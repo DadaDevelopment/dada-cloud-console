@@ -117,6 +117,12 @@ export function TemplateDeployCards({ projectId, envId, compact, hero, className
    *
    * The app name is minted here rather than server-side so deploying the same
    * project twice never collides on a name.
+   *
+   * DESTINATION. The app overview, not `/deployments`. The deployments feed
+   * carries no live-URL surface, so the dominant new-user path never saw one;
+   * overview shows the live URL, polls the app phase and fires the Metrika
+   * deploy-success goal. The app row lags the build trigger, and overview
+   * tolerates that by retrying `appsApi.list` for ~120s before not-found.
    */
   async function deploy(opts: {
     key: string;
@@ -145,7 +151,7 @@ export function TemplateDeployCards({ projectId, envId, compact, hero, className
         profile: opts.profile,
       });
       if (build?.id) trackBuildStart({ projectId, envId, appName, buildId: build.id });
-      router.push(`/projects/${projectId}/apps/${appName}/deployments?envId=${envId}`);
+      router.push(`/projects/${projectId}/apps/${appName}?envId=${envId}`);
     } catch (err) {
       setTemplateError(err instanceof Error ? err.message : t("overview.templates.error"));
       setDeployingKey(null);

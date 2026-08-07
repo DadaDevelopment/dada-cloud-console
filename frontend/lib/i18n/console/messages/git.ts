@@ -127,6 +127,14 @@ export const git: Messages = {
   },
 
   "git.import.port.label": { ru: "Порт", en: "Port" },
+  "git.import.worker.label": {
+    ru: "Фоновый процесс без HTTP-порта (бот, воркер)",
+    en: "Background process with no HTTP port (bot, worker)",
+  },
+  "git.import.worker.hint": {
+    ru: "Публичный адрес не выдаётся, порт не слушается, и консоль не будет требовать от приложения ответа по HTTP.",
+    en: "No public address is issued, no port is exposed, and the console will not expect the app to answer over HTTP.",
+  },
   "git.import.profile.label": { ru: "Профиль", en: "Profile" },
   "git.import.branch.label": { ru: "Ветка для продакшна", en: "Production branch" },
   "git.import.rootDir.label": { ru: "Корневая директория", en: "Root directory" },

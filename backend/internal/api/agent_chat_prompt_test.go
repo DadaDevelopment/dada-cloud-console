@@ -261,6 +261,39 @@ func TestAgentChatSystemPrompt_AdvertisesNoCapabilityItLacks(t *testing.T) {
 	}
 }
 
+// TestAgentChatSystemPrompt_KeepsTheUploadIntake pins the third way code
+// reaches the platform. On 2026-08-07 a user opened the chat with "I have a
+// service written, I want to deploy it"; the assistant asked twice for a
+// repository link the user did not have and then answered that it cannot
+// deploy from chat and they should use the console UI. The person never came
+// back and left zero rows in audit_events. connectGitRepo and createApp are
+// the only two intakes the assistant can execute itself, so without the upload
+// path spelled out a user whose code is a folder on their own disk has no
+// route at all -- and uploadSourceArchive is deliberately absent from the
+// catalog (a multipart file cannot travel through a tool call), which is why
+// this has to live in the prompt rather than in the toolset.
+func TestAgentChatSystemPrompt_KeepsTheUploadIntake(t *testing.T) {
+	prompt := agentChatTestPrompt(t)
+
+	section := "# DEPLOYING CODE THAT IS NOT IN GIT"
+	if !strings.Contains(prompt, section) {
+		t.Fatalf("prompt lost the %q section; a user with code but no repository has no path left", section)
+	}
+	body := prompt[strings.Index(prompt, section):]
+	if cut := strings.Index(body[len(section):], "\n# "); cut >= 0 {
+		body = body[:len(section)+cut]
+	}
+
+	for _, must := range []string{"three intakes", "connectGitRepo", "createApp", "/projects/{projectId}/apps", agentchat.OpenPageTool} {
+		if !strings.Contains(body, must) {
+			t.Errorf("the upload-intake section no longer states %q", must)
+		}
+	}
+	if !strings.Contains(body, "I cannot deploy from chat") {
+		t.Error("the upload-intake section no longer forbids the refusal that lost the 2026-08-07 user")
+	}
+}
+
 // TestAgentChatSystemPrompt_FreePlanQuotaMatchesBilling pins the one product
 // number the prompt states outright against the file the running binary
 // enforces. The prompt claimed two Free apps for a while after commit 91d5a92

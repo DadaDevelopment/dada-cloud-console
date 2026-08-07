@@ -146,6 +146,14 @@ type Config struct {
 	// DB_BACKUP_PROFILE's prefix.
 	DBBackupS3Prefix string // DB_BACKUP_S3_PREFIX
 
+	// DBShardAdminDSNs maps a db_shards.name to a superuser DSN on that
+	// instance, in the form "shard-1=postgres://...,shard-0=postgres://...".
+	// The Database Insights collector is the only consumer: it connects per
+	// shard, reads system views, and never writes. A shard missing from this
+	// map is simply not collected, so adding a shard to the registry without
+	// its credentials degrades to no insights rather than to a crash loop.
+	DBShardAdminDSNs string // DB_SHARD_ADMIN_DSNS
+
 	// S3 access for upload-deploy (docs/plans/2026-07-23-upload-deploy.md):
 	// where UploadSourceArchive stores the uploaded archive bytes, keyed
 	// "source-uploads/<projectID>/<appName>/<uploadID>.<ext>". build-agent
@@ -488,6 +496,13 @@ type Config struct {
 	GithubOAuthRedirectURI string // GITHUB_OAUTH_REDIRECT_URI (absolute callback; disambiguates the App's multiple callback URLs, must be in the App allowlist)
 	MetrikaOAuthToken      string // METRIKA_OAUTH_TOKEN
 
+	// ReactivationCampaignEnabled (REACTIVATION_CAMPAIGN_ENABLED, default
+	// false) arms the dormant-account campaign sweeper. Off by default because
+	// the sweeper's first tick mails real customers: deploying the code and
+	// deciding to send are separate decisions, and only the second one is
+	// irreversible.
+	ReactivationCampaignEnabled bool
+
 	BillingEnabled          bool  // BILLING_ENABLED (default false) — guards metering ticker; billing endpoints always load plans read-only
 	BillingMeterIntervalSec int64 // BILLING_METER_INTERVAL_SECS (default 3600)
 	// BillingExemptOrgs (BILLING_EXEMPT_ORGS, comma-separated) never hit a quota
@@ -705,6 +720,7 @@ func Load() (*Config, error) {
 		DBBackupS3SecretKey:         getEnv("DB_BACKUP_S3_SECRET_KEY", ""),
 		DBBackupS3Insecure:          getEnv("DB_BACKUP_S3_INSECURE", "false") == "true",
 		DBBackupS3Prefix:            getEnv("DB_BACKUP_S3_PREFIX", "k10/postgresql-logical"),
+		DBShardAdminDSNs:            getEnv("DB_SHARD_ADMIN_DSNS", ""),
 		SourceUploadS3Endpoint:      getEnv("SOURCE_UPLOAD_S3_ENDPOINT", ""),
 		SourceUploadS3Bucket:        getEnv("SOURCE_UPLOAD_S3_BUCKET", ""),
 		SourceUploadS3Region:        getEnv("SOURCE_UPLOAD_S3_REGION", "us-east-1"),
@@ -800,6 +816,7 @@ func Load() (*Config, error) {
 		GithubOAuthRedirectURI:      getEnv("GITHUB_OAUTH_REDIRECT_URI", ""),
 		MetrikaOAuthToken:           getEnv("METRIKA_OAUTH_TOKEN", ""),
 		BillingEnabled:              getEnv("BILLING_ENABLED", "false") == "true",
+		ReactivationCampaignEnabled: getEnv("REACTIVATION_CAMPAIGN_ENABLED", "false") == "true",
 		BillingMeterIntervalSec:     getEnvInt64("BILLING_METER_INTERVAL_SECS", 3600),
 		BillingExemptOrgs:           splitList(getEnv("BILLING_EXEMPT_ORGS", "")),
 		BillingOverageBlockFactor:   getEnvFloat("BILLING_OVERAGE_BLOCK_FACTOR", 3),

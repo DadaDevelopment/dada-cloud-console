@@ -14,6 +14,18 @@ import (
 )
 
 // ServiceDatabaseSpec holds parameters for a ServiceDatabase manifest.
+//
+// Tier selects the quota class (connection limit + per-role postgres
+// parameters) applied by the composition. An empty Tier omits the field so the
+// XRD default ("unlimited") applies and already-rendered manifests stay
+// byte-for-byte unchanged.
+//
+// Shard is the Postgres instance the database lives on; it selects the
+// provider-sql ProviderConfig used for every object of this database. An empty
+// Shard omits the field, so the XRD default (the shared instance) applies and
+// databases rendered before shards existed keep their exact placement. Editing
+// it on a live database does NOT move the data — that is the documented move
+// procedure — so it is written once at creation and carried verbatim after.
 type ServiceDatabaseSpec struct {
 	Name            string
 	Namespace       string
@@ -21,6 +33,8 @@ type ServiceDatabaseSpec struct {
 	EnvSlug         string
 	AppRef          string
 	Database        string
+	Shard           string
+	Tier            string
 	BackupEnabled   bool
 	BackupSchedule  string
 	BackupRetention string
@@ -40,6 +54,12 @@ spec:
   namespace: {{ .Namespace }}
   engine: postgresql
   database: {{ .Database }}
+{{- if .Shard }}
+  shard: {{ .Shard }}
+{{- end }}
+{{- if .Tier }}
+  tier: {{ .Tier }}
+{{- end }}
   backup:
     enabled: {{ .BackupEnabled }}
     frequency: {{ .BackupSchedule }}
@@ -271,8 +291,17 @@ type commonPvc struct {
 	Path         string `yaml:"path"`
 }
 
+// commonService carries the public-service contract into the shared Helm
+// chart. It is deliberately independent from workload type: a configured port
+// means an HTTP service; no port means the chart must emit neither Service nor
+// Ingress nor default HTTP probes.
+type commonService struct {
+	Enabled bool `yaml:"enabled"`
+}
+
 type commonValues struct {
 	Image        commonImage     `yaml:"image"`
+	Service      commonService   `yaml:"service"`
 	ServicePort  int             `yaml:"servicePort,omitempty"`
 	Replicas     int             `yaml:"replicas,omitempty"`
 	UseDotEnv    string          `yaml:"useDotEnv"`
@@ -379,6 +408,7 @@ func RenderAppValues(spec AppSpec) (string, error) {
 	name, tag := splitImageRef(spec.Image)
 	values := appValuesFile{Common: commonValues{
 		Image:        commonImage{Name: name, Tag: tag},
+		Service:      commonService{Enabled: spec.Port > 0},
 		ServicePort:  spec.Port,
 		Replicas:     spec.Replicas,
 		UseDotEnv:    "false",

@@ -36,7 +36,31 @@ const (
 	lockKeyDemoAppReap       int64 = 0x64616461_0009
 	lockKeyAgentChatFold     int64 = 0x64616461_000A
 	lockKeyAppURLWatch       int64 = 0x64616461_000B
+	lockKeyDBQuotaWatch      int64 = 0x64616461_000C
+	lockKeyDBStatsCollect    int64 = 0x64616461_000D
 )
+
+// maxConcurrentAdvisoryLockHolders caps how many background loops may pin a
+// pooled connection at the same time.
+//
+// A lock holder keeps its connection for the whole of fn, and fn does its own
+// work through the same pool. With one holder per key and no cap, the loops
+// above can pin every connection in the pool and then all block waiting for a
+// connection that only they could release — a deadlock the pool never breaks
+// out of, because none of the holders is making progress. That is not a
+// theoretical shape: on 2026-08-06 a backend replica landed on a 7-core node,
+// took the pgxpool default of 7 connections, and wedged with exactly 7 loops
+// stuck inside fn. It stayed unready for 97 minutes without ever restarting,
+// because liveness does not touch the database.
+//
+// Keeping the cap well below the pool size means the loops can never take the
+// last connection, so HTTP traffic and fn's own queries always have room. The
+// loops queue against each other instead, which is harmless: they are
+// periodic, and a tick that waits is a tick that still runs.
+const maxConcurrentAdvisoryLockHolders = 3
+
+// advisoryLockSlots hands out the holder budget described above.
+var advisoryLockSlots = make(chan struct{}, maxConcurrentAdvisoryLockHolders)
 
 // runWithAdvisoryLock executes fn while holding the session-scoped Postgres
 // advisory lock key on a dedicated pooled connection, or does nothing when
@@ -56,6 +80,13 @@ func runWithAdvisoryLock(ctx context.Context, pool *pgxpool.Pool, key int64, nam
 	if pool == nil {
 		return false
 	}
+	select {
+	case advisoryLockSlots <- struct{}{}:
+	case <-ctx.Done():
+		return false
+	}
+	defer func() { <-advisoryLockSlots }()
+
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
 		log.Warn().Err(err).Str("loop", name).Msg("advisory lock: acquire connection failed")

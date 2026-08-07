@@ -330,6 +330,11 @@ definitions:
         description: 'GitLab only: a personal/project access token to store encrypted.
           Ignored for GitHub.'
         type: string
+      worker:
+        description: |-
+          Worker marks an app with no HTTP entrypoint: port stays 0, so nothing
+          downstream renders a Service or a default hostname for it.
+        type: boolean
     type: object
   api.createAIKeyRequest:
     properties:
@@ -894,6 +899,13 @@ definitions:
       target:
         type: string
     type: object
+  api.promoTokenRequest:
+    properties:
+      token:
+        type: string
+    required:
+    - token
+    type: object
   api.putAICredentialRequest:
     properties:
       api_base:
@@ -944,6 +956,13 @@ definitions:
         type: array
       session_id:
         type: string
+    type: object
+  api.redeemPromoRequest:
+    properties:
+      token:
+        type: string
+    required:
+    - token
     type: object
   api.reportOnboardingRequest:
     properties:
@@ -1366,6 +1385,41 @@ paths:
       summary: Platform cost/revenue/margin drilldown (platform-admin only)
       tags:
       - admin
+  /admin/db-shards:
+    get:
+      description: 'Returns every managed PostgreSQL shard from the registry with
+        what is actually inside it: total sampled size, database count, instance uptime,
+        and the largest databases with their owning project, quota tier, seven-day
+        growth and open advisory counts. Databases present in the samples but absent
+        from the control plane''s resource snapshots are returned with orphan=true.
+        Reads collected samples only; no shard is queried live. Platform-admin and
+        platform-analyst readers; every other caller gets 403.'
+      operationId: getAdminDBShards
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Per-shard database consumption (admin readers)
+      tags:
+      - admin
   /admin/feedback:
     get:
       description: Returns feedback rows with the sender's email, how long the ticket
@@ -1520,6 +1574,42 @@ paths:
       summary: Resolve a feedback ticket (platform-admin only)
       tags:
       - admin
+  /admin/growth/campaigns:
+    get:
+      description: Sent/clicked/redeemed/converted per campaign, variant and signup
+        week.
+      operationId: getGrowthCampaigns
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Campaign funnel report (platform staff)
+      tags:
+      - growth
   /admin/operations:
     get:
       description: Returns operations in the WaitingForApproval state across all projects
@@ -10176,6 +10266,62 @@ paths:
       summary: Delete a managed PostgreSQL database
       tags:
       - database
+  /projects/{projectId}/environments/{envId}/databases/{name}/advisories:
+    get:
+      description: 'Lists the advisories the platform derived for a managed PostgreSQL
+        database: unused indexes, stale planner statistics, append-only tables with
+        no retention, tables read off disk instead of cache, slow or dominant queries,
+        and a storage-quota forecast. Each carries the evidence it fired on and, where
+        the action is safe to spell out, the SQL to fix it. The SQL is the owner''s
+        to run: the platform never executes DDL against tenant data.'
+      operationId: listDatabaseAdvisories
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Database resource name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: What the platform found wrong in this database
+      tags:
+      - database
   /projects/{projectId}/environments/{envId}/databases/{name}/backups:
     get:
       description: Returns the per-database logical backup catalog (newest first)
@@ -10435,6 +10581,118 @@ paths:
       summary: Reveal a database's connection credentials
       tags:
       - database
+  /projects/{projectId}/environments/{envId}/databases/{name}/insights:
+    get:
+      description: 'Returns the headline insight numbers for a managed PostgreSQL
+        database: current size against the tier quota, growth over the last seven
+        days, buffer cache hit ratio, connection count and how fresh the underlying
+        sample is. Reads collected samples from the control plane, never the tenant
+        instance. Returns collectedAt = null when no sample has been collected yet,
+        which is what an installation without collector credentials looks like.'
+      operationId: getDatabaseInsights
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Database resource name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Database size, growth and cache efficiency
+      tags:
+      - database
+  /projects/{projectId}/environments/{envId}/databases/{name}/queries:
+    get:
+      description: Lists the heaviest normalized queries of a managed PostgreSQL database
+        over the last seven days, by total execution time, with call count, mean duration,
+        rows per call, physical reads and share of the database's execution time.
+        Query text is the normalized form pg_stat_statements stores, with literal
+        constants already replaced by placeholders. Reads collected samples, never
+        the tenant instance.
+      operationId: listDatabaseQueries
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Database resource name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Slowest and heaviest queries
+      tags:
+      - database
   /projects/{projectId}/environments/{envId}/databases/{name}/restore:
     post:
       consumes:
@@ -10507,6 +10765,60 @@ paths:
       security:
       - BearerAuth: []
       summary: Restore a managed database from a backup
+      tags:
+      - database
+  /projects/{projectId}/environments/{envId}/databases/{name}/tables:
+    get:
+      description: Lists the tables of a managed PostgreSQL database with heap and
+        index size, estimated row count, cache hit ratio, growth over the last seven
+        days and the last autovacuum/autoanalyze timestamps. Only tables above 1 MB
+        are collected. Reads collected samples, never the tenant instance.
+      operationId: listDatabaseTables
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Database resource name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Per-table size, rows and growth
       tags:
       - database
   /projects/{projectId}/environments/{envId}/infra:
@@ -13575,6 +13887,89 @@ paths:
       summary: Get or create the caller's default project
       tags:
       - project
+  /promo/click:
+    post:
+      consumes:
+      - application/json
+      description: Marks a promo token as clicked. Public, idempotent, and answers
+        identically for unknown tokens.
+      operationId: recordPromoClick
+      parameters:
+      - description: Promo token
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.promoTokenRequest'
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Record a campaign promo-link click
+      tags:
+      - growth
+  /promo/redeem:
+    post:
+      consumes:
+      - application/json
+      description: Grants the campaign plan for a fixed term to the caller's org.
+        The token must belong to the calling user.
+      operationId: redeemPromo
+      parameters:
+      - description: Promo token
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.redeemPromoRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Redeem a campaign promo token
+      tags:
+      - growth
   /solutions:
     get:
       description: Returns the catalog of open-source projects the console can deploy

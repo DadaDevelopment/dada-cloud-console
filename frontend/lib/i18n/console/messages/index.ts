@@ -22,6 +22,7 @@ import { approvals } from "./approvals";
 import { audit } from "./audit";
 import { adminOverview } from "./admin-overview";
 import { adminCosts } from "./admin-costs";
+import { adminDBShards } from "./admin-db-shards";
 import { aiGatewayUsage } from "./ai-gateway-usage";
 import { cloudTasks } from "./cloud-tasks";
 import { billing } from "./billing";
@@ -33,6 +34,7 @@ import { moveApp } from "./move-app";
 import { feedback } from "./feedback";
 import { deployHooks } from "./deploy-hooks";
 import { previews } from "./previews";
+import { starterNext } from "./starter-next";
 import { agentChat } from "./agent-chat";
 import { onboarding } from "./onboarding";
 import { passkey } from "./passkey";
@@ -70,6 +72,7 @@ export const messages: Messages = {
   ...audit,
   ...adminOverview,
   ...adminCosts,
+  ...adminDBShards,
   ...aiGatewayUsage,
   ...cloudTasks,
   ...billing,
@@ -81,6 +84,7 @@ export const messages: Messages = {
   ...feedback,
   ...deployHooks,
   ...previews,
+  ...starterNext,
   ...agentChat,
   ...onboarding,
   ...passkey,

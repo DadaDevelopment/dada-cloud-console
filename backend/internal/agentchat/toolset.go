@@ -412,6 +412,13 @@ func (v *ToolView) SetNavigator(fn func(path string) bool) {
 	v.navigate = fn
 }
 
+// Navigated reports whether this turn already moved the user's tab. The caller
+// needs it to tell a turn that used OpenPageTool from one that only wrote about
+// a page: only the second kind may still be finished by the server.
+func (v *ToolView) Navigated() bool {
+	return v.navigated
+}
+
 // NewView opens a per-turn view with write dispatch allowed, in the given mode.
 // Mode decides only which writes stop for a confirmation card; it never widens
 // what the caller's own bearer is allowed to do.

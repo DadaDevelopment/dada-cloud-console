@@ -32,6 +32,7 @@ type WizardDraft = {
   selectedRepo: GitRemoteRepoCandidate | null;
   appName: string;
   port: number;
+  worker: boolean;
   profile: string;
   branch: string;
   rootDir: string;
@@ -228,6 +229,7 @@ export default function GitImportPage() {
 
   const [appName, setAppName] = useState("");
   const [port, setPort] = useState(8080);
+  const [worker, setWorker] = useState(false);
   const [profile, setProfile] = useState("small");
   const [branch, setBranch] = useState("");
   const [rootDir, setRootDir] = useState(".");
@@ -524,7 +526,8 @@ export default function GitImportPage() {
         root_dir: rootDir || ".",
         framework_override: frameworkOverride || undefined,
         auto_deploy: autoDeploy,
-        port,
+        port: worker ? 0 : port,
+        worker,
         profile,
       });
     } catch (err) {
@@ -569,6 +572,7 @@ export default function GitImportPage() {
     }
     if (d?.appName) setAppName(d.appName);
     if (typeof d?.port === "number") setPort(d.port);
+    if (typeof d?.worker === "boolean") setWorker(d.worker);
     if (d?.profile) setProfile(d.profile);
     if (d?.branch) setBranch(d.branch);
     if (d?.rootDir) setRootDir(d.rootDir);
@@ -597,6 +601,7 @@ export default function GitImportPage() {
       selectedRepo,
       appName,
       port,
+      worker,
       profile,
       branch,
       rootDir,
@@ -613,6 +618,7 @@ export default function GitImportPage() {
     selectedRepo,
     appName,
     port,
+    worker,
     profile,
     branch,
     rootDir,
@@ -1036,15 +1042,16 @@ export default function GitImportPage() {
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("git.import.port.label")}</label>
                     <input
                       type="number"
-                      required
+                      required={!worker}
+                      disabled={worker}
                       min={1}
                       max={65535}
-                      value={port}
+                      value={worker ? "" : port}
                       onChange={(e) => {
                         setPortTouched(true);
                         setPort(parseInt(e.target.value, 10) || 8080);
                       }}
-                      className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-gray-50 dark:disabled:bg-gray-900"
                     />
                   </div>
                   <div>
@@ -1060,6 +1067,19 @@ export default function GitImportPage() {
                     </select>
                   </div>
                 </div>
+
+                <label className="flex items-start gap-3 rounded-lg border border-gray-200 dark:border-gray-800 px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={worker}
+                    onChange={(e) => setWorker(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-gray-300 dark:border-gray-700"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("git.import.worker.label")}</span>
+                    <span className="mt-0.5 block text-xs text-gray-400 dark:text-gray-500">{t("git.import.worker.hint")}</span>
+                  </span>
+                </label>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>

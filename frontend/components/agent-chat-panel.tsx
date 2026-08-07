@@ -7,8 +7,15 @@ import { useT } from "@/lib/i18n/console/context";
 import { useProjectContext } from "@/lib/project-context";
 import { getToken } from "@/lib/api";
 import { renderMarkdown } from "@/lib/markdown";
-import { autolinkConsolePaths, isInternalConsolePath, isKnownConsoleRoute } from "@/lib/agent-chat-links";
+import {
+  autolinkConsolePaths,
+  isInternalConsolePath,
+  isKnownConsoleRoute,
+  matchConsoleRouteTemplate,
+  repairConsoleLinks,
+} from "@/lib/agent-chat-links";
 import { confirmArgEntries } from "@/lib/agent-chat-redact";
+import { trackUxEvent } from "@/lib/ux-telemetry";
 
 type ChatMessage =
   | { id: string; kind: "message"; role: "user" | "assistant"; content: string; pending?: boolean }
@@ -594,8 +601,17 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
    * the fetch mid-turn and the user would land on the right page with half an
    * answer and no panel. Client-side routing keeps both, and Back still undoes
    * the move.
+   *
+   * Also logs a `click` ux_event so this path is visible in the same telemetry
+   * as everything else: the router push fires the normal `pageview` for the
+   * destination, but nothing marked that page load as assistant-driven rather
+   * than clicked. Target carries the route template (`[projectId]`, never the
+   * real id) plus the destination pattern, so no project/app identity lands in
+   * telemetry.
    */
   function handleAgentNavigate(path: string) {
+    const template = matchConsoleRouteTemplate(path) ?? "unlisted";
+    trackUxEvent("click", `agent_chat_navigate:${template}`);
     router.push(path);
   }
 
@@ -775,7 +791,7 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
                   <div
                     className="agent-chat-md"
                     onClick={handleMarkdownClick}
-                    dangerouslySetInnerHTML={{ __html: renderMarkdown(autolinkConsolePaths(m.content)) }}
+                    dangerouslySetInnerHTML={{ __html: renderMarkdown(autolinkConsolePaths(repairConsoleLinks(m.content))) }}
                   />
                 ) : (
                   m.content

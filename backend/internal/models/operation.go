@@ -31,14 +31,38 @@ const (
 // rendered as a platform-owned Application in the environment's aggregate stack
 // (postgres) rather than a Crossplane ServiceDatabaseV2 CRD; empty means the k8s
 // (Crossplane Postgres) path.
+//
+// Tier is the database quota class derived from the org's billing plan. It maps
+// onto ServiceDatabaseV2.spec.tier, which the Crossplane composition turns into
+// the role's CONNECTION LIMIT and per-role postgres parameters. Empty means the
+// XRD default ("unlimited") — used for the k8s path only.
+//
+// Shard is the Postgres instance the database is placed on, resolved from the
+// db_shards registry at create time and mapped onto ServiceDatabaseV2.spec.shard,
+// which selects the provider-sql ProviderConfig of that instance. Placement is
+// automatic; empty means the XRD default (the shared instance).
 type CreateServiceDatabasePayload struct {
 	Name            string `json:"name"`
 	Database        string `json:"database"`
 	AppRef          string `json:"app_ref"`
 	Engine          string `json:"engine,omitempty"`
+	Tier            string `json:"tier,omitempty"`
+	Shard           string `json:"shard,omitempty"`
 	BackupEnabled   bool   `json:"backup_enabled"`
 	BackupSchedule  string `json:"backup_schedule"`
 	BackupRetention string `json:"backup_retention"`
+}
+
+// SetDatabaseEnforcementPayload is the typed payload for
+// SetDatabaseEnforcement operations, emitted by the storage-quota watcher and
+// never by a human. Enforcement is one of none/read-only/frozen and maps onto
+// ServiceDatabaseV2.spec.enforcement; the agent patches that one field into the
+// manifest already in git, so no other field of the database is carried here on
+// purpose — a payload that re-declared identity would silently rewrite it.
+type SetDatabaseEnforcementPayload struct {
+	Name        string `json:"name"`
+	AppRef      string `json:"app_ref,omitempty"`
+	Enforcement string `json:"enforcement"`
 }
 
 // DeleteServiceDatabasePayload is the typed payload for DeleteServiceDatabase

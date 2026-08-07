@@ -38,11 +38,24 @@ type aiCatalogProvider struct {
 // this list exists to render the console catalog and to reject a credential for
 // a provider the gateway cannot route to. Adding a model there means adding it
 // here.
+//
+// The tier rows named gemini as a failover partner until 2026-08-04 and it was
+// never a member: gemini answers 400 FAILED_PRECONDITION "user location is not
+// supported" to every request from this cluster, so the catalog was promising a
+// provider diversity the tiers did not have. Their Upstream strings now name
+// the providers each group actually holds members on.
 // aiCatalogPlatformProvider marks the tier aliases the gateway serves from the
 // platform's own keys (migration 079). They are deliberately absent from
 // aiCatalogProviders: a project can never store a BYOK credential for them, and
 // the console must not tell anyone they need one.
 const aiCatalogPlatformProvider = "platform"
+
+// aiPlatformOwnedProvider is the upstream behind every tier and behind vision:
+// the one provider the platform holds its own key for, so a project that
+// configured nothing is still served (migration 079). It is not in
+// aiCatalogProviders on purpose -- that list answers "which provider may a
+// customer store a key for", and this one they may not.
+const aiPlatformOwnedProvider = "nvidia_nim"
 
 var aiCatalogProviders = []aiCatalogProvider{
 	{Name: "openai", Label: "OpenAI", KeyURL: "https://platform.openai.com/api-keys"},
@@ -65,9 +78,27 @@ var aiCatalogModels = []aiCatalogModel{
 	{Alias: "groq-gpt-oss", Provider: "groq", Kind: "chat", Upstream: "groq/openai/gpt-oss-20b"},
 	{Alias: "groq-llama", Provider: "groq", Kind: "chat", Upstream: "groq/llama-3.3-70b-versatile"},
 	{Alias: "sambanova-llama", Provider: "sambanova", Kind: "chat", Upstream: "sambanova/Meta-Llama-3.3-70B-Instruct"},
-	{Alias: "fast", Provider: aiCatalogPlatformProvider, Kind: "chat", Upstream: "tier alias, fails over across gemini/nvidia_nim/groq/sambanova"},
-	{Alias: "medium", Provider: aiCatalogPlatformProvider, Kind: "chat", Upstream: "tier alias, fails over across gemini/nvidia_nim/groq/sambanova"},
-	{Alias: "smart", Provider: aiCatalogPlatformProvider, Kind: "chat", Upstream: "tier alias, fails over across gemini/nvidia_nim/groq/sambanova"},
+	{Alias: "fast", Provider: aiCatalogPlatformProvider, Kind: "chat", Upstream: "tier alias, fails over across nvidia_nim (x2) and groq"},
+	{Alias: "medium", Provider: aiCatalogPlatformProvider, Kind: "chat", Upstream: "tier alias, fails over across nvidia_nim (x2) and sambanova"},
+	{Alias: "smart", Provider: aiCatalogPlatformProvider, Kind: "chat", Upstream: "tier alias, fails over across nvidia_nim (x3)"},
+	{Alias: "vision", Provider: aiCatalogPlatformProvider, Kind: "chat", Upstream: "image input, nvidia_nim (x2) -- no other reachable provider reads the image"},
+	{Alias: "search", Provider: "groq", Kind: "chat", Upstream: "groq/groq/compound-mini, answer grounded in a web search groq runs itself; rejects requests carrying tools"},
+}
+
+// isKnownAIAlias reports whether the gateway serves this model group.
+//
+// Used to bound the label set of the upstream-failure metrics: the gateway is
+// the only caller and is guarded by the internal token, but a metric label fed
+// from a request body is a cardinality bomb one bad deploy away, and an
+// unbounded series is how a monitoring stack falls over during the outage it
+// was meant to report.
+func isKnownAIAlias(name string) bool {
+	for _, m := range aiCatalogModels {
+		if m.Alias == name {
+			return true
+		}
+	}
+	return false
 }
 
 // isKnownAIProvider reports whether the gateway can route to this provider at

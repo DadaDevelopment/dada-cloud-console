@@ -44,6 +44,13 @@ func (h *Handler) currentAgentChatKey() string {
 // is a write and must happen once per cluster; this is a read and must happen
 // on every replica, or the replica that lost the lock keeps serving chat with
 // a stale key.
+//
+// The first refresh runs inside the goroutine, never on the caller. It reads
+// the delivered token through the connection pool, and at startup every watcher
+// fires its first tick at once, each pinning a pooled connection for the length
+// of its pass. A synchronous first refresh therefore parks NewHandler on
+// pgxpool.Acquire until those passes finish, the HTTP listener never opens, and
+// the startup probe kills the pod before it can serve.
 func (h *Handler) StartAgentChatIdentityRefresher(ctx context.Context) {
 	clientset := newAppHealthClientset()
 	if clientset == nil {
@@ -52,8 +59,8 @@ func (h *Handler) StartAgentChatIdentityRefresher(ctx context.Context) {
 	}
 	log.Printf("agent-chat-identity: started app=%s interval=%s",
 		agentChatIdentityApp, agentChatIdentityRefreshInterval)
-	h.refreshAgentChatIdentityKey(ctx, clientset)
 	go func() {
+		h.refreshAgentChatIdentityKey(ctx, clientset)
 		t := time.NewTicker(agentChatIdentityRefreshInterval)
 		defer t.Stop()
 		for {

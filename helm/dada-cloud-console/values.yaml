@@ -271,6 +271,20 @@ gitopsAgent:
     # <name, version> pins into s3:// source URIs at render time.
     # Empty disables MLflow-pinned operations (they fail with a clear error).
     MLFLOW_BASE_URL: ""
+    # Connection router (pg-router) applications reach managed Postgres through.
+    # Set it and the status reconciler rewrites the endpoint in every
+    # "<app>-db-credentials" secret, so a shard address stops being part of any
+    # tenant's DSN and a database can move between instances without a client
+    # changing anything. The direct address is preserved on the secret as
+    # platform.dada-tuda.ru/db-direct-endpoint.
+    #
+    # Empty = off, which is today's behaviour. Turn it on only once pg-router is
+    # verified live: every tenant's traffic crosses it. Shards listed in
+    # DB_ROUTER_DIRECT_SHARDS keep their direct address — the platform's own
+    # databases, so signing in never depends on the router being up.
+    DB_ROUTER_HOST: ""
+    DB_ROUTER_PORT: "5432"
+    DB_ROUTER_DIRECT_SHARDS: "shard-0"
   existingSecret: ""
   # Service-unique secrets only. Shared keys (DATABASE_URL, GITOPS_DEFAULT_REPO_URL/
   # USERNAME/TOKEN, GITOPS_VALUES_TOKEN_SECRET) come from global.shared.

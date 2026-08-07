@@ -276,6 +276,36 @@ func (r *StatusReconciler) reconcileModels(ctx context.Context) {
 // gated off by default (GITOPS_CLUSTER_DISCOVERY_ENABLED); without it a managed
 // DB is frozen at its create-time "Pending" forever. Existing rows only, so no
 // isolation leak: a CR with no snapshot in this project is never created here.
+// crDatabaseTier reads the quota tier the composition actually applied to a
+// ServiceDatabaseV2. It is read from the LIVE CR, not from git or the billing
+// plan, so the console shows the limits a tenant really runs under — including
+// the "unlimited" default carried by every database created before tiers
+// existed. defaultDatabaseTier mirrors the XRD default.
+const defaultDatabaseTier = "unlimited"
+
+// crDatabaseShard reads the Postgres instance a ServiceDatabaseV2 actually
+// lives on. Like the tier it comes from the LIVE CR, so the console reports
+// where the data really is rather than where the registry meant to put it —
+// the two diverge for every database created before shards existed and during
+// a move. defaultDatabaseShard mirrors the XRD default (the shared instance).
+const defaultDatabaseShard = "shard-1"
+
+func crDatabaseShard(cr *unstructured.Unstructured) string {
+	shard, found, err := unstructured.NestedString(cr.Object, "spec", "shard")
+	if err != nil || !found || shard == "" {
+		return defaultDatabaseShard
+	}
+	return shard
+}
+
+func crDatabaseTier(cr *unstructured.Unstructured) string {
+	tier, found, err := unstructured.NestedString(cr.Object, "spec", "tier")
+	if err != nil || !found || tier == "" {
+		return defaultDatabaseTier
+	}
+	return tier
+}
+
 func (r *StatusReconciler) reconcileDatabases(ctx context.Context) {
 	dbEnvs, err := db.SnapshotEnvsByKind(ctx, r.pool, "ServiceDatabaseV2")
 	if err != nil {
@@ -295,17 +325,21 @@ func (r *StatusReconciler) reconcileDatabases(ctx context.Context) {
 	updated := 0
 	for i := range list.Items {
 		cr := &list.Items[i]
+		r.syncRouterEndpoint(ctx, cr)
 		name := cr.GetName()
 		ids := dbEnvs[name]
 		if len(ids) != 1 {
 			continue // no DB snapshot for this name, or ambiguous
 		}
 		phase := crPhase(cr)
-		patch, _ := json.Marshal(map[string]any{
+		fields := map[string]any{
 			"status":      phase,
 			"live_source": "crossplane",
 			"live_at":     time.Now().UTC().Format(time.RFC3339),
-		})
+		}
+		fields["tier"] = crDatabaseTier(cr)
+		fields["shard"] = crDatabaseShard(cr)
+		patch, _ := json.Marshal(fields)
 		n, err := db.UpdateLiveStatus(ctx, r.pool, ids[0], "ServiceDatabaseV2", name, phase, patch)
 		if err != nil {
 			log.Error().Err(err).Str("database", name).Msg("status-reconciler: update servicedatabase")

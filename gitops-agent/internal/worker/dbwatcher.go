@@ -269,6 +269,8 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 		return w.doCreateServiceDatabase(ctx, op)
 	case "DeleteServiceDatabase":
 		return w.doDeleteServiceDatabase(ctx, op)
+	case "SetDatabaseEnforcement":
+		return w.doSetDatabaseEnforcement(ctx, op)
 	case "CreateIngress":
 		return w.doCreateIngress(ctx, op)
 	case "CreateApp":
@@ -815,6 +817,8 @@ func (w *DBWatcher) doCreateServiceDatabase(ctx context.Context, op db.Operation
 		Database        string `json:"database"`
 		AppRef          string `json:"app_ref"`
 		Engine          string `json:"engine"`
+		Tier            string `json:"tier"`
+		Shard           string `json:"shard"`
 		BackupEnabled   bool   `json:"backup_enabled"`
 		BackupSchedule  string `json:"backup_schedule"`
 		BackupRetention string `json:"backup_retention"`
@@ -839,6 +843,8 @@ func (w *DBWatcher) doCreateServiceDatabase(ctx context.Context, op db.Operation
 		EnvSlug:         envName,
 		AppRef:          p.AppRef,
 		Database:        p.Database,
+		Shard:           p.Shard,
+		Tier:            p.Tier,
 		BackupEnabled:   p.BackupEnabled,
 		BackupSchedule:  defaultIfEmpty(p.BackupSchedule, "daily"),
 		BackupRetention: defaultIfEmpty(p.BackupRetention, "14d"),
@@ -890,6 +896,7 @@ func (w *DBWatcher) doCreateServiceDatabase(ctx context.Context, op db.Operation
 			"appRef":    p.AppRef,
 			"namespace": envNamespace,
 			"database":  p.Database,
+			"shard":     p.Shard,
 			"backup": map[string]any{
 				"enabled":   p.BackupEnabled,
 				"frequency": p.BackupSchedule,
@@ -989,15 +996,10 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 		return w.doCreateComposeApp(ctx, op, p.Name)
 	}
 
-	if p.Port == 0 {
-		p.Port = renderer.DefaultPortForFramework(p.Framework)
-	}
-
 	projectName, envName, envNamespace, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
 	if err != nil {
 		return fmt.Errorf("project/env lookup: %w", err)
 	}
-
 	mgr, err := w.managerFor(ctx, op.ProjectID)
 	if err != nil {
 		return err
@@ -1064,6 +1066,9 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 			files = append(files, *secretFile)
 		}
 	} else {
+		if p.Port <= 0 {
+			return fmt.Errorf("default hostname requires a configured port")
+		}
 		ingressYAML, iErr := renderer.RenderCustomIngress(renderer.CustomIngressSpec{
 			Name:              renderer.FQDNToName(p.DefaultHostname),
 			Namespace:         envNamespace,
@@ -1878,6 +1883,24 @@ func (w *DBWatcher) saveComposeSnapshotAndRender(ctx context.Context, op db.Oper
 	return w.renderEnvAggregate(ctx, op, op.ProjectID, op.EnvironmentID)
 }
 
+// deployPortAndWorker reads the effective port and worker flag a redeploy
+// should render with. A worker app (summary["worker"] == true) never gets a
+// Service, no matter what port an earlier snapshot happened to carry: without
+// this, a background app retrofitted with worker=true after living for a
+// while as a broken public-domain app would keep re-rendering with its old
+// non-zero port on every redeploy, re-enabling the Service
+// (renderer.RenderAppValues sets Common.Service.Enabled = spec.Port > 0) and
+// keeping the phantom route alive underneath the domain BackfillMissingDefaultDomains
+// and DetachHostname already stop from being reattached/reissued.
+func deployPortAndWorker(cur map[string]any) (port float64, worker bool) {
+	worker, _ = cur["worker"].(bool)
+	if worker {
+		return 0, true
+	}
+	port, _ = cur["port"].(float64)
+	return port, false
+}
+
 func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) error {
 	var p struct {
 		AppName   string `json:"app_name"`
@@ -1912,19 +1935,16 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 	var cur map[string]any
 	_ = json.Unmarshal(summaryRaw, &cur)
 
-	portVal, _ := cur["port"].(float64)
+	portVal, workerVal := deployPortAndWorker(cur)
 	replicasVal, _ := cur["replicas"].(float64)
 	profileVal, _ := cur["profile"].(string)
 	frameworkVal, _ := cur["framework"].(string)
 	if p.Framework != "" {
 		frameworkVal = p.Framework
 	}
-	if p.Port > 0 {
-		portVal = float64(p.Port)
-	}
-	if portVal == 0 {
-		portVal = float64(renderer.DefaultPortForFramework(frameworkVal))
-	}
+	// A later build may detect a different port, but it must not silently
+	// override the application's configured public-route contract. The current
+	// snapshot is authoritative, including an explicit zero (no HTTP service).
 	if replicasVal == 0 {
 		replicasVal = 1
 	}
@@ -2010,6 +2030,7 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 	cur["framework"] = frameworkVal
 	cur["port"] = portVal
 	cur["status"] = "Pending"
+	cur["worker"] = workerVal
 	updatedJSON, _ := json.Marshal(cur)
 	if err := db.UpsertSnapshot(ctx, w.pool,
 		op.ProjectID, op.EnvironmentID,
@@ -2166,9 +2187,6 @@ func (w *DBWatcher) doUpdateAppStorage(ctx context.Context, op db.Operation) err
 	replicasVal, _ := cur["replicas"].(float64)
 	profileVal, _ := cur["profile"].(string)
 	frameworkVal, _ := cur["framework"].(string)
-	if portVal == 0 {
-		portVal = float64(renderer.DefaultPortForFramework(frameworkVal))
-	}
 	if replicasVal == 0 {
 		replicasVal = 1
 	}
@@ -2287,8 +2305,8 @@ func (w *DBWatcher) doCreatePublicApi(ctx context.Context, op db.Operation) erro
 	var appSpec map[string]any
 	_ = json.Unmarshal(summaryRaw, &appSpec)
 	portVal, _ := appSpec["port"].(float64)
-	if portVal == 0 {
-		portVal = 8080
+	if portVal <= 0 {
+		return fmt.Errorf("public API requires a configured app port")
 	}
 
 	yaml, err := renderer.RenderPublicApi(renderer.PublicApiSpec{
@@ -2359,6 +2377,19 @@ func (w *DBWatcher) doAttachCustomHostname(ctx context.Context, op db.Operation)
 	projectName, envName, envNamespace, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
 	if err != nil {
 		return fmt.Errorf("project/env lookup: %w", err)
+	}
+	var appRaw []byte
+	if err := w.pool.QueryRow(ctx, `
+		SELECT summary_json FROM resource_snapshots
+		WHERE project_id=$1 AND environment_id=$2 AND kind='App' AND name=$3
+	`, op.ProjectID, op.EnvironmentID, p.AppName).Scan(&appRaw); err != nil {
+		return fmt.Errorf("loading app snapshot: %w", err)
+	}
+	var appSummary map[string]any
+	_ = json.Unmarshal(appRaw, &appSummary)
+	port, _ := appSummary["port"].(float64)
+	if port <= 0 {
+		return fmt.Errorf("custom hostname requires a configured app port")
 	}
 
 	mgr, err := w.managerFor(ctx, op.ProjectID)
@@ -2437,11 +2468,14 @@ func (w *DBWatcher) doAttachCustomHostnameCompose(ctx context.Context, op db.Ope
 		} `json:"desired"`
 	}
 	_ = json.Unmarshal(appRaw, &appSummary)
-	port := 80
+	port := 0
 	if len(appSummary.Desired.Ports) > 0 {
 		if p := containerPortFromPortString(appSummary.Desired.Ports[0]); p > 0 {
 			port = p
 		}
+	}
+	if port <= 0 {
+		return fmt.Errorf("custom hostname requires a configured app port")
 	}
 
 	customHosts := envelope.Ingress.CustomHosts
@@ -2488,9 +2522,8 @@ func (w *DBWatcher) doAttachDefaultDomain(ctx context.Context, op db.Operation) 
 	var cur map[string]any
 	_ = json.Unmarshal(summaryRaw, &cur)
 	portVal, _ := cur["port"].(float64)
-	frameworkVal, _ := cur["framework"].(string)
-	if portVal == 0 {
-		portVal = float64(renderer.DefaultPortForFramework(frameworkVal))
+	if portVal <= 0 {
+		return fmt.Errorf("default domain requires a configured app port")
 	}
 
 	mgr, err := w.managerFor(ctx, op.ProjectID)
@@ -2547,7 +2580,11 @@ func (w *DBWatcher) doAttachDefaultDomain(ctx context.Context, op db.Operation) 
 
 // doDetachCustomHostname removes the {Ingress, <host-as-name>} entry from the
 // owning app's resources.values.yaml manifests list. cert-manager then GCs the
-// Certificate/secret once the Ingress is pruned.
+// Certificate/secret once the Ingress is pruned. It also removes any
+// {PublicApi, <host-as-name>} entry: doAttachDefaultDomain renders both an
+// Ingress and a PublicApi (the crossplane DNS route) under the same name for
+// a managed default domain, and rv.Remove is a no-op for a kind that was
+// never rendered, so this is safe for an ordinary custom-domain detach too.
 func (w *DBWatcher) doDetachCustomHostname(ctx context.Context, op db.Operation) error {
 	var p struct {
 		AppName  string `json:"app_name"`
@@ -2581,6 +2618,7 @@ func (w *DBWatcher) doDetachCustomHostname(ctx context.Context, op db.Operation)
 	valuesPath := renderer.AppResourcesValuesGitPath(projectName, envName, p.AppName)
 	manifestFile, changed, err := removeManifestsFile(mgr, valuesPath, [][2]string{
 		{"Ingress", renderer.FQDNToName(p.Hostname)},
+		{"PublicApi", renderer.FQDNToName(p.Hostname)},
 	})
 	if err != nil {
 		return fmt.Errorf("remove manifests: %w", err)

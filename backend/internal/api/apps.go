@@ -676,7 +676,7 @@ func (h *Handler) CreateApp(c *gin.Context) {
 
 	if !isCompose {
 		// Helm app validation + defaults.
-		if req.Port == 0 {
+		if req.Port == 0 && !req.Worker {
 			req.Port = defaultPortForFramework(req.Framework)
 		}
 		if req.Replicas == 0 && !claims.IsPlatformAdmin() {
@@ -693,7 +693,7 @@ func (h *Handler) CreateApp(c *gin.Context) {
 			rejectCreate(http.StatusBadRequest, "invalid_image", err.Error())
 			return
 		}
-		if req.Port < 1 || req.Port > 65535 {
+		if !req.Worker && (req.Port < 1 || req.Port > 65535) {
 			rejectCreate(http.StatusBadRequest, "invalid_port", "port must be between 1 and 65535")
 			return
 		}

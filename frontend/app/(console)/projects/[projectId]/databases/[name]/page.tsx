@@ -14,6 +14,7 @@ import type { ChipTone } from "@/components/ui/state-chip";
 import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
 import { useT } from "@/lib/i18n/console/context";
+import { DbInsights } from "@/components/databases/db-insights";
 
 interface DbSpec {
   database?: string;
@@ -348,6 +349,8 @@ export default function DatabaseDetailPage() {
           <Field label={t("databases.detail.field.status")}>{db.phase || t("databases.detail.field.statusUnknown")}</Field>
         </div>
       </section>
+
+      <DbInsights projectId={projectId} envId={envId} name={name} />
 
       <section className="mb-8">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("databases.detail.connection")}</h2>

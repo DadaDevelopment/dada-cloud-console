@@ -161,6 +161,90 @@ func TestRenderServiceDatabase(t *testing.T) {
 	}
 }
 
+// A tier must reach the XR as spec.tier, and an empty tier must leave the
+// manifest byte-for-byte as it was before tiers existed — that is what makes
+// the quota rollout a no-op for every already-rendered database.
+func TestRenderServiceDatabaseTier(t *testing.T) {
+	base := renderer.ServiceDatabaseSpec{
+		Name:        "myapp-db",
+		Namespace:   "alpha-prod",
+		ProjectSlug: "alpha",
+		EnvSlug:     "prod",
+		AppRef:      "myapp",
+		Database:    "myapp_db",
+		OperationID: "op-123",
+	}
+
+	withTier := base
+	withTier.Tier = "starter"
+	got, err := renderer.RenderServiceDatabase(withTier)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var doc map[string]interface{}
+	if err := yaml.Unmarshal([]byte(got), &doc); err != nil {
+		t.Fatalf("rendered ServiceDatabase is not valid YAML: %v", err)
+	}
+	spec, ok := doc["spec"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("rendered ServiceDatabase missing spec block\nFull output:\n%s", got)
+	}
+	if tier, _ := spec["tier"].(string); tier != "starter" {
+		t.Errorf("spec.tier = %q, want %q\nFull output:\n%s", tier, "starter", got)
+	}
+
+	untiered, err := renderer.RenderServiceDatabase(base)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(untiered, "tier:") {
+		t.Errorf("empty Tier must not emit spec.tier (XRD default applies)\nFull output:\n%s", untiered)
+	}
+}
+
+// Placement must reach the XR as spec.shard, and an empty Shard must leave the
+// manifest exactly as it was before shards existed: the XRD default is the
+// shared instance, which is where every already-rendered database really lives.
+// Emitting a shard for those would re-point the provider at a server without
+// their data.
+func TestRenderServiceDatabaseShard(t *testing.T) {
+	base := renderer.ServiceDatabaseSpec{
+		Name:        "myapp-db",
+		Namespace:   "alpha-prod",
+		ProjectSlug: "alpha",
+		EnvSlug:     "prod",
+		AppRef:      "myapp",
+		Database:    "myapp_db",
+		OperationID: "op-123",
+	}
+
+	placed := base
+	placed.Shard = "shard-2"
+	got, err := renderer.RenderServiceDatabase(placed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var doc map[string]interface{}
+	if err := yaml.Unmarshal([]byte(got), &doc); err != nil {
+		t.Fatalf("rendered ServiceDatabase is not valid YAML: %v", err)
+	}
+	spec, ok := doc["spec"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("rendered ServiceDatabase missing spec block\nFull output:\n%s", got)
+	}
+	if shard, _ := spec["shard"].(string); shard != "shard-2" {
+		t.Errorf("spec.shard = %q, want %q\nFull output:\n%s", shard, "shard-2", got)
+	}
+
+	unplaced, err := renderer.RenderServiceDatabase(base)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(unplaced, "shard:") {
+		t.Errorf("empty Shard must not emit spec.shard (XRD default applies)\nFull output:\n%s", unplaced)
+	}
+}
+
 func TestRenderServiceDatabaseStandaloneAppRef(t *testing.T) {
 	got, err := renderer.RenderServiceDatabase(renderer.ServiceDatabaseSpec{
 		Name:        "zerkalo",

@@ -239,6 +239,8 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 
 	r.POST("/api/v1/telemetry/events", h.RecordUXEvents)
 
+	r.POST("/api/v1/promo/click", h.RecordPromoClick)
+
 	// Dada Box fake-door funnel ingest. Public on purpose: the /box landing is a
 	// marketing page with no session, and its route handler forwards events
 	// server-to-server. Guarded by a per-IP + global token bucket inside the
@@ -319,6 +321,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		internal.POST("/ai/credential/set", h.AISetProviderCredential)
 		internal.POST("/ai/credential/get", h.AIGetProviderCredential)
 		internal.POST("/ai/usage/record", h.AIRecordUsage)
+		internal.POST("/ai/failure/record", h.AIRecordFailure)
 		internal.POST("/ai/key/introspect", h.AIIntrospectKey)
 		internal.POST("/identity/introspect", h.IntrospectServiceIdentity)
 		log.Printf("internal: provisioning API enabled at /internal")
@@ -353,6 +356,10 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/projects/:projectId/environments/:envId/databases/:name/backups/:backupId/download", h.DownloadDBBackup)
 		api.POST("/projects/:projectId/environments/:envId/databases/:name/restore", h.RestoreServiceDatabase)
 		api.GET("/projects/:projectId/environments/:envId/databases/:name/credentials", h.GetDatabaseCredentials)
+		api.GET("/projects/:projectId/environments/:envId/databases/:name/insights", h.GetDatabaseInsights)
+		api.GET("/projects/:projectId/environments/:envId/databases/:name/tables", h.ListDatabaseTables)
+		api.GET("/projects/:projectId/environments/:envId/databases/:name/queries", h.ListDatabaseQueries)
+		api.GET("/projects/:projectId/environments/:envId/databases/:name/advisories", h.ListDatabaseAdvisories)
 		api.POST("/projects/:projectId/environments/:envId/ingress", h.CreateIngress)
 
 		// Object Storage (S3Bucket XR)
@@ -616,6 +623,8 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 			api.GET("/admin/overview", h.GetAdminOverview)
 			api.GET("/admin/costs", h.GetAdminCosts)
 			api.GET("/admin/ai-gateway/usage", h.GetAIGatewayUsage)
+			api.GET("/admin/growth/campaigns", h.GetGrowthCampaigns)
+			api.GET("/admin/db-shards", h.GetAdminDBShards)
 
 			// Concierge write-back for the Box private preview: which claim got
 			// which box. Mandatory — it is the only source for the repeat-use
@@ -647,6 +656,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/agent/chat/history", h.AgentChatGetHistory)
 		api.POST("/agent/chat/context/clear", h.AgentChatClearContext)
 
+		api.POST("/promo/redeem", h.RedeemPromo)
 		api.GET("/onboarding", h.GetOnboarding)
 		api.POST("/onboarding/:key", h.PostOnboarding)
 	}

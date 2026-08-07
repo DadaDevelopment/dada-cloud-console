@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { buildsApi, cloudTasksApi, deploymentsApi } from "@/lib/api";
+import { buildsApi, cloudTasksApi, deploymentsApi, gitApi } from "@/lib/api";
 import type { Build, Deployment } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
@@ -13,6 +13,7 @@ import { BuildStatusBadge, isBuildActive } from "@/components/deploy/build-statu
 import { useT } from "@/lib/i18n/console/context";
 import { formatCommitLabel, resolveCommit } from "@/lib/build-commit";
 import { trackBuildStart } from "@/lib/build-watch";
+import { StarterNextStep } from "@/components/deploy/starter-next-step";
 
 /**
  * A single row in the unified deploy feed. Either a build attempt (every
@@ -41,6 +42,7 @@ export default function AppDeploymentsPage() {
   const [triggering, setTriggering] = useState(false);
   const [actionId, setActionId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [repoFullName, setRepoFullName] = useState<string | null>(null);
   const { t } = useT();
 
   const canDeploy = canMutate(role);
@@ -72,6 +74,38 @@ export default function AppDeploymentsPage() {
   useEffect(() => {
     void load(); // eslint-disable-line react-hooks/set-state-in-effect
   }, [load]);
+
+  const latestBuild = useMemo(
+    () => [...builds].sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0))[0],
+    [builds]
+  );
+
+  /**
+   * Fetched once (not part of the 3s build poll) purely to detect a
+   * starter-template app for the StarterNextStep nudge -- this is literally
+   * the page the "deploy a template" redirect lands on, so it is where the
+   * dead-end mostly showed up in the psql read. Deliberately gated on a
+   * succeeded build: without one the nudge never renders, so an app that has
+   * no git repo at all (uploaded archive, still building, failing) never pays
+   * for the extra request.
+   */
+  useEffect(() => {
+    if (!envId || latestBuild?.status !== "success") return;
+    let cancelled = false;
+    gitApi
+      .listRepos(projectId, envId)
+      .then((data) => {
+        if (cancelled) return;
+        const repo = (data.repos ?? []).find((r) => r.app_name === appName);
+        setRepoFullName(repo?.repo_full_name ?? null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, envId, appName, latestBuild?.status]);
 
   /** Poll every 3s while any build is in-progress (mirrors operations/page.tsx). */
   useEffect(() => {
@@ -227,6 +261,15 @@ export default function AppDeploymentsPage() {
           </button>
         )}
       </div>
+
+      {latestBuild?.status === "success" && (
+        <StarterNextStep
+          projectId={projectId}
+          envId={envId || null}
+          repoFullName={repoFullName}
+          className="mb-6"
+        />
+      )}
 
       {notice && (
         <div className="mb-4 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/40 px-4 py-3 text-sm text-green-700 dark:text-green-300">{notice}</div>

@@ -133,6 +133,20 @@ func workerReplicas(replicas int, worker bool) int {
 	return replicas
 }
 
+// workerPort zeroes the port of a worker app.
+//
+// Framework detection reports a port for any image that merely EXPOSEs one, and
+// a bot image built from a generic python base does exactly that. A worker has
+// no HTTP entrypoint: a non-zero port renders a Service in front of it, the
+// url-watcher then probes a ClusterIP nobody listens on, and the console shows
+// the owner a permanent "app has no listener" alert for an app that works.
+func workerPort(port int, worker bool) int {
+	if worker {
+		return 0
+	}
+	return port
+}
+
 func buildDefaultHostname(base, name, suffix string) string {
 	fixedLen := 1 + len(suffix) + 1 + len(base)
 	label := capFragment(name, fixedLen)
@@ -245,13 +259,14 @@ func HandoffDeploy(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo
 	if det.Port > 0 {
 		deployPort = det.Port
 	}
+	deployPort = workerPort(deployPort, repo.Worker)
 	if appExists {
 		action = "DeployImageVersion"
 		payload, err = json.Marshal(deployImageVersionPayload{
 			AppName:   b.AppName,
 			Image:     imageURI,
 			Framework: det.Framework,
-			Port:      det.Port,
+			Port:      workerPort(det.Port, repo.Worker),
 		})
 	} else {
 		action = "CreateApp"

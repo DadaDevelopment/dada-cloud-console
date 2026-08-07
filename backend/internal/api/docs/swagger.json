@@ -270,6 +270,51 @@
                 }
             }
         },
+        "/admin/db-shards": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns every managed PostgreSQL shard from the registry with what is actually inside it: total sampled size, database count, instance uptime, and the largest databases with their owning project, quota tier, seven-day growth and open advisory counts. Databases present in the samples but absent from the control plane's resource snapshots are returned with orphan=true. Reads collected samples only; no shard is queried live. Platform-admin and platform-analyst readers; every other caller gets 403.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Per-shard database consumption (admin readers)",
+                "operationId": "getAdminDBShards",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/admin/feedback": {
             "get": {
                 "security": [
@@ -485,6 +530,60 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/growth/campaigns": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Sent/clicked/redeemed/converted per campaign, variant and signup week.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "growth"
+                ],
+                "summary": "Campaign funnel report (platform staff)",
+                "operationId": "getGrowthCampaigns",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -13021,6 +13120,83 @@
                 }
             }
         },
+        "/projects/{projectId}/environments/{envId}/databases/{name}/advisories": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lists the advisories the platform derived for a managed PostgreSQL database: unused indexes, stale planner statistics, append-only tables with no retention, tables read off disk instead of cache, slow or dominant queries, and a storage-quota forecast. Each carries the evidence it fired on and, where the action is safe to spell out, the SQL to fix it. The SQL is the owner's to run: the platform never executes DDL against tenant data.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "database"
+                ],
+                "summary": "What the platform found wrong in this database",
+                "operationId": "listDatabaseAdvisories",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Database resource name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/environments/{envId}/databases/{name}/backups": {
             "get": {
                 "security": [
@@ -13395,6 +13571,160 @@
                 }
             }
         },
+        "/projects/{projectId}/environments/{envId}/databases/{name}/insights": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the headline insight numbers for a managed PostgreSQL database: current size against the tier quota, growth over the last seven days, buffer cache hit ratio, connection count and how fresh the underlying sample is. Reads collected samples from the control plane, never the tenant instance. Returns collectedAt = null when no sample has been collected yet, which is what an installation without collector credentials looks like.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "database"
+                ],
+                "summary": "Database size, growth and cache efficiency",
+                "operationId": "getDatabaseInsights",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Database resource name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/environments/{envId}/databases/{name}/queries": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lists the heaviest normalized queries of a managed PostgreSQL database over the last seven days, by total execution time, with call count, mean duration, rows per call, physical reads and share of the database's execution time. Query text is the normalized form pg_stat_statements stores, with literal constants already replaced by placeholders. Reads collected samples, never the tenant instance.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "database"
+                ],
+                "summary": "Slowest and heaviest queries",
+                "operationId": "listDatabaseQueries",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Database resource name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/environments/{envId}/databases/{name}/restore": {
             "post": {
                 "security": [
@@ -13492,6 +13822,83 @@
                     },
                     "503": {
                         "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/environments/{envId}/databases/{name}/tables": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lists the tables of a managed PostgreSQL database with heap and index size, estimated row count, cache hit ratio, growth over the last seven days and the last autovacuum/autoanalyze timestamps. Only tables above 1 MB are collected. Reads collected samples, never the tenant instance.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "database"
+                ],
+                "summary": "Per-table size, rows and growth",
+                "operationId": "listDatabaseTables",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Database resource name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -17925,6 +18332,130 @@
                 }
             }
         },
+        "/promo/click": {
+            "post": {
+                "description": "Marks a promo token as clicked. Public, idempotent, and answers identically for unknown tokens.",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "growth"
+                ],
+                "summary": "Record a campaign promo-link click",
+                "operationId": "recordPromoClick",
+                "parameters": [
+                    {
+                        "description": "Promo token",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.promoTokenRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/promo/redeem": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Grants the campaign plan for a fixed term to the caller's org. The token must belong to the calling user.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "growth"
+                ],
+                "summary": "Redeem a campaign promo token",
+                "operationId": "redeemPromo",
+                "parameters": [
+                    {
+                        "description": "Promo token",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.redeemPromoRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/solutions": {
             "get": {
                 "security": [
@@ -18601,6 +19132,10 @@
                 "token": {
                     "description": "GitLab only: a personal/project access token to store encrypted. Ignored for GitHub.",
                     "type": "string"
+                },
+                "worker": {
+                    "description": "Worker marks an app with no HTTP entrypoint: port stays 0, so nothing\ndownstream renders a Service or a default hostname for it.",
+                    "type": "boolean"
                 }
             }
         },
@@ -19436,6 +19971,17 @@
                 }
             }
         },
+        "api.promoTokenRequest": {
+            "type": "object",
+            "required": [
+                "token"
+            ],
+            "properties": {
+                "token": {
+                    "type": "string"
+                }
+            }
+        },
         "api.putAICredentialRequest": {
             "type": "object",
             "required": [
@@ -19510,6 +20056,17 @@
                     }
                 },
                 "session_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.redeemPromoRequest": {
+            "type": "object",
+            "required": [
+                "token"
+            ],
+            "properties": {
+                "token": {
                     "type": "string"
                 }
             }

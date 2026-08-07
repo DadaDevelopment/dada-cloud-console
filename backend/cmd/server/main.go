@@ -243,10 +243,14 @@ func main() {
 					api.SweepPlanExpiry(meterCtx, pool, expiryNotifier, cfg.AuditNotifyEmail, now)
 					api.SweepQuotaGrace(meterCtx, pool, expiryNotifier, cfg.AuditNotifyEmail, billingPlans, now)
 					api.SweepPaymentPlanMismatch(meterCtx, pool, cfg.AuditNotifyEmail, now)
+					if cfg.ReactivationCampaignEnabled {
+						api.SweepReactivation(meterCtx, pool, expiryNotifier, cfg.PublicBaseURL, now)
+					}
 				}
 			}
 		}()
-		log.Info().Msg("billing autopay, plan-expiry and quota-grace sweepers started")
+		log.Info().Bool("reactivation", cfg.ReactivationCampaignEnabled).
+			Msg("billing autopay, plan-expiry and quota-grace sweepers started")
 	}
 
 	<-quit

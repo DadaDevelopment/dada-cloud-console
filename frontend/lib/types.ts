@@ -347,6 +347,71 @@ export interface DatabaseCredentialsResponse {
   external_port?: string;
 }
 
+export interface DatabaseInsights {
+  collectedAt: string | null;
+  stale?: boolean;
+  shard?: string;
+  database?: string;
+  tier?: string;
+  sizeBytes?: number;
+  sizeLimitBytes?: number;
+  growthBytes7d?: number;
+  cacheHitRatio?: number | null;
+  connections?: number;
+  instanceStartAt?: string | null;
+}
+
+export interface DatabaseTableCard {
+  schema: string;
+  name: string;
+  totalBytes: number;
+  heapBytes: number;
+  indexBytes: number;
+  rowsEstimate: number;
+  lastAutoanalyze?: string | null;
+  windowHours: number;
+  growthBytes?: number;
+  insertedRows?: number;
+  deletedRows?: number;
+  appendOnly?: boolean;
+  cacheHitRatio?: number;
+  bytesReadFromDisk?: number;
+}
+
+export interface DatabaseQueryStat {
+  queryId: number;
+  query: string;
+  meanMs: number;
+  calls: number;
+  totalMs: number;
+  share: number;
+  rowsPerCall: number;
+}
+
+export interface DatabaseAdvisory {
+  code: string;
+  subject: string;
+  severity: "info" | "warning" | "critical";
+  detail: string;
+  suggestedSql: string;
+  evidence: Record<string, unknown>;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
+export interface DatabaseTablesResponse {
+  tables: DatabaseTableCard[];
+}
+
+export interface DatabaseQueriesResponse {
+  queries: DatabaseQueryStat[] | null;
+  totalMs: number;
+}
+
+export interface DatabaseAdvisoriesResponse {
+  advisories: DatabaseAdvisory[];
+}
+
 export interface S3BucketsResponse {
   buckets: ResourceSnapshot[];
 }
@@ -997,6 +1062,41 @@ export interface AdminCostHardwareGroup {
   cluster: string;
   node_count: number;
   price_month_rub: number;
+}
+
+/** One logical database as the platform sees it, sitting on a shard. */
+export interface AdminDBShardDatabase {
+  datname: string;
+  size_bytes: number;
+  share: number;
+  growth_bytes_7d: number;
+  connections: number;
+  project_id?: string;
+  project_name?: string;
+  resource?: string;
+  app_ref?: string;
+  tier?: string;
+  critical_advisories: number;
+  warning_advisories: number;
+  orphan: boolean;
+}
+
+/** One managed PostgreSQL instance with what is actually inside it. */
+export interface AdminDBShard {
+  name: string;
+  state: string;
+  is_platform: boolean;
+  capacity_bytes: number;
+  sampled_bytes: number;
+  databases: number;
+  collected_at?: string;
+  instance_start_at?: string;
+  top: AdminDBShardDatabase[];
+}
+
+export interface AdminDBShardsResponse {
+  shards: AdminDBShard[];
+  window_days: number;
 }
 
 export interface AdminCostsResponse {

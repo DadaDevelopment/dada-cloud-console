@@ -154,4 +154,60 @@ export const databases: Messages = {
   "databases.backups.restoreModal.submit": { ru: "Восстановить", en: "Restore" },
   "databases.backups.restoreModal.restoring": { ru: "Восстановление…", en: "Restoring…" },
   "databases.backups.restoreError": { ru: "Не удалось запустить восстановление", en: "Failed to start restore" },
+
+  "databases.insights.title": { ru: "Что происходит внутри", en: "What is going on inside" },
+  "databases.insights.error": { ru: "Не удалось загрузить показатели базы", en: "Failed to load database insights" },
+  "databases.insights.pending.title": { ru: "Показатели ещё не собраны", en: "No samples collected yet" },
+  "databases.insights.pending.body": {
+    ru: "Платформа снимает статистику PostgreSQL раз в пять минут. Первые числа появятся здесь в течение часа после создания базы, выводы о таблицах и индексах — через сутки наблюдений.",
+    en: "The platform samples PostgreSQL statistics every five minutes. The first numbers appear within an hour of the database being created; conclusions about tables and indexes need a day of observation.",
+  },
+  "databases.insights.stale": { ru: "Данные не обновлялись {ago}", en: "Not updated for {ago}" },
+  "databases.insights.collected": { ru: "Снято {ago}", en: "Sampled {ago}" },
+
+  "databases.insights.stat.size": { ru: "Размер", en: "Size" },
+  "databases.insights.stat.ofLimit": { ru: "из {limit}", en: "of {limit}" },
+  "databases.insights.stat.growth": { ru: "Рост за 7 дней", en: "Growth over 7 days" },
+  "databases.insights.stat.cacheHit": { ru: "Чтения из памяти", en: "Reads served from memory" },
+  "databases.insights.stat.connections": { ru: "Соединений", en: "Connections" },
+
+  "databases.insights.advisories.title": { ru: "Выводы", en: "Findings" },
+  "databases.insights.advisories.empty": {
+    ru: "Ничего требующего внимания не нашлось.",
+    en: "Nothing found that needs your attention.",
+  },
+  "databases.insights.advisories.since": { ru: "Замечено {ago}", en: "First seen {ago}" },
+  "databases.insights.advisories.sql": { ru: "SQL для исправления", en: "SQL to fix it" },
+  "databases.insights.advisories.sqlHint": {
+    ru: "Выполните это сами: платформа не меняет схему вашей базы.",
+    en: "Run this yourself: the platform does not change your schema.",
+  },
+
+  "databases.insights.code.unused_index": { ru: "Индекс не используется", en: "Index is never used" },
+  "databases.insights.code.stale_stats": { ru: "Устаревшая статистика планировщика", en: "Stale planner statistics" },
+  "databases.insights.code.append_only_no_retention": { ru: "Таблица только растёт", en: "Table only grows" },
+  "databases.insights.code.low_cache_hit": { ru: "Таблица читается с диска", en: "Table is read from disk" },
+  "databases.insights.code.slow_query": { ru: "Тяжёлый запрос", en: "Heavy query" },
+  "databases.insights.code.quota_forecast": { ru: "Место закончится", en: "Storage will run out" },
+
+  "databases.insights.tables.title": { ru: "Таблицы", en: "Tables" },
+  "databases.insights.tables.empty": { ru: "Таблиц больше 1 МБ пока нет.", en: "No tables above 1 MB yet." },
+  "databases.insights.tables.rows": { ru: "{rows} строк", en: "{rows} rows" },
+  "databases.insights.tables.heap": { ru: "данные {size}", en: "data {size}" },
+  "databases.insights.tables.indexes": { ru: "индексы {size}", en: "indexes {size}" },
+  "databases.insights.tables.growth": { ru: "+{size} за {hours} ч", en: "+{size} in {hours}h" },
+  "databases.insights.tables.appendOnly": { ru: "только вставки", en: "append-only" },
+  "databases.insights.tables.cacheHit": { ru: "из памяти {pct}", en: "{pct} from memory" },
+  "databases.insights.tables.analyzed": { ru: "ANALYZE {ago}", en: "ANALYZE {ago}" },
+  "databases.insights.tables.neverAnalyzed": { ru: "ANALYZE не выполнялся", en: "never ANALYZEd" },
+
+  "databases.insights.queries.title": { ru: "Запросы", en: "Queries" },
+  "databases.insights.queries.empty": { ru: "Запросы ещё не собраны.", en: "No queries collected yet." },
+  "databases.insights.queries.hint": {
+    ru: "Нормализованные запросы: константы уже заменены на плейсхолдеры, ваших данных здесь нет.",
+    en: "Normalized queries: constants are already replaced by placeholders, none of your data is here.",
+  },
+  "databases.insights.queries.mean": { ru: "в среднем {ms}", en: "{ms} avg" },
+  "databases.insights.queries.calls": { ru: "{calls} вызовов", en: "{calls} calls" },
+  "databases.insights.queries.share": { ru: "{pct} времени базы", en: "{pct} of database time" },
 };

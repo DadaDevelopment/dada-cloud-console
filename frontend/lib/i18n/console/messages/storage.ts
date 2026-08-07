@@ -111,6 +111,11 @@ export const storage: Messages = {
     ru: "Бакет ещё создаётся на стороне провайдера — ждём и проверяем сами каждые 15 секунд, страницу обновлять не нужно. Ждём уже {min} мин; у Beget это иногда занимает больше часа.",
     en: "The provider is still building the bucket — we keep checking every 15 seconds, no need to refresh. Waiting {min} min so far; with Beget this sometimes takes over an hour.",
   },
+  "storage.detail.access.slowTitle": { ru: "Это дольше обычного", en: "This is taking longer than usual" },
+  "storage.detail.access.slowHint": {
+    ru: "Известный успешный случай ждал 80 минут — если счётчик уже перевалил за это, скорее всего дело в описании: провайдер Beget принимает не больше 45 символов и не всю пунктуацию, а провал обычно тихий. Описание уже созданного бакета не поменять. Если через пару часов доступа всё ещё нет, создайте отдельный бакет под другим именем с коротким описанием без знаков препинания, а про застрявший напишите нам — удалить его из консоли пока нельзя.",
+    en: "The longest known successful case waited 80 minutes — past that, the usual culprit is the description: Beget's provider accepts at most 45 characters and rejects some punctuation, and the failure is silent. An existing bucket's description can't be edited. If there's still no access after a couple more hours, create a separate bucket under a different name with a short, punctuation-free description, and tell us about the stuck one — the console can't delete it yet.",
+  },
   "storage.detail.access.notConfigured": {
     ru: "Доступ к учётным данным не настроен для этого окружения.",
     en: "Credential access isn't configured for this environment.",

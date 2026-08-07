@@ -178,6 +178,26 @@ func ComposeQuotaGraceReminder(graceUntilUTC string, daysLeft int, over []QuotaL
 	return subject, b.String()
 }
 
+// ComposeReactivation builds the letter sent to an account that signed up and
+// never shipped anything. Every one of those accounts already has a project,
+// so the blocker is not "how do I start" — it is "what do I put in it", and
+// the letter is written against that: one link, one offer, no tour.
+//
+// promoLink is the per-recipient tracked URL; it is the ONLY link in the body,
+// because a second link splits the click and makes the campaign unmeasurable.
+// planName and days describe the grant waiting behind it.
+func ComposeReactivation(planName string, days int, promoLink string) (subject, body string) {
+	subject = fmt.Sprintf("Dada Cloud: %s на %d дней — и готовые шаблоны, чтобы не начинать с пустого экрана", planName, days)
+	var b strings.Builder
+	b.WriteString("Вы завели проект в Dada Cloud, но так и не выкатили приложение.\n\n")
+	b.WriteString("Чаще всего дело не в платформе, а в том, что непонятно, с чего начать. Поэтому мы приготовили две вещи.\n\n")
+	fmt.Fprintf(&b, "Первое — тариф %s на %d дней бесплатно. Карта не нужна, по окончании срока аккаунт сам вернётся на Free, ничего не спишется.\n", planName, days)
+	b.WriteString("Второе — каталог готовых шаблонов: выбираете репозиторий, жмёте «Задеплоить», через пару минут приложение живёт на своём домене с HTTPS.\n\n")
+	fmt.Fprintf(&b, "Забрать тариф и посмотреть шаблоны: %s\n\n", promoLink)
+	b.WriteString("Если что-то не поедет — ответьте на это письмо, разберёмся вместе.\n")
+	return subject, b.String()
+}
+
 // crashLogSignature is one entry in the ordered pattern table ClassifyCrashLog
 // walks: pattern is matched with strings.Contains against the log excerpt,
 // label is the human hint appended to the pattern name in the parenthetical.
@@ -333,6 +353,54 @@ func ComposeVolumeAlert(appName string, ratio float64, declaredSize, consoleLink
 	fmt.Fprintf(&b, "Открыть хранилище в консоли: %s\n\n", consoleLink)
 	b.WriteString("Увеличить том можно там же, либо выгрузить и почистить данные через экспорт тома.\n\n")
 	b.WriteString("Это письмо приходит не чаще раза в 24 часа на приложение.\n")
+	return subject, b.String()
+}
+
+// ComposeDatabaseQuotaWarning warns an owner that a managed database is
+// approaching its tier's storage quota, while writes still work. It names the
+// two ways out (free space, or move up a plan) because the next step the
+// platform takes on its own — read-only — is not one the owner can undo by
+// waiting.
+func ComposeDatabaseQuotaWarning(dbName, tier string, usedGB, limitGB float64, consoleLink string) (subject, body string) {
+	subject = fmt.Sprintf("Dada Cloud: база %s заняла %.0f%% квоты", dbName, usedGB/limitGB*100)
+	var b strings.Builder
+	fmt.Fprintf(&b, "База данных %s занимает %.1f ГБ из %.0f ГБ, доступных на тарифе (квота %s).\n\n", dbName, usedGB, limitGB, tier)
+	b.WriteString("Когда база дойдёт до квоты, платформа переведёт её в режим только для чтения: данные останутся на месте и будут читаться, но запись перестанет проходить. Это делается автоматически, чтобы одна база не съела диск, общий с базами других проектов.\n\n")
+	b.WriteString("Что можно сделать: освободить место (удалить лишние данные, VACUUM FULL) или перейти на тариф с большей квотой.\n\n")
+	fmt.Fprintf(&b, "Открыть базы в консоли: %s\n\n", consoleLink)
+	b.WriteString("Это письмо приходит не чаще раза в 24 часа на базу.\n")
+	return subject, b.String()
+}
+
+// ComposeDatabaseQuotaEnforced reports that the quota has actually been
+// applied. It states plainly that nothing was deleted and how the state is
+// released, because the first thing an owner assumes when writes start failing
+// is data loss.
+func ComposeDatabaseQuotaEnforced(dbName, state string, usedGB, limitGB float64, consoleLink string) (subject, body string) {
+	if state == "frozen" {
+		subject = fmt.Sprintf("Dada Cloud: база %s отключена по квоте", dbName)
+	} else {
+		subject = fmt.Sprintf("Dada Cloud: база %s переведена в режим только для чтения", dbName)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "База данных %s занимает %.1f ГБ при квоте %.0f ГБ.\n\n", dbName, usedGB, limitGB)
+	if state == "frozen" {
+		b.WriteString("База продолжала расти после перевода в режим только для чтения, поэтому платформа закрыла подключения к ней. Данные не удалены.\n\n")
+	} else {
+		b.WriteString("Запись в базу отключена, чтение работает. Данные не удалены и не тронуты.\n\n")
+	}
+	b.WriteString("Ограничение снимается автоматически, как только база опустится ниже 90% квоты, либо сразу после перехода на тариф с большей квотой.\n\n")
+	fmt.Fprintf(&b, "Открыть базы в консоли: %s\n", consoleLink)
+	return subject, b.String()
+}
+
+// ComposeDatabaseQuotaReleased tells the owner the limit is gone, so nobody
+// keeps working around a restriction that no longer exists.
+func ComposeDatabaseQuotaReleased(dbName string, usedGB, limitGB float64, consoleLink string) (subject, body string) {
+	subject = fmt.Sprintf("Dada Cloud: ограничение с базы %s снято", dbName)
+	var b strings.Builder
+	fmt.Fprintf(&b, "База данных %s снова доступна на запись: %.1f ГБ из %.0f ГБ квоты.\n\n", dbName, usedGB, limitGB)
+	fmt.Fprintf(&b, "Открыть базы в консоли: %s\n", consoleLink)
 	return subject, b.String()
 }
 

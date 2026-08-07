@@ -156,7 +156,7 @@ function DeployResolver() {
     try {
       const name = await link(wanted);
       await buildsApi.trigger(target.projectId, target.envId, name);
-      router.replace(`/projects/${target.projectId}/apps/${name}/deployments?envId=${target.envId}`);
+      router.replace(`/projects/${target.projectId}/apps/${name}?envId=${target.envId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Деплой не запустился");
       setDeploying(false);
