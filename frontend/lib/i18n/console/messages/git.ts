@@ -83,14 +83,16 @@ export const git: Messages = {
     en: "Authorize a provider to grant access to your repositories.",
   },
   "git.import.connectGitHub": { ru: "Подключить GitHub", en: "Connect GitHub" },
-  "git.import.connectGitLab": { ru: "Подключить GitLab", en: "Connect GitLab" },
   "git.import.connectAnotherGitHub": { ru: "Подключить ещё один аккаунт GitHub", en: "Connect another GitHub account" },
   "git.import.connectAnotherGitLab": { ru: "Подключить ещё один GitLab", en: "Connect another GitLab" },
   "git.import.openGithub": {
     ru: "Ничего не произошло? Открыть GitHub →",
     en: "Nothing happened? Open GitHub →",
   },
-  "git.import.orTemplate": { ru: "или без GitHub", en: "or without GitHub" },
+  "git.import.orTemplate": {
+    ru: "или без GitHub: загрузите архив или разверните шаблон",
+    en: "or without GitHub: upload an archive or deploy a template",
+  },
 
   "git.import.select": { ru: "Выбрать →", en: "Select →" },
   "git.import.backToAccounts": { ru: "← Назад к аккаунтам", en: "← Back to accounts" },

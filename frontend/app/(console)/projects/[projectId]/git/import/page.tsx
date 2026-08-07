@@ -14,6 +14,7 @@ import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { useT } from "@/lib/i18n/console/context";
 import { TemplateDeployCards } from "@/components/console/template-deploy-cards";
+import { UploadDeployCard } from "@/components/deploy/upload-deploy";
 import { timeAgo } from "@/lib/format";
 import { CopyButton } from "@/components/ui/copy-button";
 import { githubActionsStep, deployCurl } from "@/lib/deploy-snippet";
@@ -215,7 +216,7 @@ export default function GitImportPage() {
   const [installations, setInstallations] = useState<GitInstallation[]>([]);
   const [loadingInstalls, setLoadingInstalls] = useState(true);
   const [installError, setInstallError] = useState<string | null>(null);
-  const [connectingProvider, setConnectingProvider] = useState<"github" | "gitlab" | null>(null);
+  const [connectingProvider, setConnectingProvider] = useState<"github" | null>(null);
   const [installUrl, setInstallUrl] = useState<string | null>(null);
 
   const [remoteRepos, setRemoteRepos] = useState<GitRemoteRepoCandidate[]>([]);
@@ -396,32 +397,26 @@ export default function GitImportPage() {
   const repoParam = searchParams.get("repo");
   const repoPrefillDone = useRef(false);
 
-  async function handleConnectProvider(provider: "github" | "gitlab", forceInstall = false) {
+  async function handleConnectProvider(provider: "github", forceInstall = false) {
     setInstallError(null);
 
-    if (provider === "github" && forceInstall && installUrl) {
+    if (forceInstall && installUrl) {
       window.location.href = installUrl;
       return;
     }
 
     setConnectingProvider(provider);
     try {
-      if (provider === "github" && !forceInstall) {
-        const { installations: avail } = await gitApi.availableInstallations(projectId);
-        const list = avail ?? [];
-        const toBind = list.filter((a) => !a.bound);
-        if (list.length) {
-          await Promise.all(toBind.map((a) => gitApi.bindInstallation(projectId, a.installation_id)));
-          await refreshInstallations(false);
-          return;
-        }
-        const url = installUrl ?? (await gitApi.installUrl(projectId, provider)).url;
-        setInstallUrl(url);
-        window.location.href = url;
+      const { installations: avail } = await gitApi.availableInstallations(projectId);
+      const list = avail ?? [];
+      const toBind = list.filter((a) => !a.bound);
+      if (list.length) {
+        await Promise.all(toBind.map((a) => gitApi.bindInstallation(projectId, a.installation_id)));
+        await refreshInstallations(false);
         return;
       }
-      const { url } = await gitApi.installUrl(projectId, provider);
-      if (provider === "github") setInstallUrl(url);
+      const url = installUrl ?? (await gitApi.installUrl(projectId, provider)).url;
+      setInstallUrl(url);
       window.location.href = url;
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("git.import.error.startInstall");
@@ -714,16 +709,10 @@ export default function GitImportPage() {
                   <button
                     onClick={() => handleConnectProvider("github")}
                     disabled={connectingProvider !== null}
+                    data-ux="git_import:connect_github"
                     className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {t("git.import.connectGitHub")}
-                  </button>
-                  <button
-                    onClick={() => handleConnectProvider("gitlab")}
-                    disabled={connectingProvider !== null}
-                    className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {t("git.import.connectGitLab")}
                   </button>
                 </div>
                 {installUrl && (
@@ -742,7 +731,12 @@ export default function GitImportPage() {
                   <span className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("git.import.orTemplate")}</span>
                   <div className="h-px flex-1 bg-gray-200 dark:bg-gray-800" />
                 </div>
-                <TemplateDeployCards projectId={projectId} envId={envId || null} />
+                <div className="space-y-4">
+                  <div data-ux="git_import:upload_archive">
+                    <UploadDeployCard projectId={projectId} envId={envId || null} />
+                  </div>
+                  <TemplateDeployCards projectId={projectId} envId={envId || null} />
+                </div>
               </div>
             </>
           ) : selectedRepo && !repoPickerOpen ? (
