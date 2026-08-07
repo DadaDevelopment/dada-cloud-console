@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/dada-tuda/console/portainer-agent/internal/beget"
 	"github.com/dada-tuda/console/portainer-agent/internal/config"
 	"github.com/dada-tuda/console/portainer-agent/internal/db"
 	"github.com/dada-tuda/console/portainer-agent/internal/portainer"
@@ -21,6 +22,7 @@ type VMWatcher struct {
 	cfg       *config.Config
 	portainer *portainer.Client
 	tf        *tfexecutor.Executor
+	beget     vpsRemover
 }
 
 // NewVMWatcher constructs a VMWatcher with its dependencies.
@@ -30,6 +32,7 @@ func NewVMWatcher(pool *pgxpool.Pool, cfg *config.Config) *VMWatcher {
 		cfg:       cfg,
 		portainer: portainer.New(cfg.PortainerURL, cfg.PortainerAPIToken),
 		tf:        tfexecutor.NewExecutor(cfg.TFBinPath, cfg.TFStateConnStr, cfg.TFWorkspaceBase),
+		beget:     beget.New(cfg.BegetAPIBaseURL, cfg.BegetToken),
 	}
 }
 

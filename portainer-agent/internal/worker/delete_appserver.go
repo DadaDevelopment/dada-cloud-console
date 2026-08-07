@@ -13,6 +13,41 @@ type deleteAppServerPayload struct {
 	AppServerName string `json:"app_server_name"`
 }
 
+// vpsRemover is the provider-level escape hatch used when Terraform cannot run.
+type vpsRemover interface {
+	RemoveVPS(ctx context.Context, id string) error
+}
+
+// destroyVM runs `terraform destroy` for one AppServer. The workspace is
+// re-materialised first: it holds only the embedded .tf templates and lives on
+// the agent pod's ephemeral disk, while the real state lives in Postgres. A pod
+// restart between create and delete therefore wipes the directory, and an init
+// against the missing directory used to abort the destroy (le-probe, 08-07 —
+// the VM stayed billed while its console row was marked deleted).
+func (w *VMWatcher) destroyVM(ctx context.Context, appServerUUID, serverName string) error {
+	if err := tf.PrepareWorkspace(w.tf.WorkspaceDir(appServerUUID)); err != nil {
+		return fmt.Errorf("prepare workspace: %w", err)
+	}
+	if err := w.tf.Init(ctx, appServerUUID); err != nil {
+		return fmt.Errorf("terraform init: %w", err)
+	}
+	if err := w.tf.Destroy(ctx, appServerUUID, w.tfVars(serverName, w.cfg.BegetRegion)); err != nil {
+		return fmt.Errorf("terraform destroy: %w", err)
+	}
+	return nil
+}
+
+// removeVMViaProvider deletes the machine straight through the Beget API.
+func (w *VMWatcher) removeVMViaProvider(ctx context.Context, vmProviderID *string) error {
+	if vmProviderID == nil || *vmProviderID == "" {
+		return fmt.Errorf("no vm_provider_id recorded")
+	}
+	if w.beget == nil {
+		return fmt.Errorf("beget client not configured")
+	}
+	return w.beget.RemoveVPS(ctx, *vmProviderID)
+}
+
 func (w *VMWatcher) doDeleteAppServer(ctx context.Context, op db.Operation) error {
 	var p deleteAppServerPayload
 	if err := unmarshalPayload(op.Payload, &p); err != nil {
@@ -54,13 +89,12 @@ func (w *VMWatcher) doDeleteAppServer(ctx context.Context, op db.Operation) erro
 
 	if server.TerraformWorkspace != nil {
 		appServerUUID := server.ID.String()
-		if err := w.tf.Init(ctx, appServerUUID); err != nil {
-			log.Warn().Err(err).Msg("terraform init before destroy failed")
-		} else {
-			region := w.cfg.BegetRegion
-			if err := w.tf.Destroy(ctx, appServerUUID, w.tfVars(p.AppServerName, region)); err != nil {
-				log.Warn().Err(err).Msg("terraform destroy failed — marking deleted anyway")
+		if err := w.destroyVM(ctx, appServerUUID, p.AppServerName); err != nil {
+			log.Warn().Err(err).Msg("terraform destroy unavailable — falling back to the Beget API")
+			if fallbackErr := w.removeVMViaProvider(ctx, server.VMProviderID); fallbackErr != nil {
+				return fmt.Errorf("destroy VM: %w (provider fallback: %v)", err, fallbackErr)
 			}
+			log.Info().Msg("VM removed via the Beget API")
 		}
 		if err := tf.CleanWorkspace(w.tf.WorkspaceDir(appServerUUID)); err != nil {
 			log.Warn().Err(err).Msg("clean workspace failed")
@@ -68,6 +102,8 @@ func (w *VMWatcher) doDeleteAppServer(ctx context.Context, op db.Operation) erro
 	}
 
 	// ── 4. Mark deleted ──────────────────────────────────────────────────────
+	// Only reached once the machine is provably gone: a silent "deleted" on a
+	// live VM drops the console's only handle on a billed resource.
 	if err := db.SetAppServerDeleted(ctx, w.pool, server.ID); err != nil {
 		return fmt.Errorf("set deleted: %w", err)
 	}

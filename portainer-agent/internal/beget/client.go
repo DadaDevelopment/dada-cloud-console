@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -48,6 +49,31 @@ type VPS struct {
 	Status        string           `json:"status"`
 	DateCreate    time.Time        `json:"date_create"`
 	Configuration VPSConfiguration `json:"configuration"`
+}
+
+// RemoveVPS deletes a VPS by its Beget id. It is the provider-level fallback for
+// the delete path: Terraform owns VM lifecycle normally, but its scratch
+// workspace is ephemeral, and a destroy that cannot run must not leave a billed
+// machine behind with no console-side record of it.
+func (c *Client) RemoveVPS(ctx context.Context, id string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/vps/server/"+id+"/remove", strings.NewReader("{}"))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("beget remove vps %s: %w", id, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("beget remove vps %s: status %d: %s", id, resp.StatusCode, string(body))
+	}
+	return nil
 }
 
 // ListVPS returns all VPS in the account.

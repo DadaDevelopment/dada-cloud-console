@@ -69,3 +69,38 @@ func TestListVPSErrorStatus(t *testing.T) {
 		t.Fatal("expected error on non-200 status")
 	}
 }
+
+func TestRemoveVPS(t *testing.T) {
+	var gotPath, gotMethod, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotMethod, gotAuth = r.URL.Path, r.Method, r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"vps":{"id":"vm-1","status":"REMOVING"}}`))
+	}))
+	defer srv.Close()
+
+	if err := New(srv.URL, "tok").RemoveVPS(context.Background(), "vm-1"); err != nil {
+		t.Fatalf("RemoveVPS: %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("method = %q, want POST", gotMethod)
+	}
+	if gotPath != "/v1/vps/server/vm-1/remove" {
+		t.Errorf("path = %q", gotPath)
+	}
+	if gotAuth != "Bearer tok" {
+		t.Errorf("auth = %q", gotAuth)
+	}
+}
+
+func TestRemoveVPS_ErrorStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"nope"}`))
+	}))
+	defer srv.Close()
+
+	if err := New(srv.URL, "tok").RemoveVPS(context.Background(), "vm-1"); err == nil {
+		t.Fatal("expected an error for a non-200 response, got nil")
+	}
+}
