@@ -1163,14 +1163,32 @@ export const adminApi = {
       method: "POST",
       body: { reason },
     }),
-  listAuditEvents: (params: { action?: string; user?: string; kind?: string; limit?: number; offset?: number } = {}) => {
+  listAuditEvents: (
+    params: {
+      action?: string;
+      user?: string;
+      kind?: string;
+      excludeActions?: string[];
+      excludeUsers?: string[];
+      limit?: number;
+      offset?: number;
+    } = {},
+  ) => {
     const q = new URLSearchParams();
     if (params.action) q.set("action", params.action);
     if (params.user) q.set("user", params.user);
     if (params.kind) q.set("kind", params.kind);
+    if (params.excludeActions?.length) q.set("exclude_action", params.excludeActions.join(","));
+    if (params.excludeUsers?.length) q.set("exclude_user", params.excludeUsers.join(","));
     q.set("limit", String(params.limit ?? 50));
     q.set("offset", String(params.offset ?? 0));
     return apiFetch<AuditEventsResponse>(`/api/v1/admin/audit?${q.toString()}`);
+  },
+  listAuditFacets: (params: { kind?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (params.kind) q.set("kind", params.kind);
+    const suffix = q.toString();
+    return apiFetch<AuditFacetsResponse>(`/api/v1/admin/audit/facets${suffix ? `?${suffix}` : ""}`);
   },
   listFeedback: (params: { status?: string; limit?: number } = {}) => {
     const q = new URLSearchParams();

@@ -23,6 +23,13 @@ export const audit: Messages = {
   "audit.filter.kind.internal": { ru: "Свои", en: "Internal" },
   "audit.filter.kind.synthetic": { ru: "Тестовые", en: "Test accounts" },
   "audit.filter.kind.platform": { ru: "Платформа", en: "Platform" },
+  "audit.facet.users": { ru: "Пользователи", en: "Users" },
+  "audit.facet.actions": { ru: "События", en: "Events" },
+  "audit.facet.hiddenCount": { ru: "скрыто {count}", en: "{count} hidden" },
+  "audit.facet.searchPlaceholder": { ru: "Поиск…", en: "Search…" },
+  "audit.facet.noMatches": { ru: "Ничего не найдено", en: "Nothing found" },
+  "audit.facet.showAll": { ru: "Показать все", en: "Show all" },
+  "audit.facet.hideAll": { ru: "Скрыть все", en: "Hide all" },
   "audit.filter.apply": { ru: "Применить", en: "Apply" },
   "audit.filter.clear": { ru: "Сбросить", en: "Clear" },
 

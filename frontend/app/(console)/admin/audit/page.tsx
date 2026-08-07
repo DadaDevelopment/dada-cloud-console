@@ -1,14 +1,16 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { adminApi } from "@/lib/api";
-import type { AuditEvent } from "@/lib/types";
+import type { AuditActionFacet, AuditActorFacet, AuditEvent } from "@/lib/types";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { AdminTabs } from "@/components/console/admin-tabs";
+import { AuditFacetFilter, type FacetOption } from "@/components/console/audit-facet-filter";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { useT } from "@/lib/i18n/console/context";
 
 const PAGE_SIZE = 50;
+const HIDDEN_STORAGE_KEY = "dada.audit.hidden.v1";
 const COHORTS = ["", "customer", "internal", "synthetic", "platform"] as const;
 
 const COHORT_BADGE: Record<string, string> = {
@@ -21,6 +23,26 @@ const REFRESH_MS = 30_000;
 
 function formatUTC(iso: string): string {
   return new Date(iso).toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC");
+}
+
+/**
+ * Reads the persisted hide-lists. They live in localStorage rather than the URL
+ * because unticking ViewProject is a standing preference of the reader, not a
+ * property of the link they are about to share.
+ */
+function readHidden(): { actions: string[]; users: string[] } {
+  if (typeof window === "undefined") return { actions: [], users: [] };
+  try {
+    const raw = window.localStorage.getItem(HIDDEN_STORAGE_KEY);
+    if (!raw) return { actions: [], users: [] };
+    const parsed = JSON.parse(raw) as { actions?: unknown; users?: unknown };
+    return {
+      actions: Array.isArray(parsed.actions) ? parsed.actions.filter((v): v is string => typeof v === "string") : [],
+      users: Array.isArray(parsed.users) ? parsed.users.filter((v): v is string => typeof v === "string") : [],
+    };
+  } catch {
+    return { actions: [], users: [] };
+  }
 }
 
 function resourceHref(projectId: string, kind: string, name: string): string | null {
@@ -61,6 +83,32 @@ export default function AuditPage() {
   const [appliedUser, setAppliedUser] = useState("");
   const [appliedKind, setAppliedKind] = useState("");
 
+  const [hiddenActions, setHiddenActions] = useState<Set<string>>(new Set());
+  const [hiddenUsers, setHiddenUsers] = useState<Set<string>>(new Set());
+  const [actorFacets, setActorFacets] = useState<AuditActorFacet[]>([]);
+  const [actionFacets, setActionFacets] = useState<AuditActionFacet[]>([]);
+
+  useEffect(() => {
+    const stored = readHidden();
+    setHiddenActions(new Set(stored.actions));
+    setHiddenUsers(new Set(stored.users));
+  }, []);
+
+  const excludeActions = useMemo(() => [...hiddenActions], [hiddenActions]);
+  const excludeUsers = useMemo(() => [...hiddenUsers], [hiddenUsers]);
+
+  /** Persists the hide-lists, tolerating a private-mode localStorage refusal. */
+  const persistHidden = useCallback((actions: Set<string>, users: Set<string>) => {
+    try {
+      window.localStorage.setItem(
+        HIDDEN_STORAGE_KEY,
+        JSON.stringify({ actions: [...actions], users: [...users] }),
+      );
+    } catch {
+      setError(null);
+    }
+  }, []);
+
   const load = useCallback(async (opts: { silent?: boolean } = {}) => {
     if (!opts.silent) setIsLoading(true);
     setError(null);
@@ -69,6 +117,8 @@ export default function AuditPage() {
         action: appliedAction || undefined,
         user: appliedUser || undefined,
         kind: appliedKind || undefined,
+        excludeActions,
+        excludeUsers,
         limit: PAGE_SIZE,
         offset,
       });
@@ -85,11 +135,31 @@ export default function AuditPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [appliedAction, appliedUser, appliedKind, offset, t]);
+  }, [appliedAction, appliedUser, appliedKind, excludeActions, excludeUsers, offset, t]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const facets = await adminApi.listAuditFacets({ kind: appliedKind || undefined });
+        if (cancelled) return;
+        setActorFacets(facets.actors ?? []);
+        setActionFacets(facets.actions ?? []);
+      } catch {
+        if (!cancelled) {
+          setActorFacets([]);
+          setActionFacets([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [appliedKind]);
 
   useEffect(() => {
     if (forbidden) return;
@@ -112,7 +182,30 @@ export default function AuditPage() {
     setAppliedAction("");
     setAppliedUser("");
     setAppliedKind("");
+    setHiddenActions(new Set());
+    setHiddenUsers(new Set());
+    persistHidden(new Set(), new Set());
   }
+
+  function changeHiddenActions(next: Set<string>) {
+    setHiddenActions(next);
+    setOffset(0);
+    persistHidden(next, hiddenUsers);
+  }
+
+  function changeHiddenUsers(next: Set<string>) {
+    setHiddenUsers(next);
+    setOffset(0);
+    persistHidden(hiddenActions, next);
+  }
+
+  const actorOptions: FacetOption[] = actorFacets.map((a) => ({
+    value: a.email,
+    count: a.count,
+    badge: a.account_kind !== "customer" ? t(`audit.filter.kind.${a.account_kind}`) : undefined,
+    badgeClass: COHORT_BADGE[a.account_kind] ?? COHORT_BADGE.synthetic,
+  }));
+  const actionOptions: FacetOption[] = actionFacets.map((a) => ({ value: a.action, count: a.count }));
 
   const columns: Column<AuditEvent>[] = [
     {
@@ -240,6 +333,18 @@ export default function AuditPage() {
             <option key={k || "all"} value={k}>{k ? t(`audit.filter.kind.${k}`) : t("audit.filter.kind.all")}</option>
           ))}
         </select>
+        <AuditFacetFilter
+          label={t("audit.facet.users")}
+          options={actorOptions}
+          hidden={hiddenUsers}
+          onChange={changeHiddenUsers}
+        />
+        <AuditFacetFilter
+          label={t("audit.facet.actions")}
+          options={actionOptions}
+          hidden={hiddenActions}
+          onChange={changeHiddenActions}
+        />
         <button
           onClick={applyFilters}
           className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
