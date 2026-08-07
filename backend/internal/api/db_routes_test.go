@@ -145,3 +145,25 @@ func TestSafeRouteToken(t *testing.T) {
 		}
 	}
 }
+
+func TestApplyMoveOverridesOutranksSnapshot(t *testing.T) {
+	got := applyMoveOverrides([]dbPlacement{
+		{Datname: "odds-research", Shard: "shard-1"},
+		{Datname: "app-one", Shard: "shard-1"},
+	}, map[string]string{"odds-research": "shard-2"})
+
+	if got[0].Shard != "shard-2" {
+		t.Fatalf("a database that has cut over must route to its new shard: %+v", got[0])
+	}
+	if got[1].Shard != "shard-1" {
+		t.Fatalf("a database with no move must not be touched: %+v", got[1])
+	}
+}
+
+func TestApplyMoveOverridesKeepsInputIntact(t *testing.T) {
+	in := []dbPlacement{{Datname: "odds-research", Shard: "shard-1"}}
+	applyMoveOverrides(in, map[string]string{"odds-research": "shard-2"})
+	if in[0].Shard != "shard-1" {
+		t.Fatal("the snapshot slice is shared with the caller and must not be rewritten in place")
+	}
+}

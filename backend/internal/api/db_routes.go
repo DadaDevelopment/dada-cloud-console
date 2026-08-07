@@ -210,6 +210,54 @@ func (h *Handler) routerPlacements(ctx context.Context) ([]dbPlacement, error) {
 	return out, rows.Err()
 }
 
+// applyMoveOverrides lets a move outrank the snapshot.
+//
+// Placement normally comes from the ServiceDatabaseV2 snapshot, which is a
+// Crossplane reconcile plus a status poll behind reality. A cutover cannot wait
+// for that: the seconds between "the data now lives on the new shard" and "the
+// CR says so" are exactly the seconds in which the router would keep sending
+// clients to the instance the data just left. A move that has reached its
+// cutover therefore decides where its database is until the CR agrees.
+func applyMoveOverrides(placements []dbPlacement, overrides map[string]string) []dbPlacement {
+	if len(overrides) == 0 {
+		return placements
+	}
+	out := make([]dbPlacement, len(placements))
+	copy(out, placements)
+	for i, p := range out {
+		if shard, ok := overrides[p.Datname]; ok {
+			out[i].Shard = shard
+		}
+	}
+	return out
+}
+
+// routerMoveOverrides reads the newest move per database that has reached its
+// cutover. Failed and abandoned moves are excluded by the phase filter, so a
+// move that never made it never redirects anyone.
+func (h *Handler) routerMoveOverrides(ctx context.Context) (map[string]string, error) {
+	rows, err := h.pool.Query(ctx, `
+		SELECT DISTINCT ON (datname) datname, target_shard
+		FROM db_moves
+		WHERE phase IN ('cutover', 'done')
+		ORDER BY datname, updated_at DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[string]string{}
+	for rows.Next() {
+		var datname, shard string
+		if err := rows.Scan(&datname, &shard); err != nil {
+			return nil, err
+		}
+		out[datname] = shard
+	}
+	return out, rows.Err()
+}
+
 // DBRoutes serves the router's [databases] section over the internal API. The
 // pg-router pod pulls it on boot and on a timer; a failed fetch leaves the file
 // it already has in place, which is why this handler never answers with a
@@ -226,7 +274,12 @@ func (h *Handler) DBRoutes(c *gin.Context) {
 		c.String(http.StatusInternalServerError, "read placements: %v", err)
 		return
 	}
-	body, stats, err := renderPgBouncerRoutes(shards, placements, dbRouterDefaultShard)
+	overrides, err := h.routerMoveOverrides(ctx)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "read moves: %v", err)
+		return
+	}
+	body, stats, err := renderPgBouncerRoutes(shards, applyMoveOverrides(placements, overrides), dbRouterDefaultShard)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "render routes: %v", err)
 		return
