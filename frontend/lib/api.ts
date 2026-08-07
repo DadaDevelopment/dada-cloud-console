@@ -19,6 +19,7 @@ import type {
   DatabaseCredentialsResponse,
   DatabaseInsights,
   DatabaseTablesResponse,
+  DatabaseTableDetailResponse,
   DatabaseQueriesResponse,
   DatabaseAdvisoriesResponse,
   AppsResponse,
@@ -417,6 +418,11 @@ export const databasesApi = {
   tables: (projectId: string, envId: string, name: string) =>
     apiFetch<DatabaseTablesResponse>(
       `/api/v1/projects/${projectId}/environments/${envId}/databases/${name}/tables`
+    ),
+
+  table: (projectId: string, envId: string, name: string, table: string, schema?: string) =>
+    apiFetch<DatabaseTableDetailResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/databases/${name}/tables/${encodeURIComponent(table)}${schema ? `?schema=${encodeURIComponent(schema)}` : ""}`
     ),
 
   queries: (projectId: string, envId: string, name: string) =>

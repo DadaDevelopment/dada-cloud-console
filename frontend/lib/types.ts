@@ -412,6 +412,49 @@ export interface DatabaseAdvisoriesResponse {
   advisories: DatabaseAdvisory[];
 }
 
+export interface DatabaseTableDetail extends DatabaseTableCard {
+  liveRows: number;
+  deadRows: number;
+  lastAutovacuum?: string | null;
+  collectedAt: string;
+  sampleStale: boolean;
+  seqScans?: number | null;
+  indexScans?: number | null;
+}
+
+export interface DatabaseTableSeriesPoint {
+  at: string;
+  totalBytes: number;
+}
+
+export interface DatabaseTableIndex {
+  name: string;
+  sizeBytes: number;
+  totalScans: number;
+  scansInWindow: number | null;
+  neverScanned: boolean;
+  windowHours: number;
+  isUnique: boolean;
+  isPrimary: boolean;
+}
+
+export interface DatabaseTableQuery {
+  queryId: number;
+  query: string;
+  meanMs: number;
+  calls: number;
+  totalMs: number;
+  matchedBy: string;
+}
+
+export interface DatabaseTableDetailResponse {
+  table: DatabaseTableDetail;
+  series: DatabaseTableSeriesPoint[];
+  indexes: DatabaseTableIndex[];
+  queries: DatabaseTableQuery[];
+  advisories: DatabaseAdvisory[];
+}
+
 export interface S3BucketsResponse {
   buckets: ResourceSnapshot[];
 }

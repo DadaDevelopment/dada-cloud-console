@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { databasesApi } from "@/lib/api";
 import type {
@@ -51,7 +52,7 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
   );
 }
 
-function AdvisoryCard({ a }: { a: DatabaseAdvisory }) {
+export function AdvisoryCard({ a }: { a: DatabaseAdvisory }) {
   const { t } = useT();
   const title = t(`databases.insights.code.${a.code}`);
   const sample = typeof a.evidence?.querySample === "string" ? (a.evidence.querySample as string) : "";
@@ -87,10 +88,13 @@ function AdvisoryCard({ a }: { a: DatabaseAdvisory }) {
   );
 }
 
-function TableCard({ tbl }: { tbl: DatabaseTableCard }) {
+function TableCard({ tbl, href }: { tbl: DatabaseTableCard; href: string }) {
   const { t } = useT();
   return (
-    <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 shadow-sm">
+    <Link
+      href={href}
+      className="block rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 shadow-sm transition hover:border-gray-300 dark:hover:border-gray-700 hover:shadow-md"
+    >
       <div className="flex items-baseline justify-between gap-2">
         <span className="truncate font-mono text-sm font-medium text-gray-900 dark:text-gray-100">{tbl.name}</span>
         <span className="shrink-0 text-sm font-semibold text-gray-900 dark:text-gray-100">{formatBytes(tbl.totalBytes)}</span>
@@ -131,7 +135,7 @@ function TableCard({ tbl }: { tbl: DatabaseTableCard }) {
             : t("databases.insights.tables.neverAnalyzed")}
         </span>
       </div>
-    </div>
+    </Link>
   );
 }
 
@@ -288,7 +292,11 @@ export function DbInsights({ projectId, envId, name }: { projectId: string; envI
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {tables.map((tbl) => (
-              <TableCard key={`${tbl.schema}.${tbl.name}`} tbl={tbl} />
+              <TableCard
+                key={`${tbl.schema}.${tbl.name}`}
+                tbl={tbl}
+                href={`/projects/${projectId}/databases/${name}/tables/${encodeURIComponent(tbl.name)}${tbl.schema && tbl.schema !== "public" ? `?schema=${encodeURIComponent(tbl.schema)}` : ""}`}
+              />
             ))}
           </div>
         )}

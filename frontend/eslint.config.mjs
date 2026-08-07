@@ -24,6 +24,7 @@ const eslintConfig = defineConfig([
       "app/(console)/admin/ai-gateway/page.tsx",
       "app/(console)/admin/feedback/page.tsx",
       "app/(console)/admin/db-shards/page.tsx",
+      "app/(console)/projects/\\[projectId\\]/databases/\\[name\\]/tables/\\[table\\]/page.tsx",
     ],
     rules: { "react-hooks/set-state-in-effect": "off" },
   },

@@ -842,6 +842,7 @@ var agentChatConsoleRoutes = []string{
 	"/projects/{projectId}/boxes",
 	"/projects/{projectId}/databases",
 	"/projects/{projectId}/databases/{name}",
+	"/projects/{projectId}/databases/{name}/tables/{table}",
 	"/projects/{projectId}/domains",
 	"/projects/{projectId}/git",
 	"/projects/{projectId}/git/import",
@@ -1142,6 +1143,10 @@ func buildAgentChatSystemPrompt(catalog []string) string {
 	sb.WriteString("Application logs are NOT a page of their own: link the app page anchor /projects/{projectId}/apps/{appName}#logs, or /projects/{projectId}/monitoring/{appId} for the full view. There is no top-level billing page -- project billing lives at /projects/{projectId}/billing. The panel turns such paths into clickable links automatically.\n")
 	sb.WriteString("A console link is a path and nothing else: it starts with / and carries no scheme and no host. You do not know which domain the user is on, so any absolute URL you write for the console is a hostname you made up -- it renders as a link that leaves the console and lands nowhere. Write the path exactly as it appears in the list above, with nothing in front of the leading slash.\n")
 	sb.WriteString("You are inside the console and can move it yourself: when the next thing the user has to do happens on a page, call " + agentchat.OpenPageTool + " with that path and their tab goes there while you answer, instead of \"go to <path>\" that they have to click. Use it once per turn, for the one page your answer is about, and then describe what they are now looking at. Keep writing the path in the text as well when you are only mentioning a page, not sending them to it.\n\n")
+
+	sb.WriteString("# DATABASE INSIGHTS\n")
+	sb.WriteString("When a user asks why their database is slow, big, or growing, do not answer from general PostgreSQL knowledge and do not ask them to run diagnostics -- the platform already measures their instance. Call getDatabaseInsights for size against quota, growth and cache hit ratio, listDatabaseAdvisories for what the platform itself concluded (unused indexes, append-only tables with no retention, stale statistics, slow queries, quota forecast), listDatabaseTables for per-table size, row counts and dead tuples, and listDatabaseQueries for the top statements by total time. Lead with the advisories: they carry the evidence and the exact SQL. ")
+	sb.WriteString("The platform never runs DDL inside a user's database: an advisory's SQL (DROP INDEX, ANALYZE, and the like) is text for the owner to run themselves, so present it as a suggestion with its measured justification, never as something you are about to do or have done. If insights come back empty, the collector has not gathered a window yet -- say that plainly instead of concluding the database is healthy.\n\n")
 
 	sb.WriteString("# SECRETS\n")
 	sb.WriteString("Never ask the user for a GitHub token, private key, SSH key or password in chat, and never fill the token argument of connectGitRepo -- repository access comes from the installed GitHub App; if there is no installation, call getGitInstallUrl or send the user to /projects/{projectId}/git/import. Never print, echo or repeat a secret value returned by any tool. ")

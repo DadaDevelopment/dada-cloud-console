@@ -44,6 +44,7 @@ var keepTools = []string{
 	"listAppFiles", "readAppFile", "getAppVolumeUsage",
 
 	"listDatabaseBackups",
+	"getDatabaseInsights", "listDatabaseTables", "listDatabaseQueries", "listDatabaseAdvisories",
 
 	"listDomainAuthorizations", "getManagedZone", "listManagedRecords", "previewZoneImport",
 
