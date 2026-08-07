@@ -403,3 +403,14 @@ campaign it exists to protect.
 
 To go live: set `REACTIVATION_CAMPAIGN_ENABLED=true` on the console backend.
 Funnel reads from `GET /api/v1/admin/growth/campaigns`.
+
+## Review — Let's Encrypt на песочничной VM (2026-08-07)
+
+- [x] VM `le-probe` в `agent-sandbox`, окружение `le-probe` (runtime=vm), приложение `le-web` (nginx:alpine)
+- [x] Найден и починен продуктовый дефект: ингресс без сертификатов рендерился как 443-vhost с пустым `ssl_certificate` → CrashLoop nginx → падала маршрутизация всей машины (`dffb107f`)
+- [x] Стирается протухший `error_message` при переходе AppServer в WaitingForAgent/Ready (`fc586380`)
+- [x] Полный сценарий: ингресс `le-ing2` (канонический хост без TLS, отдаёт 200 по HTTP) → attach `le-probe.pv.dada-tuda.ru` → certbot-компаньон → `active/active`
+- [x] Доказательство: `https://le-probe.pv.dada-tuda.ru/` → 200, issuer `C=US; O=Let's Encrypt; CN=YE1`, срок до 2026-11-05
+- [x] DELETE AppServer на новом образе: VM снесена, `app_servers` пуст, IP отдан провайдеру
+- [x] Уборка: приложения удалены, A-запись `le-probe` снята, TXT зоны превью не тронут (это платформенная запись `pv.dada-tuda.ru`)
+- [ ] Осталось: строка окружения `le-probe` живёт (API удаления окружения нет) — стоимости не несёт
