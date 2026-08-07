@@ -119,10 +119,16 @@ Three groups deliberately have none, and the reason is in each case that a
 substitute would answer a different question:
 
 - `vision` — nvidia_nim is the only provider here whose models read the image.
-- `search` — groq's compound is the only server-side web search; a text tier
-  returns an ungrounded guess. **Known gap:** `search` is groq-only, so for any
-  project without a groq key it is dead (measured: `401 no credential for
-  project/provider groq`), and `or-gpt-41-mini-online → search` inherits that.
+- `search` — no fallback is possible because the group is not a capability, it
+  is one vendor's bundled product: `groq/groq/compound-mini` runs the search
+  inside the model and, by its own catalog line, *rejects requests carrying
+  tools*. Nothing substitutes for that, which is exactly the argument against
+  keeping it. Web search is an ordinary tool call; modelling it as a model
+  group is what created a single-provider dependency (measured: `401 no
+  credential for project/provider groq` for any project without a groq key),
+  and `or-gpt-41-mini-online → search` inherits it. The gateway has no
+  search-shaped hole to fill — the console has no web-search tool at all, and
+  no caller in this repo asks for the `search` alias. See §5.
 - `text-embedding-3-small` — the free embedders serve 1024 dims against
   OpenAI's 1536. A fallback would hand back vectors that do not fit the
   caller's index. Closing this needs a dimension-matched free group, not a
@@ -233,8 +239,17 @@ between the two repos shows up as a visible bucket instead of as silence.
 
 - **One rescuer.** Every chain ends at nvidia_nim, 40 RPM, one key. Needs a
   second free tier that is not nvidia and does native tool calls.
-- **`search` is groq-only** and therefore dead for every project without a groq
-  key, including the `:online` alias that falls into it.
+- **Web search is modelled as a model group instead of as a tool.** That is the
+  whole reason it is provider-bound. `search` resolves to groq's compound
+  bundle, which cannot accept tools, so it can never take part in the
+  tool-calling conversation the assistant actually runs; meanwhile no code in
+  this repo calls the alias, and the assistant's toolset
+  (`backend/internal/agentchat/toolset.go`) contains no web-search tool.
+  A search tool behind the existing `LoadToolTool` catalog would work on every
+  tool-calling group already on the gateway — `fast`, `medium`, `smart`,
+  `gpt-4o*`, `or-*` — which retires the dependency rather than documenting it.
+  Until then the console has no web search, and `search` /
+  `or-gpt-41-mini-online` are dead weight for every project without a groq key.
 - **Embeddings have no fallback** and cannot get one until a 1536-dim free
   embedder exists on the gateway.
 - **`AGENT_CHAT_MEMORY_MODEL` is still unset**, so background memory folding
