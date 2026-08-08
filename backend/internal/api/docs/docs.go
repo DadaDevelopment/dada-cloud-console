@@ -3845,7 +3845,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Destructive: tears down the app server. For Terraform-provisioned servers this destroys the underlying VM and is irreversible. Asynchronous: returns 202 with an operation; poll the operation until terminal.",
+                "description": "Destructive: tears down the app server. For Terraform-provisioned servers this destroys the underlying VM and is irreversible. Asynchronous: returns 202 with an operation; poll the operation until terminal. A server left in Deleting status by a failed deletion can be deleted again; a deletion that is still running returns 409.",
                 "produces": [
                     "application/json"
                 ],
@@ -3898,6 +3898,15 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {

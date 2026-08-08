@@ -33,6 +33,14 @@ interface CreateAppServerForm {
   ssh_private_key: string;
 }
 
+/**
+ * Regions the VM provider actually serves. Mirrors appServerRegions in
+ * backend/internal/api/appservers.go: the dropdown used to offer ru2/kz1/eu1,
+ * which Beget has never had, so picking one produced an accepted order and a
+ * server that died in `terraform apply` with "Available regions: ru1".
+ */
+const APP_SERVER_REGIONS = ["ru1"] as const;
+
 const emptyForm: CreateAppServerForm = {
   name: "",
   mode: "terraform",
@@ -209,7 +217,7 @@ export default function AppServersPage() {
           render: (s: AppServer) => (
             <button
               onClick={() => void handleDelete(s.name)}
-              disabled={deletingName === s.name || s.status === "Deleting"}
+              disabled={deletingName === s.name}
               className="rounded-lg border border-red-200 dark:border-red-900 px-3 py-1.5 text-sm font-medium text-red-700 dark:text-red-300 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {deletingName === s.name ? t("common.deleting") : t("common.delete")}
@@ -345,10 +353,11 @@ export default function AppServersPage() {
                 onChange={(e) => handleFormChange("region", e.target.value)}
                 className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
               >
-                <option value="ru1">ru1</option>
-                <option value="ru2">ru2</option>
-                <option value="kz1">kz1</option>
-                <option value="eu1">eu1</option>
+                {APP_SERVER_REGIONS.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
               </select>
             </div>
           </div>

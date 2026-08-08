@@ -37,6 +37,25 @@ func (w *VMWatcher) destroyVM(ctx context.Context, appServerUUID, serverName str
 	return nil
 }
 
+// mayHaveMachine reports whether a real VM might exist behind this row, i.e.
+// whether refusing to finish the deletion protects anything.
+//
+// A create that died before `terraform apply` produced a machine leaves no IP
+// and no provider id. For such a row both destroy paths fail by construction —
+// Terraform has nothing in state, and the API fallback has no id to call with —
+// and the old code turned that double failure into a permanent 'Deleting': the
+// record could not be removed, while the row kept showing the original apply
+// error (a rejected region) as if the machine were being torn down.
+//
+// When either handle is present the refusal stands: marking a live, billed VM
+// deleted would drop the console's only way to reach it.
+func mayHaveMachine(server *db.AppServerRow) bool {
+	if server.VMProviderID != nil && *server.VMProviderID != "" {
+		return true
+	}
+	return server.VMIP != nil && *server.VMIP != ""
+}
+
 // removeVMViaProvider deletes the machine straight through the Beget API.
 func (w *VMWatcher) removeVMViaProvider(ctx context.Context, vmProviderID *string) error {
 	if vmProviderID == nil || *vmProviderID == "" {
@@ -92,9 +111,17 @@ func (w *VMWatcher) doDeleteAppServer(ctx context.Context, op db.Operation) erro
 		if err := w.destroyVM(ctx, appServerUUID, p.AppServerName); err != nil {
 			log.Warn().Err(err).Msg("terraform destroy unavailable — falling back to the Beget API")
 			if fallbackErr := w.removeVMViaProvider(ctx, server.VMProviderID); fallbackErr != nil {
-				return fmt.Errorf("destroy VM: %w (provider fallback: %v)", err, fallbackErr)
+				if mayHaveMachine(server) {
+					deleteErr := fmt.Errorf("destroy VM: %w (provider fallback: %v)", err, fallbackErr)
+					_ = db.SetAppServerFailed(ctx, w.pool, server.ID, friendlyVMError(deleteErr))
+					return deleteErr
+				}
+				log.Warn().Err(err).
+					Str("server", p.AppServerName).
+					Msg("destroy failed but the server never had a machine — deleting the record")
+			} else {
+				log.Info().Msg("VM removed via the Beget API")
 			}
-			log.Info().Msg("VM removed via the Beget API")
 		}
 		if err := tf.CleanWorkspace(w.tf.WorkspaceDir(appServerUUID)); err != nil {
 			log.Warn().Err(err).Msg("clean workspace failed")

@@ -68,7 +68,7 @@ func (w *VMWatcher) doCreateAppServer(ctx context.Context, op db.Operation) erro
 	appServerUUID := serverID.String()
 	workspaceDir := w.tf.WorkspaceDir(appServerUUID)
 	if err := tf.PrepareWorkspace(workspaceDir); err != nil {
-		_ = db.SetAppServerFailed(ctx, w.pool, serverID, err.Error())
+		_ = db.SetAppServerFailed(ctx, w.pool, serverID, friendlyVMError(err))
 		return fmt.Errorf("prepare workspace: %w", err)
 	}
 	if err := db.SetAppServerWorkspace(ctx, w.pool, serverID, workspaceDir); err != nil {
@@ -77,13 +77,13 @@ func (w *VMWatcher) doCreateAppServer(ctx context.Context, op db.Operation) erro
 
 	// ── 4. Terraform init + apply ────────────────────────────────────────────
 	if err := w.tf.Init(ctx, appServerUUID); err != nil {
-		_ = db.SetAppServerFailed(ctx, w.pool, serverID, err.Error())
+		_ = db.SetAppServerFailed(ctx, w.pool, serverID, friendlyVMError(err))
 		return fmt.Errorf("terraform init: %w", err)
 	}
 
 	outputs, err := w.tf.Apply(ctx, appServerUUID, w.tfVars(p.Name, region))
 	if err != nil {
-		_ = db.SetAppServerFailed(ctx, w.pool, serverID, err.Error())
+		_ = db.SetAppServerFailed(ctx, w.pool, serverID, friendlyVMError(err))
 		return fmt.Errorf("terraform apply: %w", err)
 	}
 	vmIP := outputs["vm_ip"]
@@ -101,7 +101,7 @@ func (w *VMWatcher) doCreateAppServer(ctx context.Context, op db.Operation) erro
 
 	params := w.bootstrapParams(p.Name, ep.EdgeKey, ep.EdgeID)
 	if err := dadash.RunBootstrap(bootstrapCtx, vmIP, "root", w.cfg.AgentSSHPrivateKey, params); err != nil {
-		_ = db.SetAppServerFailed(ctx, w.pool, serverID, err.Error())
+		_ = db.SetAppServerFailed(ctx, w.pool, serverID, friendlyVMError(err))
 		return fmt.Errorf("ssh bootstrap: %w", err)
 	}
 	log.Info().Msg("bootstrap complete — advancing to WaitingForAgent")
@@ -113,7 +113,7 @@ func (w *VMWatcher) doCreateAppServer(ctx context.Context, op db.Operation) erro
 	defer pollCancel()
 
 	if err := w.waitForAgent(pollCtx, ep.ID); err != nil {
-		_ = db.SetAppServerFailed(ctx, w.pool, serverID, "agent did not connect: "+err.Error())
+		_ = db.SetAppServerFailed(ctx, w.pool, serverID, "agent did not connect: "+friendlyVMError(err))
 		return fmt.Errorf("wait for agent: %w", err)
 	}
 
@@ -185,7 +185,7 @@ func (w *VMWatcher) doCreateManualAppServer(ctx context.Context, op db.Operation
 
 	params := w.bootstrapParams(p.Name, ep.EdgeKey, ep.EdgeID)
 	if err := dadash.RunBootstrap(bootstrapCtx, host, sshUser, p.SSHPrivateKey, params); err != nil {
-		_ = db.SetAppServerFailed(ctx, w.pool, serverID, err.Error())
+		_ = db.SetAppServerFailed(ctx, w.pool, serverID, friendlyVMError(err))
 		return fmt.Errorf("ssh bootstrap: %w", err)
 	}
 	log.Info().Msg("bootstrap complete — advancing to WaitingForAgent")
@@ -197,7 +197,7 @@ func (w *VMWatcher) doCreateManualAppServer(ctx context.Context, op db.Operation
 	defer pollCancel()
 
 	if err := w.waitForAgent(pollCtx, ep.ID); err != nil {
-		_ = db.SetAppServerFailed(ctx, w.pool, serverID, "agent did not connect: "+err.Error())
+		_ = db.SetAppServerFailed(ctx, w.pool, serverID, "agent did not connect: "+friendlyVMError(err))
 		return fmt.Errorf("wait for agent: %w", err)
 	}
 

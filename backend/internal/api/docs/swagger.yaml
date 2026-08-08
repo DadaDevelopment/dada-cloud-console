@@ -3819,7 +3819,9 @@ paths:
     delete:
       description: 'Destructive: tears down the app server. For Terraform-provisioned
         servers this destroys the underlying VM and is irreversible. Asynchronous:
-        returns 202 with an operation; poll the operation until terminal.'
+        returns 202 with an operation; poll the operation until terminal. A server
+        left in Deleting status by a failed deletion can be deleted again; a deletion
+        that is still running returns 409.'
       operationId: deleteAppServer
       parameters:
       - description: Project UUID
@@ -3854,6 +3856,12 @@ paths:
             type: object
         "404":
           description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
           schema:
             additionalProperties:
               type: string

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/dada-tuda/console/portainer-agent/internal/db"
 )
 
 type fakeRemover struct {
@@ -46,6 +48,28 @@ func TestRemoveVMViaProvider_RefusesWithoutProviderID(t *testing.T) {
 	}
 	if len(f.called) != 0 {
 		t.Errorf("provider must not be called without an id, got %v", f.called)
+	}
+}
+
+// TestMayHaveMachine separates the two rows that both fail every destroy path:
+// one that never got a machine (safe to remove) and one that has a handle on a
+// billed VM (must keep failing loudly). Treating them alike is what left a
+// failed provisioning parked in Deleting with no way out.
+func TestMayHaveMachine(t *testing.T) {
+	cases := []struct {
+		name   string
+		server *db.AppServerRow
+		want   bool
+	}{
+		{"never provisioned", &db.AppServerRow{}, false},
+		{"empty handles", &db.AppServerRow{VMIP: strptr(""), VMProviderID: strptr("")}, false},
+		{"has provider id", &db.AppServerRow{VMProviderID: strptr("cea6860c")}, true},
+		{"has ip only", &db.AppServerRow{VMIP: strptr("5.101.0.7")}, true},
+	}
+	for _, tc := range cases {
+		if got := mayHaveMachine(tc.server); got != tc.want {
+			t.Errorf("%s: mayHaveMachine = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
 

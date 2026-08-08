@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/crypto"
@@ -158,13 +159,21 @@ type createAppServerRequest struct {
 	SSHPrivateKey string `json:"ssh_private_key"`
 }
 
+// appServerRegions lists the regions the VM provider actually serves. It is an
+// allowlist, not a wish list: "ru2", "kz1" and "eu1" were offered here and in
+// the console dropdown while Beget only ever had ru1, so every pick but the
+// first died inside `terraform apply` with
+// `Region 'eu1' does not exist. Available regions: ru1` — after the console had
+// already accepted the order and created the row.
+var appServerRegions = []string{"ru1"}
+
 func isValidAppServerRegion(region string) bool {
-	switch region {
-	case "ru1", "ru2", "kz1", "eu1":
-		return true
-	default:
-		return false
+	for _, r := range appServerRegions {
+		if r == region {
+			return true
+		}
 	}
+	return false
 }
 
 // CreateAppServer enqueues a CreateAppServer operation.
@@ -244,7 +253,7 @@ func (h *Handler) CreateAppServer(c *gin.Context) {
 	switch mode {
 	case "terraform":
 		if req.Region != "" && !isValidAppServerRegion(req.Region) {
-			reject(http.StatusBadRequest, "invalid_region", "region must be one of: ru1, ru2, kz1, eu1")
+			reject(http.StatusBadRequest, "invalid_region", "region must be one of: "+strings.Join(appServerRegions, ", "))
 			return
 		}
 	case "manual":
@@ -331,7 +340,7 @@ func (h *Handler) CreateAppServer(c *gin.Context) {
 //
 // @ID          deleteAppServer
 // @Summary     Delete an app server (VM)
-// @Description Destructive: tears down the app server. For Terraform-provisioned servers this destroys the underlying VM and is irreversible. Asynchronous: returns 202 with an operation; poll the operation until terminal.
+// @Description Destructive: tears down the app server. For Terraform-provisioned servers this destroys the underlying VM and is irreversible. Asynchronous: returns 202 with an operation; poll the operation until terminal. A server left in Deleting status by a failed deletion can be deleted again; a deletion that is still running returns 409.
 // @Tags        appserver
 // @Produce     json
 // @Security    BearerAuth
@@ -341,6 +350,7 @@ func (h *Handler) CreateAppServer(c *gin.Context) {
 // @Failure     401        {object} map[string]string
 // @Failure     403        {object} map[string]string
 // @Failure     404        {object} map[string]string
+// @Failure     409        {object} map[string]string
 // @Router      /projects/{projectId}/app-servers/{serverName} [delete]
 func (h *Handler) DeleteAppServer(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
@@ -387,19 +397,39 @@ func (h *Handler) DeleteAppServer(c *gin.Context) {
 		return
 	}
 
-	// Verify server exists and is not already being deleted
+	// Verify the server exists and has not already been deleted. Status
+	// 'Deleting' is deliberately NOT a rejection: a delete whose worker failed
+	// leaves the row parked in 'Deleting' forever, and rejecting on the status
+	// alone made that row permanently undeletable (404 on every retry) instead
+	// of merely stuck. What must not be duplicated is a delete that is still
+	// running, so the in-flight check below looks at the operation, not the row.
 	var serverID uuid.UUID
 	err = h.pool.QueryRow(c.Request.Context(),
-		`SELECT id FROM app_servers WHERE project_id = $1 AND name = $2 AND status NOT IN ('Deleting','Deleted')`,
+		`SELECT id FROM app_servers WHERE project_id = $1 AND name = $2 AND status <> 'Deleted'`,
 		projectID, serverName,
 	).Scan(&serverID)
 	if err == pgx.ErrNoRows {
-		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "server_not_found_or_already_deleting", "status": http.StatusNotFound})
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "server_not_found_or_already_deleted", "status": http.StatusNotFound})
 		respondNotFound(c)
 		return
 	}
 	if err != nil {
 		rejectErr(http.StatusInternalServerError, "server_lookup_failed", "failed to find app server")
+		return
+	}
+
+	var inFlight int
+	if err := h.pool.QueryRow(c.Request.Context(),
+		`SELECT COUNT(*) FROM operations
+		 WHERE project_id = $1 AND action = 'DeleteAppServer' AND resource_name = $2
+		   AND status NOT IN ('Ready','Failed')`,
+		projectID, serverName,
+	).Scan(&inFlight); err != nil {
+		rejectErr(http.StatusInternalServerError, "delete_inflight_check_failed", "failed to check running deletions")
+		return
+	}
+	if inFlight > 0 {
+		rejectErr(http.StatusConflict, "delete_already_running", "deletion of this app server is already running")
 		return
 	}
 

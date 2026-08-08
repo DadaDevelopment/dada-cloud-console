@@ -129,7 +129,7 @@ func (r *BegetReader) adopt(ctx context.Context, projectID uuid.UUID, vm beget.V
 
 	workspaceDir := r.tf.WorkspaceDir(uuidStr)
 	if err := tf.PrepareAdoptWorkspace(workspaceDir, vm.ID); err != nil {
-		_ = db.SetAppServerFailed(ctx, r.pool, serverID, err.Error())
+		_ = db.SetAppServerFailed(ctx, r.pool, serverID, friendlyVMError(err))
 		return fmt.Errorf("prepare adopt workspace: %w", err)
 	}
 	if err := db.SetAppServerWorkspace(ctx, r.pool, serverID, workspaceDir); err != nil {
@@ -137,7 +137,7 @@ func (r *BegetReader) adopt(ctx context.Context, projectID uuid.UUID, vm beget.V
 	}
 
 	if err := r.tf.Init(ctx, uuidStr); err != nil {
-		_ = db.SetAppServerFailed(ctx, r.pool, serverID, err.Error())
+		_ = db.SetAppServerFailed(ctx, r.pool, serverID, friendlyVMError(err))
 		return fmt.Errorf("terraform init: %w", err)
 	}
 
@@ -147,7 +147,7 @@ func (r *BegetReader) adopt(ctx context.Context, projectID uuid.UUID, vm beget.V
 	}
 	outputs, err := r.tf.Apply(ctx, uuidStr, r.adoptVars(vm, region))
 	if err != nil {
-		_ = db.SetAppServerFailed(ctx, r.pool, serverID, err.Error())
+		_ = db.SetAppServerFailed(ctx, r.pool, serverID, friendlyVMError(err))
 		return fmt.Errorf("terraform apply (import): %w", err)
 	}
 
