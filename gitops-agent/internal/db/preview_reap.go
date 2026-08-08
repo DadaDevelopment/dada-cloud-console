@@ -60,6 +60,62 @@ func ReapExpiredPreviewEnvs(ctx context.Context, pool *pgxpool.Pool) ([]uuid.UUI
 	return ids, nil
 }
 
+// EnqueueDeletePreviewEnvsForApp enqueues a DeletePreviewEnv operation for every
+// environment whose git_repo_id points at the given app's git_repos row(s),
+// scoped by project/environment/app_name the same way doDeleteApp's own
+// cleanup queries are scoped. Called from inside doDeleteApp, right before it
+// detaches and deletes that git_repos row: environments.git_repo_id is
+// ON DELETE CASCADE (backend/migrations/014_preview_environments.sql), so
+// deleting the row while a preview environment still references it would
+// silently delete that environment row and leak its namespace. Enqueuing a
+// real teardown first, then nulling the reference (see doDeleteApp), lets the
+// git_repos row be deleted unconditionally without ever leaking a namespace or
+// leaving a phantom NotDeployed placeholder behind.
+//
+// Attribution and de-duplication mirror ReapExpiredPreviewEnvs: systemActorID,
+// because the user asked to delete an app, not this environment, and a
+// NOT EXISTS guard so a retried DeleteApp operation cannot double-enqueue a
+// teardown that is already Created or Processing. The payload shape
+// (environment_id, namespace) matches what doDeletePreviewEnv unmarshals in
+// gitops-agent/internal/worker/preview.go. Returns the ids of the environments
+// a teardown was enqueued for, so the caller can null out their git_repo_id.
+func EnqueueDeletePreviewEnvsForApp(ctx context.Context, pool *pgxpool.Pool, projectID, environmentID uuid.UUID, appName string) ([]uuid.UUID, error) {
+	rows, err := pool.Query(ctx, `
+		INSERT INTO operations
+			(actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
+		SELECT
+			$1::uuid, e.project_id, e.id, 'DeletePreviewEnv', 'Environment', e.namespace, 'Created',
+			jsonb_build_object('environment_id', e.id::text, 'namespace', e.namespace)
+		FROM environments e
+		JOIN git_repos gr ON gr.id = e.git_repo_id
+		WHERE gr.project_id = $2 AND gr.environment_id = $3 AND gr.app_name = $4
+		  AND NOT EXISTS (
+			SELECT 1 FROM operations o
+			WHERE o.environment_id = e.id
+			  AND o.action = 'DeletePreviewEnv'
+			  AND o.status IN ('Created', 'Processing')
+		  )
+		RETURNING environment_id
+	`, systemActorID, projectID, environmentID, appName)
+	if err != nil {
+		return nil, fmt.Errorf("enqueue preview teardown for app %s: %w", appName, err)
+	}
+	defer rows.Close()
+
+	var envIDs []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan enqueued preview teardown env id: %w", err)
+		}
+		envIDs = append(envIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return envIDs, nil
+}
+
 // recordReapAudit writes one audit row per teardown the reaper just enqueued.
 // A preview environment expiring is the one end-of-life a user never asks for,
 // so without this row the environment simply stops existing and nothing says

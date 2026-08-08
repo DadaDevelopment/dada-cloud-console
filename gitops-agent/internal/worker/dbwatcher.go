@@ -1190,10 +1190,11 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 // reintroduce an unquoted image in the chart. Missing files are skipped silently
 // by RemoveAndPush. Also clears the app's own snapshot AND every child resource
 // snapshot bound to it (ServiceDatabaseV2 / PublicApi / S3Bucket / AIModel),
-// revokes any AIModel API keys bound to the app, and drops the app's git_repos
-// link (unless a PR preview environment still references it), so quota/read
-// APIs reflect the deletion immediately and ListApps stops synthesizing a
-// NotDeployed placeholder for the dead app.
+// revokes any AIModel API keys bound to the app, enqueues a real teardown for
+// any preview environment still referencing the app's git_repos row and
+// detaches that reference, and unconditionally drops the app's git_repos row,
+// so quota/read APIs reflect the deletion immediately and ListApps stops
+// synthesizing a NotDeployed placeholder for the dead app.
 func (w *DBWatcher) doDeleteApp(ctx context.Context, op db.Operation) error {
 	var p struct {
 		Name string `json:"name"`
@@ -1281,18 +1282,7 @@ func (w *DBWatcher) doDeleteApp(ctx context.Context, op db.Operation) error {
 		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3`,
 		op.ProjectID, op.EnvironmentID, p.Name,
 	)
-	// Drop the app's git link, else ListApps keeps synthesizing a NotDeployed
-	// placeholder forever and the app resurfaces as an undeletable phantom.
-	// Guarded on preview environments: environments.git_repo_id is ON DELETE
-	// CASCADE, so removing the row while a PR preview still references it would
-	// silently delete environment rows and leak their live namespaces. In that
-	// case the link is left in place; preview teardown owns the cleanup.
-	_, _ = w.pool.Exec(ctx,
-		`DELETE FROM git_repos gr
-		 WHERE gr.project_id = $1 AND gr.environment_id = $2 AND gr.app_name = $3
-		   AND NOT EXISTS (SELECT 1 FROM environments e WHERE e.git_repo_id = gr.id)`,
-		op.ProjectID, op.EnvironmentID, p.Name,
-	)
+	w.deleteAppGitRepo(ctx, op.ProjectID, op.EnvironmentID, p.Name)
 
 	// For VM (compose) apps, re-assemble the environment's aggregate stack without
 	// the deleted app so its service leaves the running stack on the next deploy.
@@ -1302,6 +1292,54 @@ func (w *DBWatcher) doDeleteApp(ctx context.Context, op db.Operation) error {
 		return w.renderEnvAggregate(ctx, op, op.ProjectID, op.EnvironmentID)
 	}
 	return nil
+}
+
+// deleteAppGitRepo drops the app's git_repos row, else ListApps keeps
+// synthesizing a NotDeployed placeholder forever and the app resurfaces as an
+// undeletable phantom the user then deletes again -- the root cause of 32/32
+// prod DeleteApp operations reaching Committed while 6 apps stayed visible and
+// got deleted 2-3 times each.
+//
+// environments.git_repo_id is ON DELETE CASCADE (backend/migrations/014), so a
+// bare DELETE of a git_repos row still referenced by a preview environment
+// would silently cascade-delete that environment row and leak its namespace.
+// Only ephemeral preview environments ever set git_repo_id, and previews are a
+// dead feature (see preview.go header) with 0 such rows left in prod, but the
+// guard has to hold anyway: this enqueues a real DeletePreviewEnv teardown for
+// every environment still referencing the row (mirrors the TTL reaper),
+// detaches the reference, and only then deletes the git_repos row
+// unconditionally -- so the row can never survive to resurrect the app, and a
+// referencing environment gets torn down instead of leaked. Every step here is
+// best-effort and logged rather than propagated: the app's own delete already
+// committed to git and MarkCommitted above, so a bookkeeping failure here must
+// not turn a successful delete into a reported failure.
+func (w *DBWatcher) deleteAppGitRepo(ctx context.Context, projectID uuid.UUID, environmentID *uuid.UUID, appName string) {
+	if environmentID != nil {
+		if _, err := db.EnqueueDeletePreviewEnvsForApp(ctx, w.pool, projectID, *environmentID, appName); err != nil {
+			log.Error().Err(err).Str("app", appName).Str("project_id", projectID.String()).
+				Msg("db-watcher: enqueue preview env teardown for deleted app")
+		}
+	}
+	if environmentID != nil {
+		if _, err := w.pool.Exec(ctx,
+			`UPDATE environments e SET git_repo_id = NULL
+			 FROM git_repos gr
+			 WHERE e.git_repo_id = gr.id
+			   AND gr.project_id = $1 AND gr.environment_id = $2 AND gr.app_name = $3`,
+			projectID, *environmentID, appName,
+		); err != nil {
+			log.Error().Err(err).Str("app", appName).Str("project_id", projectID.String()).
+				Msg("db-watcher: detach git_repo_id from preview environments for deleted app")
+		}
+	}
+	if _, err := w.pool.Exec(ctx,
+		`DELETE FROM git_repos gr
+		 WHERE gr.project_id = $1 AND gr.environment_id = $2 AND gr.app_name = $3`,
+		projectID, environmentID, appName,
+	); err != nil {
+		log.Error().Err(err).Str("app", appName).Str("project_id", projectID.String()).
+			Msg("db-watcher: delete git_repos row for deleted app")
+	}
 }
 
 // doDeleteProject tears down an entire project (MVP scope): removes the whole
