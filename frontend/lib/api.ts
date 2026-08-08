@@ -57,6 +57,7 @@ import type {
   RevealAPIKeyResponse,
   PendingApprovalsResponse,
   AuditEventsResponse,
+  AuditCoverageResponse,
   AuditFacetsResponse,
   FeedbackListResponse,
   AdminOverviewResponse,
@@ -82,6 +83,7 @@ import type {
   FrameworkDetection,
   Solution,
   ResolveSolutionsResponse,
+  SolutionCategory,
   InstallSolutionResponse,
   // Monitoring
   MonitoringApp,
@@ -1203,6 +1205,8 @@ export const adminApi = {
     const suffix = q.toString();
     return apiFetch<AuditFacetsResponse>(`/api/v1/admin/audit/facets${suffix ? `?${suffix}` : ""}`);
   },
+  getAuditCoverage: (days = 30) =>
+    apiFetch<AuditCoverageResponse>(`/api/v1/admin/audit/coverage?days=${days}`),
   listFeedback: (params: { status?: string; limit?: number } = {}) => {
     const q = new URLSearchParams();
     if (params.status) q.set("status", params.status);
@@ -1323,7 +1327,8 @@ export const gitApi = {
  * here on purpose.
  */
 export const solutionsApi = {
-  list: () => apiFetch<{ solutions: Solution[] }>(`/api/v1/solutions`),
+  list: () =>
+    apiFetch<{ solutions: Solution[]; categories: SolutionCategory[] }>(`/api/v1/solutions`),
 
   get: (slug: string) => apiFetch<Solution>(`/api/v1/solutions/${encodeURIComponent(slug)}`),
 
@@ -1363,6 +1368,7 @@ export const solutionsApi = {
       port?: number;
       profile?: string;
       with_database?: boolean;
+      params?: Record<string, string>;
     }
   ) =>
     apiFetch<InstallSolutionResponse>(

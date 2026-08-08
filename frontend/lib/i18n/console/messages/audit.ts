@@ -47,6 +47,21 @@ export const audit: Messages = {
 
   "audit.error.load": { ru: "Не удалось загрузить журнал аудита", en: "Failed to load the audit log" },
 
+  "audit.coverage.title": { ru: "Покрытие аудита", en: "Audit coverage" },
+  "audit.coverage.subtitle": {
+    ru: "Операции за {days} дн., у которых нет ни одной строки аудита с их operation_id.",
+    en: "Operations over the last {days} days with no audit row carrying their operation_id.",
+  },
+  "audit.coverage.clean": {
+    ru: "За {days} дн. каждая операция оставила след в аудите.",
+    en: "Every operation in the last {days} days left an audit trail.",
+  },
+  "audit.coverage.col.action": { ru: "Действие", en: "Action" },
+  "audit.coverage.col.operations": { ru: "Операций", en: "Operations" },
+  "audit.coverage.col.audited": { ru: "С аудитом", en: "Audited" },
+  "audit.coverage.col.missing": { ru: "Без следа", en: "Missing" },
+  "audit.coverage.totalMissing": { ru: "Без следа всего: {count}", en: "{count} missing in total" },
+
   "audit.total": { ru: "Всего событий: {count}", en: "{count} events total" },
   "audit.pager.prev": { ru: "Назад", en: "Previous" },
   "audit.pager.next": { ru: "Вперёд", en: "Next" },

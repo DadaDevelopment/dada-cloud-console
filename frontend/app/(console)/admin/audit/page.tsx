@@ -2,7 +2,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { adminApi } from "@/lib/api";
-import type { AuditActionFacet, AuditActorFacet, AuditCohortFacet, AuditEvent } from "@/lib/types";
+import type {
+  AuditActionFacet,
+  AuditActorFacet,
+  AuditCohortFacet,
+  AuditCoverageResponse,
+  AuditEvent,
+} from "@/lib/types";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { AdminTabs } from "@/components/console/admin-tabs";
 import { AuditFacetFilter, type FacetOption } from "@/components/console/audit-facet-filter";
@@ -10,6 +16,7 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { useT } from "@/lib/i18n/console/context";
 
 const PAGE_SIZE = 50;
+const COVERAGE_DAYS = 30;
 const HIDDEN_STORAGE_KEY = "dada.audit.hidden.v1";
 
 const COHORT_BADGE: Record<string, string> = {
@@ -73,6 +80,7 @@ export default function AuditPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
+  const [coverage, setCoverage] = useState<AuditCoverageResponse | null>(null);
 
   const [actionFilter, setActionFilter] = useState("");
   const [userFilter, setUserFilter] = useState("");
@@ -169,6 +177,28 @@ export default function AuditPage() {
       cancelled = true;
     };
   }, [excludeActions, excludeUsers, excludeKinds]);
+
+  /**
+   * Loads the coverage report once per visit. It answers a different question
+   * from the event list below it — not "what happened" but "what happened and
+   * was never written down" — so it deliberately ignores the hide-lists: an
+   * action hidden from the feed is exactly the one whose silence goes unnoticed.
+   * A failure here leaves the panel out rather than the page broken.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const data = await adminApi.getAuditCoverage(COVERAGE_DAYS);
+        if (!cancelled) setCoverage(data);
+      } catch {
+        if (!cancelled) setCoverage(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (forbidden) return;
@@ -325,6 +355,46 @@ export default function AuditPage() {
 
       {error && (
         <div className="mb-6 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-400">{error}</div>
+      )}
+
+      {coverage && (
+        <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t("audit.coverage.title")}</h2>
+            <span className="text-xs text-gray-400 dark:text-gray-500">
+              {t("audit.coverage.totalMissing").replace("{count}", String(coverage.total_missing))}
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+            {t("audit.coverage.subtitle").replace("{days}", String(coverage.days))}
+          </p>
+          {coverage.gaps.length === 0 ? (
+            <p className="mt-2 text-sm text-emerald-700 dark:text-emerald-400">
+              {t("audit.coverage.clean").replace("{days}", String(coverage.days))}
+            </p>
+          ) : (
+            <table className="mt-2 w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-gray-400 dark:text-gray-500">
+                  <th className="py-1 font-medium">{t("audit.coverage.col.action")}</th>
+                  <th className="py-1 text-right font-medium">{t("audit.coverage.col.operations")}</th>
+                  <th className="py-1 text-right font-medium">{t("audit.coverage.col.audited")}</th>
+                  <th className="py-1 text-right font-medium">{t("audit.coverage.col.missing")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {coverage.gaps.map((g) => (
+                  <tr key={g.action} className="border-t border-gray-100 dark:border-gray-800">
+                    <td className="py-1 font-mono text-xs text-gray-900 dark:text-gray-100">{g.action}</td>
+                    <td className="py-1 text-right text-gray-600 dark:text-gray-400">{g.operations}</td>
+                    <td className="py-1 text-right text-gray-600 dark:text-gray-400">{g.audited}</td>
+                    <td className="py-1 text-right font-medium text-amber-700 dark:text-amber-400">{g.missing}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       )}
 
       <div className="mb-4 flex flex-wrap items-center gap-2">

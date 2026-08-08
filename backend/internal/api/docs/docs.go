@@ -163,6 +163,59 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/audit/coverage": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns, per action, how many operations finished in the window and how many of them have a row in audit_events, listing only the actions with a shortfall. Read access follows the rest of the admin dashboards (/platform-admins and /platform-analysts); every other caller gets 403.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Operations that left no audit row (platform-admin only)",
+                "operationId": "getAuditCoverage",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Length of the window in days (default 30, max 90)",
+                        "name": "days",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/admin/audit/facets": {
             "get": {
                 "security": [
@@ -19297,6 +19350,9 @@ const docTemplate = `{
         "api.appVolumeReq": {
             "type": "object",
             "properties": {
+                "fs_group": {
+                    "type": "integer"
+                },
                 "path": {
                     "type": "string"
                 },
@@ -20306,6 +20362,12 @@ const docTemplate = `{
                 },
                 "framework": {
                     "type": "string"
+                },
+                "params": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
                 },
                 "port": {
                     "type": "integer"

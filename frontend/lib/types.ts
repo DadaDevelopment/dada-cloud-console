@@ -1006,6 +1006,20 @@ export interface AuditCohortFacet {
   count: number;
 }
 
+/** One action whose operations outnumber the audit rows joined to them by operation_id. */
+export interface AuditCoverageGap {
+  action: string;
+  operations: number;
+  audited: number;
+  missing: number;
+}
+
+export interface AuditCoverageResponse {
+  days: number;
+  gaps: AuditCoverageGap[];
+  total_missing: number;
+}
+
 export interface AuditFacetsResponse {
   actors: AuditActorFacet[];
   actions: AuditActionFacet[];
@@ -1660,12 +1674,47 @@ export interface AppDiagnosis {
  * the console can build and deploy in one click, plus the build spec verified
  * for it. Mirrors the backend's `internal/solutions` catalog.
  */
+/** One value an entry asks for before it can start (a password, an API base). */
+export interface SolutionParam {
+  key: string;
+  label: string;
+  help: string;
+  kind: "text" | "secret" | "select";
+  required: boolean;
+  default: string;
+  options: string[] | null;
+  placeholder: string;
+}
+
+/** The persistent data directory an image entry mounts. */
+export interface SolutionVolume {
+  path: string;
+  size: string;
+}
+
+/** A catalog group and the heading the console draws above it. */
+export interface SolutionCategory {
+  key: string;
+  title: string;
+}
+
 export interface Solution {
   slug: string;
   name: string;
   tagline: string;
   /** Owner's GitHub picture, same source the resolver puts on its rows. */
   icon: string;
+  /**
+   * Which track this entry takes: "repo" is built from source by our pipeline,
+   * "image" runs a published image and skips the build entirely. The two are
+   * not the same promise, so the card says which one it is.
+   */
+  source: "repo" | "image";
+  /** Set only for `source: "image"`: the pinned image the app runs. */
+  image: string;
+  /** Set only for image entries that keep state on disk. */
+  volume: SolutionVolume | null;
+  params: SolutionParam[] | null;
   about: string;
   bullets: string[] | null;
   category: string;
@@ -1726,7 +1775,12 @@ export interface ResolveSolutionsResponse {
 
 export interface InstallSolutionResponse {
   app_name: string;
-  build: Build;
+  /** Present on the build track only: an image install has nothing to build. */
+  build?: Build;
+  /** Present on the image track: the queued app-creation operation. */
+  operation?: Operation;
+  default_hostname?: string;
+  source?: "repo" | "image";
   /** Present only when the install also ordered a managed database. */
   database?: Operation | null;
   installed: boolean;
