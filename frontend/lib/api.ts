@@ -218,6 +218,7 @@ export async function apiFetch<T>(
     const err = await res.json().catch(() => ({ error: res.statusText }));
     const body = err as {
       error?: string;
+      code?: string;
       message?: string;
       upgrade?: boolean;
       resource?: string;
@@ -233,7 +234,7 @@ export async function apiFetch<T>(
       provisioningSince?: string;
     };
     apiError.status = res.status;
-    apiError.code = body.error;
+    apiError.code = body.code ?? body.error;
     apiError.upgrade = body.upgrade;
     apiError.resource = body.resource;
     apiError.limit = body.limit;
@@ -247,6 +248,24 @@ export async function apiFetch<T>(
   }
 
   return res.json() as Promise<T>;
+}
+
+/**
+ * Classifies a 409 from ConnectGitRepo (backend/internal/api/gitrepos.go) into
+ * which of the two known conflicts happened, so callers can show the right
+ * copy instead of the raw backend sentence.
+ *
+ * `repo_already_connected`: this exact repository is already linked to that
+ * app - the caller's previous attempt succeeded and this is a retry.
+ * `app_name_taken` (or any other/missing code, for rollout compatibility with
+ * a backend that has not deployed `code` yet): the app name collides with a
+ * different repository.
+ */
+export type ConnectRepoConflict = "repo_already_connected" | "app_name_taken" | null;
+
+export function classifyConnectRepoConflict(status: number | undefined, code: string | undefined): ConnectRepoConflict {
+  if (status !== 409) return null;
+  return code === "repo_already_connected" ? "repo_already_connected" : "app_name_taken";
 }
 
 const UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;

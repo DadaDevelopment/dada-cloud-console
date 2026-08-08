@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { gitApi, buildsApi } from "@/lib/api";
+import { gitApi, buildsApi, classifyConnectRepoConflict } from "@/lib/api";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
 import { useT } from "@/lib/i18n/console/context";
@@ -116,8 +116,16 @@ export function ConnectByUrlDialog({ projectId, envId, open, onClose }: ConnectB
         token: token || undefined,
       });
     } catch (err) {
+      const apiErr = err as { status?: number; code?: string } | undefined;
+      const conflict = classifyConnectRepoConflict(apiErr?.status, apiErr?.code);
       const msg = err instanceof Error ? err.message : t("git.import.error.connect");
-      setError(/409/.test(msg) ? t("git.import.byUrl.error.appNameTaken") : msg);
+      if (conflict === "repo_already_connected") {
+        setError(t("git.import.byUrl.error.repoAlreadyConnected"));
+      } else if (conflict === "app_name_taken") {
+        setError(t("git.import.byUrl.error.appNameTaken"));
+      } else {
+        setError(msg);
+      }
       setSubmitting(false);
       return;
     }

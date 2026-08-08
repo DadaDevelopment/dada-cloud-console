@@ -1053,7 +1053,7 @@ func (h *Handler) ConnectGitRepo(c *gin.Context) {
 		respond()
 	}
 	rejectErr := func(status int, reason, msg string) {
-		reject(status, reason, func() { respondError(c, status, msg) })
+		reject(status, reason, func() { respondErrorCode(c, status, reason, msg) })
 	}
 
 	var req connectGitRepoRequest
@@ -1227,12 +1227,34 @@ func (h *Handler) linkGitRepo(ctx context.Context, actorID, projectID, envID uui
 		&r.RootDir, &r.FrameworkOverride, &r.AutoDeploy,
 		&r.Port, &r.Replicas, &r.Profile, &r.Worker, &r.CreatedAt, &r.UpdatedAt); err != nil {
 		if isUniqueViolation(err) {
-			return nil, &opFault{http.StatusConflict, "repo_already_linked", "this app already has a linked repository in this environment"}
+			return nil, h.linkConflictFault(ctx, projectID, envID, req)
 		}
 		return nil, &opFault{http.StatusInternalServerError, "link_insert_failed", "failed to link repository"}
 	}
 	r.PlatformAccess = classifyPlatformAccess(r.Provider, r.InstallationID)
 	return &r, nil
+}
+
+// linkConflictFault turns a unique-violation on git_repos(project_id,
+// environment_id, app_name) into the two causes a client actually needs to
+// tell apart: the same repo hit twice (a retried click, harmless) versus a
+// different repo fighting over an app name already taken (needs a rename).
+// A failed or empty lookup falls back to app_name_taken rather than a 500 --
+// the diagnostic query is not allowed to turn a real conflict into an
+// internal error.
+func (h *Handler) linkConflictFault(ctx context.Context, projectID, envID uuid.UUID, req *connectGitRepoRequest) *opFault {
+	var existingRepo, existingProvider string
+	err := h.pool.QueryRow(ctx,
+		`SELECT repo_full_name, provider FROM git_repos
+		 WHERE project_id = $1 AND environment_id = $2 AND app_name = $3`,
+		projectID, envID, req.AppName,
+	).Scan(&existingRepo, &existingProvider)
+	if err == nil && existingRepo == req.RepoFullName && existingProvider == req.Provider {
+		return &opFault{http.StatusConflict, "repo_already_connected",
+			fmt.Sprintf("this repository is already connected to app %q", req.AppName)}
+	}
+	return &opFault{http.StatusConflict, "app_name_taken",
+		fmt.Sprintf("app name %q is already used by another repository in this environment", req.AppName)}
 }
 
 // DisconnectGitRepo unlinks a repository from an app.

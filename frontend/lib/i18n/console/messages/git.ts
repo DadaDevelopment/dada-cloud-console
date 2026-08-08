@@ -204,6 +204,10 @@ export const git: Messages = {
     ru: "Приложение с таким именем уже есть в этом окружении.",
     en: "An app with this name already exists in this environment.",
   },
+  "git.import.byUrl.error.repoAlreadyConnected": {
+    ru: "Этот репозиторий уже подключен к этому приложению. Повторно подключать не нужно - откройте приложение.",
+    en: "This repository is already connected to this app. No need to reconnect it - open the app instead.",
+  },
   "git.import.byUrl.error.empty": { ru: "Введите clone URL репозитория", en: "Enter the repository's clone URL" },
   "git.import.byUrl.error.sshNotSupported": {
     ru: "ssh-адреса не поддерживаются - используйте https-адрес с токеном.",
