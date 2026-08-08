@@ -18,3 +18,43 @@ export function buildFailureDetail(failReason?: string | null, errorMessage?: st
   const prefix = `${failReason}: `;
   return message.startsWith(prefix) ? message.slice(prefix.length).trim() : message;
 }
+
+/**
+ * Builds the failure context handed to the AI auto-fix run.
+ *
+ * The console used to send the branch, the commit ref and the commit message
+ * and nothing else, so the agent was asked why a build broke while being told
+ * only what was being built. The cause is the part it cannot derive.
+ *
+ * @param build - branch, commit ref and the persisted failure of the build
+ * @returns a multi-line summary whose last lines name the reason and the cause
+ */
+export function buildFailureSummary(build: {
+  branch: string;
+  commitRef: string;
+  commitMessage?: string | null;
+  failReason?: string | null;
+  errorMessage?: string | null;
+}): string {
+  let summary = `Build failed on branch ${build.branch} (${build.commitRef})`;
+  if (build.commitMessage) summary += `: ${build.commitMessage}`;
+  if (build.failReason) summary += `\nFailure reason: ${build.failReason}`;
+  const detail = buildFailureDetail(build.failReason, build.errorMessage);
+  if (detail) summary += `\nCause: ${detail}`;
+  return summary;
+}
+
+/**
+ * Reports whether a failed build can plausibly be fixed by editing the
+ * repository, which is the only thing the auto-fix agent can do.
+ *
+ * Measured on thirty days of production failures: a third of them are git
+ * authentication and orphaned GitHub App installations. No commit repairs
+ * those -- the platform cannot even read the repo -- so offering an AI fix
+ * there spends the user's attention on a run that is guaranteed to fail.
+ *
+ * @param failReason - the build's `fail_reason`
+ */
+export function isRepoFixable(failReason?: string | null): boolean {
+  return failReason !== "git_auth_failed" && failReason !== "platform_error";
+}

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildFailureDetail } from "./build-failure.ts";
+import { buildFailureDetail, buildFailureSummary, isRepoFixable } from "./build-failure.ts";
 
 test("drops the fail_reason prefix the build agent writes", () => {
   assert.equal(
@@ -30,4 +30,35 @@ test("survives a missing reason or message", () => {
   assert.equal(buildFailureDetail(undefined, "plain failure"), "plain failure");
   assert.equal(buildFailureDetail("build_failed", null), "");
   assert.equal(buildFailureDetail(null, undefined), "");
+});
+
+test("the autofix summary names the reason and the cause", () => {
+  assert.equal(
+    buildFailureSummary({
+      branch: "main",
+      commitRef: "abcdef123456",
+      commitMessage: "add sqlite",
+      failReason: "dockerfile_build_failed",
+      errorMessage:
+        "dockerfile_build_failed: [4/7] RUN pip install -r requirements.txt: ERROR: No matching distribution found for sqlite3",
+    }),
+    "Build failed on branch main (abcdef123456): add sqlite\n" +
+      "Failure reason: dockerfile_build_failed\n" +
+      "Cause: [4/7] RUN pip install -r requirements.txt: ERROR: No matching distribution found for sqlite3",
+  );
+});
+
+test("a build with nothing persisted still produces the old summary", () => {
+  assert.equal(
+    buildFailureSummary({ branch: "main", commitRef: "abc123" }),
+    "Build failed on branch main (abc123)",
+  );
+});
+
+test("failures the platform caused are not offered to the repo-editing agent", () => {
+  assert.equal(isRepoFixable("git_auth_failed"), false);
+  assert.equal(isRepoFixable("platform_error"), false);
+  assert.equal(isRepoFixable("dockerfile_build_failed"), true);
+  assert.equal(isRepoFixable("no_dockerfile"), true);
+  assert.equal(isRepoFixable(null), true);
 });

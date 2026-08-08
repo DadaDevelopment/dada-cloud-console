@@ -11,6 +11,7 @@ import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
 import { BuildStatusBadge, isBuildActive } from "@/components/deploy/build-status-badge";
 import { useT } from "@/lib/i18n/console/context";
+import { buildFailureSummary } from "@/lib/build-failure";
 import { formatCommitLabel, resolveCommit } from "@/lib/build-commit";
 import { BuildProvenance, buildTriggerLabel } from "@/components/deploy/build-provenance";
 import { trackBuildStart } from "@/lib/build-watch";
@@ -193,7 +194,13 @@ export default function AppDeploymentsPage() {
     try {
       const resolved = resolveCommit(build);
       const ref = resolved.kind === "sha" ? resolved.sha.slice(0, 12) : formatCommitLabel(resolved, t);
-      const summary = `Build failed on branch ${build.branch} (${ref})${build.commit_message ? `: ${build.commit_message}` : ""}`;
+      const summary = buildFailureSummary({
+        branch: build.branch,
+        commitRef: ref,
+        commitMessage: build.commit_message,
+        failReason: build.fail_reason,
+        errorMessage: build.error_message,
+      });
       await cloudTasksApi.triggerAutofix(projectId, envId, appName, summary);
       router.push(`/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}#agent`);
     } catch (err) {

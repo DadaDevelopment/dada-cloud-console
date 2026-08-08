@@ -10,6 +10,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { BuildStatusBadge, isBuildActive } from "@/components/deploy/build-status-badge";
 import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
+import { buildFailureSummary, isRepoFixable } from "@/lib/build-failure";
 import { useT } from "@/lib/i18n/console/context";
 import { trackUxEvent } from "@/lib/ux-telemetry";
 import { resolveCommit, formatCommitLabel } from "@/lib/build-commit";
@@ -172,7 +173,13 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appReady
     try {
       const resolved = resolveCommit(build);
       const ref = resolved.kind === "sha" ? resolved.sha.slice(0, 12) : formatCommitLabel(resolved, t);
-      const summary = `Build failed on branch ${build.branch} (${ref})${build.commit_message ? `: ${build.commit_message}` : ""}`;
+      const summary = buildFailureSummary({
+        branch: build.branch,
+        commitRef: ref,
+        commitMessage: build.commit_message,
+        failReason: build.fail_reason,
+        errorMessage: build.error_message,
+      });
       await cloudTasksApi.triggerAutofix(projectId, envId, appName, summary);
       router.push(`/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}#agent`);
     } catch (err) {
@@ -277,7 +284,16 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appReady
             <BuildProvenance build={build} className="mt-1 min-w-0" />
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            {canDeploy && hasGitRepo && (
+            {canDeploy && hasGitRepo && !isRepoFixable(build.fail_reason) && (
+              <Link
+                href={`/projects/${projectId}/apps/${appName}/settings?tab=git${envId ? `&envId=${envId}` : ""}`}
+                data-ux="app_latest_build:reconnect_repo"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-red-700 transition-colors"
+              >
+                {t("apps.builds.fail.gitAuth.reconnect")}
+              </Link>
+            )}
+            {canDeploy && hasGitRepo && isRepoFixable(build.fail_reason) && (
               <button
                 type="button"
                 onClick={handleAutofix}

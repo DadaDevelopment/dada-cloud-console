@@ -254,7 +254,11 @@ func (h *Handler) launchAutofix(ctx context.Context, in autofixLaunch) (models.C
 // formatBuildFailureSummary renders a short natural-language failure summary
 // from build fields -- the auto-fix error context used when the caller does
 // not supply one explicitly.
-func formatBuildFailureSummary(branch, commitSHA string, commitMessage *string, finishedAt *time.Time) string {
+// The cause is the whole point of the summary. Without it the agent is handed
+// a commit message and a timestamp and asked why the build broke -- it cannot
+// know, and the run burns tokens guessing. fail_reason names the class and
+// error_message carries the line the build actually died on.
+func formatBuildFailureSummary(branch, commitSHA string, commitMessage *string, finishedAt *time.Time, failReason string, errorMessage *string) string {
 	summary := fmt.Sprintf("Build failed on branch %s (commit %s)", branch, shortSHA(commitSHA))
 	if commitMessage != nil && *commitMessage != "" {
 		summary += ": " + *commitMessage
@@ -262,7 +266,32 @@ func formatBuildFailureSummary(branch, commitSHA string, commitMessage *string, 
 	if finishedAt != nil {
 		summary += " [failed at " + finishedAt.UTC().Format(time.RFC3339) + "]"
 	}
+	if cause := buildFailureCause(failReason, errorMessage); cause != "" {
+		summary += "\n" + cause
+	}
 	return summary
+}
+
+// buildFailureCause renders the persisted failure of a build as the line an
+// agent can act on. The build agent stores error_message as
+// "<fail_reason>: <detail>", so the code is dropped when the detail already
+// repeats it rather than saying the same word twice.
+func buildFailureCause(failReason string, errorMessage *string) string {
+	msg := ""
+	if errorMessage != nil {
+		msg = strings.TrimSpace(*errorMessage)
+	}
+	if failReason == "" && msg == "" {
+		return ""
+	}
+	if msg == "" {
+		return "Failure reason: " + failReason
+	}
+	msg = strings.TrimPrefix(msg, failReason+": ")
+	if failReason == "" {
+		return "Cause: " + msg
+	}
+	return "Failure reason: " + failReason + "\nCause: " + msg
 }
 
 // shortSHA trims a commit sha to a readable prefix.
@@ -279,16 +308,22 @@ func (h *Handler) latestFailedBuildSummary(ctx context.Context, envID uuid.UUID,
 	var branch, commitSHA string
 	var commitMessage *string
 	var finishedAt *time.Time
+	var failReason *string
+	var errorMessage *string
 	err := h.pool.QueryRow(ctx,
-		`SELECT branch, commit_sha, commit_message, finished_at
+		`SELECT branch, commit_sha, commit_message, finished_at, fail_reason, error_message
 		   FROM builds
 		  WHERE environment_id = $1 AND app_name = $2 AND status = 'failed'
 		  ORDER BY created_at DESC LIMIT 1`,
-		envID, appName).Scan(&branch, &commitSHA, &commitMessage, &finishedAt)
+		envID, appName).Scan(&branch, &commitSHA, &commitMessage, &finishedAt, &failReason, &errorMessage)
 	if err != nil {
 		return "", err
 	}
-	return formatBuildFailureSummary(branch, commitSHA, commitMessage, finishedAt), nil
+	reason := ""
+	if failReason != nil {
+		reason = *failReason
+	}
+	return formatBuildFailureSummary(branch, commitSHA, commitMessage, finishedAt, reason, errorMessage), nil
 }
 
 // fetchAutofixLogs pulls the last hour of ERROR-level runtime logs for an app
