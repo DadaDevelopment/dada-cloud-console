@@ -93,6 +93,19 @@ func AppSnapshotEnvs(ctx context.Context, pool *pgxpool.Pool) (map[string][]uuid
 	return SnapshotEnvsByKind(ctx, pool, "App")
 }
 
+// AppSnapshotEnvsIncludingOrphaned is the fallback counterpart to
+// AppSnapshotEnvs: same lookup, same kind='App', but keeps Orphaned rows in
+// the candidate set. The status reconciler consults this only after the
+// exclusive map already failed to resolve a name — i.e. no live row claims
+// it — so it exists to let a live workload re-attach to the one Orphaned
+// snapshot that still carries its name, instead of leaving that workload
+// unattributed forever. See SnapshotEnvsByKind for why Orphaned is excluded
+// by default, and the reconciler's resolveEnv for the three-step order that
+// keeps both directions safe.
+func AppSnapshotEnvsIncludingOrphaned(ctx context.Context, pool *pgxpool.Pool) (map[string][]uuid.UUID, error) {
+	return snapshotEnvsByKind(ctx, pool, "App", true)
+}
+
 // SnapshotEnvsByKind maps a snapshot name (of the given kind) to the environment
 // IDs that have a snapshot with that name. Used by the status reconciler to
 // resolve a workload living in a namespace that isn't its env namespace (e.g.
@@ -109,12 +122,36 @@ func AppSnapshotEnvs(ctx context.Context, pool *pgxpool.Pool) (map[string][]uuid
 // "platform" to "observability" left an Orphaned twin per app and blacked out
 // live status for the whole monitoring estate, with the orphan GC unable to
 // purge the twins because its own clone could not sync.
+//
+// This exclusion has a matching failure mode in the other direction, fixed by
+// AppSnapshotEnvsIncludingOrphaned: an adopted/infra app (e.g. jenkins) whose
+// only manifest lives outside the tenant's own namespace has no other way to
+// attribute its live workload than this name lookup. If its one surviving
+// snapshot row gets marked Orphaned — by any earlier hiccup, not necessarily a
+// real deletion — this exclusive map now returns zero candidates for its name
+// forever, the reconciler can never mark it live again, and the orphan GC
+// purges the snapshot for real on the next sweep: a live app erased from the
+// console because a soft-delete flag became a one-way door. Observed
+// 2026-08-08/09: jenkins, nexus, portainer, neo4j and others in project
+// "platform" were purged this way despite running pods the whole time.
 func SnapshotEnvsByKind(ctx context.Context, pool *pgxpool.Pool, kind string) (map[string][]uuid.UUID, error) {
-	rows, err := pool.Query(ctx, `
+	return snapshotEnvsByKind(ctx, pool, kind, false)
+}
+
+func snapshotEnvsByKind(ctx context.Context, pool *pgxpool.Pool, kind string, includeOrphaned bool) (map[string][]uuid.UUID, error) {
+	query := `
 		SELECT name, environment_id
 		FROM resource_snapshots
 		WHERE kind = $1 AND environment_id IS NOT NULL AND phase <> 'Orphaned'
-	`, kind)
+	`
+	if includeOrphaned {
+		query = `
+			SELECT name, environment_id
+			FROM resource_snapshots
+			WHERE kind = $1 AND environment_id IS NOT NULL
+		`
+	}
+	rows, err := pool.Query(ctx, query, kind)
 	if err != nil {
 		return nil, fmt.Errorf("list snapshot envs: %w", err)
 	}

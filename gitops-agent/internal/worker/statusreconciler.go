@@ -647,6 +647,16 @@ func (r *StatusReconciler) reconcile(ctx context.Context) map[snapKey]bool {
 		log.Error().Err(err).Msg("status-reconciler: list app snapshot envs")
 		return nil
 	}
+	// appEnvsAll is the orphan-including fallback for the case appEnvs cannot
+	// resolve at all: an adopted/infra app whose only remaining App snapshot
+	// got marked Orphaned. Without this, that name has zero live claimants
+	// forever, its workload can never be attributed, and the orphan GC purges
+	// the snapshot for real on the next sweep even though the pod is up.
+	appEnvsAll, err := db.AppSnapshotEnvsIncludingOrphaned(ctx, r.pool)
+	if err != nil {
+		log.Error().Err(err).Msg("status-reconciler: list app snapshot envs (including orphaned)")
+		return nil
+	}
 
 	// One cluster-wide list per workload kind: covers both env namespaces and
 	// override namespaces (e.g. dada-agent in argocd-prod). Beyond Deployments we
@@ -657,14 +667,25 @@ func (r *StatusReconciler) reconcile(ctx context.Context) map[snapKey]bool {
 	agg := map[snapKey]*liveApp{}
 
 	// resolveEnv is the namespace-to-environment lookup shared by every workload
-	// kind (Deployment/StatefulSet/DaemonSet/Pod): normal case is the workload's
-	// own namespace, fallback is an unambiguous namespace-override app name.
+	// kind (Deployment/StatefulSet/DaemonSet/Pod), in three steps:
+	//  1. the workload's own namespace (normal case).
+	//  2. an unambiguous namespace-override app name among live (non-Orphaned)
+	//     snapshots — a live twin always outranks an Orphaned one by this step,
+	//     which is what keeps a re-homed app from reviving its old row.
+	//  3. only if step 2 found no live claimant at all, fall back to the
+	//     orphan-including map: the one remaining case is an adopted/infra app
+	//     whose sole snapshot got marked Orphaned, and without this step its
+	//     live workload can never be attributed again and the row gets purged
+	//     for real out from under a running pod.
 	resolveEnv := func(app, ns string) (uuid.UUID, bool) {
 		if id, ok := envByNs[ns]; ok {
-			return id, true // workload sits in its env's namespace (normal case)
+			return id, true
 		}
 		if ids := appEnvs[app]; len(ids) == 1 {
-			return ids[0], true // namespace override, unambiguous app name
+			return ids[0], true
+		}
+		if ids := appEnvsAll[app]; len(ids) == 1 {
+			return ids[0], true
 		}
 		return uuid.UUID{}, false // not an app namespace, and name absent/ambiguous → skip
 	}
