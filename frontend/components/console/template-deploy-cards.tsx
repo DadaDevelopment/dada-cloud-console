@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { gitApi, solutionsApi } from "@/lib/api";
-import type { Solution, SolutionCandidate } from "@/lib/types";
+import type { Solution, SolutionCandidate, SolutionCategory } from "@/lib/types";
 import { ResourceIcon } from "@/components/shell/icons";
 import { Spinner } from "@/components/ui/spinner";
 import { useT } from "@/lib/i18n/console/context";
@@ -23,6 +23,11 @@ function uniqueAppName(base: string): string {
   const suffix = Math.random().toString(36).slice(2, 8);
   return toKubeName(`${toKubeName(base).slice(0, 30)}-${suffix}`);
 }
+
+/** How many catalog chips the compact placement shows before «show all». */
+const CHIP_LIMIT = 8;
+
+type Translate = (key: string, vars?: Record<string, string | number>) => string;
 
 export type { TemplateDeployPlacement };
 export { templateUxName };
@@ -57,6 +62,9 @@ export function TemplateDeployCards({ projectId, envId, placement, compact, hero
   const { t } = useT();
   const router = useRouter();
   const [solutions, setSolutions] = useState<Solution[] | null>(null);
+  const [categories, setCategories] = useState<SolutionCategory[]>([]);
+  const [showAll, setShowAll] = useState(false);
+  const [paramsFor, setParamsFor] = useState<Solution | null>(null);
   const [deployingKey, setDeployingKey] = useState<string | null>(null);
   const [templateError, setTemplateError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -69,7 +77,9 @@ export function TemplateDeployCards({ projectId, envId, placement, compact, hero
     solutionsApi
       .list()
       .then((res) => {
-        if (!cancelled) setSolutions(res.solutions ?? []);
+        if (cancelled) return;
+        setSolutions(res.solutions ?? []);
+        setCategories(res.categories ?? []);
       })
       .catch(() => {
         if (!cancelled) setSolutions([]);
@@ -139,6 +149,7 @@ export function TemplateDeployCards({ projectId, envId, placement, compact, hero
     framework?: string;
     port?: number;
     profile?: string;
+    params?: Record<string, string>;
   }) {
     if (!envId || deployingKey) return;
     setTemplateError(null);
@@ -154,6 +165,7 @@ export function TemplateDeployCards({ projectId, envId, placement, compact, hero
         framework: opts.framework,
         port: opts.port,
         profile: opts.profile,
+        params: opts.params,
       });
       if (build?.id) trackBuildStart({ projectId, envId, appName, buildId: build.id });
       router.push(`/projects/${projectId}/apps/${appName}?envId=${envId}`);
@@ -163,7 +175,17 @@ export function TemplateDeployCards({ projectId, envId, placement, compact, hero
     }
   }
 
+  /**
+   * An entry that asks for a password or an endpoint cannot be a one-click
+   * chip: installing it blind would either fail on a required parameter or,
+   * worse, come up with no password on a public address. Those open the form
+   * first; everything else deploys on the click.
+   */
   function deploySolution(s: Solution) {
+    if (s.params && s.params.length > 0) {
+      setParamsFor(s);
+      return;
+    }
     return deploy({ key: s.slug, appBase: s.slug, slug: s.slug });
   }
 
@@ -214,6 +236,28 @@ export function TemplateDeployCards({ projectId, envId, placement, compact, hero
 
   const asking = query.trim().length >= 2;
 
+  const shownChips = showAll ? (solutions ?? []) : (solutions ?? []).slice(0, CHIP_LIMIT);
+
+  /**
+   * Cards grouped by the categories the backend named, in its order. An entry
+   * whose category nothing titles would otherwise vanish from the grid, so the
+   * leftovers get their own group at the end rather than being dropped.
+   */
+  const grouped = (() => {
+    const rest = new Set((solutions ?? []).map((s) => s.slug));
+    const out: { category: SolutionCategory; items: Solution[] }[] = [];
+    for (const category of categories) {
+      const items = (solutions ?? []).filter((s) => s.category === category.key);
+      items.forEach((s) => rest.delete(s.slug));
+      if (items.length > 0) out.push({ category, items });
+    }
+    const leftovers = (solutions ?? []).filter((s) => rest.has(s.slug));
+    if (leftovers.length > 0) {
+      out.push({ category: { key: "other", title: "" }, items: leftovers });
+    }
+    return out;
+  })();
+
   const body = (
     <>
       {!compact && (
@@ -248,7 +292,7 @@ export function TemplateDeployCards({ projectId, envId, placement, compact, hero
         <div className="flex flex-wrap gap-2">
           {solutions === null
             ? [0, 1, 2, 3].map((i) => <SolutionChipSkeleton key={i} />)
-            : solutions.map((s) => (
+            : shownChips.map((s) => (
                 <SolutionChip
                   key={s.slug}
                   solution={s}
@@ -258,23 +302,62 @@ export function TemplateDeployCards({ projectId, envId, placement, compact, hero
                   onClick={() => deploySolution(s)}
                 />
               ))}
+          {solutions !== null && solutions.length > CHIP_LIMIT && (
+            <button
+              type="button"
+              onClick={() => setShowAll((v) => !v)}
+              className="inline-flex items-center rounded-full border border-dashed border-gray-300 dark:border-gray-700 px-3.5 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-300 transition-colors hover:border-blue-400 hover:text-blue-600"
+            >
+              {showAll
+                ? t("overview.templates.showLess")
+                : t("overview.templates.showAll", { count: solutions.length })}
+            </button>
+          )}
+        </div>
+      ) : solutions === null ? (
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {[0, 1, 2].map((i) => (
+            <SolutionCardSkeleton key={i} />
+          ))}
         </div>
       ) : (
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {solutions === null
-            ? [0, 1, 2].map((i) => <SolutionCardSkeleton key={i} />)
-            : solutions.map((s) => (
-                <SolutionCard
-                  key={s.slug}
-                  solution={s}
-                  cta={deployingKey === s.slug ? t("overview.templates.deploying") : t("overview.templates.cta")}
-                  busy={deployingKey === s.slug}
-                  disabled={!!deployingKey || !envId}
-                  uxName={templateUxName(placement, "deploy", s.slug)}
-                  onClick={() => deploySolution(s)}
-                />
-              ))}
+        <div className="mt-4 space-y-6">
+          {grouped.map(({ category, items }) => (
+            <div key={category.key}>
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                {category.title}
+              </p>
+              <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {items.map((s) => (
+                  <SolutionCard
+                    key={s.slug}
+                    solution={s}
+                    cta={deployingKey === s.slug ? t("overview.templates.deploying") : t("overview.templates.cta")}
+                    busy={deployingKey === s.slug}
+                    disabled={!!deployingKey || !envId}
+                    uxName={templateUxName(placement, "deploy", s.slug)}
+                    onClick={() => deploySolution(s)}
+                    t={t}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
+      )}
+
+      {paramsFor && (
+        <SolutionParamsDialog
+          solution={paramsFor}
+          busy={deployingKey === paramsFor.slug}
+          t={t}
+          onCancel={() => setParamsFor(null)}
+          onSubmit={(values) => {
+            const s = paramsFor;
+            setParamsFor(null);
+            void deploy({ key: s.slug, appBase: s.slug, slug: s.slug, params: values });
+          }}
+        />
       )}
 
       <div
@@ -518,6 +601,13 @@ function SolutionCardSkeleton() {
   );
 }
 
+/**
+ * One catalog card.
+ *
+ * The source badge is not decoration: a repo entry costs a build of several
+ * minutes and an image entry starts in seconds with a disk attached, and the
+ * customer deserves to know which of the two they clicked before they wait.
+ */
 function SolutionCard({
   solution,
   cta,
@@ -525,6 +615,7 @@ function SolutionCard({
   disabled,
   uxName,
   onClick,
+  t,
 }: {
   solution: Solution;
   cta: string;
@@ -532,7 +623,9 @@ function SolutionCard({
   disabled: boolean;
   uxName: string;
   onClick: () => void;
+  t: Translate;
 }) {
+  const image = solution.source === "image";
   return (
     <div className="flex flex-col rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
       <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400">
@@ -540,8 +633,28 @@ function SolutionCard({
       </div>
       <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{solution.name}</p>
       <p className="mt-1 flex-1 text-sm text-gray-500 dark:text-gray-400">{solution.tagline}</p>
-      <p className="mt-2 truncate text-xs text-gray-400 dark:text-gray-500" title={solution.repo}>
-        {solution.repo} · {solution.license}
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        <span
+          title={t(image ? "overview.templates.source.imageHint" : "overview.templates.source.repoHint")}
+          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
+            image
+              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
+              : "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300"
+          }`}
+        >
+          {t(image ? "overview.templates.source.image" : "overview.templates.source.repo")}
+        </span>
+        {solution.volume?.size && (
+          <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+            {t("overview.templates.volume", { size: solution.volume.size })}
+          </span>
+        )}
+      </div>
+      <p
+        className="mt-2 truncate text-xs text-gray-400 dark:text-gray-500"
+        title={image ? solution.image : solution.repo}
+      >
+        {(image ? solution.image : solution.repo) || solution.name} · {solution.license}
       </p>
       <button
         type="button"
@@ -553,6 +666,106 @@ function SolutionCard({
         {busy && <Spinner size="sm" />}
         {cta}
       </button>
+    </div>
+  );
+}
+
+/**
+ * Collects the values an entry declares it needs before the install call.
+ *
+ * Required fields are enforced here rather than server-side alone because the
+ * failure they prevent is not a validation error but a running app on a public
+ * address with no password on it.
+ */
+function SolutionParamsDialog({
+  solution,
+  busy,
+  t,
+  onCancel,
+  onSubmit,
+}: {
+  solution: Solution;
+  busy: boolean;
+  t: Translate;
+  onCancel: () => void;
+  onSubmit: (values: Record<string, string>) => void;
+}) {
+  const params = solution.params ?? [];
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(params.map((p) => [p.key, p.default || (p.kind === "select" ? (p.options ?? [])[0] ?? "" : "")])),
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  function submit() {
+    const missing = params.some((p) => p.required && !(values[p.key] ?? "").trim());
+    if (missing) {
+      setError(t("overview.templates.params.missing"));
+      return;
+    }
+    onSubmit(values);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-xl">
+        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+          {solution.name} · {t("overview.templates.params.title")}
+        </p>
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("overview.templates.params.hint")}</p>
+        <div className="mt-4 space-y-3">
+          {params.map((p) => (
+            <label key={p.key} className="block">
+              <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                {p.label || p.key}
+                {p.required && (
+                  <span className="ml-1 text-gray-400">({t("overview.templates.params.required")})</span>
+                )}
+              </span>
+              {p.kind === "select" ? (
+                <select
+                  value={values[p.key] ?? ""}
+                  onChange={(e) => setValues((v) => ({ ...v, [p.key]: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:border-blue-500 focus:outline-none"
+                >
+                  {(p.options ?? []).map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type={p.kind === "secret" ? "password" : "text"}
+                  value={values[p.key] ?? ""}
+                  placeholder={p.placeholder}
+                  onChange={(e) => setValues((v) => ({ ...v, [p.key]: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:border-blue-500 focus:outline-none"
+                />
+              )}
+              {p.help && <span className="mt-1 block text-xs text-gray-400 dark:text-gray-500">{p.help}</span>}
+            </label>
+          ))}
+        </div>
+        {error && <p className="mt-3 text-sm text-red-600 dark:text-red-400">{error}</p>}
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-lg border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200"
+          >
+            {t("overview.templates.params.cancel")}
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+          >
+            {busy && <Spinner size="sm" />}
+            {t("overview.templates.params.submit")}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

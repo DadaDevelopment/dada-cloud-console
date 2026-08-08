@@ -94,7 +94,11 @@ func (h *Handler) ListSolutions(c *gin.Context) {
 	for _, s := range solutions.V1 {
 		out = append(out, solutionPayload(s))
 	}
-	c.JSON(http.StatusOK, gin.H{"solutions": out})
+	cats := make([]gin.H, 0, len(solutions.CategoryTitles))
+	for _, c := range solutions.CategoryTitles {
+		cats = append(cats, gin.H{"key": string(c.Category), "title": c.Title})
+	}
+	c.JSON(http.StatusOK, gin.H{"solutions": out, "categories": cats})
 }
 
 // GetSolution returns one catalog entry by slug.

@@ -89,6 +89,29 @@ export const overview: Messages = {
   "overview.templates.ask.archived": { ru: "архив", en: "archived" },
   "overview.templates.ask.openDatabases": { ru: "Создать", en: "Create" },
 
+  "overview.templates.source.repo": { ru: "сборка из исходников", en: "built from source" },
+  "overview.templates.source.image": { ru: "готовый образ", en: "prebuilt image" },
+  "overview.templates.source.repoHint": {
+    ru: "Мы соберём проект из публичного репозитория — первая сборка занимает несколько минут.",
+    en: "We build the project from its public repository; the first build takes a few minutes.",
+  },
+  "overview.templates.source.imageHint": {
+    ru: "Запускаем готовый образ — без сборки, с постоянным диском для данных.",
+    en: "Runs a published image: no build, and a persistent disk for its data.",
+  },
+  "overview.templates.volume": { ru: "диск {size}", en: "{size} disk" },
+  "overview.templates.showAll": { ru: "Показать все ({count})", en: "Show all ({count})" },
+  "overview.templates.showLess": { ru: "Свернуть", en: "Show less" },
+  "overview.templates.params.title": { ru: "Настройки перед установкой", en: "Settings before install" },
+  "overview.templates.params.hint": {
+    ru: "Эти значения нужны проекту при первом запуске.",
+    en: "The project needs these values on its first start.",
+  },
+  "overview.templates.params.required": { ru: "обязательно", en: "required" },
+  "overview.templates.params.cancel": { ru: "Отмена", en: "Cancel" },
+  "overview.templates.params.submit": { ru: "Установить", en: "Install" },
+  "overview.templates.params.missing": { ru: "Заполните обязательные поля", en: "Fill in the required fields" },
+
   "overview.boxes.col.name": { ru: "Имя", en: "Name" },
   "overview.boxes.col.status": { ru: "Статус", en: "Status" },
   "overview.boxes.col.profile": { ru: "Профиль", en: "Profile" },
