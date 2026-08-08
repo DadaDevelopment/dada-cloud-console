@@ -61,6 +61,10 @@ export const overview: Messages = {
     ru: "Или напишите, что нужно запустить",
     en: "Or say what you want to run",
   },
+  "overview.templates.ask.anythingTitle": {
+    ru: "…или запустите вообще что угодно с GitHub",
+    en: "…or run anything at all from GitHub",
+  },
   "overview.templates.ask.hint": {
     ru: "Название проекта, ссылка на GitHub или просто «база данных» — найдём и соберём.",
     en: "A project name, a GitHub link, or just «database» — we find it and build it.",

@@ -1664,6 +1664,8 @@ export interface Solution {
   slug: string;
   name: string;
   tagline: string;
+  /** Owner's GitHub picture, same source the resolver puts on its rows. */
+  icon: string;
   about: string;
   bullets: string[] | null;
   category: string;

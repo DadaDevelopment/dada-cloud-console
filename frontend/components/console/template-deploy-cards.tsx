@@ -245,21 +245,20 @@ export function TemplateDeployCards({ projectId, envId, placement, compact, hero
       )}
 
       {compact ? (
-        <ul className="divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800">
+        <div className="flex flex-wrap gap-2">
           {solutions === null
-            ? [0, 1, 2].map((i) => <SolutionRowSkeleton key={i} />)
+            ? [0, 1, 2, 3].map((i) => <SolutionChipSkeleton key={i} />)
             : solutions.map((s) => (
-                <SolutionRow
+                <SolutionChip
                   key={s.slug}
                   solution={s}
-                  cta={deployingKey === s.slug ? t("overview.templates.deploying") : t("overview.templates.cta")}
                   busy={deployingKey === s.slug}
                   disabled={!!deployingKey || !envId}
                   uxName={templateUxName(placement, "deploy", s.slug)}
                   onClick={() => deploySolution(s)}
                 />
               ))}
-        </ul>
+        </div>
       ) : (
         <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {solutions === null
@@ -278,15 +277,31 @@ export function TemplateDeployCards({ projectId, envId, placement, compact, hero
         </div>
       )}
 
-      <div className="mt-5 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 p-4">
+      <div
+        className={
+          compact
+            ? "mt-4"
+            : "mt-5 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 p-4"
+        }
+      >
         <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-          {t("overview.templates.ask.title")}
+          {compact ? t("overview.templates.ask.anythingTitle") : t("overview.templates.ask.title")}
         </p>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
           {t("overview.templates.ask.hint")}
         </p>
-        <div className="mt-3 flex items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 focus-within:border-blue-500">
-          <ResourceIcon name="apps" className="h-4 w-4 shrink-0 text-gray-400" />
+        <div
+          className={`mt-3 flex items-center gap-2 rounded-lg border bg-white dark:bg-gray-900 focus-within:border-blue-500 ${
+            compact
+              ? "border-gray-300 dark:border-gray-700 px-3 py-2.5 shadow-sm"
+              : "border-gray-300 dark:border-gray-700 px-3 py-2"
+          }`}
+        >
+          {compact ? (
+            <GithubMark className="h-4 w-4 shrink-0 text-gray-400" />
+          ) : (
+            <ResourceIcon name="apps" className="h-4 w-4 shrink-0 text-gray-400" />
+          )}
           <input
             type="text"
             value={query}
@@ -426,64 +441,69 @@ function CandidateRow({
   );
 }
 
+/** GitHub's own mark: the field under it searches GitHub, and the logo says so without a word of copy. */
+function GithubMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden className={className}>
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z" />
+    </svg>
+  );
+}
+
 /**
- * One catalog project in a secondary placement. The showroom is not the offer —
- * four hero-sized cards with a full-width blue CTA each shouted louder than the
- * Git path they sit under, and a four-item three-column grid left an orphan card
- * on its own row. A row per project keeps the same one-click deploy at the
- * weight of a footnote.
+ * One catalog project as a logo chip.
+ *
+ * The showroom is not the offer. Hero cards with a full-width blue CTA each
+ * shouted louder than the Git path above them; a row apiece with name, tagline,
+ * repository and licence merely shouted quieter while still spending four lines
+ * on four demo apps. The logo is the recognisable part, so the chip carries the
+ * mark and the name, the whole chip is the button, and the tagline retreats to
+ * the tooltip.
  */
-function SolutionRow({
+function SolutionChip({
   solution,
-  cta,
   busy,
   disabled,
   uxName,
   onClick,
 }: {
   solution: Solution;
-  cta: string;
   busy: boolean;
   disabled: boolean;
   uxName: string;
   onClick: () => void;
 }) {
   return (
-    <li className="flex items-center gap-3 bg-white dark:bg-gray-900 px-3 py-2.5">
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">{solution.name}</p>
-        <p className="truncate text-xs text-gray-500 dark:text-gray-400">{solution.tagline}</p>
-      </div>
-      <span
-        className="hidden shrink-0 truncate text-xs text-gray-400 dark:text-gray-500 sm:block"
-        title={solution.repo}
-      >
-        {solution.repo} · {solution.license}
-      </span>
-      <button
-        type="button"
-        onClick={onClick}
-        disabled={disabled}
-        data-ux={uxName}
-        className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-sm font-medium text-gray-900 dark:text-gray-100 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {busy && <Spinner size="sm" />}
-        {cta}
-      </button>
-    </li>
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      data-ux={uxName}
+      title={solution.tagline}
+      className="inline-flex items-center gap-2 rounded-full border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 py-1.5 pl-1.5 pr-3.5 text-sm font-medium text-gray-900 dark:text-gray-100 transition-colors hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30 disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      {busy ? (
+        <span className="flex h-6 w-6 items-center justify-center">
+          <Spinner size="sm" />
+        </span>
+      ) : solution.icon ? (
+        <img
+          src={solution.icon}
+          alt=""
+          className="h-6 w-6 rounded-full bg-gray-100 dark:bg-gray-800 object-cover"
+        />
+      ) : (
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400">
+          <ResourceIcon name="apps" className="h-3.5 w-3.5" />
+        </span>
+      )}
+      {solution.name}
+    </button>
   );
 }
 
-function SolutionRowSkeleton() {
-  return (
-    <li className="flex items-center gap-3 bg-white dark:bg-gray-900 px-3 py-2.5">
-      <div className="min-w-0 flex-1">
-        <div className="h-4 w-28 animate-pulse rounded bg-gray-100 dark:bg-gray-800" />
-        <div className="mt-1.5 h-3 w-48 animate-pulse rounded bg-gray-100 dark:bg-gray-800" />
-      </div>
-      <div className="h-8 w-24 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-800" />
-    </li>
-  );
+function SolutionChipSkeleton() {
+  return <div className="h-9 w-32 animate-pulse rounded-full bg-gray-100 dark:bg-gray-800" />;
 }
 
 function SolutionCardSkeleton() {

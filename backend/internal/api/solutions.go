@@ -48,6 +48,7 @@ func solutionPayload(s solutions.Solution) gin.H {
 		"slug":       s.Slug,
 		"name":       s.Name,
 		"tagline":    s.Tagline,
+		"icon":       solutions.OwnerAvatar(s.Repo),
 		"about":      s.About,
 		"bullets":    s.Bullets,
 		"category":   string(s.Category),

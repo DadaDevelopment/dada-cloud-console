@@ -85,9 +85,9 @@ const scoreSubstring = 100
 // comes out of a per-minute budget shared by the whole cluster.
 const minSearchQuery = 3
 
-// ownerAvatar is the owner's GitHub picture, which GitHub serves for any
+// OwnerAvatar is the owner's GitHub picture, which GitHub serves for any
 // account without an API call or a token.
-func ownerAvatar(repoFullName string) string {
+func OwnerAvatar(repoFullName string) string {
 	owner, _, ok := strings.Cut(repoFullName, "/")
 	if !ok || owner == "" {
 		return ""
@@ -102,7 +102,7 @@ func candidateFor(s Solution) Candidate {
 		Slug:      s.Slug,
 		Name:      s.Name,
 		Tagline:   s.Tagline,
-		Icon:      ownerAvatar(s.Repo),
+		Icon:      OwnerAvatar(s.Repo),
 		Repo:      s.Repo,
 		Branch:    s.Branch,
 		RootDir:   s.RootDir,
@@ -157,7 +157,7 @@ func Resolve(query string) Result {
 				Slug:    full,
 				Name:    name,
 				Tagline: owner,
-				Icon:    ownerAvatar(full),
+				Icon:    OwnerAvatar(full),
 				Repo:    full,
 				RootDir: ".",
 				Score:   scorePastedLink,

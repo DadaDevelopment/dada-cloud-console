@@ -153,10 +153,10 @@ func TestCatalogAliasesAreLowercase(t *testing.T) {
 // exist on GitHub; the owner's picture is what every GitHub UI shows, and
 // getting the owner half wrong silently renders a broken image everywhere.
 func TestOwnerAvatarUsesOwner(t *testing.T) {
-	if got := ownerAvatar("freeCodeCamp/devdocs"); got != "https://github.com/freeCodeCamp.png?size=160" {
-		t.Fatalf("ownerAvatar = %q", got)
+	if got := OwnerAvatar("freeCodeCamp/devdocs"); got != "https://github.com/freeCodeCamp.png?size=160" {
+		t.Fatalf("OwnerAvatar = %q", got)
 	}
-	if got := ownerAvatar("nonsense"); got != "" {
-		t.Fatalf("ownerAvatar(nonsense) = %q, want empty", got)
+	if got := OwnerAvatar("nonsense"); got != "" {
+		t.Fatalf("OwnerAvatar(nonsense) = %q, want empty", got)
 	}
 }
