@@ -198,6 +198,9 @@ func (w *GitWatcher) syncRepo(ctx context.Context, mgr *git.Manager) error {
 	if err != nil {
 		return err
 	}
+	if lastSHA == "" {
+		return w.adoptHeadWithoutReplay(ctx, mgr)
+	}
 
 	commits, err := mgr.CommitsSince(lastSHA)
 	if err != nil {
@@ -219,6 +222,38 @@ func (w *GitWatcher) syncRepo(ctx context.Context, mgr *git.Manager) error {
 	// Advance sync state to the latest commit.
 	newSHA := commits[len(commits)-1].SHA
 	return db.SetSyncState(ctx, w.pool, mgr.RepoURL(), mgr.Branch(), newSHA)
+}
+
+// adoptHeadWithoutReplay handles an empty sync cursor: this repo+branch has no
+// row in git_sync_state, so the watcher has never recorded a position on it.
+//
+// The cursor must not be handed to CommitsSince, because an empty fromSHA walks
+// the branch from its root and replays every historical commit. That is not a
+// theoretical hazard: processCommit syncs additions and modifications but drops
+// deletions (see syncablePaths), so replaying history re-applies the add-commit
+// of every resource ever created and never the delete-commit that removed it.
+// On 2026-08-08 one such replay re-inserted 52 App snapshots for apps deleted
+// days to weeks earlier, and a user who saw a deleted app reappear deleted it a
+// second time.
+//
+// Git is not the bootstrap source for this state — the database is authoritative
+// and the manifests are rendered from it — so there is nothing to import on a
+// first poll. The cursor is therefore stamped at the current HEAD with zero
+// commits processed, and the watcher picks up genuinely new commits from there.
+// This is the same resolution adoptRewrittenHistory applies for the same reason.
+func (w *GitWatcher) adoptHeadWithoutReplay(ctx context.Context, mgr *git.Manager) error {
+	head, err := mgr.LocalHEAD()
+	if err != nil {
+		return fmt.Errorf("resolving HEAD for first sync: %w", err)
+	}
+
+	log.Info().
+		Str("repo", mgr.RepoURL()).
+		Str("branch", mgr.Branch()).
+		Str("head", head).
+		Msg("git-watcher: no sync cursor for this repo — adopting current HEAD without replaying history")
+
+	return db.SetSyncState(ctx, w.pool, mgr.RepoURL(), mgr.Branch(), head)
 }
 
 // adoptRewrittenHistory handles a CommitsSince ErrHistoryRewritten result: the

@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -69,15 +70,24 @@ func AllIntegrations(ctx context.Context, pool *pgxpool.Pool) ([]GitIntegration,
 	return result, rows.Err()
 }
 
-// GetOrSetSyncState returns the last known SHA for a repo+branch, then updates it.
-// Returns the previous SHA (empty string if first time).
+// GetSyncState returns the last known SHA for a repo+branch. An empty string
+// with a nil error means there is genuinely no cursor yet (first poll).
+//
+// Only pgx.ErrNoRows is translated into that empty cursor. Every other failure —
+// a dead pool during startup, a timeout, a broken connection — is returned as an
+// error, because the caller treats an empty cursor as "this repo has never been
+// synced" and a transient database blip must never be allowed to impersonate
+// that state.
 func GetSyncState(ctx context.Context, pool *pgxpool.Pool, repoURL, branch string) (string, error) {
 	var sha string
 	err := pool.QueryRow(ctx, `
 		SELECT last_sha FROM git_sync_state WHERE repo_url = $1 AND branch = $2
 	`, repoURL, branch).Scan(&sha)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
 	if err != nil {
-		return "", nil // no row yet → first poll
+		return "", fmt.Errorf("reading git_sync_state for %s@%s: %w", repoURL, branch, err)
 	}
 	return sha, nil
 }
