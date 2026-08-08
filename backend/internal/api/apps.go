@@ -485,6 +485,7 @@ type appVolumeReq struct {
 	Path         string `json:"path"`
 	Size         string `json:"size"`
 	StorageClass string `json:"storage_class"`
+	FSGroup      int64  `json:"fs_group"`
 }
 
 // defaultVolumeStorageClass is a ReadWriteMany-capable Longhorn class with
@@ -544,7 +545,10 @@ func validateAppVolume(v *appVolumeReq) (*models.AppVolume, error) {
 	if !allowedVolumeStorageClasses[sc] {
 		return nil, fmt.Errorf("storage_class must be one of: longhorn-dev, longhorn-prod, longhorn-stateful-prod")
 	}
-	return &models.AppVolume{Path: v.Path, Size: v.Size, StorageClass: sc}, nil
+	if v.FSGroup < 0 || v.FSGroup > 65535 {
+		return nil, fmt.Errorf("fs_group must be between 0 and 65535")
+	}
+	return &models.AppVolume{Path: v.Path, Size: v.Size, StorageClass: sc, FSGroup: v.FSGroup}, nil
 }
 
 // CreateApp enqueues an operation to provision a new App CRD.
@@ -598,8 +602,48 @@ func (h *Handler) CreateApp(c *gin.Context) {
 	}
 
 	var req createAppRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "CreateApp",
+			ResourceKind:  "App",
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": "malformed_body", "status": http.StatusBadRequest},
+		})
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
 
-	rejectCreate := func(status int, reason, msg string) {
+	op, defaultHostname, fault := h.createAppOp(c, claims, projectID, envID, req)
+	if fault != nil {
+		if fault.Status != 0 {
+			respondError(c, fault.Status, fault.Message)
+		}
+		return
+	}
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"operation":        op,
+		"default_hostname": defaultHostname,
+		"message":          "App creation queued",
+	})
+}
+
+// createAppOp validates one create-app request and queues the CreateApp
+// operation, returning the operation and the default hostname it attached.
+//
+// It exists because two entry points create an app from a published image: the
+// customer's own POST /apps, and installing a catalog entry that ships an image
+// rather than a repository. Duplicating the body here would mean duplicating the
+// quota gate, the volume ceiling and the name-uniqueness check — exactly the
+// guards whose absence is invisible until the second path is the one that runs.
+//
+// A returned fault with Status 0 means the response is already written: the
+// billing gates own their own response shape (quota vs consumption) and the
+// caller must not write a second one.
+func (h *Handler) createAppOp(c *gin.Context, claims *auth.Claims, projectID, envID uuid.UUID, req createAppRequest) (*models.Operation, string, *opFault) {
+	rejectCreate := func(status int, reason, msg string) *opFault {
 		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
 			ProjectID:     projectID,
 			EnvironmentID: envID,
@@ -609,7 +653,10 @@ func (h *Handler) CreateApp(c *gin.Context) {
 			Outcome:       auditOutcomeFailure,
 			Metadata:      map[string]any{"reason": reason, "status": status},
 		})
-		respondError(c, status, msg)
+		return &opFault{Status: status, Reason: reason, Message: msg}
+	}
+	fail := func(msg string) *opFault {
+		return &opFault{Status: http.StatusInternalServerError, Reason: "internal", Message: msg}
 	}
 
 	if orgID, orgErr := h.projectOrg(c.Request.Context(), projectID); orgErr == nil {
@@ -624,7 +671,7 @@ func (h *Handler) CreateApp(c *gin.Context) {
 					Metadata:      meta,
 				})
 				h.respondBillingBlocked(c, orgID, qErr)
-				return
+				return nil, "", &opFault{Reason: "billing_blocked"}
 			}
 		}
 	}
@@ -634,11 +681,9 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		`SELECT runtime FROM environments WHERE id = $1 AND project_id = $2`,
 		envID, projectID,
 	).Scan(&runtime); err == pgx.ErrNoRows {
-		respondNotFound(c)
-		return
+		return nil, "", &opFault{Status: http.StatusNotFound, Reason: "not_found", Message: "not found"}
 	} else if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to load environment runtime")
-		return
+		return nil, "", fail("failed to load environment runtime")
 	}
 	isCompose := runtime == models.EnvironmentRuntimeVM
 
@@ -647,39 +692,29 @@ func (h *Handler) CreateApp(c *gin.Context) {
 	var appServerName string
 	if isCompose {
 		var status string
-		err = h.pool.QueryRow(c.Request.Context(),
+		err := h.pool.QueryRow(c.Request.Context(),
 			`SELECT s.name, s.status
 			 FROM environments e JOIN app_servers s ON s.id = e.app_server_id
 			 WHERE e.id = $1 AND e.project_id = $2`,
 			envID, projectID,
 		).Scan(&appServerName, &status)
 		if err == pgx.ErrNoRows {
-			rejectCreate(http.StatusConflict, "no_appserver", "this VM environment has no AppServer attached; create or attach one first")
-			return
+			return nil, "", rejectCreate(http.StatusConflict, "no_appserver", "this VM environment has no AppServer attached; create or attach one first")
 		}
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, "failed to load environment AppServer")
-			return
+			return nil, "", fail("failed to load environment AppServer")
 		}
 		if status != string(models.AppServerStatusReady) {
-			rejectCreate(http.StatusConflict, "appserver_not_ready", "the environment's AppServer is not Ready yet")
-			return
+			return nil, "", rejectCreate(http.StatusConflict, "appserver_not_ready", "the environment's AppServer is not Ready yet")
 		}
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		rejectCreate(http.StatusBadRequest, "malformed_body", err.Error())
-		return
 	}
 
 	// Validate name (common to both runtimes).
 	if req.Name == "" {
-		rejectCreate(http.StatusBadRequest, "name_required", "name is required")
-		return
+		return nil, "", rejectCreate(http.StatusBadRequest, "name_required", "name is required")
 	}
 	if err := validateKubeName(req.Name); err != nil {
-		rejectCreate(http.StatusBadRequest, "invalid_name", err.Error())
-		return
+		return nil, "", rejectCreate(http.StatusBadRequest, "invalid_name", err.Error())
 	}
 
 	if !isCompose {
@@ -694,61 +729,50 @@ func (h *Handler) CreateApp(c *gin.Context) {
 			req.Profile = "small"
 		}
 		if req.Image == "" {
-			rejectCreate(http.StatusBadRequest, "image_required", "image is required")
-			return
+			return nil, "", rejectCreate(http.StatusBadRequest, "image_required", "image is required")
 		}
 		if err := ValidateImage(req.Image); err != nil {
-			rejectCreate(http.StatusBadRequest, "invalid_image", err.Error())
-			return
+			return nil, "", rejectCreate(http.StatusBadRequest, "invalid_image", err.Error())
 		}
 		if !req.Worker && (req.Port < 1 || req.Port > 65535) {
-			rejectCreate(http.StatusBadRequest, "invalid_port", "port must be between 1 and 65535")
-			return
+			return nil, "", rejectCreate(http.StatusBadRequest, "invalid_port", "port must be between 1 and 65535")
 		}
 		minReplicas := 1
 		if claims.IsPlatformAdmin() {
 			minReplicas = 0
 		}
 		if req.Replicas < minReplicas || req.Replicas > 10 {
-			rejectCreate(http.StatusBadRequest, "invalid_replicas", fmt.Sprintf("replicas must be between %d and 10", minReplicas))
-			return
+			return nil, "", rejectCreate(http.StatusBadRequest, "invalid_replicas", fmt.Sprintf("replicas must be between %d and 10", minReplicas))
 		}
 		validProfiles := map[string]bool{"small": true, "medium": true, "large": true}
 		if !validProfiles[req.Profile] {
-			rejectCreate(http.StatusBadRequest, "invalid_profile", "profile must be one of: small, medium, large")
-			return
+			return nil, "", rejectCreate(http.StatusBadRequest, "invalid_profile", "profile must be one of: small, medium, large")
 		}
 		validWorkloadTypes := map[string]bool{"": true, "Deployment": true, "StatefulSet": true}
 		if !validWorkloadTypes[req.WorkloadType] {
-			rejectCreate(http.StatusBadRequest, "invalid_workload_type", "workload_type must be one of: Deployment, StatefulSet")
-			return
+			return nil, "", rejectCreate(http.StatusBadRequest, "invalid_workload_type", "workload_type must be one of: Deployment, StatefulSet")
 		}
 	} else {
 		if req.WorkloadType != "" {
-			rejectCreate(http.StatusBadRequest, "workload_type_not_supported", "workload_type is only supported for Kubernetes apps")
-			return
+			return nil, "", rejectCreate(http.StatusBadRequest, "workload_type_not_supported", "workload_type is only supported for Kubernetes apps")
 		}
 		if req.Worker {
-			rejectCreate(http.StatusBadRequest, "worker_not_supported", "worker is only supported for Kubernetes apps")
-			return
+			return nil, "", rejectCreate(http.StatusBadRequest, "worker_not_supported", "worker is only supported for Kubernetes apps")
 		}
 	}
 
 	appVolume, err := validateAppVolume(req.Volume)
 	if err != nil {
-		rejectCreate(http.StatusBadRequest, "invalid_volume", err.Error())
-		return
+		return nil, "", rejectCreate(http.StatusBadRequest, "invalid_volume", err.Error())
 	}
 	if appVolume != nil && isCompose {
-		rejectCreate(http.StatusBadRequest, "storage_not_supported", "persistent storage is only supported for Kubernetes apps")
-		return
+		return nil, "", rejectCreate(http.StatusBadRequest, "storage_not_supported", "persistent storage is only supported for Kubernetes apps")
 	}
 	if appVolume != nil {
 		if orgID, orgErr := h.projectOrg(c.Request.Context(), projectID); orgErr == nil {
 			capBytes, limitGB, capErr := h.storageCapBytes(c.Request.Context(), orgID)
 			if capErr != nil {
-				respondError(c, http.StatusInternalServerError, "failed to resolve storage quota")
-				return
+				return nil, "", fail("failed to resolve storage quota")
 			}
 			if capBytes > 0 && quantityBytes(appVolume.Size) > capBytes {
 				h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
@@ -761,7 +785,7 @@ func (h *Handler) CreateApp(c *gin.Context) {
 					Metadata:      map[string]any{"reason": "storage_quota_exceeded", "limit_gb": limitGB},
 				})
 				respondQuotaExceeded(c, "storage_gb", limitGB)
-				return
+				return nil, "", &opFault{Reason: "storage_quota_exceeded"}
 			}
 		}
 	}
@@ -795,13 +819,15 @@ func (h *Handler) CreateApp(c *gin.Context) {
 			Outcome:       auditOutcomeFailure,
 			Metadata:      map[string]any{"reason": "name_taken"},
 		})
-		respondError(c, http.StatusConflict, fmt.Sprintf(
-			"the app name %q is already taken in this project's environment; choose another name",
-			req.Name))
-		return
+		return nil, "", &opFault{
+			Status: http.StatusConflict,
+			Reason: "name_taken",
+			Message: fmt.Sprintf(
+				"the app name %q is already taken in this project's environment; choose another name",
+				req.Name),
+		}
 	} else if err != pgx.ErrNoRows {
-		respondError(c, http.StatusInternalServerError, "failed to check name uniqueness")
-		return
+		return nil, "", fail("failed to check name uniqueness")
 	}
 
 	var defaultHostname string
@@ -827,14 +853,12 @@ func (h *Handler) CreateApp(c *gin.Context) {
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to marshal payload")
-		return
+		return nil, "", fail("failed to marshal payload")
 	}
 
 	tx, err := h.pool.Begin(c.Request.Context())
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
-		return
+		return nil, "", fail("failed to create operation")
 	}
 	defer func() { _ = tx.Rollback(c.Request.Context()) }()
 
@@ -848,8 +872,7 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		claims.UserID, projectID, envID, req.Name, payloadBytes,
 	)
 	if err = scanOperation(row, &op); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
-		return
+		return nil, "", fail("failed to create operation")
 	}
 
 	optimisticSummary := map[string]any{
@@ -861,8 +884,7 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		optimisticSummary["worker"] = true
 	}
 	if err = seedOptimisticSnapshot(c.Request.Context(), tx, projectID, envID, "App", req.Name, optimisticSummary); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
-		return
+		return nil, "", fail("failed to create operation")
 	}
 
 	if defaultHostname != "" {
@@ -872,14 +894,12 @@ func (h *Handler) CreateApp(c *gin.Context) {
 			 ON CONFLICT (hostname) DO NOTHING`,
 			envID, req.Name, defaultHostname, op.ID,
 		); err != nil {
-			respondError(c, http.StatusInternalServerError, "failed to record default hostname")
-			return
+			return nil, "", fail("failed to record default hostname")
 		}
 	}
 
 	if err = tx.Commit(c.Request.Context()); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
-		return
+		return nil, "", fail("failed to create operation")
 	}
 
 	// Insert AuditEvent (best-effort)
@@ -894,11 +914,7 @@ func (h *Handler) CreateApp(c *gin.Context) {
 	})
 	h.notifyAuditEvent(claims, projectID, "CreateApp", req.Name)
 
-	c.JSON(http.StatusAccepted, gin.H{
-		"operation":        op,
-		"default_hostname": defaultHostname,
-		"message":          "App creation queued",
-	})
+	return &op, defaultHostname, nil
 }
 
 type updateAppImageRequest struct {

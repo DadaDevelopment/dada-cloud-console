@@ -89,7 +89,16 @@ const minSearchQuery = 3
 // account without an API call or a token.
 func OwnerAvatar(repoFullName string) string {
 	owner, _, ok := strings.Cut(repoFullName, "/")
-	if !ok || owner == "" {
+	if !ok {
+		return ""
+	}
+	return avatarForOwner(owner)
+}
+
+// avatarForOwner is the same URL from a bare GitHub account name, for catalog
+// entries that have no repository of their own to derive it from.
+func avatarForOwner(owner string) string {
+	if owner == "" {
 		return ""
 	}
 	return "https://github.com/" + owner + ".png?size=160"
@@ -102,7 +111,7 @@ func candidateFor(s Solution) Candidate {
 		Slug:      s.Slug,
 		Name:      s.Name,
 		Tagline:   s.Tagline,
-		Icon:      OwnerAvatar(s.Repo),
+		Icon:      s.Icon(),
 		Repo:      s.Repo,
 		Branch:    s.Branch,
 		RootDir:   s.RootDir,
@@ -206,7 +215,13 @@ func Resolve(query string) Result {
 
 // lookupByRepo finds a catalog entry by its repository full name.
 func lookupByRepo(repoFullName string) (Solution, bool) {
+	if repoFullName == "" {
+		return Solution{}, false
+	}
 	for _, s := range V1 {
+		if s.Repo == "" {
+			continue
+		}
 		if strings.EqualFold(s.Repo, repoFullName) {
 			return s, true
 		}

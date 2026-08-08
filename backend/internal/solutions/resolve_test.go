@@ -104,13 +104,13 @@ func TestResolveShortQuerySkipsSearch(t *testing.T) {
 }
 
 // TestResolveUnknownWordAsksForSearch is the beginner scenario: nothing local
-// matches "n8n", so the caller is told to go and ask GitHub rather than
+// matches "immich", so the caller is told to go and ask GitHub rather than
 // showing an empty list.
 func TestResolveUnknownWordAsksForSearch(t *testing.T) {
-	res := Resolve("n8n")
+	res := Resolve("immich")
 	for _, c := range res.Candidates {
 		if c.Kind == CandidateSolution {
-			t.Fatalf("unexpected catalog match for n8n: %q", c.Slug)
+			t.Fatalf("unexpected catalog match for immich: %q", c.Slug)
 		}
 	}
 	if res.SearchQuery == "" {

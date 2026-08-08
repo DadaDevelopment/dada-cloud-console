@@ -139,6 +139,7 @@ type AppSpec struct {
 	VolumePath         string
 	VolumeSize         string
 	VolumeStorageClass string
+	VolumeFSGroup      int64
 	WorkloadType       string
 
 	// ResourcesOnly marks a resources-carrier owner app (no workload of its own):
@@ -309,6 +310,20 @@ type commonValues struct {
 	ExtraEnv     []commonEnvVar  `yaml:"extraEnv,omitempty"`
 	Pvc          *commonPvc      `yaml:"pvc,omitempty"`
 	WorkloadType string          `yaml:"workloadType,omitempty"`
+
+	PodSecurityContext *commonPodSecurityContext `yaml:"podSecurityContext,omitempty"`
+}
+
+// commonPodSecurityContext hands a persistent volume to a non-root image.
+//
+// A Longhorn volume arrives owned by root:root, so an image that drops to its
+// own user (grafana 472, node 1000) cannot write to the data directory it was
+// just given and crash-loops on first start with a permission error that reads
+// like an application bug. fsGroup makes the kubelet chown the mount to that
+// group, which is the only place this can be fixed: the image is upstream's and
+// the volume is created empty by the CSI driver.
+type commonPodSecurityContext struct {
+	FSGroup int64 `yaml:"fsGroup"`
 }
 
 type appValuesFile struct {
@@ -421,6 +436,9 @@ func RenderAppValues(spec AppSpec) (string, error) {
 			Size:         spec.VolumeSize,
 			StorageClass: spec.VolumeStorageClass,
 			Path:         spec.VolumePath,
+		}
+		if spec.VolumeFSGroup > 0 {
+			values.Common.PodSecurityContext = &commonPodSecurityContext{FSGroup: spec.VolumeFSGroup}
 		}
 	}
 

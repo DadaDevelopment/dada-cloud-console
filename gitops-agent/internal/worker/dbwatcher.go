@@ -1007,6 +1007,7 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 			Path         string `json:"path"`
 			Size         string `json:"size"`
 			StorageClass string `json:"storage_class"`
+			FSGroup      int64  `json:"fs_group"`
 		} `json:"volume"`
 		Worker bool `json:"worker"`
 	}
@@ -1057,6 +1058,7 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 		appSpec.VolumePath = p.Volume.Path
 		appSpec.VolumeSize = p.Volume.Size
 		appSpec.VolumeStorageClass = p.Volume.StorageClass
+		appSpec.VolumeFSGroup = p.Volume.FSGroup
 	}
 	if env.hasSecret() {
 		appSpec.SecretEnvName = renderer.AppEnvSecretName(p.Name)
@@ -1170,6 +1172,7 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 	if p.Volume != nil && p.Volume.Path != "" {
 		summary["volume"] = map[string]any{
 			"path": p.Volume.Path, "size": p.Volume.Size, "storage_class": p.Volume.StorageClass,
+			"fs_group": p.Volume.FSGroup,
 		}
 	}
 	summaryJSON, _ := json.Marshal(summary)
@@ -2042,10 +2045,11 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 		HelmTargetRevision: mgr.Branch(),
 		Env:                env.Plain,
 	}
-	if vp, vs, vsc := volumeFromSummary(cur); vp != "" {
+	if vp, vs, vsc, vfg := volumeFromSummary(cur); vp != "" {
 		appSpec.VolumePath = vp
 		appSpec.VolumeSize = vs
 		appSpec.VolumeStorageClass = vsc
+		appSpec.VolumeFSGroup = vfg
 	}
 	appSpec.ArgoName, _ = cur["argo_name"].(string)
 	appSpec.WorkloadType, _ = cur["workload_type"].(string)
@@ -2167,15 +2171,21 @@ func (w *DBWatcher) appProfileFallback(ctx context.Context, environmentID *uuid.
 
 // volumeFromSummary extracts a persistent-directory spec from a resource_snapshot
 // summary_json map. It returns empty strings when no volume is configured.
-func volumeFromSummary(cur map[string]any) (path, size, storageClass string) {
+func volumeFromSummary(cur map[string]any) (path, size, storageClass string, fsGroup int64) {
 	v, ok := cur["volume"].(map[string]any)
 	if !ok {
-		return "", "", ""
+		return "", "", "", 0
 	}
 	path, _ = v["path"].(string)
 	size, _ = v["size"].(string)
 	storageClass, _ = v["storage_class"].(string)
-	return path, size, storageClass
+	switch g := v["fs_group"].(type) {
+	case float64:
+		fsGroup = int64(g)
+	case int64:
+		fsGroup = g
+	}
+	return path, size, storageClass, fsGroup
 }
 
 // resourcesFromSummary extracts the explicit resource envelope from a
@@ -2223,6 +2233,7 @@ func (w *DBWatcher) doUpdateAppStorage(ctx context.Context, op db.Operation) err
 			Path         string `json:"path"`
 			Size         string `json:"size"`
 			StorageClass string `json:"storage_class"`
+			FSGroup      int64  `json:"fs_group"`
 		} `json:"volume"`
 	}
 	if err := json.Unmarshal(op.Payload, &p); err != nil {
@@ -2249,6 +2260,9 @@ func (w *DBWatcher) doUpdateAppStorage(ctx context.Context, op db.Operation) err
 	replicasVal, _ := cur["replicas"].(float64)
 	profileVal, _ := cur["profile"].(string)
 	frameworkVal, _ := cur["framework"].(string)
+	if p.Volume.FSGroup == 0 {
+		_, _, _, p.Volume.FSGroup = volumeFromSummary(cur)
+	}
 	if replicasVal == 0 {
 		replicasVal = 1
 	}
@@ -2285,6 +2299,7 @@ func (w *DBWatcher) doUpdateAppStorage(ctx context.Context, op db.Operation) err
 		VolumePath:         p.Volume.Path,
 		VolumeSize:         p.Volume.Size,
 		VolumeStorageClass: p.Volume.StorageClass,
+		VolumeFSGroup:      p.Volume.FSGroup,
 	}
 	appSpec.ArgoName, _ = cur["argo_name"].(string)
 	if env.hasSecret() {
@@ -2326,6 +2341,7 @@ func (w *DBWatcher) doUpdateAppStorage(ctx context.Context, op db.Operation) err
 
 	cur["volume"] = map[string]any{
 		"path": p.Volume.Path, "size": p.Volume.Size, "storage_class": p.Volume.StorageClass,
+		"fs_group": p.Volume.FSGroup,
 	}
 	cur["status"] = "Pending"
 	updatedJSON, _ := json.Marshal(cur)

@@ -445,6 +445,37 @@ func TestRenderAppValuesPersistentVolume(t *testing.T) {
 	}
 }
 
+// A fresh Longhorn volume arrives owned by root, so an image that runs as a
+// non-root user (Grafana 472, Metabase 2000) crash-loops on its own data
+// directory unless the pod hands the volume to that group. Without this block
+// half the ready-made catalog would deploy green and never come up.
+func TestRenderAppValuesVolumeFSGroup(t *testing.T) {
+	got, err := renderer.RenderAppValues(renderer.AppSpec{
+		Image: "grafana/grafana:13.0", Port: 3000, Replicas: 1, Profile: "small",
+		VolumePath: "/var/lib/grafana", VolumeSize: "5Gi", VolumeStorageClass: "longhorn-dev",
+		VolumeFSGroup: 472,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{"podSecurityContext:", "fsGroup: 472"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("values missing %q\nFull output:\n%s", want, got)
+		}
+	}
+
+	rootOwned, err := renderer.RenderAppValues(renderer.AppSpec{
+		Image: "nocodb/nocodb:2026.08.0", Port: 8080, Replicas: 1, Profile: "small",
+		VolumePath: "/usr/app/data", VolumeSize: "5Gi", VolumeStorageClass: "longhorn-dev",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(rootOwned, "podSecurityContext") {
+		t.Errorf("no fs group was asked for, so nothing should be pinned\nFull output:\n%s", rootOwned)
+	}
+}
+
 func TestRenderAppValuesNoVolumeOmitsPvc(t *testing.T) {
 	got, err := renderer.RenderAppValues(renderer.AppSpec{
 		Image: "ghcr.io/dada-tuda/api-service:v1", Port: 8080, Replicas: 1, Profile: "small",

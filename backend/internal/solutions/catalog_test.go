@@ -32,19 +32,51 @@ func TestV1CatalogInvariants(t *testing.T) {
 			t.Fatalf("solution %q: say what to do once it is up", s.Slug)
 		}
 
-		// The repository is the whole point of an entry: it is what gets built.
-		if _, err := ParseRepoURL(s.Repo); err != nil {
-			t.Fatalf("solution %q: repo %q is not a usable owner/name: %v", s.Slug, s.Repo, err)
+		if s.IsImage() {
+			if s.Repo != "" {
+				t.Fatalf("solution %q: an image entry must not also name a repo, or the card lies about which track it took", s.Slug)
+			}
+			if s.IconRepo == "" {
+				t.Fatalf("solution %q: an image entry has no repo to take a logo from, so IconRepo is required", s.Slug)
+			}
+			if !strings.Contains(s.Image, ":") || strings.HasSuffix(s.Image, ":latest") {
+				t.Fatalf("solution %q: image %q must be pinned to a real tag, never latest", s.Slug, s.Image)
+			}
+			if s.Volume != nil {
+				if !strings.HasPrefix(s.Volume.Path, "/") || strings.Contains(s.Volume.Path, "..") {
+					t.Fatalf("solution %q: volume path %q must be absolute and free of ..", s.Slug, s.Volume.Path)
+				}
+				if s.Volume.Size == "" {
+					t.Fatalf("solution %q: volume needs a size", s.Slug)
+				}
+				if s.Volume.FSGroup < 0 || s.Volume.FSGroup > 65535 {
+					t.Fatalf("solution %q: fs group %d is not a group id", s.Slug, s.Volume.FSGroup)
+				}
+			}
+		} else {
+			// The repository is the whole point of a built entry: it is what gets built.
+			if _, err := ParseRepoURL(s.Repo); err != nil {
+				t.Fatalf("solution %q: repo %q is not a usable owner/name: %v", s.Slug, s.Repo, err)
+			}
+			if seenRepo[strings.ToLower(s.Repo)] {
+				t.Fatalf("two entries build %q", s.Repo)
+			}
+			seenRepo[strings.ToLower(s.Repo)] = true
+			if s.Branch == "" {
+				t.Fatalf("solution %q: branch is required; the default is not the same on every repo", s.Slug)
+			}
+			if s.RootDir == "" {
+				t.Fatalf("solution %q: root dir is required (\".\" for the repository root)", s.Slug)
+			}
+			if s.Volume != nil {
+				t.Fatalf("solution %q: the build track has nowhere to put a volume; make it an image entry", s.Slug)
+			}
 		}
-		if seenRepo[strings.ToLower(s.Repo)] {
-			t.Fatalf("two entries build %q", s.Repo)
+		if s.Icon() == "" {
+			t.Fatalf("solution %q: no logo; the console draws entries as logo chips", s.Slug)
 		}
-		seenRepo[strings.ToLower(s.Repo)] = true
-		if s.Branch == "" {
-			t.Fatalf("solution %q: branch is required; the default is not the same on every repo", s.Slug)
-		}
-		if s.RootDir == "" {
-			t.Fatalf("solution %q: root dir is required (\".\" for the repository root)", s.Slug)
+		if s.Category == "" {
+			t.Fatalf("solution %q: category is required; the console groups by it", s.Slug)
 		}
 		if s.Port < 1 || s.Port > 65535 {
 			t.Fatalf("solution %q: port %d is not a port; a wrong one deploys green and answers 502", s.Slug, s.Port)
@@ -67,15 +99,35 @@ func TestV1CatalogInvariants(t *testing.T) {
 	}
 }
 
-// v1 builds from source, and an app created by the build pipeline has no
-// volume: a project that keeps state on disk would lose it on every redeploy.
-// Until the build path can carry one, every entry must be stateless — this test
-// is the reminder, so adding a stateful project is a deliberate act with a
-// matching change to the build spec rather than an oversight.
-func TestEveryEntryShipsItsOwnDockerfileBuild(t *testing.T) {
+// An app created by the build pipeline has no volume: a project that keeps
+// state on disk would lose it on every redeploy. So a built entry must be
+// stateless and must build from its own root Dockerfile, and anything stateful
+// belongs on the image track — this test is what makes crossing the two a
+// deliberate act rather than an oversight.
+func TestEveryBuiltEntryShipsItsOwnDockerfileBuild(t *testing.T) {
 	for _, s := range V1 {
+		if s.IsImage() {
+			continue
+		}
 		if s.Framework != "dockerfile" {
-			t.Fatalf("solution %q builds via %q; every v1 entry was verified against its own root Dockerfile", s.Slug, s.Framework)
+			t.Fatalf("solution %q builds via %q; every built entry was verified against its own root Dockerfile", s.Slug, s.Framework)
+		}
+	}
+}
+
+// Every category an entry claims must be one the console knows how to title,
+// otherwise the entry lands in a group with no name on it.
+func TestEveryCategoryHasATitle(t *testing.T) {
+	titled := map[Category]bool{}
+	for _, c := range CategoryTitles {
+		if titled[c.Category] {
+			t.Fatalf("category %q titled twice", c.Category)
+		}
+		titled[c.Category] = true
+	}
+	for _, s := range V1 {
+		if !titled[s.Category] {
+			t.Fatalf("solution %q is in category %q, which nothing titles", s.Slug, s.Category)
 		}
 	}
 }

@@ -16,11 +16,11 @@ func TestSolutionPayloadCarriesIcon(t *testing.T) {
 	}
 	for _, s := range solutions.V1 {
 		got, _ := solutionPayload(s)["icon"].(string)
-		if want := solutions.OwnerAvatar(s.Repo); got != want {
+		if want := s.Icon(); got != want {
 			t.Fatalf("%s: icon = %q, want %q", s.Slug, got, want)
 		}
 		if got == "" {
-			t.Fatalf("%s: no icon for repo %q", s.Slug, s.Repo)
+			t.Fatalf("%s: no icon", s.Slug)
 		}
 	}
 }

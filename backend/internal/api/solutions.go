@@ -44,11 +44,18 @@ func solutionPayload(s solutions.Solution) gin.H {
 			"placeholder": p.Placeholder,
 		})
 	}
+	var volume gin.H
+	if s.Volume != nil {
+		volume = gin.H{"path": s.Volume.Path, "size": s.Volume.Size}
+	}
 	return gin.H{
 		"slug":       s.Slug,
 		"name":       s.Name,
 		"tagline":    s.Tagline,
-		"icon":       solutions.OwnerAvatar(s.Repo),
+		"icon":       s.Icon(),
+		"source":     s.Source(),
+		"image":      s.Image,
+		"volume":     volume,
 		"about":      s.About,
 		"bullets":    s.Bullets,
 		"category":   string(s.Category),
@@ -326,15 +333,16 @@ func (h *Handler) ResolveSolution(c *gin.Context) {
 // customer said nothing", which is the only way a catalog entry that declares
 // Needs can default to yes and still be refusable.
 type installSolutionRequest struct {
-	Slug         string `json:"slug"`
-	Repo         string `json:"repo"`
-	AppName      string `json:"app_name"`
-	Branch       string `json:"branch"`
-	RootDir      string `json:"root_dir"`
-	Framework    string `json:"framework"`
-	Port         int    `json:"port"`
-	Profile      string `json:"profile"`
-	WithDatabase *bool  `json:"with_database"`
+	Slug         string            `json:"slug"`
+	Repo         string            `json:"repo"`
+	AppName      string            `json:"app_name"`
+	Branch       string            `json:"branch"`
+	RootDir      string            `json:"root_dir"`
+	Framework    string            `json:"framework"`
+	Port         int               `json:"port"`
+	Profile      string            `json:"profile"`
+	WithDatabase *bool             `json:"with_database"`
+	Params       map[string]string `json:"params"`
 }
 
 // managedDatabaseNameFor derives the database resource name and PostgreSQL
@@ -489,6 +497,10 @@ func (h *Handler) InstallSolution(c *gin.Context) {
 			rejectErr(http.StatusNotFound, "unknown_solution", "no such ready-made project")
 			return
 		}
+		if s.IsImage() {
+			h.installImageSolution(c, claims, projectID, envID, s, req)
+			return
+		}
 		link.RepoFullName = s.Repo
 		if link.ProductionBranch == "" {
 			link.ProductionBranch = s.Branch
@@ -596,6 +608,145 @@ func (h *Handler) InstallSolution(c *gin.Context) {
 		"build":     b,
 		"database":  dbOperation,
 		"installed": true,
+	})
+}
+
+// installImageSolution installs a catalog entry that ships a published image.
+//
+// The build track cannot carry a volume, so every project that keeps state on
+// disk was unreachable from the catalog. This path skips the pipeline and
+// creates the ordinary image app a customer would create by hand — same quota
+// gate, same storage ceiling, same name-uniqueness rule, because it goes through
+// createAppOp rather than around it.
+//
+// Order matters. Parameters and the managed database land in env_vars BEFORE the
+// CreateApp operation is queued, so the container starts with its configuration
+// already present instead of crash-looping until a second deploy carries it.
+func (h *Handler) installImageSolution(c *gin.Context, claims *auth.Claims, projectID, envID uuid.UUID, s solutions.Solution, req installSolutionRequest) {
+	appName := appNameForInstall(req, s.Repo)
+	audit := func(outcome string, meta map[string]any) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "InstallSolution",
+			ResourceKind:  "Solution",
+			ResourceName:  appName,
+			Outcome:       outcome,
+			Metadata:      meta,
+		})
+	}
+	rejectErr := func(status int, reason, msg string) {
+		audit(auditOutcomeFailure, map[string]any{"reason": reason, "status": status, "track": "image"})
+		respondError(c, status, msg)
+	}
+
+	if err := validateKubeName(appName); err != nil {
+		rejectErr(http.StatusBadRequest, "invalid_app_name", err.Error())
+		return
+	}
+
+	env, err := s.ResolveParams(req.Params)
+	if err != nil {
+		rejectErr(http.StatusBadRequest, "invalid_params", err.Error())
+		return
+	}
+	for key, value := range s.Env {
+		if _, set := env[key]; !set {
+			env[key] = value
+		}
+	}
+	secretEnv := make(map[string]bool, len(s.Params))
+	for _, p := range s.Params {
+		secretEnv[p.EnvKey] = p.Kind == solutions.ParamSecret
+	}
+	for key, value := range env {
+		if _, err := h.upsertEnvVar(c.Request.Context(), envID, appName, key, value, secretEnv[key], "runtime", claims.UserID.String()); err != nil {
+			rejectErr(http.StatusInternalServerError, "env_failed", "failed to store the project's settings")
+			return
+		}
+	}
+
+	needsDatabase := false
+	for _, need := range s.Needs {
+		if need == "postgres" {
+			needsDatabase = true
+		}
+	}
+	if req.WithDatabase != nil {
+		needsDatabase = *req.WithDatabase
+	}
+
+	var dbOperation any
+	if needsDatabase {
+		resource, database := managedDatabaseNameFor(appName)
+		res, dbFault := h.createManagedDatabase(c.Request.Context(), claims.UserID, projectID, envID, createServiceDatabaseRequest{
+			Name:     resource,
+			Database: database,
+			AppRef:   appName,
+		})
+		if dbFault != nil {
+			audit(auditOutcomeFailure, map[string]any{
+				"reason": dbFault.Reason,
+				"status": dbFault.Status,
+				"stage":  "database",
+				"track":  "image",
+				"app":    appName,
+			})
+			respondError(c, dbFault.Status, dbFault.Message)
+			return
+		}
+		dbOperation = res.Operation
+	}
+
+	create := createAppRequest{
+		Name:     appName,
+		Image:    s.Image,
+		Port:     s.Port,
+		Replicas: 1,
+		Profile:  s.Profile,
+	}
+	if req.Port != 0 {
+		create.Port = req.Port
+	}
+	if req.Profile != "" {
+		create.Profile = req.Profile
+	}
+	if s.Volume != nil {
+		create.Volume = &appVolumeReq{Path: s.Volume.Path, Size: s.Volume.Size, FSGroup: s.Volume.FSGroup}
+	}
+
+	op, defaultHostname, fault := h.createAppOp(c, claims, projectID, envID, create)
+	if fault != nil {
+		audit(auditOutcomeFailure, map[string]any{
+			"reason": fault.Reason,
+			"status": fault.Status,
+			"stage":  "app",
+			"track":  "image",
+			"app":    appName,
+		})
+		if fault.Status != 0 {
+			respondError(c, fault.Status, fault.Message)
+		}
+		return
+	}
+
+	audit(auditOutcomeSuccess, map[string]any{
+		"slug":     s.Slug,
+		"image":    s.Image,
+		"app":      appName,
+		"track":    "image",
+		"database": needsDatabase,
+		"volume":   s.Volume != nil,
+	})
+	h.notifyAuditEvent(claims, projectID, "InstallSolution", appName)
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"app_name":         appName,
+		"operation":        op,
+		"default_hostname": defaultHostname,
+		"database":         dbOperation,
+		"source":           "image",
+		"installed":        true,
 	})
 }
 

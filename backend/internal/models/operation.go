@@ -102,10 +102,16 @@ type CreateS3BucketPayload struct {
 // It maps directly to the workload chart's common.pvc block: a ReadWriteMany
 // PersistentVolumeClaim of Size mounted at Path on every replica. RWX is the
 // only access mode we expose so multi-replica apps can share one volume.
+//
+// FSGroup is the group id the volume is chowned to (podSecurityContext.fsGroup).
+// A fresh Longhorn volume is owned by root, so an image that runs as any other
+// user cannot write to the directory it was just given; zero means the image
+// runs as root and needs nothing.
 type AppVolume struct {
 	Path         string `json:"path"`
 	Size         string `json:"size"`
 	StorageClass string `json:"storage_class,omitempty"`
+	FSGroup      int64  `json:"fs_group,omitempty"`
 }
 
 // CreateAppPayload is the typed payload for CreateApp operations.
