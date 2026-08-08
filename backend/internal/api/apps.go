@@ -326,10 +326,11 @@ func (h *Handler) ListApps(c *gin.Context) {
 	}
 
 	rows, err := h.pool.Query(c.Request.Context(),
-		`SELECT id, project_id, environment_id, kind, name, phase, summary_json, last_synced_at
-		 FROM resource_snapshots
-		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App'
-		 ORDER BY name`,
+		`SELECT rs.id, rs.project_id, rs.environment_id, rs.kind, rs.name, rs.phase, rs.summary_json, rs.last_synced_at
+		 FROM resource_snapshots rs
+		 WHERE rs.project_id = $1 AND rs.environment_id = $2 AND rs.kind = 'App'
+		   AND `+notOrphanedSnapshot+`
+		 ORDER BY rs.name`,
 		projectID, envID,
 	)
 	if err != nil {

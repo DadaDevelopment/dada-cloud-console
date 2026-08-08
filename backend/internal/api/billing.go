@@ -215,7 +215,7 @@ func (h *Handler) countResource(ctx context.Context, orgID, resource string) (in
 		err := h.pool.QueryRow(ctx, `
 			SELECT COUNT(*) FROM resource_snapshots rs
 			JOIN projects p ON p.id = rs.project_id
-			WHERE p.org_id = $1 AND rs.kind = 'App'
+			WHERE p.org_id = $1 AND rs.kind = 'App' AND `+notOrphanedSnapshot+`
 		`, orgID).Scan(&n)
 		return n, err
 
@@ -454,7 +454,7 @@ func (h *Handler) orgStorageBytes(ctx context.Context, orgID string) (int64, err
 		SELECT rs.summary_json->'volume'->>'size'
 		FROM resource_snapshots rs
 		JOIN projects p ON p.id = rs.project_id
-		WHERE p.org_id = $1 AND rs.kind = 'App'
+		WHERE p.org_id = $1 AND rs.kind = 'App' AND `+notOrphanedSnapshot+`
 		  AND rs.summary_json->'volume'->>'size' IS NOT NULL
 	`, orgID)
 	if err != nil {

@@ -165,7 +165,7 @@ func (h *Handler) consumptionApps(ctx context.Context, projectID uuid.UUID, star
 		   FROM resource_snapshots rs
 		   JOIN environments e ON e.id = rs.environment_id
 		  WHERE rs.project_id = $1 AND rs.kind = 'App' AND NOT e.is_ephemeral
-		    AND e.runtime <> 'box'
+		    AND e.runtime <> 'box' AND `+notOrphanedSnapshot+`
 		  ORDER BY rs.name`,
 		projectID,
 	)
