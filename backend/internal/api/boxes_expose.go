@@ -1,9 +1,13 @@
 package api
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/dada-tuda/console/backend/internal/box"
 	"github.com/dada-tuda/console/backend/internal/metrics"
 	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/gin-gonic/gin"
@@ -83,63 +87,97 @@ func (h *Handler) ExposeBox(c *gin.Context) {
 		return
 	}
 
-	started := time.Now()
-	exp, err := stack.exposer.Expose(b.Name, req.Port)
+	pub, err := h.publishBoxPort(c.Request.Context(), stack, b, req.Port, exposeProbeBudget)
 	if err != nil {
 		audit(uuid.Nil, auditOutcomeFailure, map[string]any{
-			"reason": "expose_failed", "port": req.Port, "detail": err.Error(), "status": http.StatusInternalServerError,
+			"reason": pub.failureReason, "port": req.Port, "detail": err.Error(), "status": http.StatusInternalServerError,
 		})
-		respondError(c, http.StatusInternalServerError, "failed to publish the port: "+err.Error())
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// Measured to the first real 200 from the published address, which is why the
-	// probe happens before the metric and before the response.
-	probe := awaitPublishedURL(exp.URL, exp.Hostname, exposeProbeBudget, exposeProbeInterval)
-	elapsed := time.Since(started)
-	metrics.RecordBoxExpose("wildcard", elapsed)
 
-	var exposureID uuid.UUID
-	if err := h.pool.QueryRow(c.Request.Context(),
+	audit(uuid.Nil, auditOutcomeSuccess, map[string]any{
+		"exposure_id":  pub.exposureID,
+		"port":         req.Port,
+		"hostname":     pub.exposure.Hostname,
+		"cert":         pub.exposure.Cert,
+		"answered":     pub.probe.ok,
+		"probe_status": pub.probe.status,
+		"expose_ms":    pub.elapsed.Milliseconds(),
+	})
+
+	c.JSON(http.StatusOK, gin.H{
+		"exposure": gin.H{
+			"id":       pub.exposureID,
+			"port":     pub.exposure.Port,
+			"hostname": pub.exposure.Hostname,
+			"url":      pub.exposure.URL,
+			"cert":     pub.exposure.Cert,
+		},
+		"first_response": gin.H{
+			"status":   pub.probe.status,
+			"ok":       pub.probe.ok,
+			"body":     pub.probe.body,
+			"attempts": pub.probe.attempts,
+		},
+		"expose_ms": pub.elapsed.Milliseconds(),
+		"note": "the hostname is assigned by the platform under its wildcard and cannot be chosen. " +
+			"Responses carry X-Robots-Tag: noindex.",
+	})
+}
+
+// boxPublication is one box port on the platform edge: the recorded exposure and
+// what the published address answered.
+type boxPublication struct {
+	exposureID    uuid.UUID
+	exposure      box.Exposure
+	probe         publishedProbe
+	elapsed       time.Duration
+	failureReason string
+}
+
+// publishBoxPort puts one port of a box on the platform wildcard and records the
+// exposure row, returning what answered.
+//
+// It is shared by ExposeBox and by the single-call door, which publishes the
+// box's own endpoint on its way to ready. One body for both is what keeps the
+// exposure row and the ingress from drifting: box_exposures is the only place
+// boxReachability looks to decide whether a connection block may hand out a
+// public URL, so an exposure created without its row is invisible and a row
+// written without its ingress is a lie.
+//
+// A probeBudget of zero or less SKIPS the probe. The single-call door uses that:
+// a fresh hostname regularly needs a few seconds before the edge answers, and a
+// door that already spent minutes on a cold start must not spend more waiting to
+// confirm what it can simply state honestly as "published, not yet verified".
+func (h *Handler) publishBoxPort(ctx context.Context, stack *boxRuntimeStack, b models.Box, port int, probeBudget time.Duration) (boxPublication, error) {
+	if stack.exposer == nil {
+		return boxPublication{failureReason: "exposer_unavailable"}, errors.New("this installation has no box exposer wired")
+	}
+	started := time.Now()
+	exp, err := stack.exposer.Expose(b.Name, port)
+	if err != nil {
+		return boxPublication{failureReason: "expose_failed"}, fmt.Errorf("failed to publish the port: %w", err)
+	}
+	out := boxPublication{exposure: exp}
+	if probeBudget > 0 {
+		out.probe = awaitPublishedURL(exp.URL, exp.Hostname, probeBudget, exposeProbeInterval)
+	}
+	out.elapsed = time.Since(started)
+	metrics.RecordBoxExpose("wildcard", out.elapsed)
+
+	if err := h.pool.QueryRow(ctx,
 		`INSERT INTO box_exposures (box_id, port, hostname, url, cert)
 		 VALUES ($1, $2, $3, $4, $5)
 		 ON CONFLICT (box_id, port) WHERE withdrawn_at IS NULL
 		 DO UPDATE SET hostname = EXCLUDED.hostname, url = EXCLUDED.url, cert = EXCLUDED.cert
 		 RETURNING id`,
-		b.ID, req.Port, exp.Hostname, exp.URL, exp.Cert,
-	).Scan(&exposureID); err != nil {
-		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "exposure_insert_failed", "port": req.Port, "status": http.StatusInternalServerError})
-		respondError(c, http.StatusInternalServerError, "failed to record the exposure")
-		return
+		b.ID, port, exp.Hostname, exp.URL, exp.Cert,
+	).Scan(&out.exposureID); err != nil {
+		out.failureReason = "exposure_insert_failed"
+		return out, errors.New("failed to record the exposure")
 	}
-
-	audit(uuid.Nil, auditOutcomeSuccess, map[string]any{
-		"exposure_id":  exposureID,
-		"port":         req.Port,
-		"hostname":     exp.Hostname,
-		"cert":         exp.Cert,
-		"answered":     probe.ok,
-		"probe_status": probe.status,
-		"expose_ms":    elapsed.Milliseconds(),
-	})
-
-	c.JSON(http.StatusOK, gin.H{
-		"exposure": gin.H{
-			"id":       exposureID,
-			"port":     exp.Port,
-			"hostname": exp.Hostname,
-			"url":      exp.URL,
-			"cert":     exp.Cert,
-		},
-		"first_response": gin.H{
-			"status":   probe.status,
-			"ok":       probe.ok,
-			"body":     probe.body,
-			"attempts": probe.attempts,
-		},
-		"expose_ms": elapsed.Milliseconds(),
-		"note": "the hostname is assigned by the platform under its wildcard and cannot be chosen. " +
-			"Responses carry X-Robots-Tag: noindex.",
-	})
+	return out, nil
 }
 
 // An ingress object and its wildcard certificate are programmed by the edge a

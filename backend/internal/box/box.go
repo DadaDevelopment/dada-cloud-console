@@ -34,6 +34,20 @@ import (
 // that sees ErrPoolExhausted can fall back to a cold start and account for it.
 var ErrPoolExhausted = errors.New("box: warm pool exhausted")
 
+// ErrColdStart reports that the pool was empty AND building a body on the spot
+// did not work either.
+//
+// It is a separate error from ErrPoolExhausted because the two say opposite
+// things to the person who hit them. "Exhausted" means the product is full and
+// nothing the caller does will help; a failed cold start means the cluster had
+// room and one particular build did not finish in the time the caller allowed,
+// which a retry — or a longer wait_seconds — can fix. Folding the second into
+// the first kept one metric label at the cost of telling first-time users the
+// product was out of capacity when it was not. The label is kept distinct
+// instead, so the alert that watches genuine exhaustion is not diluted by the
+// slow path it was never meant to cover.
+var ErrColdStart = errors.New("box: cold start did not produce a ready body")
+
 // ErrBodyGone reports that the box's running body no longer exists — the pod was
 // deleted by a node drain, an evicted preemption, or a teardown that already ran.
 //

@@ -153,12 +153,16 @@ this server that runs a command, and there will not be one.
 Then:
 
 ```
-attachBoxDatabase(projectId, boxName="scratch", name="db")
-listBoxAttachments(projectId, boxName="scratch")   → which env KEYS were injected
+createDatabase(projectId, envId, name="db")        → managed Postgres, outside the box
 exposeBox(projectId, boxName="scratch", port=3000) → platform-assigned hostname
 ```
 
-The database is provisioned *outside* the box and injected into its env file, so
+`attachBoxDatabase` answers **501 Not Implemented** on this installation and will
+not start working on retry: the box runtime that runs here has no attach path.
+Provision the database with `createDatabase` and set its connection string as env
+inside the box yourself — one extra step, same result.
+
+The database is provisioned *outside* the box, so
 deleting the box never destroys your data. You do not get to choose the exposed
 hostname — that is a crystallization feature, not an ephemeral-sandbox one.
 

@@ -257,18 +257,30 @@ func TestClaimColdStartsWhenTheParkedSetIsEmpty(t *testing.T) {
 	}
 }
 
-// TestClaimColdStartFailureIsStillPoolExhausted: when there is no free box AND
-// making one fails, the customer's answer is unchanged and so is the alert that
-// watches it. A second rejection reason would split that alert in half.
-func TestClaimColdStartFailureIsStillPoolExhausted(t *testing.T) {
+// TestClaimColdStartFailureIsNotPoolExhausted: when there is no free box AND
+// making one fails, the caller is told a cold start failed, not that the product
+// is full.
+//
+// This test asserted the opposite until a production trace showed what the
+// merged reason cost. The warm target is one, so the second person to create a
+// box in a minute ALWAYS takes this path; when their cold start ran long they
+// were told `pool_exhausted` — the product is full, nothing you can do — about a
+// cluster with room to spare, and they left. The alert argument that justified
+// the merge is answered the other way round: pool_exhausted now means only what
+// it says, and cold_start gets its own signal, which is the one that actually
+// moves when the warm target or the wait budget is wrong.
+func TestClaimColdStartFailureIsNotPoolExhausted(t *testing.T) {
 	cs := fake.NewSimpleClientset()
 	rt := newClusterRuntime(cs, nil, "dada-boxes", nil)
 	rt.ReadyTimeout = 30 * time.Millisecond
 	pool := NewClusterPool(rt)
 
 	_, hit, err := pool.Claim(context.Background(), boxcatalog.DefaultImage().Name, "")
-	if hit || !errors.Is(err, ErrPoolExhausted) {
-		t.Fatalf("Claim = (hit %v, %v), want an ErrPoolExhausted", hit, err)
+	if hit || !errors.Is(err, ErrColdStart) {
+		t.Fatalf("Claim = (hit %v, %v), want an ErrColdStart", hit, err)
+	}
+	if errors.Is(err, ErrPoolExhausted) {
+		t.Error("a failed cold start still reports ErrPoolExhausted; that tells a customer the product is full when the cluster had room")
 	}
 	pods, pvcs := countBoxObjects(t, cs, "dada-boxes")
 	if pods != 0 || pvcs != 0 {

@@ -4782,7 +4782,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "The single-call door to a box. Creates the box and its owning environment, claims a pre-warmed body, binds the caller's identity to it, and returns only once a command has actually executed inside it and returned success — not when the API answered and not when a port accepted. The response carries the connection coordinates, a one-time \"dadabox_\" session token (shown exactly once, never retrievable again), a ready-to-paste mcpServers snippet pointing at the BOX's own endpoint, and the measured time to ready broken down by phase. Synchronous rather than 202-with-an-operation because a worker poll is longer than the entire time-to-ready budget.",
+                "description": "The single-call door to a box. Creates the box and its owning environment, claims a pre-warmed body, binds the caller's identity to it, and returns only once a command has actually executed inside it and returned success — not when the API answered and not when a port accepted. The response carries the connection coordinates, a one-time \"dadabox_\" session token (shown exactly once, never retrievable again), a ready-to-paste mcpServers snippet pointing at the BOX's own endpoint, and the measured time to ready broken down by phase. The box's own endpoint is PUBLISHED on a platform hostname as part of coming up, so the returned coordinates answer from outside the cluster rather than being a Pod IP the caller cannot reach. wait_seconds defaults to 240 and is capped at 360: a pool hit answers in seconds, but an empty pool builds a body on the spot and a measured cold start is ~176s, so a smaller ceiling refused the exact request the product exists to serve. A cold start that runs past the caller's bound answers 504 with reason cold_start_timeout, which is NOT pool_exhausted and does not mean the product is full. Synchronous rather than 202-with-an-operation because a worker poll is longer than the entire time-to-ready budget.",
                 "consumes": [
                     "application/json"
                 ],
@@ -4865,7 +4865,16 @@
                         }
                     },
                     "503": {
-                        "description": "no warm box available, or the box runtime is not configured",
+                        "description": "no warm box available and building one failed, or the box runtime is not configured",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "504": {
+                        "description": "a cold start ran past wait_seconds; retry with a larger wait_seconds",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -5157,7 +5166,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Provisions a managed PostgreSQL database and role OUTSIDE the box and injects the connection credential into the box's env file (mode 0600, root). The box can then open it immediately - the very next command inside the box sees DATABASE_URL. The database is deliberately not inside the box: a disposable body must not own the customer's data, so deleting or crystallizing the box never destroys it. The response lists WHICH env keys were injected and never their values. Current installation status: this returns 503 always, for every box, because the wired box runtime (the cluster adapter, ADR-019) has no attach path. This is not a transient failure and retrying will not help. Use createDatabase instead (POST /projects/{projectId}/environments/{envId}/databases) to provision the same managed Postgres outside the box, then inject its credential into the box yourself.",
+                "description": "Provisions a managed PostgreSQL database and role OUTSIDE the box and injects the connection credential into the box's env file (mode 0600, root). The box can then open it immediately - the very next command inside the box sees DATABASE_URL. The database is deliberately not inside the box: a disposable body must not own the customer's data, so deleting or crystallizing the box never destroys it. The response lists WHICH env keys were injected and never their values. Current installation status: this returns 501 Not Implemented for every box, because the wired box runtime (the cluster adapter, ADR-019) has no attach path. 501 rather than 503 on purpose: 503 means try again later and every client and agent loop retries it, while this endpoint has refused every call it has ever received and box_attachments has never held a row. The refusal body carries use_instead. Use createDatabase (POST /projects/{projectId}/environments/{envId}/databases) to provision the same managed Postgres outside the box, then inject its credential into the box yourself.",
                 "consumes": [
                     "application/json"
                 ],
@@ -5246,8 +5255,15 @@
                             }
                         }
                     },
+                    "501": {
+                        "description": "this installation has no attach path; the body names the endpoint to use instead",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "503": {
-                        "description": "box runtime or managed Postgres not configured",
+                        "description": "box runtime not configured",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -19426,7 +19442,7 @@
                     "type": "integer"
                 },
                 "wait_seconds": {
-                    "description": "WaitSeconds bounds how long the caller is willing to wait, in [0,120]. It is\na bound and not a hint: exceeding it returns a classified failure rather than\na body that arrives after the caller gave up.",
+                    "description": "WaitSeconds bounds how long the caller is willing to wait, in [0,360],\ndefaulting to 240. It is a bound and not a hint: exceeding it returns a\nclassified failure rather than a body that arrives after the caller gave up.\nA cold start measured at ~176s is what the default has to clear.",
                     "type": "integer"
                 }
             }

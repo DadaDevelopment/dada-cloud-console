@@ -535,7 +535,7 @@ func (h *Handler) provisionBoxRecord(c *gin.Context, actorID uuid.UUID, projectI
 		// The (project_id, name) pair is taken by an existing environment. That is
 		// a 409 rather than a reuse: silently adopting someone else's environment
 		// would hand the box an identity that already owns other resources.
-		respondError(c, http.StatusConflict, "an environment with that name already exists in this project; pick another box name")
+		respondError(c, http.StatusConflict, "an environment with that name already exists in this project; pick another box name, or delete the box that owns it with DELETE /projects/{projectId}/boxes/{boxName}")
 		return models.Box{}, false
 	} else if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to create box environment")
@@ -554,7 +554,7 @@ func (h *Handler) provisionBoxRecord(c *gin.Context, actorID uuid.UUID, projectI
 		// The partial unique index on (project_id, name) WHERE status <> 'Deleted'
 		// is what refuses a duplicate live name — the DATABASE refuses it, so two
 		// racing replicas cannot both win.
-		respondError(c, http.StatusConflict, "a box with that name already exists in this project")
+		respondError(c, http.StatusConflict, "a box with that name already exists in this project. A box that FAILED still holds its name — delete it with DELETE /projects/{projectId}/boxes/{boxName} before reusing the name, or pick another one")
 		return models.Box{}, false
 	}
 	if err := tx.Commit(c.Request.Context()); err != nil {

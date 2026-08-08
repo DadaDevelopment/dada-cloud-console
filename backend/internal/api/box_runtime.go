@@ -372,25 +372,37 @@ func boxSessionBaseURL(cfg *config.Config) string {
 	return "http://127.0.0.1:" + cfg.Port
 }
 
-// requireAttachProvider answers 503 when the wired adapter has no attach path.
+// requireAttachProvider answers 501 when the wired adapter has no attach path.
 //
-// The cluster adapter deliberately has none yet: managed Postgres for a cluster
-// box means a real ServiceDatabaseV2 outside the box, and the local provider
-// would hand the tenant a DSN pointing at a database inside a body that is about
-// to be destroyed. An unconfigured subsystem is not a failed request, which is
-// why this is 503 with a reason and not a 500.
+// The cluster adapter deliberately has none: managed Postgres for a cluster box
+// means a real ServiceDatabaseV2 outside the box, and the local provider would
+// hand the tenant a DSN pointing at a database inside a body that is about to be
+// destroyed.
 //
-// The message deliberately does not say "yet" or "not ready": on the cluster
-// adapter this is not a warm-up state a retry will clear, it is the shape of
-// this installation today (see boxRuntimeStack doc). A caller — human or agent —
-// that reads "yet" retries forever. The message instead names the working path:
-// createDatabase against the project's environment provisions the same managed
-// Postgres outside the box; the caller injects its credential into the box itself
-// (getBoxConnection plus its own env-setting step).
+// It answers 501 and not 503 because 503 is a lie told by the status code. 503
+// means "try again later", every HTTP client and every agent loop treats it as
+// retryable, and on the cluster adapter — the only adapter production runs —
+// there is no later: this endpoint has answered the same refusal to every call
+// it has ever received, and box_attachments has never held a row. 501 says the
+// server does not implement this, which is the truth and is not retryable.
+//
+// The body carries use_instead so a caller does not have to parse prose to find
+// the working path: createDatabase against the project's environment provisions
+// the same managed Postgres outside the box, and the caller injects its
+// credential into the box itself (getBoxConnection plus its own env-setting
+// step).
 func (s *boxRuntimeStack) requireAttachProvider(c *gin.Context) (box.AttachProvider, bool) {
 	if s.attach == nil {
-		respondError(c, http.StatusServiceUnavailable,
-			"attaching a managed database directly to a box is not available in this installation: the wired box runtime has no attach path (ADR-019). This is not temporary and will not succeed on retry. Use a project database instead: POST /projects/{projectId}/environments/{envId}/databases (MCP tool createDatabase), then set its connection details as env inside the box yourself")
+		c.JSON(http.StatusNotImplemented, gin.H{
+			"error": "attaching a managed database directly to a box is not implemented in this installation: the wired box runtime has no attach path (ADR-019). This is not temporary and will not succeed on retry.",
+			"use_instead": gin.H{
+				"endpoint": "POST /projects/{projectId}/environments/{envId}/databases",
+				"mcp_tool": "createDatabase",
+				"then":     "read the box's coordinates with getBoxConnection and set the database's connection details as env inside the box yourself",
+				"why":      "the database must outlive the box; a disposable body must not own the customer's data",
+			},
+			"retryable": false,
+		})
 		return nil, false
 	}
 	return s.attach, true

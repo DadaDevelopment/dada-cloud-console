@@ -58,7 +58,7 @@ var (
 
 	boxSpawns = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "dada_box_spawns_total",
-		Help: "Box spawn attempts. result=ready|failed|timeout|rejected, pool=hit|miss, reason=none|quota|spend_cap|pool_exhausted|runtime_error|image_pull. rate(result=\"failed\") > 0 means agents are being denied a body.",
+		Help: "Box spawn attempts. result=ready|failed|timeout|rejected, pool=hit|miss, reason=none|quota|spend_cap|pool_exhausted|cold_start|runtime_error|image_pull. rate(result=\"failed\") > 0 means agents are being denied a body. pool_exhausted means the product had no body to give; cold_start means it had room and building one ran past the caller's budget, which the warm target or wait_seconds fixes.",
 	}, []string{"result", "pool", "reason"})
 
 	boxes = promauto.NewGaugeVec(prometheus.GaugeOpts{

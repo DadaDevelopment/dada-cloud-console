@@ -39,6 +39,12 @@ const (
 
 // RejectionReason is the bounded set of reasons a spawn did not produce a body.
 // It is also the `reason` label on dada_box_spawns_total, so it must stay small.
+//
+// ReasonColdStart is the one distinction the set is deliberately paying a label
+// for: the pool being empty and the body built on the spot not arriving in time
+// is a slow path, not a full product, and folding it into ReasonPoolExhausted
+// both misinformed the customer and diluted the alert that watches genuine
+// exhaustion. See ErrColdStart.
 type RejectionReason string
 
 const (
@@ -46,6 +52,7 @@ const (
 	ReasonQuota         RejectionReason = "quota"
 	ReasonSpendCap      RejectionReason = "spend_cap"
 	ReasonPoolExhausted RejectionReason = "pool_exhausted"
+	ReasonColdStart     RejectionReason = "cold_start"
 	ReasonRuntimeError  RejectionReason = "runtime_error"
 	ReasonImagePull     RejectionReason = "image_pull"
 	// ReasonNotReady folds into runtime_error on purpose: from the customer's
@@ -136,7 +143,10 @@ func Spawn(ctx context.Context, d Deps, spec Spec) (*SpawnResult, error) {
 	}
 	if err != nil {
 		reason := ReasonRuntimeError
-		if errors.Is(err, ErrPoolExhausted) {
+		switch {
+		case errors.Is(err, ErrColdStart):
+			reason = ReasonColdStart
+		case errors.Is(err, ErrPoolExhausted):
 			reason = ReasonPoolExhausted
 		}
 		return res, recordFailure(res, Reject(reason, err))

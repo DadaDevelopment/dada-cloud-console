@@ -361,6 +361,13 @@ func TestExposeBox_UnknownBoxIsAudited(t *testing.T) {
 // wired, the box is Ready, and the platform still cannot hand over a database.
 // That row now carries the box's environment, which is what ties it to the rest
 // of the box's lifecycle.
+//
+// The status is 501 and not 503 on purpose. 503 announces a temporary condition,
+// so every HTTP client and every agent loop retries it, and on the only adapter
+// production runs there is no later: the cluster runtime has no attach path at
+// all (ADR-019). The refusal has to be permanent in the status code and has to
+// name the endpoint that does work, or the caller burns its retries learning
+// nothing.
 func TestAttachBoxDatabase_NoAttachProviderIsAudited(t *testing.T) {
 	pool := testOptimisticPool(t)
 	h := &Handler{pool: pool, cfg: &config.Config{}, boxStack: &boxRuntimeStack{}}
@@ -377,8 +384,11 @@ func TestAttachBoxDatabase_NoAttachProviderIsAudited(t *testing.T) {
 	c, rec := newBoxCtx(t, http.MethodPost, `{"name":"db"}`, boxParams(projectID, boxName), godClaims(userID))
 	h.AttachBoxDatabase(c)
 
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503; body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "createDatabase") {
+		t.Errorf("body = %s, must name the endpoint that does work; a refusal without an alternative is a dead end", rec.Body.String())
 	}
 	outcome, reason, gotEnv := lastAuditRow(t, pool, projectID, models.ActionAttachBoxDatabase)
 	if outcome != auditOutcomeFailure || reason != "attach_provider_unavailable" {

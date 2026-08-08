@@ -279,6 +279,31 @@ func mergeAuditMetadata(meta []byte, extra map[string]string) []byte {
 	return out
 }
 
+// auditWriteTimeout bounds a detached audit write. It is generous relative to a
+// single INSERT and deliberately shorter than any caller's own budget.
+const auditWriteTimeout = 5 * time.Second
+
+// recordAuditDetached writes the row synchronously but OUT FROM UNDER the
+// caller's cancellation.
+//
+// A failure row is written on the path where the request is most likely to be
+// gone already: a caller that waited out its own timeout, or a client that hung
+// up, cancels c.Request.Context() before the handler reaches the audit call, and
+// pgx refuses to execute on a cancelled context. The row is not delayed, it is
+// never written — so the one outcome the trail exists to explain is the one
+// outcome missing from it. Live evidence: a box that recorded its error_message
+// (written through context.Background()) while audit_events held no row at all
+// for the same failure.
+//
+// This is not recordAuditAsync: the values on the caller's context (request id,
+// tracing) are kept, and the write still completes before the handler returns,
+// so a test can observe it without racing a goroutine.
+func (h *Handler) recordAuditDetached(ctx context.Context, actorID uuid.UUID, e auditEntry) {
+	detached, cancel := context.WithTimeout(context.WithoutCancel(ctx), auditWriteTimeout)
+	defer cancel()
+	h.recordAudit(detached, actorID, e)
+}
+
 // recordAuditAsync writes the row off the request's hot path with its own
 // deadline, because the request context is cancelled as soon as the response is
 // flushed and passive signals are recorded during, not before, the response.

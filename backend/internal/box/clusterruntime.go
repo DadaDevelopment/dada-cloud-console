@@ -133,7 +133,14 @@ const (
 // them up. Keeping this well under a process's typical lifetime is what lets a
 // failed create clean up after itself instead of depending on staying alive long
 // enough to notice.
-const clusterDefaultReadyTimeout = 3 * time.Minute
+//
+// Three minutes was measured too tight. A production cold start on a node that
+// had to pull the image reached ready in 175.8s — 4 seconds of headroom against
+// a 180s ceiling, which is not headroom, it is a coin flip. Five minutes keeps
+// the argument above intact (a backend process lives for days, not minutes) and
+// leaves the slow honest pull room to finish instead of being destroyed one
+// heartbeat before it succeeded.
+const clusterDefaultReadyTimeout = 5 * time.Minute
 
 // clusterOrphanAfter is the reaper's threshold: a box pod that has not gone Ready
 // this long after creation is treated as abandoned, regardless of which process

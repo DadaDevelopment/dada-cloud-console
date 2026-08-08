@@ -42,7 +42,7 @@ type attachBoxDatabaseRequest struct {
 //
 // @ID          attachBoxDatabase
 // @Summary     Attach a managed Postgres database to a running box
-// @Description Provisions a managed PostgreSQL database and role OUTSIDE the box and injects the connection credential into the box's env file (mode 0600, root). The box can then open it immediately - the very next command inside the box sees DATABASE_URL. The database is deliberately not inside the box: a disposable body must not own the customer's data, so deleting or crystallizing the box never destroys it. The response lists WHICH env keys were injected and never their values. Current installation status: this returns 503 always, for every box, because the wired box runtime (the cluster adapter, ADR-019) has no attach path. This is not a transient failure and retrying will not help. Use createDatabase instead (POST /projects/{projectId}/environments/{envId}/databases) to provision the same managed Postgres outside the box, then inject its credential into the box yourself.
+// @Description Provisions a managed PostgreSQL database and role OUTSIDE the box and injects the connection credential into the box's env file (mode 0600, root). The box can then open it immediately - the very next command inside the box sees DATABASE_URL. The database is deliberately not inside the box: a disposable body must not own the customer's data, so deleting or crystallizing the box never destroys it. The response lists WHICH env keys were injected and never their values. Current installation status: this returns 501 Not Implemented for every box, because the wired box runtime (the cluster adapter, ADR-019) has no attach path. 501 rather than 503 on purpose: 503 means try again later and every client and agent loop retries it, while this endpoint has refused every call it has ever received and box_attachments has never held a row. The refusal body carries use_instead. Use createDatabase (POST /projects/{projectId}/environments/{envId}/databases) to provision the same managed Postgres outside the box, then inject its credential into the box yourself.
 // @Tags        box
 // @Accept      json
 // @Produce     json
@@ -56,7 +56,8 @@ type attachBoxDatabaseRequest struct {
 // @Failure     403       {object} map[string]string
 // @Failure     404       {object} map[string]string
 // @Failure     409       {object} map[string]string "the box is not in a phase that can accept an attachment"
-// @Failure     503       {object} map[string]string "box runtime or managed Postgres not configured"
+// @Failure     501       {object} map[string]interface{} "this installation has no attach path; the body names the endpoint to use instead"
+// @Failure     503       {object} map[string]string "box runtime not configured"
 // @Router      /projects/{projectId}/boxes/{boxName}/attach/database [post]
 func (h *Handler) AttachBoxDatabase(c *gin.Context) {
 	claims, projectID, ok := h.boxWriteGate(c, true)

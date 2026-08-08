@@ -142,14 +142,19 @@ func (p *ClusterPool) Claim(ctx context.Context, image, region string) (*Instanc
 }
 
 // coldStart builds a body on the caller's request after the parked set came up
-// empty. A failure here is still reported as ErrPoolExhausted so the spawn keeps
-// its `pool_exhausted` label: from the customer's side there was no free box and
-// making one did not work either, and splitting that into a second reason would
-// split the alert that watches it.
+// empty.
+//
+// A failure here is ErrColdStart and NOT ErrPoolExhausted. The two were folded
+// together to keep one metric label, and the cost of that was paid by the only
+// people who ever see this path: the pool target in production is one, so the
+// second person to create a box in a minute always takes the cold start, and
+// when it ran long they were told `pool_exhausted` — the product is full, stop
+// trying — about a cluster with room to spare. The reasons are now distinct at
+// the source so both the label and the customer-facing message can be honest.
 func (p *ClusterPool) coldStart(ctx context.Context, image, region string) (*Instance, bool, error) {
 	inst, err := p.rt.createClaimed(ctx, image, region)
 	if err != nil {
-		return nil, false, fmt.Errorf("%w: cold start: %v", ErrPoolExhausted, err)
+		return nil, false, fmt.Errorf("%w: %v", ErrColdStart, err)
 	}
 	return inst, false, nil
 }

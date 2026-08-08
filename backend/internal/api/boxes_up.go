@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 )
 
 // The single-call door: `box up`.
@@ -33,6 +35,23 @@ import (
 // orchestrator's clock at the moment it happens. Nothing in this file can put a
 // guest-reported instant into it, and that is by construction rather than by care.
 
+// The wait bound of the synchronous door.
+//
+// Both numbers used to be 120, and 120 was a promise the door could not keep. A
+// pool hit answers in seconds, but the production warm target is one, so the
+// second caller in a minute takes a cold start — and a measured cold start is
+// 175.8s. The door therefore rejected, with a 400 about wait_seconds, the exact
+// request the product exists to serve, and no value the caller could send would
+// have helped because the ceiling was the ceiling.
+//
+// The default is now larger than the measured cold start and the maximum leaves
+// room above clusterDefaultReadyTimeout, so a caller who accepts the wait gets
+// the body rather than an argument about the parameter.
+const (
+	boxUpDefaultWaitSeconds = 240
+	boxUpMaxWaitSeconds     = 360
+)
+
 type boxUpRequest struct {
 	Name    string `json:"name"`
 	Image   string `json:"image"`
@@ -46,9 +65,10 @@ type boxUpRequest struct {
 	SSHPublicKey string `json:"ssh_public_key"`
 	// SessionTTLHours defaults to 12 and is capped at 168.
 	SessionTTLHours int `json:"session_ttl_hours"`
-	// WaitSeconds bounds how long the caller is willing to wait, in [0,120]. It is
-	// a bound and not a hint: exceeding it returns a classified failure rather than
-	// a body that arrives after the caller gave up.
+	// WaitSeconds bounds how long the caller is willing to wait, in [0,360],
+	// defaulting to 240. It is a bound and not a hint: exceeding it returns a
+	// classified failure rather than a body that arrives after the caller gave up.
+	// A cold start measured at ~176s is what the default has to clear.
 	WaitSeconds int `json:"wait_seconds"`
 }
 
@@ -57,7 +77,7 @@ type boxUpRequest struct {
 //
 // @ID          boxUp
 // @Summary     Bring up a box in one call (synchronous)
-// @Description The single-call door to a box. Creates the box and its owning environment, claims a pre-warmed body, binds the caller's identity to it, and returns only once a command has actually executed inside it and returned success — not when the API answered and not when a port accepted. The response carries the connection coordinates, a one-time "dadabox_" session token (shown exactly once, never retrievable again), a ready-to-paste mcpServers snippet pointing at the BOX's own endpoint, and the measured time to ready broken down by phase. Synchronous rather than 202-with-an-operation because a worker poll is longer than the entire time-to-ready budget.
+// @Description The single-call door to a box. Creates the box and its owning environment, claims a pre-warmed body, binds the caller's identity to it, and returns only once a command has actually executed inside it and returned success — not when the API answered and not when a port accepted. The response carries the connection coordinates, a one-time "dadabox_" session token (shown exactly once, never retrievable again), a ready-to-paste mcpServers snippet pointing at the BOX's own endpoint, and the measured time to ready broken down by phase. The box's own endpoint is PUBLISHED on a platform hostname as part of coming up, so the returned coordinates answer from outside the cluster rather than being a Pod IP the caller cannot reach. wait_seconds defaults to 240 and is capped at 360: a pool hit answers in seconds, but an empty pool builds a body on the spot and a measured cold start is ~176s, so a smaller ceiling refused the exact request the product exists to serve. A cold start that runs past the caller's bound answers 504 with reason cold_start_timeout, which is NOT pool_exhausted and does not mean the product is full. Synchronous rather than 202-with-an-operation because a worker poll is longer than the entire time-to-ready budget.
 // @Tags        box
 // @Accept      json
 // @Produce     json
@@ -70,7 +90,8 @@ type boxUpRequest struct {
 // @Failure     403       {object} map[string]string
 // @Failure     404       {object} map[string]string
 // @Failure     409       {object} map[string]string "a live box with that name already exists in this project"
-// @Failure     503       {object} map[string]string "no warm box available, or the box runtime is not configured"
+// @Failure     503       {object} map[string]string "no warm box available and building one failed, or the box runtime is not configured"
+// @Failure     504       {object} map[string]string "a cold start ran past wait_seconds; retry with a larger wait_seconds"
 // @Router      /projects/{projectId}/box-up [post]
 func (h *Handler) BoxUp(c *gin.Context) {
 	claims, projectID, ok := h.boxWriteGate(c, true)
@@ -85,12 +106,20 @@ func (h *Handler) BoxUp(c *gin.Context) {
 	// single-call door is the one place where a refusal IS the product
 	// experience: "no warm body available" and "never asked for one" have to be
 	// distinguishable in the trail.
+	//
+	// The write is DETACHED from the request context, which is the difference
+	// between a trail and an empty table here. The rejections worth reading are
+	// exactly the ones that take minutes — a cold start running past the wait
+	// bound — and by then the caller has usually hung up, cancelling the context
+	// pgx would have executed the INSERT on. The box row carried its
+	// error_message (written through a background context) while audit_events
+	// held nothing for the same failure.
 	reject := func(status int, reason string, extra map[string]any) {
 		meta := map[string]any{"reason": reason, "status": status}
 		for k, v := range extra {
 			meta[k] = v
 		}
-		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		h.recordAuditDetached(c.Request.Context(), claims.UserID, auditEntry{
 			ProjectID:     projectID,
 			EnvironmentID: envID,
 			Action:        models.ActionBoxUp,
@@ -117,10 +146,11 @@ func (h *Handler) BoxUp(c *gin.Context) {
 	resourceName = req.Name
 	wait := req.WaitSeconds
 	if wait <= 0 {
-		wait = 120
+		wait = boxUpDefaultWaitSeconds
 	}
-	if wait > 120 {
-		rejectErr(http.StatusBadRequest, "invalid_wait_seconds", "wait_seconds must be between 0 and 120")
+	if wait > boxUpMaxWaitSeconds {
+		rejectErr(http.StatusBadRequest, "invalid_wait_seconds",
+			fmt.Sprintf("wait_seconds must be between 0 and %d", boxUpMaxWaitSeconds))
 		return
 	}
 
@@ -165,16 +195,14 @@ func (h *Handler) BoxUp(c *gin.Context) {
 
 	res, mcpURL, sshHost, spawnErr := h.bootBoxInstance(ctx, stack, projectID, b, req.SSHPublicKey)
 	if spawnErr != nil {
+		status, reason, advice := classifyBoxUpFailure(spawnErr, res != nil && res.PoolHit, wait)
 		h.failBox(context.Background(), b.ID, spawnErr.Error())
-		status := http.StatusServiceUnavailable
-		if res != nil && res.PoolHit {
-			status = http.StatusInternalServerError
-		}
-		reject(status, "box_not_ready", map[string]any{
-			"error": spawnErr.Error(),
-			"pool":  poolLabelFor(res != nil && res.PoolHit),
+		reject(status, reason, map[string]any{
+			"error":        spawnErr.Error(),
+			"pool":         poolLabelFor(res != nil && res.PoolHit),
+			"wait_seconds": wait,
 		})
-		respondError(c, status, "box did not become ready: "+spawnErr.Error())
+		respondError(c, status, "box did not become ready: "+spawnErr.Error()+". "+advice)
 		return
 	}
 	inst := res.Instance
@@ -185,12 +213,14 @@ func (h *Handler) BoxUp(c *gin.Context) {
 		return
 	}
 
+	published := h.autoPublishBoxEndpoint(c.Request.Context(), stack, updated)
+
 	phases := map[string]int64{}
 	for phase, d := range res.Timeline.Durations() {
 		phases[phase] = d.Milliseconds()
 	}
 
-	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+	h.recordAuditDetached(c.Request.Context(), claims.UserID, auditEntry{
 		ProjectID:     projectID,
 		EnvironmentID: envID,
 		Action:        models.ActionBoxUp,
@@ -201,6 +231,7 @@ func (h *Handler) BoxUp(c *gin.Context) {
 			"box_id": b.ID, "instance_ref": inst.InstanceRef,
 			"pool": poolLabelFor(res.PoolHit), "time_to_ready_ms": res.Timeline.Total().Milliseconds(),
 			"session_token_prefix": sessionPrefix,
+			"published":            published,
 		},
 	})
 
@@ -226,6 +257,87 @@ func (h *Handler) BoxUp(c *gin.Context) {
 			"guest_clock_skew": "recorded, never measured with",
 		},
 	})
+}
+
+// autoPublishBoxEndpoint puts the box's own endpoint on the platform edge as
+// part of coming up, and reports whether it did.
+//
+// The single-call door is sold as "one POST returns a body you can work in", and
+// what it returned was the pod's address: ssh root@10.244.x.x and an mcpServers
+// snippet on the same unroutable host. From inside the cluster that is the whole
+// truth; from the laptop of the person the product is FOR, it is a hang that
+// looks like a working product. The fix a caller needed was a second, separate
+// call they had no reason to know existed, which is the same "VPS with extra
+// steps" this door was built to avoid.
+//
+// Failure here does not fail the box. The body is up and works from inside the
+// cluster either way, and boxConnectBlock reads box_exposures to decide what it
+// may claim, so an unpublished box degrades to the honest cluster-scope answer
+// rather than to a lie. SSH is deliberately not published: the edge is an L7
+// HTTP proxy and cannot carry the stream.
+func (h *Handler) autoPublishBoxEndpoint(ctx context.Context, stack *boxRuntimeStack, b models.Box) bool {
+	if stack.exposer == nil || !boxOwnsItsMCPURL(b.MCPURL) {
+		return false
+	}
+	port := brokerPortOf(b.MCPURL)
+	if port == 0 {
+		return false
+	}
+	if _, err := h.publishBoxPort(ctx, stack, b, port, 0); err != nil {
+		log.Warn().Err(err).Str("box", b.Name).Int("port", port).
+			Msg("box: publishing the box endpoint failed; its coordinates stay cluster-scoped")
+		return false
+	}
+	return true
+}
+
+// classifyBoxUpFailure turns a spawn failure into the HTTP status, the audit
+// reason, and the one sentence that tells the caller what to do next.
+//
+// It exists because the door used to answer every failure with one reason,
+// "box_not_ready", over a message that was the raw error. The two failures that
+// dominate in production are opposite in meaning and the caller could not tell
+// them apart: an empty pool with a cluster that has room is a slow path a retry
+// or a longer wait fixes, while a genuinely exhausted product is a dead end. A
+// first-time user who was told the second when the first was true simply left.
+//
+// The advice names the DELETE too. A failed box keeps its name and its
+// environment row — the partial unique index on (project_id, name) refuses a
+// second live box with the same name — so a caller who retries with the name
+// they chose walks straight into a 409 unless they are told.
+func classifyBoxUpFailure(err error, poolHit bool, wait int) (int, string, string) {
+	reason := box.ReasonRuntimeError
+	var rejected *box.RejectedError
+	switch {
+	case errors.As(err, &rejected):
+		reason = rejected.Reason
+	case errors.Is(err, box.ErrColdStart):
+		reason = box.ReasonColdStart
+	case errors.Is(err, box.ErrPoolExhausted):
+		reason = box.ReasonPoolExhausted
+	}
+
+	retry := " Retry, or delete the failed box first if you want its name back: " +
+		"DELETE /projects/{projectId}/boxes/{boxName}."
+	switch reason {
+	case box.ReasonColdStart:
+		if errors.Is(err, context.DeadlineExceeded) {
+			return http.StatusGatewayTimeout, "cold_start_timeout", fmt.Sprintf(
+				"No warm box was free, so one was built on the spot, and it did not reach ready inside the %d seconds you allowed. "+
+					"This is NOT the product being full — the cluster had room. Pass a larger wait_seconds (up to %d) and it will very likely succeed.",
+				wait, boxUpMaxWaitSeconds) + retry
+		}
+		return http.StatusServiceUnavailable, "cold_start_failed",
+			"No warm box was free and building one failed. The cluster is not full; this is a build failure, not a capacity refusal." + retry
+	case box.ReasonPoolExhausted:
+		return http.StatusServiceUnavailable, "pool_exhausted",
+			"No box body could be claimed and none could be created. This one IS a capacity refusal." + retry
+	}
+	if poolHit {
+		return http.StatusInternalServerError, "box_not_ready",
+			"A warm box was claimed and then failed to become usable." + retry
+	}
+	return http.StatusServiceUnavailable, "box_not_ready", "The box did not become usable." + retry
 }
 
 // poolLabelFor renders the pool label the metrics use.
