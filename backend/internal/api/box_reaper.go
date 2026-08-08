@@ -346,8 +346,8 @@ func (r *BoxReaper) enqueueSuspend(ctx context.Context, c boxReapCandidate, reas
 	if !models.CanTransitionBoxStatus(c.Status, models.BoxStatusSleeping) {
 		return
 	}
-	if err := enqueueBoxReaperOperation(ctx, r.pool, c.ProjectID, c.EnvironmentID, c.Name,
-		models.ActionSuspendBox, models.SuspendBoxPayload{BoxID: c.BoxID, Reason: reason}); err != nil {
+	if _, err := enqueueBoxReaperOperation(ctx, r.pool, c.ProjectID, c.EnvironmentID, c.Name,
+		models.ActionSuspendBox, reason, models.SuspendBoxPayload{BoxID: c.BoxID, Reason: reason}); err != nil {
 		log.Warn().Err(err).Str("box", c.BoxID.String()).Str("reason", reason).
 			Msg("box reaper: failed to enqueue suspend")
 		return
@@ -358,8 +358,8 @@ func (r *BoxReaper) enqueueSuspend(ctx context.Context, c boxReapCandidate, reas
 // enqueueDelete destroys a box and marks it Deleting so a concurrent read never
 // hands out a body that is being torn down (same ordering as the DeleteBox handler).
 func (r *BoxReaper) enqueueDelete(ctx context.Context, c boxReapCandidate, reason string) {
-	if err := enqueueBoxReaperOperation(ctx, r.pool, c.ProjectID, c.EnvironmentID, c.Name,
-		models.ActionDeleteBox, models.DeleteBoxPayload{BoxID: c.BoxID, Reason: reason}); err != nil {
+	if _, err := enqueueBoxReaperOperation(ctx, r.pool, c.ProjectID, c.EnvironmentID, c.Name,
+		models.ActionDeleteBox, reason, models.DeleteBoxPayload{BoxID: c.BoxID, Reason: reason}); err != nil {
 		log.Warn().Err(err).Str("box", c.BoxID.String()).Msg("box reaper: failed to enqueue delete")
 		return
 	}

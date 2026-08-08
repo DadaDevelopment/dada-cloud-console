@@ -640,8 +640,8 @@ func (m *BoxMeter) stopOnSpendCap(ctx context.Context, r boxMeterRow, s boxSpend
 		return
 	}
 	metrics.RecordBoxSpendCapHit("stopped")
-	if err := enqueueBoxReaperOperation(ctx, m.pool, r.ProjectID, r.EnvironmentID, r.Name,
-		models.ActionSuspendBox, models.SuspendBoxPayload{BoxID: r.BoxID, Reason: "spend_cap"}); err != nil {
+	if _, err := enqueueBoxReaperOperation(ctx, m.pool, r.ProjectID, r.EnvironmentID, r.Name,
+		models.ActionSuspendBox, "spend_cap", models.SuspendBoxPayload{BoxID: r.BoxID, Reason: "spend_cap"}); err != nil {
 		log.Warn().Err(err).Str("box", r.BoxID.String()).Msg("box meter: failed to enqueue spend-cap suspend")
 	}
 	subject, body := notify.ComposeBoxSpendCapStopped(r.Name, s.Total, capRub)
@@ -683,8 +683,8 @@ func (m *BoxMeter) enforceDiskAccrualLimit(ctx context.Context, r boxMeterRow, s
 	if now.Before(r.DeleteWarned.Add(boxSpendCapDeleteGrace)) {
 		return
 	}
-	if err := enqueueBoxReaperOperation(ctx, m.pool, r.ProjectID, r.EnvironmentID, r.Name,
-		models.ActionDeleteBox, models.DeleteBoxPayload{BoxID: r.BoxID, Reason: "spend_cap"}); err != nil {
+	if _, err := enqueueBoxReaperOperation(ctx, m.pool, r.ProjectID, r.EnvironmentID, r.Name,
+		models.ActionDeleteBox, "spend_cap", models.DeleteBoxPayload{BoxID: r.BoxID, Reason: "spend_cap"}); err != nil {
 		log.Warn().Err(err).Str("box", r.BoxID.String()).Msg("box meter: failed to enqueue disk-accrual delete")
 		return
 	}
@@ -872,21 +872,45 @@ func (h *Handler) GetBoxUsage(c *gin.Context) {
 // platform suspended this because of the spend cap" from "a person clicked suspend".
 var boxSystemActorID = uuid.MustParse("00000000-0000-0000-0000-000000000000")
 
-// enqueueBoxReaperOperation inserts one platform-initiated box operation.
+// enqueueBoxReaperOperation inserts one platform-initiated box operation and
+// records it in the audit trail.
 //
 // A package function rather than a Handler method because the meter and the reaper
 // are background loops with no request, no claims and no Handler.
-func enqueueBoxReaperOperation(ctx context.Context, pool *pgxpool.Pool, projectID, environmentID uuid.UUID, boxName, action string, payload any) error {
+//
+// The audit row is written HERE rather than at the four call sites because this is
+// the only door platform-initiated box work goes through, and forgetting it is
+// exactly what happened: every user-facing box verb links its operation, while the
+// reaper and the meter wrote nothing at all -- 271 of 274 SuspendBox operations in
+// the last 30 days had no audit row, so the box pool ate boxes with no record of
+// who decided to [live psql 2026-08-08]. A caller added later cannot repeat that
+// omission without deleting code.
+//
+// The reason is a separate argument even though the payload already carries one:
+// the payload shape differs per action, and a trail that has to unmarshal three
+// structs to answer "why was this box killed" is a trail nobody queries.
+func enqueueBoxReaperOperation(ctx context.Context, pool *pgxpool.Pool, projectID, environmentID uuid.UUID, boxName, action, reason string, payload any) (uuid.UUID, error) {
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		return err
+		return uuid.Nil, err
 	}
-	_, err = pool.Exec(ctx,
+	var opID uuid.UUID
+	if err := pool.QueryRow(ctx,
 		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
-		 VALUES ($1, $2, $3, $4, $5, $6, 'Created', $7)`,
-		boxSystemActorID, projectID, environmentID, action, models.ResourceKindBox, boxName, payloadBytes)
-	if err != nil {
-		return fmt.Errorf("enqueue %s for box %s: %w", action, boxName, err)
+		 VALUES ($1, $2, $3, $4, $5, $6, 'Created', $7)
+		 RETURNING id`,
+		boxSystemActorID, projectID, environmentID, action, models.ResourceKindBox, boxName, payloadBytes).Scan(&opID); err != nil {
+		return uuid.Nil, fmt.Errorf("enqueue %s for box %s: %w", action, boxName, err)
 	}
-	return nil
+	writeAuditRow(ctx, pool, boxSystemActorID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: environmentID,
+		OperationID:   opID,
+		Action:        action,
+		ResourceKind:  models.ResourceKindBox,
+		ResourceName:  boxName,
+		Outcome:       auditOutcomeSuccess,
+		Metadata:      map[string]any{"trigger": "platform", "reason": reason},
+	})
+	return opID, nil
 }

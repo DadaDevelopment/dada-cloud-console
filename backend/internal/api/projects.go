@@ -213,7 +213,7 @@ func (h *Handler) CreateProject(c *gin.Context) {
 		defaultEnv = "prod"
 	}
 
-	projectID, envID, err := h.insertProject(c.Request.Context(), claims.UserID, slug, displayName, org, defaultEnv)
+	projectID, envID, opID, err := h.insertProject(c.Request.Context(), claims.UserID, slug, displayName, org, defaultEnv)
 	if err != nil {
 		if isUniqueViolation(err) {
 			rejectErr(http.StatusConflict, "slug_taken", "a project with this slug already exists")
@@ -232,6 +232,7 @@ func (h *Handler) CreateProject(c *gin.Context) {
 	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
 		ProjectID:     projectID,
 		EnvironmentID: envID,
+		OperationID:   opID,
 		Action:        "CreateProject",
 		ResourceKind:  "Project",
 		ResourceName:  slug,
@@ -279,9 +280,16 @@ func (h *Handler) ensureProjectGroupsAsync(org, projectID, slug, displayName, ow
 }
 
 // insertProject creates a project row plus its default environment in one tx and
-// returns the new ids. Shared by CreateProject and EnsureDefaultProject so both
-// paths build identical rows (the gitops db-watcher then bootstraps the manifest).
-func (h *Handler) insertProject(ctx context.Context, ownerID uuid.UUID, slug, displayName, org, defaultEnv string) (uuid.UUID, uuid.UUID, error) {
+// returns the new ids, the last of which is the enqueued CreateProject operation.
+// Shared by CreateProject and EnsureDefaultProject so both paths build identical
+// rows (the gitops db-watcher then bootstraps the manifest).
+//
+// The operation id is returned so the caller's audit row can carry it. Without it
+// the two tables describe the same event and cannot be joined: 17 CreateProject
+// operations and 9 audit rows coexisted on prod with operation_id NULL on every
+// one of them, which the coverage report reads as an action nobody audits at all
+// [live psql 2026-08-08].
+func (h *Handler) insertProject(ctx context.Context, ownerID uuid.UUID, slug, displayName, org, defaultEnv string) (uuid.UUID, uuid.UUID, uuid.UUID, error) {
 	envType := "prod"
 	if defaultEnv == "dev" {
 		envType = "dev"
@@ -289,7 +297,7 @@ func (h *Handler) insertProject(ctx context.Context, ownerID uuid.UUID, slug, di
 
 	tx, err := h.pool.Begin(ctx)
 	if err != nil {
-		return uuid.Nil, uuid.Nil, err
+		return uuid.Nil, uuid.Nil, uuid.Nil, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
 
@@ -298,7 +306,7 @@ func (h *Handler) insertProject(ctx context.Context, ownerID uuid.UUID, slug, di
 		INSERT INTO projects (id, name, display_name, org_id, owner_type, owner_id, default_environment)
 		VALUES ($1, $2, $3, $4, 'team', $5, $6)
 	`, projectID, slug, displayName, org, ownerID, defaultEnv); err != nil {
-		return uuid.Nil, uuid.Nil, err
+		return uuid.Nil, uuid.Nil, uuid.Nil, err
 	}
 
 	var envID uuid.UUID
@@ -307,24 +315,26 @@ func (h *Handler) insertProject(ctx context.Context, ownerID uuid.UUID, slug, di
 		VALUES ($1, $2, $3, $4)
 		RETURNING id
 	`, projectID, defaultEnv, slug+"-"+defaultEnv, envType).Scan(&envID); err != nil {
-		return uuid.Nil, uuid.Nil, err
+		return uuid.Nil, uuid.Nil, uuid.Nil, err
 	}
 
 	payloadBytes, err := json.Marshal(models.CreateProjectPayload{})
 	if err != nil {
-		return uuid.Nil, uuid.Nil, err
+		return uuid.Nil, uuid.Nil, uuid.Nil, err
 	}
-	if _, err := tx.Exec(ctx, `
+	var opID uuid.UUID
+	if err := tx.QueryRow(ctx, `
 		INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
 		VALUES ($1, $2, $3, 'CreateProject', 'Project', $4, 'Created', $5)
-	`, ownerID, projectID, envID, slug, payloadBytes); err != nil {
-		return uuid.Nil, uuid.Nil, err
+		RETURNING id
+	`, ownerID, projectID, envID, slug, payloadBytes).Scan(&opID); err != nil {
+		return uuid.Nil, uuid.Nil, uuid.Nil, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return uuid.Nil, uuid.Nil, err
+		return uuid.Nil, uuid.Nil, uuid.Nil, err
 	}
-	return projectID, envID, nil
+	return projectID, envID, opID, nil
 }
 
 // defaultProjectSlug derives a stable, DNS-1123-label-safe slug from a username so
@@ -438,7 +448,7 @@ func (h *Handler) EnsureDefaultProject(c *gin.Context) {
 	personalOrg := claims.Username
 	slug = defaultProjectSlug(claims.Username)
 	displayName = defaultProjectDisplayName(claims.Username)
-	pid, envID, err = h.insertProject(ctx, claims.UserID, slug, displayName, personalOrg, "prod")
+	pid, envID, defaultOpID, err := h.insertProject(ctx, claims.UserID, slug, displayName, personalOrg, "prod")
 	if err != nil {
 		if isUniqueViolation(err) {
 			// Slug already taken (race or pre-existing row not visible via claims):
@@ -467,6 +477,7 @@ func (h *Handler) EnsureDefaultProject(c *gin.Context) {
 	h.recordAudit(ctx, claims.UserID, auditEntry{
 		ProjectID:     pid,
 		EnvironmentID: envID,
+		OperationID:   defaultOpID,
 		Action:        "CreateProject",
 		ResourceKind:  "Project",
 		ResourceName:  slug,
