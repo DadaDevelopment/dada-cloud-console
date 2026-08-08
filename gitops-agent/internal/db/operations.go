@@ -111,14 +111,61 @@ func ClaimPending(ctx context.Context, pool *pgxpool.Pool) ([]Operation, error) 
 	return ops, nil
 }
 
-// MarkCommitted sets status=Committed and records the git commit SHA and path.
+// MarkCommitted sets status=Committed, records the git commit SHA and path, and
+// for an operation nothing audited at enqueue records the success in audit_events.
 func MarkCommitted(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, sha, gitPath string) error {
 	_, err := pool.Exec(ctx, `
 		UPDATE operations
 		SET    status = 'Committed', git_commit = $2, git_path = $3, updated_at = NOW()
 		WHERE  id = $1
 	`, id, sha, gitPath)
-	return err
+	if err != nil {
+		return err
+	}
+	recordSuccessAudit(ctx, pool, id, sha)
+	return nil
+}
+
+// recordSuccessAudit writes an outcome=success audit row for an operation that
+// committed with nothing in audit_events about it.
+//
+// recordFailureAudit below assumes an API handler wrote a row at enqueue time,
+// so that only the async result was missing. That is true of everything a user
+// clicks, and false of the repairs this agent runs on its own behalf: on prod
+// AttachDefaultDomain had 15 operations against zero audit rows [live psql,
+// 30d]. Both of its call sites are self-repair -- reissueDefaultDomainDNS and
+// BackfillMissingDefaultDomains [backend domains.go] -- so no user asked and no
+// handler audited. The value there is not the click but the explanation: the
+// user's app suddenly has a public URL, or a different one, and until now
+// nothing recorded when that happened or what caused it.
+//
+// The guard is the absence of ANY row for the operation, not the absence of a
+// success row: an action already audited at enqueue must not get a second row
+// saying the same thing, and an action that failed already has its terminal row.
+// ResizeApp is the case that makes this matter -- it is audited under two other
+// names, UpdateAppProfile for the user path and AutoscaleApp for the watcher,
+// so a name-based guard would double every resize.
+//
+// The row is built from the operations row itself so it cannot disagree with it
+// about actor, project, environment or resource, and carries the commit so a
+// domain that appeared out of nowhere can be traced to the change that made it.
+//
+// Best-effort: the operation genuinely succeeded and must not be reported as
+// failed by a bookkeeping error.
+func recordSuccessAudit(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, sha string) {
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO audit_events
+			(actor_id, project_id, environment_id, operation_id, action, resource_kind, resource_name, outcome, metadata)
+		SELECT o.actor_id, o.project_id, o.environment_id, o.id, o.action, o.resource_kind, o.resource_name, 'success',
+		       jsonb_build_object('phase', 'operation', 'git_commit', $2::text)
+		  FROM operations o
+		 WHERE o.id = $1
+		   AND NOT EXISTS (
+			SELECT 1 FROM audit_events a WHERE a.operation_id = o.id
+		   )
+	`, id, sha); err != nil {
+		log.Printf("mark committed: audit row insert failed for op %s: %v", id, err)
+	}
 }
 
 // MarkFailed sets status=Failed with an error message, and records the failure
