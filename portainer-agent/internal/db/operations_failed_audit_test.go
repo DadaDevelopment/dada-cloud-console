@@ -77,6 +77,114 @@ func TestMarkFailed_WritesFailureAudit(t *testing.T) {
 	}
 }
 
+// TestMarkReady_WritesSuccessAudit pins the audit row on an operation that
+// finished with nothing said about it. DeployStack is enqueued by another agent
+// and DiscoverWorkload by a handler that does not audit, so on prod the only
+// DeployStack rows in audit_events were the three that FAILED, while the seven
+// that worked left no trace [live psql, 30d].
+func TestMarkReady_WritesSuccessAudit(t *testing.T) {
+	ctx, pool, projectID := setupAuditTest(t)
+
+	var opID uuid.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO operations (actor_id, project_id, action, resource_kind, resource_name, status, payload)
+		VALUES ('00000000-0000-0000-0000-000000000000', $1, 'DeployStack', 'App', 'stack-1', 'Processing', '{}'::jsonb)
+		RETURNING id`, projectID).Scan(&opID); err != nil {
+		t.Fatalf("seed operation: %v", err)
+	}
+
+	if err := MarkReady(ctx, pool, opID); err != nil {
+		t.Fatalf("MarkReady: %v", err)
+	}
+
+	var action, kind, name, phase string
+	if err := pool.QueryRow(ctx, `
+		SELECT action, resource_kind, resource_name, metadata->>'phase'
+		  FROM audit_events WHERE operation_id = $1 AND outcome = 'success'`, opID,
+	).Scan(&action, &kind, &name, &phase); err != nil {
+		t.Fatalf("an operation succeeded terminally but wrote no audit row — only its failures are visible to path analysis: %v", err)
+	}
+	if action != "DeployStack" || kind != "App" || name != "stack-1" {
+		t.Errorf("row = %s %s/%s, want DeployStack App/stack-1", action, kind, name)
+	}
+	if phase != "operation" {
+		t.Errorf("metadata phase = %q, want operation", phase)
+	}
+
+	if err := MarkReady(ctx, pool, opID); err != nil {
+		t.Fatalf("MarkReady (repeat): %v", err)
+	}
+	var n int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM audit_events WHERE operation_id = $1`, opID).Scan(&n); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("rows = %d, want 1 — a retried terminal write must not stack rows", n)
+	}
+}
+
+// TestMarkReady_LeavesHandlerAuditAlone pins the guard that keeps the coverage
+// fix from double-counting. CreateAppServer, DeleteAppServer and RestartStack
+// are audited by their handler at enqueue; a second row on success would inflate
+// every count built on audit_events, which is the table the funnel is read from.
+func TestMarkReady_LeavesHandlerAuditAlone(t *testing.T) {
+	ctx, pool, projectID := setupAuditTest(t)
+
+	var opID uuid.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO operations (actor_id, project_id, action, resource_kind, resource_name, status, payload)
+		VALUES ('00000000-0000-0000-0000-000000000000', $1, 'CreateAppServer', 'AppServer', 'vm-2', 'Processing', '{}'::jsonb)
+		RETURNING id`, projectID).Scan(&opID); err != nil {
+		t.Fatalf("seed operation: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, outcome, metadata)
+		VALUES ('00000000-0000-0000-0000-000000000000', $1, $2, 'CreateAppServer', 'AppServer', 'vm-2', 'success', '{}'::jsonb)`,
+		projectID, opID); err != nil {
+		t.Fatalf("seed handler audit: %v", err)
+	}
+
+	if err := MarkReady(ctx, pool, opID); err != nil {
+		t.Fatalf("MarkReady: %v", err)
+	}
+
+	var n int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM audit_events WHERE operation_id = $1`, opID).Scan(&n); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("rows = %d, want 1 — an action already audited at enqueue must not get a second row", n)
+	}
+}
+
+// setupAuditTest connects to the shared test database, applies the schema when
+// absent, and seeds one project for the caller's operations to hang off.
+func setupAuditTest(t *testing.T) (context.Context, *pgxpool.Pool, uuid.UUID) {
+	t.Helper()
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping DB integration test")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	ensureSchemaForTest(t, ctx, pool)
+
+	projectID := uuid.New()
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO projects (id, name, display_name) VALUES ($1, $2, 'Test')`,
+		projectID, "p-"+projectID.String()[:8]); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+	return ctx, pool, projectID
+}
+
 // ensureSchemaForTest applies the backend migrations only when the schema is
 // absent. The whole repo shares one test database, so an unconditional
 // drop-and-rebuild would pull the tables out from under a test running in

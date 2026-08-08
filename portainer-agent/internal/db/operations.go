@@ -133,9 +133,56 @@ func recordFailureAudit(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, c
 	}
 }
 
-// MarkReady sets status=Ready.
+// MarkReady sets status=Ready and, for an operation nothing audited at enqueue,
+// records the success in audit_events.
 func MarkReady(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) error {
-	return UpdateStatus(ctx, pool, id, "Ready")
+	if err := UpdateStatus(ctx, pool, id, "Ready"); err != nil {
+		return err
+	}
+	recordSuccessAudit(ctx, pool, id)
+	return nil
+}
+
+// recordSuccessAudit writes an outcome=success audit row for an operation that
+// reached its terminal state with nothing in audit_events about it.
+//
+// recordFailureAudit above assumes every one of these actions already has a row
+// written by an API handler at enqueue time, so that only the async result is
+// missing. That holds for three of the five: CreateAppServer, DeleteAppServer
+// and RestartStack each matched their operation count on prod. It does not hold
+// for the other two, and they are exactly the ones no handler audits --
+// DiscoverWorkload is enqueued without an audit call [backend appservers.go
+// DiscoverWorkload], and DeployStack has no handler at all, being enqueued by
+// another agent as a follow-up [gitops-agent EnqueueDeployStack]. On prod that
+// read as 7 DeployStack and 2 DiscoverWorkload operations completing against
+// zero audit rows, while the 3 DeployStack operations that FAILED were audited
+// [live psql, 30d] -- the trail recorded only the deploys that went wrong.
+//
+// The guard is the absence of ANY row for the operation, not the absence of a
+// success row: an action already audited at enqueue must not get a second row
+// saying the same thing, and an action that failed already has its terminal row
+// from recordFailureAudit. That also means an action added later inherits the
+// coverage without being named here.
+//
+// The row is built from the operations row itself so it cannot disagree with it
+// about actor, project, environment or resource.
+//
+// Best-effort: the operation genuinely succeeded and must not be reported as
+// failed by a bookkeeping error.
+func recordSuccessAudit(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) {
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO audit_events
+			(actor_id, project_id, environment_id, operation_id, action, resource_kind, resource_name, outcome, metadata)
+		SELECT o.actor_id, o.project_id, o.environment_id, o.id, o.action, o.resource_kind, o.resource_name, 'success',
+		       jsonb_build_object('phase', 'operation')
+		  FROM operations o
+		 WHERE o.id = $1
+		   AND NOT EXISTS (
+			SELECT 1 FROM audit_events a WHERE a.operation_id = o.id
+		   )
+	`, id); err != nil {
+		log.Warn().Err(err).Str("operation", id.String()).Msg("mark ready: audit row insert failed")
+	}
 }
 
 // SaveValidationResult stores a handler's JSON result in operations.validation_result
