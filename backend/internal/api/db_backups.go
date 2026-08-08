@@ -226,7 +226,7 @@ func (h *Handler) startDBBackup(ctx context.Context, projectID, envID uuid.UUID,
 
 	asName, err := h.kanister.CreateBackup(ctx, cloudtask.KanisterActionSpec{
 		Namespace:   h.cfg.DBBackupNamespace,
-		StatefulSet: h.cfg.DBBackupStatefulSet,
+		StatefulSet: h.backupStatefulSetFor(ctx, database),
 		Profile:     h.cfg.DBBackupProfile,
 		Blueprint:   h.cfg.DBBackupBlueprint,
 		Database:    database,
@@ -368,7 +368,7 @@ func (h *Handler) RestoreServiceDatabase(c *gin.Context) {
 
 	_, err = h.kanister.CreateRestore(c.Request.Context(), cloudtask.KanisterActionSpec{
 		Namespace:   h.cfg.DBBackupNamespace,
-		StatefulSet: h.cfg.DBBackupStatefulSet,
+		StatefulSet: h.backupStatefulSetFor(c.Request.Context(), database),
 		Profile:     h.cfg.DBBackupProfile,
 		Blueprint:   h.cfg.DBBackupBlueprint,
 		Database:    database,
