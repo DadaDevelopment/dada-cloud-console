@@ -1,0 +1,35 @@
+[2026-08-07T10:38:36.404Z] #12 [build-stage 4/6] RUN npm install -g pnpm && pnpm i --frozen-lockfile
+[2026-08-07T10:38:39.722Z] #12 2.981 
+[2026-08-07T10:38:39.722Z] #12 2.981 added 1 package in 3s
+[2026-08-07T10:38:39.722Z] #12 2.982 1 package is looking for funding
+[2026-08-07T10:38:39.722Z] #12 2.982   run `npm fund` for details
+[2026-08-07T10:38:41.647Z] #12 5.412 [ERROR] Cannot verify the identity of the @pnpm/exe.linux-x64 native binary: it is missing from pnpm-lock.yaml.
+[2026-08-07T10:38:41.647Z] #12 5.412 For help, run: pnpm help install
+[2026-08-07T10:38:41.647Z] #12 ERROR: process "/bin/sh -c npm install -g pnpm && pnpm i --frozen-lockfile" did not complete successfully: exit code: 1
+[2026-08-07T10:38:41.647Z] ------
+[2026-08-07T10:38:41.647Z]  > importing cache manifest from nexus.dada-tuda.ru/a5-testuser-ccea53c1/it-tools-2yig82:buildcache-main:
+[2026-08-07T10:38:41.647Z] ------
+[2026-08-07T10:38:41.647Z] ------
+[2026-08-07T10:38:41.647Z]  > [build-stage 4/6] RUN npm install -g pnpm && pnpm i --frozen-lockfile:
+[2026-08-07T10:38:41.647Z] 2.981 
+[2026-08-07T10:38:41.647Z] 2.981 added 1 package in 3s
+[2026-08-07T10:38:41.647Z] 2.981 
+[2026-08-07T10:38:41.647Z] 2.982 1 package is looking for funding
+[2026-08-07T10:38:41.647Z] 2.982   run `npm fund` for details
+[2026-08-07T10:38:41.647Z] 5.412 [ERROR] Cannot verify the identity of the @pnpm/exe.linux-x64 native binary: it is missing from pnpm-lock.yaml.
+[2026-08-07T10:38:41.647Z] 5.412 For help, run: pnpm help install
+[2026-08-07T10:38:41.647Z] ------
+[2026-08-07T10:38:41.647Z] WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+[2026-08-07T10:38:41.647Z] 
+[2026-08-07T10:38:41.647Z] [33m2 warnings found (use docker --debug to expand):
+[2026-08-07T10:38:41.647Z] [0m - LegacyKeyValueFormat: "ENV key=value" should be used instead of legacy "ENV key value" format (line 4)
+[2026-08-07T10:38:41.647Z] Dockerfile:8
+[2026-08-07T10:38:41.647Z] --------------------
+[2026-08-07T10:38:41.647Z]    7 |     COPY package.json pnpm-lock.yaml ./
+[2026-08-07T10:38:41.647Z]    8 | >>> RUN npm install -g pnpm && pnpm i --frozen-lockfile
+[2026-08-07T10:38:41.647Z]    9 |     COPY . .
+[2026-08-07T10:38:41.647Z] --------------------
+[2026-08-07T10:38:41.647Z] ERROR: failed to solve: process "/bin/sh -c npm install -g pnpm && pnpm i --frozen-lockfile" did not complete successfully: exit code: 1
+[2026-08-07T10:38:41.647Z] dockerBuildxPush: build+push failed after 3 attempts
+[2026-08-07T10:38:42.501Z] ERROR: script returned exit code 1
+[2026-08-07T10:38:42.571Z] Finished: FAILURE

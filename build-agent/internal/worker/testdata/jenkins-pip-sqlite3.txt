@@ -1,0 +1,45 @@
+[2026-08-08T00:11:35.596Z] #10 [3/7] COPY requirements.txt .
+[2026-08-08T00:11:35.596Z] #10 DONE 0.0s
+[2026-08-08T00:11:35.596Z] 
+[2026-08-08T00:11:35.596Z] #11 [4/7] RUN pip install --no-cache-dir -r requirements.txt
+[2026-08-08T00:11:38.138Z] #11 2.392 Collecting pyTelegramBotAPI==4.20.0 (from -r requirements.txt (line 1))
+[2026-08-08T00:11:38.138Z] #11 2.826   Downloading pytelegrambotapi-4.20.0-py3-none-any.whl.metadata (48 kB)
+[2026-08-08T00:11:38.396Z] #11 2.858      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 48.1/48.1 kB 1.4 MB/s eta 0:00:00
+[2026-08-08T00:11:38.396Z] #11 2.924 Collecting python-dotenv==1.0.1 (from -r requirements.txt (line 2))
+[2026-08-08T00:11:38.396Z] #11 2.956   Downloading python_dotenv-1.0.1-py3-none-any.whl.metadata (23 kB)
+[2026-08-08T00:11:38.396Z] #11 3.096 ERROR: Could not find a version that satisfies the requirement sqlite3 (from versions: none)
+[2026-08-08T00:11:38.655Z] #11 3.097 ERROR: No matching distribution found for sqlite3
+[2026-08-08T00:11:38.656Z] #11 3.420 
+[2026-08-08T00:11:38.656Z] #11 3.420 [notice] A new release of pip is available: 24.0 -> 26.2.1
+[2026-08-08T00:11:38.656Z] #11 3.420 [notice] To update, run: pip install --upgrade pip
+[2026-08-08T00:11:38.915Z] #11 ERROR: process "/bin/sh -c pip install --no-cache-dir -r requirements.txt" did not complete successfully: exit code: 1
+[2026-08-08T00:11:38.915Z] ------
+[2026-08-08T00:11:38.915Z]  > importing cache manifest from nexus.dada-tuda.ru/sevarabot/tvk-assistantbot:buildcache-main:
+[2026-08-08T00:11:38.915Z] ------
+[2026-08-08T00:11:38.915Z] ------
+[2026-08-08T00:11:38.915Z]  > [4/7] RUN pip install --no-cache-dir -r requirements.txt:
+[2026-08-08T00:11:38.915Z] 2.392 Collecting pyTelegramBotAPI==4.20.0 (from -r requirements.txt (line 1))
+[2026-08-08T00:11:38.915Z] 2.826   Downloading pytelegrambotapi-4.20.0-py3-none-any.whl.metadata (48 kB)
+[2026-08-08T00:11:38.915Z] 2.858      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 48.1/48.1 kB 1.4 MB/s eta 0:00:00
+[2026-08-08T00:11:38.915Z] 2.924 Collecting python-dotenv==1.0.1 (from -r requirements.txt (line 2))
+[2026-08-08T00:11:38.915Z] 2.956   Downloading python_dotenv-1.0.1-py3-none-any.whl.metadata (23 kB)
+[2026-08-08T00:11:38.915Z] 3.096 ERROR: Could not find a version that satisfies the requirement sqlite3 (from versions: none)
+[2026-08-08T00:11:38.915Z] 3.097 ERROR: No matching distribution found for sqlite3
+[2026-08-08T00:11:38.915Z] 3.420 
+[2026-08-08T00:11:38.915Z] 3.420 [notice] A new release of pip is available: 24.0 -> 26.2.1
+[2026-08-08T00:11:38.915Z] 3.420 [notice] To update, run: pip install --upgrade pip
+[2026-08-08T00:11:38.915Z] ------
+[2026-08-08T00:11:38.915Z] WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+[2026-08-08T00:11:38.915Z] Dockerfile:7
+[2026-08-08T00:11:38.915Z] --------------------
+[2026-08-08T00:11:38.915Z]    5 |     # Установка зависимостей
+[2026-08-08T00:11:38.915Z]    6 |     COPY requirements.txt .
+[2026-08-08T00:11:38.915Z]    7 | >>> RUN pip install --no-cache-dir -r requirements.txt
+[2026-08-08T00:11:38.915Z]    8 |     
+[2026-08-08T00:11:38.915Z]    9 |     # Копирование кода
+[2026-08-08T00:11:38.915Z] --------------------
+[2026-08-08T00:11:38.915Z] ERROR: failed to solve: process "/bin/sh -c pip install --no-cache-dir -r requirements.txt" did not complete successfully: exit code: 1
+[2026-08-08T00:11:38.915Z] + '[' 1 -ge 3 ]
+[2026-08-08T00:11:38.915Z] + echo '[push-retry 1/2] buildx build+push failed (often a transient nexus registry '"'"'digest mismatch'"'"' on a large layer); retrying in 10s...'
+[2026-08-08T00:11:38.915Z] [push-retry 1/2] buildx build+push failed (often a transient nexus registry 'digest mismatch' on a large layer); retrying in 10s...
+[2026-08-08T00:11:38.915Z] + attempt=2

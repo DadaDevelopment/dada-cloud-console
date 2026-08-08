@@ -162,34 +162,29 @@ func isPlatformFailure(cause error) bool {
 // pulled from the matching console line. Returns an empty code when nothing
 // recognized matched, so the caller falls back to the generic message.
 func classifyFailure(console string) (code string, detail string) {
-	lines := strings.Split(console, "\n")
-	for _, raw := range lines {
-		line := stripLogTimestamp(strings.TrimSpace(raw))
+	lines := normalizeConsole(console)
+	for _, line := range lines {
 		if strings.Contains(line, "has no template and repo ships no Dockerfile") {
 			return buildFailNoDockerfile, line
 		}
 	}
-	for _, raw := range lines {
-		line := stripLogTimestamp(strings.TrimSpace(raw))
+	for _, line := range lines {
 		if isGitAuthFailure(line) {
 			return buildFailGitAuth, line
 		}
 	}
-	for _, raw := range lines {
-		line := stripLogTimestamp(strings.TrimSpace(raw))
-		if strings.Contains(line, "ERROR: failed to solve") {
-			return buildFailDockerfileBuild, line
-		}
-		if strings.Contains(line, "docker build") && strings.Contains(line, "exit code") && !strings.Contains(line, "exit code 0") {
-			return buildFailDockerfileBuild, line
-		}
-		if strings.Contains(line, "buildx") && strings.Contains(line, "exit code") && !strings.Contains(line, "exit code 0") {
+	for i, line := range lines {
+		if strings.Contains(line, "ERROR: failed to solve") ||
+			(strings.Contains(line, "docker build") && strings.Contains(line, "exit code") && !strings.Contains(line, "exit code 0")) ||
+			(strings.Contains(line, "buildx") && strings.Contains(line, "exit code") && !strings.Contains(line, "exit code 0")) {
+			if cause := buildkitCause(lines, i); cause != "" {
+				return buildFailDockerfileBuild, cause
+			}
 			return buildFailDockerfileBuild, line
 		}
 	}
 	lastError := ""
-	for _, raw := range lines {
-		line := stripLogTimestamp(strings.TrimSpace(raw))
+	for _, line := range lines {
 		if strings.HasPrefix(line, "ERROR: ") {
 			lastError = strings.TrimPrefix(line, "ERROR: ")
 		}
@@ -198,6 +193,187 @@ func classifyFailure(console string) (code string, detail string) {
 		return buildFailGeneric, lastError
 	}
 	return "", ""
+}
+
+// normalizeConsole turns raw Jenkins console text into trimmed, timestamp-free,
+// escape-free lines. Positions are preserved (one output line per input line)
+// because the BuildKit readers below navigate by neighbourhood, not by search.
+func normalizeConsole(console string) []string {
+	raw := strings.Split(console, "\n")
+	out := make([]string, len(raw))
+	for i, line := range raw {
+		s := consoleNoteRe.ReplaceAllString(line, "")
+		s = ansiRe.ReplaceAllString(s, "")
+		out[i] = stripLogTimestamp(strings.TrimSpace(s))
+	}
+	return out
+}
+
+var (
+	buildkitStepOutputRe = regexp.MustCompile(`^#(\d+)\s+\d+\.\d+\s+(.*)$`)
+	buildkitStepHeadRe   = regexp.MustCompile(`^#(\d+)\s+\[(.*)\]\s+(.*)$`)
+	buildkitElapsedRe    = regexp.MustCompile(`^\d+\.\d+\s+`)
+	causeErrorRe         = regexp.MustCompile(`(?i)\b(error|fatal|panic|cannot)\b`)
+)
+
+// buildkitCause pulls the line that actually broke the image build out of the
+// failure excerpt BuildKit prints just above its "failed to solve" wrapper.
+//
+// The wrapper names only the step that exited non-zero -- `process "/bin/sh -c
+// pip install -r requirements.txt" did not complete successfully: exit code:
+// 1` -- and never why it exited, so persisting it hands the owner of the repo
+// the single fact they already have. The reason sits above it:
+//
+//	#12 5.678 ERROR: No matching distribution found for sqlite3
+//	#12 ERROR: process "/bin/sh -c pip install -r requirements.txt" ...
+//	------
+//	 > [stage-1 4/6] RUN pip install -r requirements.txt:
+//	5.678 ERROR: No matching distribution found for sqlite3
+//	------
+//	ERROR: failed to solve: process "/bin/sh -c pip install ..." exit code: 1
+//
+// Read by ENVELOPE, not by a table of known error signatures: the compilers
+// and package managers that can fail inside a Dockerfile are unbounded and no
+// signature list ever catches up with them, while the BuildKit frame around
+// them is fixed. Returns "" when the console carries no excerpt and no step
+// output, leaving the caller on the wrapper line rather than on nothing.
+func buildkitCause(lines []string, wrapper int) string {
+	step, cause := buildkitExcerpt(lines, wrapper)
+	if cause == "" {
+		step, cause = buildkitStepTail(lines, wrapper)
+	}
+	if cause == "" {
+		return ""
+	}
+	if step != "" {
+		cause = step + ": " + cause
+	}
+	return truncateDetail(redactSecrets(cause))
+}
+
+// buildkitExcerpt reads the `------` delimited block BuildKit prints for the
+// failing step. Its first line is the step header (`> [stage-1 4/6] RUN ...:`)
+// and the rest is that step's output tail, each line prefixed with elapsed
+// seconds.
+// The fence does not sit directly above the wrapper: BuildKit prints a commit
+// WARNING and a `Dockerfile:N` source excerpt (fenced with twenty dashes, not
+// six) in between, and the block itself is preceded by an empty decoy block for
+// the cache manifest import. So the pairs are walked from the bottom up and the
+// first one that yields a cause wins.
+func buildkitExcerpt(lines []string, wrapper int) (step, cause string) {
+	const fence = "------"
+	const window = 120
+	fences := []int{}
+	for i := wrapper - 1; i >= 0 && i >= wrapper-window; i-- {
+		if lines[i] == fence {
+			fences = append(fences, i)
+		}
+	}
+	for p := 0; p+1 < len(fences); p += 2 {
+		closing, opening := fences[p], fences[p+1]
+		body := lines[opening+1 : closing]
+		if len(body) == 0 {
+			continue
+		}
+		blockStep := ""
+		if head := strings.TrimSpace(body[0]); strings.HasPrefix(head, "> ") {
+			blockStep = strings.TrimSuffix(strings.TrimSpace(strings.TrimPrefix(head, "> ")), ":")
+			body = body[1:]
+		}
+		if c := pickCause(body); c != "" {
+			return blockStep, c
+		}
+	}
+	return "", ""
+}
+
+// pickCause chooses the line of a failing step's output that tells the reader
+// what broke. The last line is the wrong answer often enough to matter: pip
+// signs off with `[notice] A new release of pip is available`, npm with a
+// funding blurb, so the real build-264 excerpt ends two lines below its own
+// `ERROR: No matching distribution found for sqlite3`. Prefer the last line
+// that announces an error and fall back to the last line that is neither
+// advisory nor BuildKit's own envelope.
+func pickCause(body []string) string {
+	clean := make([]string, 0, len(body))
+	for _, raw := range body {
+		line := buildkitElapsedRe.ReplaceAllString(strings.TrimSpace(raw), "")
+		if line == "" || isBuildkitWrapperLine(line) || isAdvisoryLine(line) {
+			continue
+		}
+		clean = append(clean, line)
+	}
+	for i := len(clean) - 1; i >= 0; i-- {
+		if causeErrorRe.MatchString(clean[i]) {
+			return clean[i]
+		}
+	}
+	if len(clean) > 0 {
+		return clean[len(clean)-1]
+	}
+	return ""
+}
+
+// isAdvisoryLine reports whether a line is a package manager talking about
+// itself rather than about the failure.
+func isAdvisoryLine(line string) bool {
+	return strings.HasPrefix(line, "[notice]") || strings.HasPrefix(line, "npm notice")
+}
+
+// buildkitStepTail is the fallback for consoles without an excerpt block (a
+// plain `docker build`, or BuildKit output truncated before the fence): walk
+// back from the wrapper and take the last thing the failing step printed.
+func buildkitStepTail(lines []string, wrapper int) (step, cause string) {
+	stepNum := ""
+	for i := wrapper - 1; i >= 0; i-- {
+		m := buildkitStepOutputRe.FindStringSubmatch(lines[i])
+		if m == nil {
+			continue
+		}
+		body := strings.TrimSpace(m[2])
+		if body == "" || isBuildkitWrapperLine(body) || isAdvisoryLine(body) {
+			continue
+		}
+		stepNum, cause = m[1], body
+		break
+	}
+	if cause == "" {
+		return "", ""
+	}
+	for i := wrapper - 1; i >= 0; i-- {
+		m := buildkitStepHeadRe.FindStringSubmatch(lines[i])
+		if m != nil && m[1] == stepNum {
+			return "[" + m[2] + "] " + strings.TrimSpace(m[3]), cause
+		}
+	}
+	return "", cause
+}
+
+// isBuildkitWrapperLine reports whether a line is BuildKit's own "the step
+// exited non-zero" envelope rather than something the step printed. Skipping
+// these is the whole point: they are what the reader already saw.
+func isBuildkitWrapperLine(line string) bool {
+	return strings.Contains(line, "did not complete successfully") ||
+		strings.Contains(line, "failed to solve")
+}
+
+// redactSecrets strips credentials that a failing package manager or git step
+// can echo back (an index URL with an inline password, a GitHub token) before
+// the line is persisted to error_message and rendered in the console UI.
+func redactSecrets(s string) string {
+	s = credURLRe.ReplaceAllString(s, "$1***@")
+	return ghTokenRe.ReplaceAllString(s, "***")
+}
+
+// truncateDetail caps a persisted detail line. Compiler and linker errors run
+// to thousands of characters; error_message is read in a one-line card.
+func truncateDetail(s string) string {
+	const max = 400
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
 }
 
 // Runner drives one build through the state machine by orchestrating Jenkins

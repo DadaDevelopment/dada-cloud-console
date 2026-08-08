@@ -15,6 +15,7 @@ import { useT } from "@/lib/i18n/console/context";
 import { trackUxEvent } from "@/lib/ux-telemetry";
 import { resolveCommit } from "@/lib/build-commit";
 import { trackBuildStart } from "@/lib/build-watch";
+import { buildFailureDetail } from "@/lib/build-failure";
 
 const PYTHON_BOT_DOCKERFILE = `FROM python:3.12-slim
 WORKDIR /app
@@ -47,6 +48,7 @@ export default function BuildDetailPage() {
   const appUrlPollsRef = useRef(0);
 
   const canDeploy = canMutate(role);
+  const failureDetail = buildFailureDetail(build?.fail_reason, build?.error_message);
 
   const load = useCallback(
     async (silent = false) => {
@@ -308,19 +310,30 @@ export default function BuildDetailPage() {
                   >
                     {t("apps.builds.fail.gitAuth.reconnect")}
                   </Link>
-                  {build.error_message ? (
-                    <p className="whitespace-pre-wrap break-words font-mono text-xs opacity-80">{build.error_message}</p>
+                  {failureDetail ? (
+                    <p className="whitespace-pre-wrap break-words font-mono text-xs opacity-80">{failureDetail}</p>
                   ) : null}
                 </div>
               ) : build.fail_reason === "platform_error" ? (
                 <div className="mt-1 space-y-2">
                   <p>{t("apps.builds.fail.reason.platformError")}</p>
-                  {build.error_message ? (
-                    <p className="whitespace-pre-wrap break-words font-mono text-xs opacity-80">{build.error_message}</p>
+                  {failureDetail ? (
+                    <p className="whitespace-pre-wrap break-words font-mono text-xs opacity-80">{failureDetail}</p>
                   ) : null}
                 </div>
-              ) : build.error_message ? (
-                <p className="mt-1 whitespace-pre-wrap break-words font-mono text-xs">{build.error_message}</p>
+              ) : build.fail_reason === "dockerfile_build_failed" || build.fail_reason === "build_failed" ? (
+                <div className="mt-1 space-y-2">
+                  <p>
+                    {build.fail_reason === "dockerfile_build_failed"
+                      ? t("apps.builds.fail.reason.dockerfileBuildFailed")
+                      : t("apps.builds.fail.reason.buildFailed")}
+                  </p>
+                  {failureDetail ? (
+                    <p className="whitespace-pre-wrap break-words font-mono text-xs opacity-80">{failureDetail}</p>
+                  ) : null}
+                </div>
+              ) : failureDetail ? (
+                <p className="mt-1 whitespace-pre-wrap break-words font-mono text-xs">{failureDetail}</p>
               ) : null}
             </div>
           )}
