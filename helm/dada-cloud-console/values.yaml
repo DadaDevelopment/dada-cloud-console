@@ -280,11 +280,13 @@ gitopsAgent:
     #
     # Empty = off, which is today's behaviour. Turn it on only once pg-router is
     # verified live: every tenant's traffic crosses it. Shards listed in
-    # DB_ROUTER_DIRECT_SHARDS keep their direct address — the platform's own
-    # databases, so signing in never depends on the router being up.
+    # DB_ROUTER_DIRECT_SHARDS keep their direct address; leave it empty. The
+    # platform's own connections come from this release's shared secrets, not
+    # from this reconciler, so the only thing an entry here does is hand the
+    # tenant databases on that shard a shard address instead of the router.
     DB_ROUTER_HOST: ""
     DB_ROUTER_PORT: "5432"
-    DB_ROUTER_DIRECT_SHARDS: "shard-0"
+    DB_ROUTER_DIRECT_SHARDS: ""
   existingSecret: ""
   # Service-unique secrets only. Shared keys (DATABASE_URL, GITOPS_DEFAULT_REPO_URL/
   # USERNAME/TOKEN, GITOPS_VALUES_TOKEN_SECRET) come from global.shared.

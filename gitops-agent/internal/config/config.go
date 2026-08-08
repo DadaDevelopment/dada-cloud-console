@@ -112,9 +112,15 @@ type Config struct {
 	DBRouterPort string
 
 	// DBRouterDirectShards are shards whose databases keep their direct address
-	// even when the router is enabled. The platform shard belongs here: routing
-	// the console's and Keycloak's own connections through the router would make
-	// signing in depend on the router being up.
+	// even when the router is enabled.
+	//
+	// Empty is the right default. The exception exists for the platform's own
+	// connections (console, Keycloak), and those are not wired by this
+	// reconciler at all -- they come from the release's shared secrets. Naming
+	// a shard here only strips router indirection from the tenant databases
+	// that happen to sit on it, which is exactly what the router is for: after
+	// the move to shard-0 the old default handed every new tenant a shard
+	// address again.
 	DBRouterDirectShards []string
 }
 
@@ -178,7 +184,7 @@ func Load() (*Config, error) {
 
 		DBRouterHost:         getEnv("DB_ROUTER_HOST", ""),
 		DBRouterPort:         getEnv("DB_ROUTER_PORT", "5432"),
-		DBRouterDirectShards: splitList(getEnv("DB_ROUTER_DIRECT_SHARDS", "shard-0")),
+		DBRouterDirectShards: splitList(os.Getenv("DB_ROUTER_DIRECT_SHARDS")),
 	}
 
 	if cfg.DatabaseURL == "" {
