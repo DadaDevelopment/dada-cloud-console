@@ -50,6 +50,7 @@ func authMiddleware(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 		}
 		if created {
 			notifySignup(pool, signupNotifier, cfg.SignupNotifyEmail, kc)
+			recordIdentitySignal(pool, collectIdentitySignal(c, id, "signup"))
 		}
 		// Authorization is decoded from the native Keycloak claims (group paths +
 		// scope). The /platform-admins staff god-mode is handled inside the claim
@@ -121,6 +122,12 @@ func optionalAuthResolver(pool *pgxpool.Pool, cfg *config.Config) func(c *gin.Co
 	}
 }
 
+// trustedProxyCIDRs are the only hops allowed to speak for a client's address.
+// Gin's default trusts every proxy, which makes ClientIP() return whatever
+// X-Forwarded-For the caller chose to send. Only in-cluster hops belong here:
+// the pod network (10.244.0.0/16) and the node network (10.16.0.0/16).
+var trustedProxyCIDRs = []string{"10.244.0.0/16", "10.16.0.0/16"}
+
 // SetupRouter configures and returns the Gin engine with all API routes registered.
 func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 	if !cfg.DevMode {
@@ -128,6 +135,9 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 	}
 
 	r := gin.New()
+	if err := r.SetTrustedProxies(trustedProxyCIDRs); err != nil {
+		log.Printf("router: set trusted proxies: %v", err)
+	}
 	r.Use(gin.Recovery())
 	r.Use(metrics.HTTPMiddleware())
 
