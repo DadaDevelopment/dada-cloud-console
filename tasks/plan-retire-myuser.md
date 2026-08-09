@@ -47,10 +47,37 @@
 - [x] 6. `mydatabase` → `mydatabase--retired-2026-08-10` (122 MB держим как
       откат, владелец `svc-mydatabase`), приложение перепроверено после
       переименования
-- [ ] 7. архивные дампы `keycloakdb`, `codexlb`, `console-test` → дроп
-- [ ] 8. `DROP ROLE myuser`, вычистить `myuser` из `cm/postgresql-init-scripts`
-      и из `secret/codex-lb`
-- [ ] 9. проверка: на обоих шардах нет ни объекта, ни привилегии за `myuser`
+- [x] 7. `codexlb` разобран как проектная база: `ServiceDatabaseV2 codex-lb`
+      (отдельный App `service-databases-codex-lb`), перелив сверен - 20 таблиц,
+      8 сиквенсов с совпавшим хешем `last_value`, 59 индексов, `usage_history`
+      64218, `request_logs` 4194, `reservations` 19406, `max(requested_at)`
+      идентичен; 87 объектов за `svc-codex-lb`. Оригинал →
+      `codexlb--retired-2026-08-10`, DSN в `values.yaml` переключён на роутер +
+      `svc-codex-lb` + платформенный секрет. `keycloakdb--junk` и
+      `codexlb--moved-to-shard-0` переливать некуда: первый - стоковый бутстрап
+      (realm `master`, 1 юзер `keycloakadmin`, 6 стоковых клиентов, 0 событий)
+      против живой `keycloak` с 98 юзерами; второй - побайтово тот же codexlb
+- [x] 8. `myuser` вычищен из `cm/postgresql-init-scripts` (через
+      `helm/databases/postgresql/values.yaml`), `DROP ROLE myuser` на shard-0
+      прошёл. Секрет `codex-lb` больше никем не читается - оставлен как есть
+- [x] 9. проверка: на обоих шардах ноль объектов за `myuser`; на shard-0 роли
+      больше нет. Откатные копии целы: `codexlb--retired` 64218/19406,
+      `mydatabase--retired` 38 таблиц в `profi`; `profi-backend` Running
+
+## Не закрыто: `myuser` жив на shard-1 как логин экспортёра метрик
+
+`DROP ROLE` на shard-1 нельзя: под `myuser` ходит metrics-сайдкар самого шарда
+(`DATA_SOURCE_USER=myuser`, `127.0.0.1`, запрос по `pg_stat_archiver`). На
+shard-0 сайдкар ходит под `postgres`, поэтому там роль снялась без последствий.
+
+Объектов и привилегий за ролью на shard-1 нет - только идентичность экспортёра.
+Чтобы снять: `auth.username` в `helm/databases/postgresql/values.yaml` увести в
+пусто (чарт тогда отдаёт экспортёру `postgres`). Это env в pod spec, то есть
+прокат StatefulSet прод-шарда, а на нём живая клиентская `odds-research`. Нужен
+согласованный простой, отдельным окном.
+
+Там же ждут окна `primary.initdb.user/password: myuser/mypassword` - латентные,
+скрипт initdb на живом томе не выполняется.
 
 ## Что вскрылось по дороге
 
@@ -70,18 +97,17 @@
   `/auth/login/` = 401 JSON, три сессии `fin-core|svc-fin-core`, внешний
   `https://profi.dada-tuda.ru/` = 200. Фикс роутера доказан на живом без клона.
 
-## Что осталось за `myuser` (live, 2026-08-10)
-
-| шард | БД | объектов |
-|---|---|---|
-| shard-0 | `codexlb` | 119 |
-| shard-0 | `keycloakdb--junk-2026-08-10` | 398 |
-| shard-0 | `mydatabase--retired-2026-08-10` | 1777 + 13 схем |
-| shard-1 | `codexlb--moved-to-shard-0` | 119 |
-
-Пункты 7-9 упираются в `codexlb`: он в проекте `platform`, который read-only.
-`DROP ROLE myuser` до его разбора невозможен — роль ещё владеет объектами.
-Нужно явное добро владельца в диалоге.
+- Проверка «объектов за ролью ноль» не значит, что роль снимается: `DROP ROLE`
+  падает и на грантах. Считать надо не только `pg_class.relowner`, а гасить
+  парой `REASSIGN OWNED BY ... TO postgres` + `DROP OWNED BY ...` в каждой базе,
+  которую перечислил `DETAIL` ошибки.
+- Приложение `apps/codex-lb` не рендерится в Argo с 09.08: воркло погашено в
+  нуль коммитом `219f1b4f0`, а схема значений чарта требует `replicaCount >= 1`
+  (`Failed to load target state ... minimum: got 0, want 1`). Ошибка одного
+  источника обнуляет все три, поэтому `resources` того же App не применяются -
+  включая `PublicApi codex-proxy`. Отсюда проектная база вынесена в отдельный
+  App. Сама поломка не чинилась: воркло погашено намеренно, поднимать реплики
+  без решения владельца нельзя.
 
 ## Инварианты
 
