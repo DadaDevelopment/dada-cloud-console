@@ -69,7 +69,7 @@ export function MarketingHeader() {
                 {t.nav.login}
               </Link>
               <Link
-                href={consoleHref("/register")}
+                href={consoleHref(localeHref("/register", locale))}
                 onClick={() => reachGoal(GOAL_LANDING_CTA, { source: "direct", placement: "header" })}
                 className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
               >
@@ -109,7 +109,7 @@ export function MarketingHeader() {
           <div className="flex items-center justify-between gap-3 pt-3">
             <LangToggle />
             <Link
-              href={consoleHref(token ? "/projects" : "/register")}
+              href={consoleHref(token ? "/projects" : localeHref("/register", locale))}
               onClick={() => {
                 setOpen(false);
                 if (!token) {

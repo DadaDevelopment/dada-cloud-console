@@ -14,9 +14,19 @@ import assert from "node:assert/strict";
 import {
   ABANDONED_REGISTRATION_CEILING_MS,
   ABANDONED_REGISTRATION_GRACE_MS,
+  isEmailSignupEnabled,
   readAbandonedRegistration,
   registerQueryParams,
 } from "./register-redirect.ts";
+
+test("isEmailSignupEnabled: only the literal 'true' turns the flag on", () => {
+  assert.equal(isEmailSignupEnabled("true"), true);
+  assert.equal(isEmailSignupEnabled("false"), false);
+  assert.equal(isEmailSignupEnabled(undefined), false);
+  assert.equal(isEmailSignupEnabled(""), false);
+  assert.equal(isEmailSignupEnabled("True"), false);
+  assert.equal(isEmailSignupEnabled("1"), false);
+});
 
 test("registerQueryParams yandex hints the broker and skips prompt=create", () => {
   assert.deepEqual(registerQueryParams("yandex"), { kc_idp_hint: "yandex" });

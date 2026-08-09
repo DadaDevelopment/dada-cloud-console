@@ -19,7 +19,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { AuthErrorScreen } from "@/components/shell/auth-error-screen";
-import { startRegister } from "@/lib/register-redirect";
+import { isEmailSignupEnabled, startRegister } from "@/lib/register-redirect";
 import { projectsApi, gitApi, buildsApi } from "@/lib/api";
 import type { FrameworkDetection } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
@@ -71,7 +71,8 @@ function DeployResolver() {
 
     if (!token) {
       const qs = searchParams.toString();
-      void startRegister(`/deploy${qs ? `?${qs}` : ""}`);
+      const method = isEmailSignupEnabled(process.env.NEXT_PUBLIC_EMAIL_SIGNUP_ENABLED) ? "email" : "yandex";
+      void startRegister(`/deploy${qs ? `?${qs}` : ""}`, method);
       return;
     }
 

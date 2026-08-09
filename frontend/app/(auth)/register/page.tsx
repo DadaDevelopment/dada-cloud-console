@@ -1,12 +1,14 @@
 "use client";
 import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import { localeFromPath } from "@/lib/i18n/context";
 import { AuthErrorScreen } from "@/components/shell/auth-error-screen";
 import { Button } from "@/components/ui/button";
 import {
   PENDING_REGISTRATION_KEY,
+  isEmailSignupEnabled,
   readAbandonedRegistration,
   startRegister,
   type RegisterMethod,
@@ -15,6 +17,40 @@ import { GOAL_SIGNUP_STARTED, reachGoal, rememberSource } from "@/lib/metrika";
 import { trackUxEvent } from "@/lib/ux-telemetry";
 
 const AUTH_MODE = process.env.NEXT_PUBLIC_AUTH_MODE;
+const EMAIL_SIGNUP_ENABLED = isEmailSignupEnabled(process.env.NEXT_PUBLIC_EMAIL_SIGNUP_ENABLED);
+
+/**
+ * Local copy for this page only. Kept out of `lib/i18n/dict.ts` on purpose -
+ * that dictionary is for the marketing site's URL-prefix locale, while this
+ * page picks its locale from `localeFromPath` the same way but lives in the
+ * auth flow and has no other console strings to share a dictionary with.
+ */
+const REGISTER_COPY = {
+  ru: {
+    noscript: "Для регистрации нужен включенный JavaScript в браузере.",
+    title: "Создать аккаунт",
+    subtitle: "Выберите способ регистрации",
+    abandonedNotice: "Похоже, прошлая попытка регистрации не завершилась.",
+    abandonedRetry: "Попробовать еще раз",
+    yandex: "Продолжить с Яндексом",
+    email: "Регистрация по e-mail",
+    emailSignupUnavailable: "Сейчас регистрация доступна только через Яндекс ID.",
+    haveAccount: "Уже есть аккаунт?",
+    signIn: "Войти",
+  },
+  en: {
+    noscript: "Registration requires JavaScript enabled in your browser.",
+    title: "Create account",
+    subtitle: "Choose how to sign up",
+    abandonedNotice: "Looks like your previous sign-up attempt didn't finish.",
+    abandonedRetry: "Try again",
+    yandex: "Continue with Yandex",
+    email: "Sign up with e-mail",
+    emailSignupUnavailable: "Sign-up is currently available through Yandex ID only.",
+    haveAccount: "Already have an account?",
+    signIn: "Sign in",
+  },
+} as const;
 
 /**
  * Only accepts in-app paths ("/foo") as a returnTo target, rejecting
@@ -41,7 +77,9 @@ function sanitizeReturnTo(value: string | null): string {
  */
 function OidcRegisterPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
+  const copy = REGISTER_COPY[localeFromPath(pathname)];
   const { isLoading, token, authError, logout } = useAuth();
   const [pending, setPending] = useState<RegisterMethod | null>(null);
   /**
@@ -105,7 +143,7 @@ function OidcRegisterPage() {
     <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
       <noscript>
         <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-center text-sm text-amber-800">
-          Для регистрации нужен включенный JavaScript в браузере.
+          {copy.noscript}
         </div>
       </noscript>
       <div className="w-full max-w-md">
@@ -116,19 +154,19 @@ function OidcRegisterPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
               </svg>
             </div>
-            <h1 className="text-2xl font-bold text-gray-900">Создать аккаунт</h1>
-            <p className="mt-1 text-sm text-gray-500">Выберите способ регистрации</p>
+            <h1 className="text-2xl font-bold text-gray-900">{copy.title}</h1>
+            <p className="mt-1 text-sm text-gray-500">{copy.subtitle}</p>
           </div>
 
           {abandoned && (
             <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-              <p>Похоже, прошлая попытка регистрации не завершилась.</p>
+              <p>{copy.abandonedNotice}</p>
               <button
                 type="button"
                 className="mt-2 font-medium text-blue-700 underline hover:text-blue-900"
                 onClick={handleRetryAbandoned}
               >
-                Попробовать еще раз
+                {copy.abandonedRetry}
               </button>
             </div>
           )}
@@ -142,25 +180,29 @@ function OidcRegisterPage() {
               disabled={pending !== null && pending !== "yandex"}
               onClick={() => handleChoose("yandex")}
             >
-              Продолжить с Яндексом
+              {copy.yandex}
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full"
-              size="lg"
-              isLoading={pending === "email"}
-              disabled={pending !== null && pending !== "email"}
-              onClick={() => handleChoose("email")}
-            >
-              Регистрация по e-mail
-            </Button>
+            {EMAIL_SIGNUP_ENABLED ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                size="lg"
+                isLoading={pending === "email"}
+                disabled={pending !== null && pending !== "email"}
+                onClick={() => handleChoose("email")}
+              >
+                {copy.email}
+              </Button>
+            ) : (
+              <p className="text-center text-sm text-gray-500">{copy.emailSignupUnavailable}</p>
+            )}
           </div>
 
           <p className="mt-6 text-center text-sm text-gray-500">
-            Уже есть аккаунт?{" "}
+            {copy.haveAccount}{" "}
             <Link href="/login" className="font-medium text-blue-600 hover:text-blue-700">
-              Войти
+              {copy.signIn}
             </Link>
           </p>
         </div>

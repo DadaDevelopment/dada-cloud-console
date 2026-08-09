@@ -15,12 +15,17 @@ ARG NEXT_PUBLIC_API_URL=
 # Auth/console links on the marketing landing target the console host (so OIDC
 # login uses the whitelisted redirect). Empty → relative links (local dev).
 ARG NEXT_PUBLIC_CONSOLE_URL=
+# Gate for the "Sign up with e-mail" button on /register. Keycloak's own
+# registration form is a dead end while registrationAllowed=false on the
+# realm, so this must default to unset/false: only "true" turns it on.
+ARG NEXT_PUBLIC_EMAIL_SIGNUP_ENABLED=false
 
 ENV NEXT_PUBLIC_AUTH_MODE=$NEXT_PUBLIC_AUTH_MODE
 ENV NEXT_PUBLIC_KEYCLOAK_ISSUER=$NEXT_PUBLIC_KEYCLOAK_ISSUER
 ENV NEXT_PUBLIC_OIDC_CLIENT_ID=$NEXT_PUBLIC_OIDC_CLIENT_ID
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_CONSOLE_URL=$NEXT_PUBLIC_CONSOLE_URL
+ENV NEXT_PUBLIC_EMAIL_SIGNUP_ENABLED=$NEXT_PUBLIC_EMAIL_SIGNUP_ENABLED
 
 # @dada/* deps come from internal Nexus npm (see .npmrc). Auth is provided as a
 # BuildKit secret so it never lands in an image layer:

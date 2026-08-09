@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Check } from "lucide-react";
 import { useLang } from "@/lib/i18n/context";
-import { consoleHref } from "@/lib/site";
+import { consoleHref, localeHref } from "@/lib/site";
 import { ProductHero, CtaBand, FaqList, RelatedLinks } from "@/components/marketing/sections";
 import { FaqJsonLd } from "@/components/marketing/faq-jsonld";
 import { clsx } from "clsx";
@@ -219,7 +219,7 @@ export default function PricingPage() {
                 </ul>
 
                 <Link
-                  href={p.key === "enterprise" ? "mailto:hello@dada-tuda.ru" : consoleHref("/register")}
+                  href={p.key === "enterprise" ? "mailto:hello@dada-tuda.ru" : consoleHref(localeHref("/register", locale))}
                   className={clsx(
                     "mt-6 rounded-lg px-5 py-2.5 text-center text-sm font-semibold transition-colors",
                     p.highlight

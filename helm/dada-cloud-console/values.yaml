@@ -436,6 +436,7 @@ frontend:
     NEXT_PUBLIC_AUTH_MODE: "oidc"
     NEXT_PUBLIC_KEYCLOAK_ISSUER: "https://id.dada-tuda.ru/realms/master"
     NEXT_PUBLIC_OIDC_CLIENT_ID: "dada-console"
+    NEXT_PUBLIC_EMAIL_SIGNUP_ENABLED: "false"
     # Runtime env (NOT baked). The same image serves the marketing landing and the
     # console; proxy.ts shows the landing at "/" only on this host and redirects
     # "/" → /projects on every other host. Empty = always serve the landing at "/".

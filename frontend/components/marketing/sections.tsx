@@ -35,7 +35,7 @@ export function ProductHero({
           <p className="mt-5 max-w-2xl text-lg text-white/70">{subtitle}</p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Link
-              href={consoleHref(ctaHref ?? "/register")}
+              href={consoleHref(localeHref(ctaHref ?? "/register", locale))}
               onClick={() => reachGoal(GOAL_LANDING_CTA, { source: ctaSource(ctaHref ?? ""), placement: "hero" })}
               className="rounded-md bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
             >
@@ -187,7 +187,7 @@ export function FaqList({ title, items }: { title: string; items: { q: string; a
 }
 
 export function CtaBand({ ctaHref }: { ctaHref?: string } = {}) {
-  const { t } = useLang();
+  const { t, locale } = useLang();
   return (
     <section className="mkt-hero-gradient">
       <div className="mx-auto max-w-7xl px-4 py-16 text-center sm:px-6 lg:px-8">
@@ -196,7 +196,7 @@ export function CtaBand({ ctaHref }: { ctaHref?: string } = {}) {
         </h2>
         <p className="mx-auto mt-4 max-w-xl text-lg text-white/70">{t.home.ctaSubtitle}</p>
         <Link
-          href={consoleHref(ctaHref ?? "/register")}
+          href={consoleHref(localeHref(ctaHref ?? "/register", locale))}
           onClick={() => reachGoal(GOAL_LANDING_CTA, { source: ctaSource(ctaHref ?? ""), placement: "band" })}
           className="mt-8 inline-block rounded-md bg-blue-600 px-8 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
         >

@@ -33,6 +33,22 @@ export function registerQueryParams(method: RegisterMethod): Record<string, stri
 }
 
 /**
+ * Pure decision behind the `NEXT_PUBLIC_EMAIL_SIGNUP_ENABLED` build flag.
+ * Only the literal string `"true"` turns the e-mail sign-up path on; any
+ * other value (missing, `"false"`, a typo) keeps it off. The realm this
+ * points at (`registrationAllowed=false` since the 2026-08-08 farm wave)
+ * makes Keycloak's own registration form a guaranteed dead end for every
+ * visitor who reaches it, so the safe default is off, not on.
+ *
+ * Takes the raw env value as a parameter rather than reading
+ * `process.env` itself so it stays a pure function callers can unit-test
+ * without relying on Next.js's build-time env inlining.
+ */
+export function isEmailSignupEnabled(raw: string | undefined): boolean {
+  return raw === "true";
+}
+
+/**
  * Kicks off the Keycloak sign-UP flow instead of the default sign-in form.
  *
  * `@dada/react-sso` only exposes `login(returnTo)`, which forwards `{ state }`
