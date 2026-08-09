@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { gitApi, buildsApi, classifyConnectRepoConflict } from "@/lib/api";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
@@ -55,6 +56,7 @@ export function ConnectByUrlDialog({ projectId, envId, open, onClose }: ConnectB
   const [worker, setWorker] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [alreadyConnected, setAlreadyConnected] = useState<string | null>(null);
 
   function cloneUrlErrorMessage(code: ParseGitCloneUrlError): string {
     switch (code) {
@@ -88,6 +90,29 @@ export function ConnectByUrlDialog({ projectId, envId, open, onClose }: ConnectB
     setPort(8080);
     setWorker(false);
     setError(null);
+    setAlreadyConnected(null);
+  }
+
+  /**
+   * Triggers the first build for `name` and lands on its log page, the same
+   * tail every successful path through this dialog ends with. Split out so
+   * the `repo_already_connected` recovery can reuse it: that conflict means
+   * the link the user asked for already exists, so the honest next step is
+   * the build they came for, not a red dead end.
+   */
+  async function startBuild(name: string) {
+    if (!envId) return;
+    try {
+      const { build } = await buildsApi.trigger(projectId, envId, name);
+      if (build?.id) {
+        trackBuildStart({ projectId, envId, appName: name, buildId: build.id });
+      }
+      router.push(`/projects/${projectId}/apps/${name}/builds/${build.id}?envId=${envId}`);
+      reset();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("git.import.deploy.triggerFailed"));
+      setSubmitting(false);
+    }
   }
 
   async function handleSubmit() {
@@ -121,6 +146,7 @@ export function ConnectByUrlDialog({ projectId, envId, open, onClose }: ConnectB
       const msg = err instanceof Error ? err.message : t("git.import.error.connect");
       if (conflict === "repo_already_connected") {
         setError(t("git.import.byUrl.error.repoAlreadyConnected"));
+        setAlreadyConnected(trimmedName);
       } else if (conflict === "app_name_taken") {
         setError(t("git.import.byUrl.error.appNameTaken"));
       } else {
@@ -130,18 +156,7 @@ export function ConnectByUrlDialog({ projectId, envId, open, onClose }: ConnectB
       return;
     }
 
-    try {
-      const { build } = await buildsApi.trigger(projectId, envId, trimmedName);
-      if (build?.id) {
-        trackBuildStart({ projectId, envId, appName: trimmedName, buildId: build.id });
-      }
-      router.push(`/projects/${projectId}/apps/${trimmedName}/builds/${build.id}?envId=${envId}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("git.import.deploy.triggerFailed"));
-      setSubmitting(false);
-      return;
-    }
-    reset();
+    await startBuild(trimmedName);
   }
 
   const canSubmit = cloneUrl.trim() !== "" && appName.trim() !== "" && !!envId && !submitting;
@@ -258,6 +273,31 @@ export function ConnectByUrlDialog({ projectId, envId, open, onClose }: ConnectB
         {error && (
           <div role="alert" className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm text-red-700 dark:text-red-300">
             {error}
+            {alreadyConnected && (
+              <div className="mt-2 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  data-ux="git_import:already_connected_rebuild"
+                  onClick={() => {
+                    setError(null);
+                    setSubmitting(true);
+                    void startBuild(alreadyConnected);
+                  }}
+                  disabled={submitting}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+                >
+                  {submitting && <Spinner size="sm" />}
+                  {t("git.import.byUrl.alreadyConnected.rebuild")}
+                </button>
+                <Link
+                  href={`/projects/${projectId}/apps/${alreadyConnected}${envId ? `?envId=${envId}` : ""}`}
+                  data-ux="git_import:already_connected_open"
+                  className="text-xs font-semibold underline underline-offset-2 hover:text-red-800 dark:hover:text-red-200"
+                >
+                  {t("git.import.byUrl.alreadyConnected.open")}
+                </Link>
+              </div>
+            )}
           </div>
         )}
 
