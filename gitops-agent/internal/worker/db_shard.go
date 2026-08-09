@@ -62,7 +62,7 @@ func (w *DBWatcher) doSetDatabaseShard(ctx context.Context, op db.Operation) err
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("set database shard: no ServiceDatabaseV2 in %s", valuesPath)
+		return w.setShardInHelmValues(ctx, op, mgr, projectName, envName, p.AppRef, p.Name, p.Shard)
 	}
 
 	patched, changed, err := patchDatabaseShard(raw, p.Name, p.Shard)
@@ -118,6 +118,82 @@ func patchDatabaseShard(manifestYAML, wantName, shard string) (string, bool, err
 		return "", false, nil
 	}
 	spec["shard"] = shard
+	out, err := yaml.Marshal(doc)
+	if err != nil {
+		return "", false, err
+	}
+	return string(out), true, nil
+}
+
+// setShardInHelmValues is the path for apps whose ServiceDatabaseV2 is rendered
+// by their own chart out of common.serviceDatabase in values.yaml, rather than
+// standing as a manifest in resources.values.yaml.
+//
+// Both shapes are live: databases the console creates today land in
+// resources.values.yaml, but everything provisioned through an app chart --
+// reels, user, telemost-bot -- has only the values block, and for those the
+// manifest lookup finds nothing. Failing there left the shard unrecorded for
+// exactly the apps whose charts do accept it (n8n already passes it through),
+// so a move silently kept pointing Kasten and the ProviderConfig at the shard
+// the data left.
+func (w *DBWatcher) setShardInHelmValues(ctx context.Context, op db.Operation, mgr *git.Manager, projectName, envName, appRef, name, shard string) error {
+	if appRef == "" {
+		return fmt.Errorf("set database shard: %s has no ServiceDatabaseV2 manifest and no appRef to find its values.yaml", name)
+	}
+	valuesPath := renderer.AppHelmValuesGitPath(projectName, envName, appRef)
+	existing, err := mgr.ReadFile(valuesPath)
+	if err != nil {
+		return fmt.Errorf("set database shard: neither a ServiceDatabaseV2 manifest nor %s: %w", valuesPath, err)
+	}
+
+	patched, changed, err := patchHelmValuesShard(existing, shard)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return nil
+	}
+
+	commitMsg := fmt.Sprintf(
+		"[DADA Console] Set ServiceDatabaseV2 %s shard=%s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
+		name, shard, op.ID, projectName, envName,
+	)
+	if err := w.commitFilesAndRecord(ctx, op, mgr, valuesPath, []git.FileChange{{Path: valuesPath, Content: patched}}, commitMsg); err != nil {
+		return err
+	}
+
+	patch, _ := json.Marshal(map[string]any{"shard": shard})
+	_, err = w.pool.Exec(ctx, `
+		UPDATE resource_snapshots
+		SET summary_json = COALESCE(summary_json, '{}'::jsonb) || $1::jsonb
+		WHERE environment_id = $2 AND kind = 'ServiceDatabaseV2' AND name = $3
+	`, patch, op.EnvironmentID, name)
+	return err
+}
+
+// patchHelmValuesShard sets common.serviceDatabase.shard and reports
+// changed=false when the file already names that shard.
+//
+// It refuses a values.yaml with no serviceDatabase block rather than creating
+// one: a block conjured here would carry no name, no schema and no backup
+// settings, and the chart would render a second database next to the real one.
+func patchHelmValuesShard(valuesYAML, shard string) (string, bool, error) {
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(valuesYAML), &doc); err != nil {
+		return "", false, fmt.Errorf("parsing values.yaml for shard patch: %w", err)
+	}
+	common, ok := doc["common"].(map[string]any)
+	if !ok {
+		return "", false, fmt.Errorf("values.yaml has no common block to carry the database shard")
+	}
+	sd, ok := common["serviceDatabase"].(map[string]any)
+	if !ok {
+		return "", false, fmt.Errorf("values.yaml has no common.serviceDatabase block to carry the shard")
+	}
+	if cur, _ := sd["shard"].(string); cur == shard {
+		return "", false, nil
+	}
+	sd["shard"] = shard
 	out, err := yaml.Marshal(doc)
 	if err != nil {
 		return "", false, err
