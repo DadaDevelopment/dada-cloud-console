@@ -185,6 +185,11 @@ func (h *Handler) GetAdminOverview(c *gin.Context) {
 	})
 }
 
+// overviewUsers counts customer accounts and how many of them acted in the last
+// 48 hours. SignUp is excluded from the activity query because provisioning
+// writes that row in the same statement that creates the user
+// (backend/internal/auth/provision.go): counting it would report every fresh
+// registration as an active customer without a single product action.
 func (h *Handler) overviewUsers(ctx context.Context) (overviewUsers, error) {
 	var out overviewUsers
 	err := h.pool.QueryRow(ctx, `
@@ -206,6 +211,7 @@ func (h *Handler) overviewUsers(ctx context.Context) (overviewUsers, error) {
 		FROM audit_events a
 		JOIN user_accounts u ON u.id = a.actor_id
 		WHERE a.created_at >= now() - interval '48 hours'
+		  AND a.action <> 'SignUp'
 		  AND u.account_kind = $1`,
 		overviewCustomerKind,
 	).Scan(&out.Active48h)

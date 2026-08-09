@@ -366,13 +366,21 @@ const (
 // authenticated request skips this query entirely. A query failure must not
 // invent an answer, so it reports "unknown" rather than falling back to
 // "first" or "return".
+//
+// SignUp is excluded from the lookup: provisioning writes that row in the same
+// statement that creates the users row (backend/internal/auth/provision.go), so
+// counting it as prior history would make every genuinely first visit report
+// "return".
 func (h *Handler) classifyFirstVisit(ctx context.Context, actorID uuid.UUID, now time.Time) string {
 	if h.pool == nil {
 		return auditVisitUnknown
 	}
 	var exists bool
 	err := h.pool.QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM audit_events WHERE actor_id = $1 AND created_at < $2 LIMIT 1)`,
+		`SELECT EXISTS(
+		     SELECT 1 FROM audit_events
+		      WHERE actor_id = $1 AND created_at < $2 AND action <> 'SignUp'
+		      LIMIT 1)`,
 		actorID, now,
 	).Scan(&exists)
 	if err != nil {
