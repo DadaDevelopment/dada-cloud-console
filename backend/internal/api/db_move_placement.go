@@ -35,7 +35,7 @@ func (h *Handler) recordMovePlacement(ctx context.Context, datname, shard string
 		`SELECT project_id, environment_id, name, COALESCE(summary_json->'spec'->>'appRef', '')
 		 FROM resource_snapshots
 		 WHERE kind = 'ServiceDatabaseV2' AND summary_json->'spec'->>'database' = $1
-		 ORDER BY updated_at DESC
+		 ORDER BY last_synced_at DESC
 		 LIMIT 1`, datname).Scan(&projectID, &envID, &name, &appRef)
 	if errors.Is(err, pgx.ErrNoRows) {
 		log.Printf("db-move: %s has no ServiceDatabaseV2 snapshot, its CR keeps the old shard", datname)
@@ -54,10 +54,10 @@ func (h *Handler) recordMovePlacement(ctx context.Context, datname, shard string
 	var opID uuid.UUID
 	err = h.pool.QueryRow(ctx,
 		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
-		 SELECT $1, $2, $3, 'SetDatabaseShard', 'ServiceDatabaseV2', $4, 'Created', $5
+		 SELECT $1, $2, $3, 'SetDatabaseShard', 'ServiceDatabaseV2', $4::text, 'Created', $5::jsonb
 		 WHERE NOT EXISTS (
 		   SELECT 1 FROM operations
-		   WHERE environment_id = $3 AND resource_kind = 'ServiceDatabaseV2' AND resource_name = $4
+		   WHERE environment_id = $3 AND resource_kind = 'ServiceDatabaseV2' AND resource_name = $4::text
 		     AND action = 'SetDatabaseShard' AND status IN ('Created', 'Reconciling')
 		 )
 		 RETURNING id`,
