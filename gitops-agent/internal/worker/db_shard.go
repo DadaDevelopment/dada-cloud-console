@@ -20,6 +20,10 @@ import (
 // composition would point Kasten backups and the admin ProviderConfig at the
 // wrong instance, and anyone reading the manifest is told a lie.
 //
+// The manifest is looked up by name, not by kind: standalone databases of one
+// project share the carrier app service-databases-<project>, so the first
+// ServiceDatabaseV2 in that file usually belongs to a different database.
+//
 // Like the enforcement patch, this edits the manifest already in git rather
 // than re-rendering from the payload: the deployed CR is the authoritative
 // record of the database identity, and a payload that carried none of it would
@@ -57,7 +61,7 @@ func (w *DBWatcher) doSetDatabaseShard(ctx context.Context, op db.Operation) err
 	if err != nil {
 		return err
 	}
-	raw, ok, err := rv.ManifestOfKind("ServiceDatabaseV2")
+	raw, ok, err := rv.ManifestOfKindNamed("ServiceDatabaseV2", p.Name)
 	if err != nil {
 		return err
 	}

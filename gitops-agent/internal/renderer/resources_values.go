@@ -172,6 +172,28 @@ func (rv *ResourcesValues) ManifestOfKind(kind string) (string, bool, error) {
 	return "", false, nil
 }
 
+// ManifestOfKindNamed returns the YAML of the manifest of the given kind whose
+// metadata.name matches, and whether one was present.
+//
+// ManifestOfKind is not enough for the files a carrier app owns: standalone
+// databases of one project all render into service-databases-<project>, so the
+// first ServiceDatabaseV2 in the file usually belongs to another database and a
+// patch aimed by name is rejected as targeting the wrong manifest.
+func (rv *ResourcesValues) ManifestOfKindNamed(kind, name string) (string, bool, error) {
+	for i := range rv.Manifests {
+		k, n := manifestKey(&rv.Manifests[i])
+		if k != kind || n != name {
+			continue
+		}
+		b, err := yaml.Marshal(&rv.Manifests[i])
+		if err != nil {
+			return "", false, fmt.Errorf("marshalling %s/%s manifest: %w", kind, name, err)
+		}
+		return string(b), true, nil
+	}
+	return "", false, nil
+}
+
 // Marshal renders the file back to YAML with a top-level "manifests:" key. When
 // the list is empty it emits "manifests: []" so the file is still valid.
 func (rv *ResourcesValues) Marshal() (string, error) {
