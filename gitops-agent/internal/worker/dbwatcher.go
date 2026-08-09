@@ -1422,6 +1422,15 @@ func (w *DBWatcher) doDeleteProject(ctx context.Context, op db.Operation) error 
 // at an operation owned by the OLD one. Those rows survive the scoped delete and
 // then block the operations delete from a project they no longer belong to, so
 // operation_id is detached platform-wide first — same treatment git_commits gets.
+//
+// audit_events is the one table here that is DETACHED, never deleted: it is a
+// trail and must outlive the thing it describes (migration 110, same choice 044
+// and 093 made). Deleting it made every project teardown erase the user's only
+// action history — measured 2026-08-09, when the ban sweep's 17 project deletes
+// left all 18 accounts of that wave with zero audit_events while ux_events still
+// held 13-1532 events each, so "did nothing" was an artifact of this function.
+// The project id and name are stashed into metadata before detaching, so a
+// detached row stays attributable after the projects row is gone.
 func wipeProjectRows(ctx context.Context, tx pgx.Tx, projectID uuid.UUID) error {
 	if _, err := tx.Exec(ctx,
 		`UPDATE git_commits SET operation_id = NULL WHERE operation_id IN (SELECT id FROM operations WHERE project_id = $1)`,
@@ -1447,8 +1456,22 @@ func wipeProjectRows(ctx context.Context, tx pgx.Tx, projectID uuid.UUID) error 
 	); err != nil {
 		return fmt.Errorf("detach preview parent_env_id: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM audit_events WHERE project_id = $1`, projectID); err != nil {
-		return fmt.Errorf("delete audit_events: %w", err)
+	if _, err := tx.Exec(ctx,
+		`UPDATE audit_events
+		    SET metadata = metadata || jsonb_build_object(
+		            'deleted_project_id', project_id::text,
+		            'deleted_project_name', (SELECT name FROM projects WHERE id = $1)),
+		        project_id = NULL
+		  WHERE project_id = $1`,
+		projectID,
+	); err != nil {
+		return fmt.Errorf("detach audit_events from project: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE audit_events SET operation_id = NULL WHERE operation_id IN (SELECT id FROM operations WHERE project_id = $1)`,
+		projectID,
+	); err != nil {
+		return fmt.Errorf("detach audit_events from operations: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM db_backups WHERE project_id = $1`, projectID); err != nil {
 		return fmt.Errorf("delete db_backups: %w", err)

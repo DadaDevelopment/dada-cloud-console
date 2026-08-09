@@ -52,6 +52,94 @@ func TestWipeProjectRows_NoOrphans(t *testing.T) {
 	assertNoRows(t, ctx, pool, projectID)
 }
 
+// TestWipeProjectRows_PreservesAuditTrail is the regression for the bug that
+// made every project teardown erase the user's action history: wipeProjectRows
+// used to DELETE the project's audit_events, so the 2026-08-09 ban sweep's 17
+// project deletes left all 18 accounts of that wave looking like they had never
+// clicked anything. Asserts both directions — the deleted project's audit row
+// survives detached and attributable (project id + name stashed in metadata),
+// and a SURVIVING project's audit row that referenced the deleted project's
+// operation keeps its own project_id while losing only operation_id.
+func TestWipeProjectRows_PreservesAuditTrail(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping DB integration test")
+	}
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+
+	applyMigrations(t, ctx, pool)
+
+	doomedID := uuid.New()
+	seedProjectTrail(t, ctx, pool, doomedID)
+	survivorID := uuid.New()
+	seedProjectTrail(t, ctx, pool, survivorID)
+
+	var doomedName string
+	if err := pool.QueryRow(ctx, `SELECT name FROM projects WHERE id = $1`, doomedID).Scan(&doomedName); err != nil {
+		t.Fatalf("read doomed project name: %v", err)
+	}
+	var doomedOp uuid.UUID
+	if err := pool.QueryRow(ctx, `SELECT id FROM operations WHERE project_id = $1`, doomedID).Scan(&doomedOp); err != nil {
+		t.Fatalf("read doomed operation: %v", err)
+	}
+	exec(t, ctx, pool,
+		`UPDATE audit_events SET operation_id = $1 WHERE project_id = $2`, doomedOp, survivorID)
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := wipeProjectRows(ctx, tx, doomedID); err != nil {
+		t.Fatalf("wipeProjectRows: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	var kept int
+	var gotName string
+	var opNull bool
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*), coalesce(max(metadata->>'deleted_project_name'), ''), coalesce(bool_and(operation_id IS NULL), false)
+		   FROM audit_events WHERE metadata->>'deleted_project_id' = $1`,
+		doomedID.String(),
+	).Scan(&kept, &gotName, &opNull); err != nil {
+		t.Fatalf("count detached audit rows: %v", err)
+	}
+	if kept != 1 {
+		t.Fatalf("audit rows of the deleted project: got %d, want 1 (the trail must outlive the project)", kept)
+	}
+	if gotName != doomedName {
+		t.Errorf("stashed project name: got %q, want %q", gotName, doomedName)
+	}
+	if !opNull {
+		t.Errorf("detached audit row still references the deleted operation")
+	}
+
+	var survivorRows, survivorDetached int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*), count(*) FILTER (WHERE operation_id IS NULL)
+		   FROM audit_events WHERE project_id = $1`,
+		survivorID,
+	).Scan(&survivorRows, &survivorDetached); err != nil {
+		t.Fatalf("count survivor audit rows: %v", err)
+	}
+	if survivorRows != 1 {
+		t.Errorf("survivor audit rows: got %d, want 1 (a foreign project's trail must not be touched)", survivorRows)
+	}
+	if survivorDetached != survivorRows {
+		t.Errorf("survivor audit row still references the deleted operation: %d of %d detached", survivorDetached, survivorRows)
+	}
+}
+
 func applyMigrations(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
 	dir := filepath.Join("..", "..", "..", "backend", "migrations")
