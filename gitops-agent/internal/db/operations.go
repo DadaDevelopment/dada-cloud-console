@@ -37,9 +37,28 @@ func (o Operation) Unattended() bool { return o.ActorID == SystemActorID }
 
 const claimBatchSize = 10
 
-// ClaimPending atomically claims up to claimBatchSize Created operations,
-// marking them Processing, and returns them. Uses SKIP LOCKED so multiple
-// replicas can run without contention.
+// staleProcessingTimeout is how long an operation may sit in Processing before
+// another worker may take it over.
+//
+// A claim flips Created to Processing and nothing else ever touches the row, so
+// a pod that dies mid-operation (a rollout, an OOM kill) leaves the operation
+// Processing forever: the console shows it running, no worker will look at it
+// again, and the user's action is silently lost. Two SetDatabaseShard operations
+// were stranded that way by ordinary deploys [live psql, 2026-08-10].
+//
+// The window is generous on purpose. There is no heartbeat, so a genuinely slow
+// operation is only safe from a second worker for this long, and the git work
+// these operations do (clone, patch, commit) is idempotent when repeated: a
+// patch that is already in place reports no change and commits nothing.
+const staleProcessingTimeout = 30 * time.Minute
+
+// ClaimPending atomically claims up to claimBatchSize operations, marking them
+// Processing, and returns them. Uses SKIP LOCKED so multiple replicas can run
+// without contention.
+//
+// It claims Created operations and re-claims ones abandoned in Processing by a
+// worker that died, so a rollout mid-operation costs a retry rather than the
+// operation.
 func ClaimPending(ctx context.Context, pool *pgxpool.Pool) ([]Operation, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -73,7 +92,7 @@ func ClaimPending(ctx context.Context, pool *pgxpool.Pool) ([]Operation, error) 
 		SET    status = 'Processing', updated_at = NOW()
 		WHERE  id IN (
 			SELECT o.id FROM operations o
-			WHERE  o.status = 'Created'
+			WHERE  (o.status = 'Created' OR (o.status = 'Processing' AND o.updated_at < NOW() - $2::interval))
 			  AND  o.action NOT IN ('CreateAppServer', 'DeleteAppServer', 'DeployStack', 'DiscoverWorkload', 'RestartStack',
 			                        'BoxUp', 'SuspendBox', 'ResumeBox', 'DeleteBox',
 			                        'AttachBoxDatabase', 'AttachBoxS3', 'DetachBoxAttachment',
@@ -83,7 +102,7 @@ func ClaimPending(ctx context.Context, pool *pgxpool.Pool) ([]Operation, error) 
 			FOR UPDATE SKIP LOCKED
 		)
 		RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name, payload, created_at
-	`, claimBatchSize)
+	`, claimBatchSize, staleProcessingTimeout.String())
 	if err != nil {
 		return nil, fmt.Errorf("claim query: %w", err)
 	}
