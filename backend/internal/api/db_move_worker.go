@@ -364,9 +364,32 @@ func (w *dbMoveWorker) cutover(ctx context.Context, m dbMove) error {
 		return err
 	}
 	if ownDB {
+		w.markOwnMoveDoneOnOldCopy(ctx, m)
 		w.h.recordMovePlacement(ctx, m.Datname, m.TargetShard)
 	}
 	return nil
+}
+
+// markOwnMoveDoneOnOldCopy repeats the 'done' write on the copy the console is
+// still connected to.
+//
+// Moving the console's own database splits its bookkeeping in two: the row that
+// says the move finished is written on the new shard, while every tick keeps
+// reading the old copy until someone flips the DSN. That copy still shows the
+// move in 'cutover', so the next tick runs the cutover again - against a
+// subscription the first pass already dropped - and buries a finished move
+// under "the initial table copy has not finished". The failure is cosmetic for
+// the data and expensive for whoever reads the row afterwards.
+//
+// The write happens after the router has released the database: inside the held
+// window it would queue behind the worker's own PAUSE.
+func (w *dbMoveWorker) markOwnMoveDoneOnOldCopy(ctx context.Context, m dbMove) {
+	if _, err := w.h.pool.Exec(ctx,
+		`UPDATE db_moves SET phase = 'done', error = '', cutover_at = COALESCE(cutover_at, NOW()), updated_at = NOW()
+		 WHERE id = $1`, m.ID); err != nil {
+		log.Printf("db-move: %s finished but the copy the console still reads keeps the old phase: %v",
+			m.Datname, err)
+	}
 }
 
 // ownDatabase reports whether a move is moving the console's own database.
