@@ -13,6 +13,12 @@ type deleteAppServerPayload struct {
 	AppServerName string `json:"app_server_name"`
 }
 
+// vmResourceAddress is the only resource a VM teardown may destroy. The
+// workspace's other resource, beget_ssh_key.deploy, is shared across every
+// AppServer and carries lifecycle.prevent_destroy; leaving it in the plan makes
+// Terraform reject the destroy outright instead of skipping the key.
+const vmResourceAddress = "beget_compute_instance.app_server"
+
 // vpsRemover is the provider-level escape hatch used when Terraform cannot run.
 type vpsRemover interface {
 	RemoveVPS(ctx context.Context, id string) error
@@ -31,7 +37,7 @@ func (w *VMWatcher) destroyVM(ctx context.Context, appServerUUID, serverName str
 	if err := w.tf.Init(ctx, appServerUUID); err != nil {
 		return fmt.Errorf("terraform init: %w", err)
 	}
-	if err := w.tf.Destroy(ctx, appServerUUID, w.tfVars(serverName, w.cfg.BegetRegion)); err != nil {
+	if err := w.tf.Destroy(ctx, appServerUUID, w.tfVars(serverName, w.cfg.BegetRegion), vmResourceAddress); err != nil {
 		return fmt.Errorf("terraform destroy: %w", err)
 	}
 	return nil

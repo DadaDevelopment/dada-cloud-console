@@ -73,8 +73,18 @@ func (e *Executor) Apply(ctx context.Context, appServerID string, vars map[strin
 	return e.outputs(ctx, dir)
 }
 
-// Destroy runs terraform destroy.
-func (e *Executor) Destroy(ctx context.Context, appServerID string, vars map[string]string) error {
+// Destroy runs terraform destroy, optionally scoped to the given resource
+// addresses.
+//
+// Scoping matters: the workspace also holds beget_ssh_key.deploy, which carries
+// lifecycle.prevent_destroy so that tearing a VM down never wipes the shared
+// deploy key. An unscoped destroy plan still includes that key, and
+// prevent_destroy then rejects the WHOLE plan — "Resource beget_ssh_key.deploy
+// has lifecycle.prevent_destroy set" — so no VM could ever be destroyed through
+// this path (incident 2026-08-09: a farm-account VM survived DeleteAppServer,
+// billed at 1012 RUB/mo, and the fallback Beget API call 404'd). Passing the
+// instance address keeps the key out of the plan.
+func (e *Executor) Destroy(ctx context.Context, appServerID string, vars map[string]string, targets ...string) error {
 	dir := e.WorkspaceDir(appServerID)
 	tf, err := e.newTF(dir)
 	if err != nil {
@@ -83,6 +93,9 @@ func (e *Executor) Destroy(ctx context.Context, appServerID string, vars map[str
 	opts := []tfexec.DestroyOption{}
 	for k, v := range vars {
 		opts = append(opts, tfexec.Var(fmt.Sprintf("%s=%s", k, v)))
+	}
+	for _, t := range targets {
+		opts = append(opts, tfexec.Target(t))
 	}
 	if err := tf.Destroy(ctx, opts...); err != nil {
 		return fmt.Errorf("tf destroy: %w", err)

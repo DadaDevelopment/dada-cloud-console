@@ -5,7 +5,12 @@ import (
 	"errors"
 	"testing"
 
+	"os"
+	"path/filepath"
+	"strings"
+
 	"github.com/dada-tuda/console/portainer-agent/internal/db"
+	tf "github.com/dada-tuda/console/portainer-agent/internal/terraform"
 )
 
 type fakeRemover struct {
@@ -79,5 +84,43 @@ func TestRemoveVMViaProvider_PropagatesProviderError(t *testing.T) {
 
 	if err := w.removeVMViaProvider(context.Background(), strptr("vm-1")); err == nil {
 		t.Fatal("expected the provider error to surface so the operation fails instead of orphaning a billed VM")
+	}
+}
+
+// TestVMResourceAddressMatchesTemplate pins the destroy scope to the Terraform
+// template. An unscoped destroy is impossible here: beget_ssh_key.deploy carries
+// lifecycle.prevent_destroy, and its presence in the plan makes Terraform reject
+// the whole destroy — on 2026-08-09 that left a farm-account VM running and
+// billed after DeleteAppServer reported failure. Renaming the instance resource
+// in the template without updating vmResourceAddress would silently restore that
+// failure, so both halves of the contract are asserted here.
+func TestVMResourceAddressMatchesTemplate(t *testing.T) {
+	dir := t.TempDir()
+	if err := tf.PrepareWorkspace(dir); err != nil {
+		t.Fatalf("prepare workspace: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "main.tf"))
+	if err != nil {
+		t.Fatalf("read main.tf: %v", err)
+	}
+	main := string(body)
+
+	kind, name, ok := strings.Cut(vmResourceAddress, ".")
+	if !ok {
+		t.Fatalf("vmResourceAddress %q is not <type>.<name>", vmResourceAddress)
+	}
+	decl := "resource \"" + kind + "\" \"" + name + "\""
+	if !strings.Contains(main, decl) {
+		t.Fatalf("template declares no %s — destroy would target nothing", vmResourceAddress)
+	}
+	if !strings.Contains(main, "prevent_destroy") {
+		t.Fatal("template no longer sets prevent_destroy — re-check whether scoping the destroy is still required")
+	}
+	keyDecl := "resource \"beget_ssh_key\" \"deploy\""
+	if !strings.Contains(main, keyDecl) {
+		t.Fatal("shared deploy key resource is gone — update the destroy scope")
+	}
+	if strings.HasPrefix(vmResourceAddress, "beget_ssh_key.") {
+		t.Fatalf("vmResourceAddress %q points at the protected shared key", vmResourceAddress)
 	}
 }
