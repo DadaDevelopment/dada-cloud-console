@@ -23,7 +23,7 @@ func TestRenderRoutesWildcardOnlyWhenNothingMoved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	if !strings.Contains(out, "* = host=postgresql.databases.svc.cluster.local port=5432 auth_dbname=postgres") {
+	if !strings.Contains(out, "* = host=postgresql.databases.svc.cluster.local port=5432 auth_dbname=dada_auth_shard-1") {
 		t.Fatalf("wildcard missing:\n%s", out)
 	}
 	if strings.Contains(out, "app-one =") || strings.Contains(out, "app-two =") {
@@ -45,7 +45,7 @@ func TestRenderRoutesLinesMovedDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	want := "odds-research = host=pg-shard-2-postgresql.databases.svc.cluster.local port=5432 dbname=odds-research auth_dbname=postgres"
+	want := "odds-research = host=pg-shard-2-postgresql.databases.svc.cluster.local port=5432 dbname=odds-research auth_dbname=dada_auth_shard-2"
 	if !strings.Contains(out, want) {
 		t.Fatalf("missing route for the moved database:\n%s", out)
 	}
@@ -187,11 +187,31 @@ func TestRenderRoutesLinesMoveWithoutSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	want := "no-cr-yet = host=pg-shard-0-postgresql.databases.svc.cluster.local port=5432 dbname=no-cr-yet auth_dbname=postgres"
+	want := "no-cr-yet = host=pg-shard-0-postgresql.databases.svc.cluster.local port=5432 dbname=no-cr-yet auth_dbname=dada_auth_shard-0"
 	if !strings.Contains(out, want) {
 		t.Fatalf("a cut-over database with no CR must get a line:\n%s", out)
 	}
 	if stats.Routed != 1 {
 		t.Fatalf("the moved database is the one routed by name: %+v", stats)
+	}
+}
+
+// TestRenderRoutesAuthEntryStaysOnItsShard guards the failure that took
+// profi-backend down: a role created directly on a non-default shard was
+// looked up through the wildcard, on the default shard, and PgBouncer answered
+// "no such user". Every route must resolve auth on its own instance.
+func TestRenderRoutesAuthEntryStaysOnItsShard(t *testing.T) {
+	out, _, err := renderPgBouncerRoutes(routeShards(),
+		[]dbPlacement{{Datname: "fin-core", Shard: "shard-0"}}, "shard-1")
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	entry := "dada_auth_shard-0 = host=pg-shard-0-postgresql.databases.svc.cluster.local port=5432 dbname=postgres"
+	if !strings.Contains(out, entry) {
+		t.Fatalf("no auth entry on the database's own shard:\n%s", out)
+	}
+	route := "fin-core = host=pg-shard-0-postgresql.databases.svc.cluster.local port=5432 dbname=fin-core auth_dbname=dada_auth_shard-0"
+	if !strings.Contains(out, route) {
+		t.Fatalf("route does not use its shard's auth entry:\n%s", out)
 	}
 }

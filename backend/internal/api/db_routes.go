@@ -18,10 +18,30 @@ import (
 // databases sitting there need no line of their own.
 const dbRouterDefaultShard = "shard-1"
 
-// dbRouterAuthDBName is the database every auth_query lookup runs against on
-// the target shard. pg_authid is cluster-wide, so which database answers is
-// irrelevant, but the name has to exist on every shard - "postgres" does.
+// dbRouterAuthDBName is the database every auth_query lookup runs against.
+// pg_authid is cluster-wide, so which database answers is irrelevant as long as
+// it is on the same instance as the route - "postgres" exists on every shard.
 const dbRouterAuthDBName = "postgres"
+
+// dbRouterAuthEntryPrefix names the per-shard auth entries. auth_dbname does
+// not name a database, it names another entry in this same [databases] table,
+// and that entry decides which INSTANCE answers the auth_query. Pointing every
+// route at a bare "postgres" sent all lookups through the wildcard - that is,
+// to the default shard - so a role created directly on a non-default shard was
+// invisible and PgBouncer answered "no such user". It only stayed hidden
+// because every role predating the shard split still exists on the default
+// shard. One entry per shard keeps the lookup on the instance that holds the
+// database.
+const dbRouterAuthEntryPrefix = "dada_auth_"
+
+// authEntryFor is the auth entry name for a shard, or the plain database name
+// when the shard cannot be expressed as a config token.
+func authEntryFor(shard string) string {
+	if !safeRouteToken(shard) {
+		return dbRouterAuthDBName
+	}
+	return dbRouterAuthEntryPrefix + shard
+}
 
 // shardAddr is a shard's network address as the registry knows it.
 type shardAddr struct {
@@ -125,7 +145,22 @@ func renderPgBouncerRoutes(shards []shardAddr, placements []dbPlacement, default
 	b.WriteString("; Generated from the db_shards registry. Do not edit by hand:\n")
 	b.WriteString("; the console rewrites this file whenever a database is placed or moved.\n")
 	b.WriteString("[databases]\n")
-	fmt.Fprintf(&b, "* = host=%s port=%d auth_dbname=%s\n", def.Host, def.Port, dbRouterAuthDBName)
+	fmt.Fprintf(&b, "* = host=%s port=%d auth_dbname=%s\n", def.Host, def.Port, authEntryFor(defaultShard))
+
+	authNames := make([]string, 0, len(byName))
+	for name := range byName {
+		if safeRouteToken(name) {
+			authNames = append(authNames, name)
+		}
+	}
+	sort.Strings(authNames)
+	b.WriteString("; auth_dbname targets: one per shard, so a role is looked up on the\n")
+	b.WriteString("; instance that holds the database rather than on the default shard.\n")
+	for _, name := range authNames {
+		addr := byName[name]
+		fmt.Fprintf(&b, "%s = host=%s port=%d dbname=%s\n",
+			authEntryFor(name), addr.Host, addr.Port, dbRouterAuthDBName)
+	}
 
 	names := make([]string, 0, len(shardsFor))
 	for name := range shardsFor {
@@ -159,7 +194,7 @@ func renderPgBouncerRoutes(shards []shardAddr, placements []dbPlacement, default
 		}
 		stats.Routed++
 		fmt.Fprintf(&b, "%s = host=%s port=%d dbname=%s auth_dbname=%s\n",
-			name, addr.Host, addr.Port, name, dbRouterAuthDBName)
+			name, addr.Host, addr.Port, name, authEntryFor(shard))
 	}
 	return b.String(), stats, nil
 }
