@@ -6,11 +6,14 @@
 package notify
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"html"
+	"io"
+	"mime/quotedprintable"
 	"net/smtp"
 	"regexp"
 	"strings"
@@ -817,11 +820,13 @@ func (n *Notifier) renderAlternative(to, subject, textBody, htmlBody string) str
 	fmt.Fprintf(&b, "Content-Type: multipart/alternative; boundary=\"%s\"\r\n", boundary)
 	b.WriteString("\r\n")
 	fmt.Fprintf(&b, "--%s\r\n", boundary)
-	b.WriteString("Content-Type: text/plain; charset=\"UTF-8\"\r\n\r\n")
-	b.WriteString(strings.ReplaceAll(textBody, "\n", "\r\n"))
+	b.WriteString("Content-Type: text/plain; charset=\"UTF-8\"\r\n")
+	b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
+	b.WriteString(encodeBody(textBody))
 	fmt.Fprintf(&b, "\r\n--%s\r\n", boundary)
-	b.WriteString("Content-Type: text/html; charset=\"UTF-8\"\r\n\r\n")
-	b.WriteString(strings.ReplaceAll(htmlBody, "\n", "\r\n"))
+	b.WriteString("Content-Type: text/html; charset=\"UTF-8\"\r\n")
+	b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
+	b.WriteString(encodeBody(htmlBody))
 	fmt.Fprintf(&b, "\r\n--%s--\r\n", boundary)
 	return b.String()
 }
@@ -846,9 +851,42 @@ func (n *Notifier) render(to, subject, body string) string {
 	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().UTC().Format(time.RFC1123Z))
 	b.WriteString("MIME-Version: 1.0\r\n")
 	b.WriteString("Content-Type: text/plain; charset=\"UTF-8\"\r\n")
+	b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n")
 	b.WriteString("\r\n")
-	b.WriteString(strings.ReplaceAll(body, "\n", "\r\n"))
+	b.WriteString(encodeBody(body))
 	return b.String()
+}
+
+// encodeBody quoted-printable-encodes a message body, which is what keeps a
+// single long line from killing the whole letter.
+//
+// RFC 5321 caps a line at 1000 octets, and Postbox enforces it: it answered
+// 500 "Line too long" and dropped the connection. Nine of the ten
+// operator-fallback alerts in the last 30 days died that way — every one of
+// them for profi-backend, whose crash excerpt carries an unwrapped traceback
+// line. The body was previously written raw, with newlines merely converted to
+// CRLF, so nothing bounded a line: an app whose log happened to be wide made
+// the alert about it undeliverable. The same render path serves volume,
+// autoscale, quota and box-reap alerts, so this was every alert waiting for a
+// wide enough log line.
+//
+// Quoted-printable rather than manual wrapping: the encoder inserts soft line
+// breaks that the receiving client removes, so the reader sees the original
+// text, and it does so without ever splitting a multi-byte Cyrillic rune.
+//
+// On the encoder's own failure the raw body is returned: a letter that might
+// be rejected still beats no letter at all.
+func encodeBody(body string) string {
+	normalized := strings.ReplaceAll(body, "\r\n", "\n")
+	var out bytes.Buffer
+	w := quotedprintable.NewWriter(&out)
+	if _, err := io.WriteString(w, normalized); err != nil {
+		return strings.ReplaceAll(normalized, "\n", "\r\n")
+	}
+	if err := w.Close(); err != nil {
+		return strings.ReplaceAll(normalized, "\n", "\r\n")
+	}
+	return out.String()
 }
 
 // encodeHeader RFC-2047 base64-encodes a header value when it contains

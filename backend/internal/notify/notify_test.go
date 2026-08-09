@@ -1,6 +1,8 @@
 package notify
 
 import (
+	"io"
+	"mime/quotedprintable"
 	"strings"
 	"testing"
 )
@@ -238,5 +240,59 @@ func TestReactivationFixHTMLCarriesTheBanner(t *testing.T) {
 	}
 	if !strings.Contains(got, "ссылку на репозиторий") {
 		t.Fatalf("fix-wave body must state what changed: %s", got)
+	}
+}
+
+// TestRenderKeepsLinesWithinSMTPLimit feeds the shape that actually broke
+// delivery: a crash excerpt whose traceback is one unwrapped line. RFC 5321
+// caps a line at 1000 octets and Postbox enforced it with 500 "Line too long",
+// killing nine of ten operator-fallback alerts in 30 days.
+func TestRenderKeepsLinesWithinSMTPLimit(t *testing.T) {
+	n := New("smtp.example.com", 587, "u", "p", "from@example.com")
+	body := "Приложение упало.\n\n" + strings.Repeat("Traceback фрагмент без переносов ", 200) + "\n\nСсылка: https://example.com\n"
+
+	msg := n.render("to@example.com", "Тема", body)
+
+	for i, line := range strings.Split(msg, "\r\n") {
+		if len(line) > 998 {
+			t.Fatalf("line %d is %d octets, SMTP allows 998", i, len(line))
+		}
+	}
+}
+
+// TestRenderBodySurvivesEncoding pins that the reader still sees the original
+// letter: soft line breaks are the transport's business, not the text's, and a
+// Cyrillic rune must never be split by the wrapping.
+func TestRenderBodySurvivesEncoding(t *testing.T) {
+	n := New("smtp.example.com", 587, "u", "p", "from@example.com")
+	body := "Сборка приложения shop завершилась.\n" + strings.Repeat("длинная строка ", 100) + "\nконец\n"
+
+	msg := n.render("to@example.com", "Тема", body)
+	_, encoded, ok := strings.Cut(msg, "\r\n\r\n")
+	if !ok {
+		t.Fatal("message has no body")
+	}
+	decoded, err := io.ReadAll(quotedprintable.NewReader(strings.NewReader(encoded)))
+	if err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if got := strings.ReplaceAll(string(decoded), "\r\n", "\n"); got != body {
+		t.Fatalf("body changed in transit:\ngot  %q\nwant %q", got, body)
+	}
+}
+
+// TestRenderAlternativeKeepsLinesWithinSMTPLimit covers the campaign path: the
+// HTML part carries markup on one line far more often than a plain body does.
+func TestRenderAlternativeKeepsLinesWithinSMTPLimit(t *testing.T) {
+	n := New("smtp.example.com", 587, "u", "p", "from@example.com")
+	text := strings.Repeat("текстовая часть ", 200)
+	html := "<html><body>" + strings.Repeat("<p>абзац письма</p>", 300) + "</body></html>"
+
+	msg := n.renderAlternative("to@example.com", "Тема", text, html)
+
+	for i, line := range strings.Split(msg, "\r\n") {
+		if len(line) > 998 {
+			t.Fatalf("line %d is %d octets, SMTP allows 998", i, len(line))
+		}
 	}
 }
