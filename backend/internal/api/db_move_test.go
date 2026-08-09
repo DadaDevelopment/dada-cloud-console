@@ -298,3 +298,27 @@ func TestAwaitInitialCopyAllowsADatabaseWithNoTables(t *testing.T) {
 		t.Fatalf("an empty database has nothing to copy: %v", err)
 	}
 }
+
+// TestResolveOwnerReadsTheSourceShard covers the lookup that spares whoever
+// starts a move from having to name the tenant's role.
+func TestResolveOwnerReadsTheSourceShard(t *testing.T) {
+	src := &fakeShard{answers: []fakeRow{{vals: []any{"svc-keycloak"}}}}
+	owner, err := resolveOwner(context.Background(), src, "keycloak")
+	if err != nil {
+		t.Fatalf("resolveOwner: %v", err)
+	}
+	if owner != "svc-keycloak" {
+		t.Fatalf("owner = %q, want svc-keycloak", owner)
+	}
+	if !strings.Contains(src.queries[0], "pg_database") {
+		t.Fatalf("owner was not read from pg_database: %q", src.queries[0])
+	}
+}
+
+// TestResolveOwnerRefusesAMissingDatabase keeps a typo in the database name
+// from being reported as a role problem three steps later.
+func TestResolveOwnerRefusesAMissingDatabase(t *testing.T) {
+	if _, err := resolveOwner(context.Background(), &fakeShard{}, "nope"); err == nil {
+		t.Fatal("resolving the owner of a database that is not there succeeded")
+	}
+}

@@ -196,6 +196,17 @@ func (w *dbMoveWorker) prepare(ctx context.Context, m dbMove) error {
 	}
 	defer dst.Close(ctx)
 
+	if m.OwnerRole == "" {
+		owner, err := resolveOwner(ctx, src, m.Datname)
+		if err != nil {
+			return err
+		}
+		if _, err := w.h.pool.Exec(ctx,
+			`UPDATE db_moves SET owner_role = $2, updated_at = NOW() WHERE id = $1`, m.ID, owner); err != nil {
+			return fmt.Errorf("db-move: record owner of %q: %w", m.Datname, err)
+		}
+		m.OwnerRole = owner
+	}
 	if err := copyRole(ctx, src, dst, m.OwnerRole); err != nil {
 		return err
 	}
@@ -320,7 +331,8 @@ func (w *dbMoveWorker) cutover(ctx context.Context, m dbMove) error {
 	}
 	defer dstDB.Close(ctx)
 
-	return w.router.Cutover(ctx, m.Datname, targetHost, func(ctx context.Context) error {
+	ownDB := w.ownDatabase(m.Datname)
+	if err := w.router.Cutover(ctx, m.Datname, targetHost, func(ctx context.Context) error {
 		if err := awaitInitialCopy(ctx, dstDB, m.Datname); err != nil {
 			return err
 		}
@@ -337,14 +349,39 @@ func (w *dbMoveWorker) cutover(ctx context.Context, m dbMove) error {
 		if err := finishReplication(ctx, srcDB, dstDB, m.Datname); err != nil {
 			return err
 		}
-		if _, err := w.h.pool.Exec(ctx,
-			`UPDATE db_moves SET phase = 'done', error = '', cutover_at = NOW(), updated_at = NOW()
-			 WHERE id = $1`, m.ID); err != nil {
+		const markDone = `UPDATE db_moves SET phase = 'done', error = '', cutover_at = NOW(), updated_at = NOW()
+			 WHERE id = $1`
+		if ownDB {
+			_, err := dstDB.Exec(ctx, markDone, m.ID)
+			return err
+		}
+		if _, err := w.h.pool.Exec(ctx, markDone, m.ID); err != nil {
 			return err
 		}
 		w.h.recordMovePlacement(ctx, m.Datname, m.TargetShard)
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	if ownDB {
+		w.h.recordMovePlacement(ctx, m.Datname, m.TargetShard)
+	}
+	return nil
+}
+
+// ownDatabase reports whether a move is moving the console's own database.
+//
+// It decides which connection may be used while the router holds the database
+// still. Every client of the paused database waits, and the console is one of
+// them: a write through w.h.pool inside that window queues behind the very
+// PAUSE the worker is holding, and the cutover deadlocks until it times out.
+// The bookkeeping goes to the target shard directly instead, on a connection
+// the router never sees.
+func (w *dbMoveWorker) ownDatabase(datname string) bool {
+	if w.h == nil || w.h.pool == nil {
+		return false
+	}
+	return strings.EqualFold(datname, w.h.pool.Config().ConnConfig.Database)
 }
 
 // shardHost reads where the target shard answers, which is the host the router

@@ -95,6 +95,29 @@ func moveObjectName(datname string) string {
 	return out
 }
 
+// resolveOwner reads who owns the database on the shard it is leaving.
+//
+// The owner is not something the person starting a move should have to know:
+// it is a fact of the source shard, and a move enqueued without it used to die
+// in prepare with "empty owner role" -- a message that names a column rather
+// than the thing to look up. Roles are cluster-wide, so this is the only place
+// the tenant's role can be learned before the database exists on the target.
+func resolveOwner(ctx context.Context, src shardExecutor, datname string) (string, error) {
+	var owner string
+	err := src.QueryRow(ctx,
+		`SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = $1`, datname).Scan(&owner)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", fmt.Errorf("db-move: database %q does not exist on the source shard", datname)
+	}
+	if err != nil {
+		return "", fmt.Errorf("db-move: read owner of %q: %w", datname, err)
+	}
+	if owner == "" {
+		return "", fmt.Errorf("db-move: database %q reports no owner", datname)
+	}
+	return owner, nil
+}
+
 // copyRole recreates the database's owner on the target shard.
 //
 // Roles are cluster-wide, not database-local, so a database that arrives on a
