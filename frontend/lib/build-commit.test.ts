@@ -19,6 +19,7 @@ import { formatCommitLabel, isPlaceholderCommit, resolveCommit, type Translate }
 
 const t: Translate = (key, vars) => {
   if (key === "common.commit.branchLatest") return `latest commit on branch ${vars?.branch}`;
+  if (key === "common.commit.archiveWithId") return `archive ${vars?.id}`;
   if (key === "common.commit.archive") return "uploaded archive";
   return key;
 };
@@ -57,8 +58,43 @@ test("resolveCommit treats a real empty branch/no branch consistently", () => {
   assert.deepEqual(resolveCommit({}), { kind: "none" });
 });
 
-test("formatCommitLabel renders a short sha, honest branch phrasing, or archive phrasing", () => {
+test("resolveCommit reports an archive build with an identified upload id", () => {
+  const resolved = resolveCommit({
+    source: "archive",
+    commit_sha: "manual-1738528000",
+    head_sha: "a1b2c3d4",
+    commit_message: "site-v2.zip",
+    branch: "upload",
+  });
+  assert.deepEqual(resolved, { kind: "archive", uploadId: "a1b2c3d4", filename: "site-v2.zip" });
+});
+
+test("resolveCommit reports an archive build with no identified upload id", () => {
+  const resolved = resolveCommit({ source: "archive", commit_sha: "manual-1738528000", branch: "upload" });
+  assert.deepEqual(resolved, { kind: "archive", uploadId: null, filename: null });
+});
+
+test("resolveCommit never lets a stale branch: 'upload' masquerade as a git branch when source is archive", () => {
+  const resolved = resolveCommit({ source: "archive", commit_sha: "manual-1738528000", branch: "upload" });
+  assert.notEqual(resolved.kind, "branch");
+  assert.equal(resolved.kind, "archive");
+});
+
+test("resolveCommit leaves git builds byte-identical to before the archive field existed", () => {
+  const withSha = resolveCommit({ source: "git", commit_sha: "a1b2c3d4e5f6", commit_message: "fix thing", branch: "main" });
+  assert.deepEqual(withSha, { kind: "sha", sha: "a1b2c3d4e5f6", message: "fix thing" });
+
+  const withPlaceholderBranch = resolveCommit({ source: "git", commit_sha: "manual-1738528000", branch: "main" });
+  assert.deepEqual(withPlaceholderBranch, { kind: "branch", branch: "main" });
+
+  const withNoSource = resolveCommit({ commit_sha: "a1b2c3d4e5f6", commit_message: "fix thing", branch: "main" });
+  assert.deepEqual(withNoSource, { kind: "sha", sha: "a1b2c3d4e5f6", message: "fix thing" });
+});
+
+test("formatCommitLabel renders a short sha, honest branch phrasing, identified archive, or archive phrasing", () => {
   assert.equal(formatCommitLabel({ kind: "sha", sha: "a1b2c3d4e5f6", message: null }, t), "a1b2c3d");
   assert.equal(formatCommitLabel({ kind: "branch", branch: "main" }, t), "latest commit on branch main");
+  assert.equal(formatCommitLabel({ kind: "archive", uploadId: "a1b2c3d4", filename: "site.zip" }, t), "archive a1b2c3d4");
+  assert.equal(formatCommitLabel({ kind: "archive", uploadId: null, filename: null }, t), "uploaded archive");
   assert.equal(formatCommitLabel({ kind: "none" }, t), "uploaded archive");
 });

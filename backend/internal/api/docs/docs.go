@@ -19511,6 +19511,9 @@ const docTemplate = `{
                 "pr_number": {
                     "type": "integer"
                 },
+                "source": {
+                    "type": "string"
+                },
                 "started_at": {
                     "type": "string"
                 },

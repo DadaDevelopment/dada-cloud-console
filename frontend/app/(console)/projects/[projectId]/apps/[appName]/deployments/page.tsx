@@ -340,9 +340,7 @@ export default function AppDeploymentsPage() {
                               <span className="text-xs text-gray-400 dark:text-gray-500">{b.branch}</span>
                             </>
                           ) : (
-                            <span className="text-xs text-gray-400 dark:text-gray-500">
-                              {resolved.kind === "branch" ? t("common.commit.branchLatest", { branch: resolved.branch }) : t("common.commit.archive")}
-                            </span>
+                            <span className="text-xs text-gray-400 dark:text-gray-500">{formatCommitLabel(resolved, t)}</span>
                           )}
                           <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                             {buildTriggerLabel(b.trigger, b.pr_number ?? null, t)}
@@ -413,7 +411,10 @@ export default function AppDeploymentsPage() {
                         {depResolved.kind === "branch" && (
                           <span className="text-xs text-gray-400 dark:text-gray-500">{t("common.commit.branchLatest", { branch: depResolved.branch })}</span>
                         )}
-                        {depResolved.kind === "none" && <span className="text-xs text-gray-400 dark:text-gray-500">{t("common.commit.archive")}</span>}
+                        {depResolved.kind === "archive" && (
+                          <span className="text-xs text-gray-400 dark:text-gray-500">{formatCommitLabel(depResolved, t)}</span>
+                        )}
+                        {depResolved.kind === "none" && <span className="text-xs text-gray-400 dark:text-gray-500">{t("common.commit.unknown")}</span>}
                       </div>
                       <p className="mt-1 truncate font-mono text-xs text-gray-400 dark:text-gray-500">{dep.image_uri}</p>
                       <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">{timeAgo(dep.created_at)}</p>

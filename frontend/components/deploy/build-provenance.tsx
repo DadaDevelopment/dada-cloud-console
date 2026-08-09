@@ -2,7 +2,7 @@
 
 import type { Build, DeployTrigger } from "@/lib/types";
 import { useT } from "@/lib/i18n/console/context";
-import { resolveCommit } from "@/lib/build-commit";
+import { formatCommitLabel, resolveCommit } from "@/lib/build-commit";
 import { BuildStatusBadge, isBuildActive } from "@/components/deploy/build-status-badge";
 
 interface BuildProvenanceProps {
@@ -31,7 +31,7 @@ interface BuildProvenanceProps {
 export function BuildProvenance({ build, showStatus, className }: BuildProvenanceProps) {
   const { t } = useT();
   const resolved = resolveCommit(build);
-  const subject = resolved.kind === "sha" ? firstLine(resolved.message) : null;
+  const subject = resolved.kind === "sha" ? firstLine(resolved.message) : resolved.kind === "archive" ? resolved.filename ?? null : null;
   const at = build.finished_at ?? build.started_at ?? build.created_at;
 
   return (
@@ -44,7 +44,9 @@ export function BuildProvenance({ build, showStatus, className }: BuildProvenanc
         <p className="truncate text-xs text-gray-700 dark:text-gray-300">
           {resolved.kind === "branch"
             ? t("common.commit.branchLatest", { branch: resolved.branch })
-            : t("common.commit.archive")}
+            : resolved.kind === "archive"
+              ? formatCommitLabel(resolved, t)
+              : t("common.commit.archive")}
         </p>
       )}
       <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
@@ -55,7 +57,7 @@ export function BuildProvenance({ build, showStatus, className }: BuildProvenanc
             <span aria-hidden>·</span>
           </>
         )}
-        {build.branch && (
+        {resolved.kind !== "archive" && build.branch && (
           <>
             <span className="font-mono">{build.branch}</span>
             <span aria-hidden>·</span>

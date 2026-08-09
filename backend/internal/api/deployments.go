@@ -12,7 +12,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// deployment mirrors the frontend Deployment shape.
+// deployment mirrors the frontend Deployment shape. CommitSHA, CommitMessage,
+// HeadSHA, Branch and Source describe the provenance of the deployment's
+// build (via build_id -> builds -> git_repos); they are nil/empty when the
+// deployment has no build_id (e.g. an adopted or manually created row).
 type deployment struct {
 	ID            uuid.UUID  `json:"id"`
 	EnvironmentID uuid.UUID  `json:"environment_id"`
@@ -22,17 +25,43 @@ type deployment struct {
 	ImageURI      string     `json:"image_uri"`
 	Trigger       string     `json:"trigger"`
 	IsCurrent     bool       `json:"is_current"`
+	CommitSHA     *string    `json:"commit_sha,omitempty"`
+	CommitMessage *string    `json:"commit_message,omitempty"`
+	HeadSHA       *string    `json:"head_sha,omitempty"`
+	Branch        *string    `json:"branch,omitempty"`
+	Source        string     `json:"source,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
 }
 
-const deploymentSelectCols = `id, environment_id, app_name, build_id, operation_id,
-		image_uri, trigger, is_current, created_at`
+// deploymentSelectColsWithSource is deploymentSelectCols qualified with a
+// "d." alias plus the joined builds commit fields and git_repos provider,
+// for queries that populate the deployment's commit provenance. Pair with
+// scanDeploymentWithSource and a "FROM deployments d
+// LEFT JOIN builds b ON b.id = d.build_id
+// LEFT JOIN git_repos gr ON gr.id = b.git_repo_id" query. Both joins are
+// LEFT because build_id is nullable and a build's git_repo_id may point to
+// a since-deleted repo.
+const deploymentSelectColsWithSource = `d.id, d.environment_id, d.app_name, d.build_id, d.operation_id,
+		d.image_uri, d.trigger, d.is_current, d.created_at,
+		b.commit_sha, b.commit_message, b.head_sha, b.branch, gr.provider`
 
-func scanDeployment(s interface {
+// scanDeploymentWithSource scans a row selected with
+// deploymentSelectColsWithSource, deriving deployment.Source from the joined
+// git_repos.provider (empty when the deployment has no build_id, i.e. no
+// known provenance).
+func scanDeploymentWithSource(s interface {
 	Scan(dest ...any) error
 }, d *deployment) error {
-	return s.Scan(&d.ID, &d.EnvironmentID, &d.AppName, &d.BuildID, &d.OperationID,
-		&d.ImageURI, &d.Trigger, &d.IsCurrent, &d.CreatedAt)
+	var provider *string
+	if err := s.Scan(&d.ID, &d.EnvironmentID, &d.AppName, &d.BuildID, &d.OperationID,
+		&d.ImageURI, &d.Trigger, &d.IsCurrent, &d.CreatedAt,
+		&d.CommitSHA, &d.CommitMessage, &d.HeadSHA, &d.Branch, &provider); err != nil {
+		return err
+	}
+	if provider != nil {
+		d.Source = sourceForProvider(*provider)
+	}
+	return nil
 }
 
 // ListDeployments returns the deployment history for an app in an environment.
@@ -87,10 +116,12 @@ func (h *Handler) ListDeployments(c *gin.Context) {
 	}
 
 	rows, err := h.pool.Query(c.Request.Context(),
-		`SELECT `+deploymentSelectCols+`
-		 FROM deployments
-		 WHERE environment_id = $1 AND app_name = $2
-		 ORDER BY created_at DESC`,
+		`SELECT `+deploymentSelectColsWithSource+`
+		 FROM deployments d
+		 LEFT JOIN builds b ON b.id = d.build_id
+		 LEFT JOIN git_repos gr ON gr.id = b.git_repo_id
+		 WHERE d.environment_id = $1 AND d.app_name = $2
+		 ORDER BY d.created_at DESC`,
 		envID, appName,
 	)
 	if err != nil {
@@ -102,7 +133,7 @@ func (h *Handler) ListDeployments(c *gin.Context) {
 	deployments := []deployment{}
 	for rows.Next() {
 		var d deployment
-		if err := scanDeployment(rows, &d); err != nil {
+		if err := scanDeploymentWithSource(rows, &d); err != nil {
 			respondError(c, http.StatusInternalServerError, "failed to scan deployment")
 			return
 		}

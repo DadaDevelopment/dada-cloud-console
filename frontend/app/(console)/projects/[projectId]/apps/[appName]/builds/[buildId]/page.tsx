@@ -13,7 +13,7 @@ import { BuildStatusBadge, isBuildActive } from "@/components/deploy/build-statu
 import { BuildLogViewer } from "@/components/deploy/build-log-viewer";
 import { useT } from "@/lib/i18n/console/context";
 import { trackUxEvent } from "@/lib/ux-telemetry";
-import { resolveCommit } from "@/lib/build-commit";
+import { formatCommitLabel, resolveCommit } from "@/lib/build-commit";
 import { trackBuildStart } from "@/lib/build-watch";
 import { buildFailureDetail } from "@/lib/build-failure";
 
@@ -216,6 +216,9 @@ export default function BuildDetailPage() {
                   }
                   if (resolved.kind === "branch") {
                     return <span>{t("common.commit.branchLatest", { branch: resolved.branch })}</span>;
+                  }
+                  if (resolved.kind === "archive") {
+                    return <span>{formatCommitLabel(resolved, t)}</span>;
                   }
                   return <span>{t("common.commit.archive")}</span>;
                 })()}{" "}

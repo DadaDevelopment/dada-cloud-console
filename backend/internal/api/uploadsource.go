@@ -232,18 +232,28 @@ func (h *Handler) UploadSourceArchive(c *gin.Context) {
 	}
 
 	commitSHA := "manual-" + time.Now().UTC().Format("20060102150405.000000")
+	var headSHA *string
+	if id := archiveUploadIDFromCloneURL(artifactURI); id != "" {
+		headSHA = &id
+	}
+	var commitMessage *string
+	if msg := sanitizeUploadedFilename(fileHeader.Filename); msg != "" {
+		commitMessage = &msg
+	}
+
 	var b build
 	row := h.pool.QueryRow(c.Request.Context(),
 		`INSERT INTO builds
-		   (git_repo_id, environment_id, app_name, commit_sha, branch, triggered_by, trigger, status)
-		 VALUES ($1, $2, $3, $4, 'upload', $5, 'manual', 'queued')
+		   (git_repo_id, environment_id, app_name, commit_sha, branch, head_sha, commit_message, triggered_by, trigger, status)
+		 VALUES ($1, $2, $3, $4, 'upload', $5, $6, $7, 'manual', 'queued')
 		 RETURNING `+buildSelectCols,
-		gitRepoID, envID, appName, commitSHA, claims.UserID,
+		gitRepoID, envID, appName, commitSHA, headSHA, commitMessage, claims.UserID,
 	)
 	if err := scanBuild(row, &b); err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to queue build")
 		return
 	}
+	b.Source = "archive"
 
 	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
 		ProjectID:     projectID,

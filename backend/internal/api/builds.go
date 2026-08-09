@@ -11,7 +11,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// build mirrors the frontend Build shape.
+// build mirrors the frontend Build shape. Source is the git_repos provider
+// collapsed via sourceForProvider ("git" or "archive"); it is populated by
+// the list/get/trigger/upload endpoints, which know the owning git_repos
+// row, and omitted elsewhere.
 type build struct {
 	ID            uuid.UUID  `json:"id"`
 	GitRepoID     uuid.UUID  `json:"git_repo_id"`
@@ -32,11 +35,20 @@ type build struct {
 	UpdatedAt     time.Time  `json:"updated_at"`
 	ErrorMessage  *string    `json:"error_message,omitempty"`
 	FailReason    *string    `json:"fail_reason,omitempty"`
+	Source        string     `json:"source,omitempty"`
 }
 
 const buildSelectCols = `id, git_repo_id, environment_id, app_name, status, trigger,
 		commit_sha, commit_message, head_sha, branch, image_uri, logs_ref, pr_number,
 		started_at, finished_at, created_at, updated_at, error_message, fail_reason`
+
+// buildSelectColsWithSource is buildSelectCols qualified with a "b." alias
+// plus the joined git_repos provider, for queries that populate build.Source.
+// Pair with scanBuildWithSource and a "FROM builds b JOIN git_repos gr ON
+// gr.id = b.git_repo_id" query.
+const buildSelectColsWithSource = `b.id, b.git_repo_id, b.environment_id, b.app_name, b.status, b.trigger,
+		b.commit_sha, b.commit_message, b.head_sha, b.branch, b.image_uri, b.logs_ref, b.pr_number,
+		b.started_at, b.finished_at, b.created_at, b.updated_at, b.error_message, b.fail_reason, gr.provider`
 
 func scanBuild(s interface {
 	Scan(dest ...any) error
@@ -44,6 +56,21 @@ func scanBuild(s interface {
 	return s.Scan(&b.ID, &b.GitRepoID, &b.EnvironmentID, &b.AppName, &b.Status, &b.Trigger,
 		&b.CommitSHA, &b.CommitMessage, &b.HeadSHA, &b.Branch, &b.ImageURI, &b.LogsRef, &b.PRNumber,
 		&b.StartedAt, &b.FinishedAt, &b.CreatedAt, &b.UpdatedAt, &b.ErrorMessage, &b.FailReason)
+}
+
+// scanBuildWithSource scans a row selected with buildSelectColsWithSource,
+// deriving build.Source from the joined git_repos.provider.
+func scanBuildWithSource(s interface {
+	Scan(dest ...any) error
+}, b *build) error {
+	var provider string
+	if err := s.Scan(&b.ID, &b.GitRepoID, &b.EnvironmentID, &b.AppName, &b.Status, &b.Trigger,
+		&b.CommitSHA, &b.CommitMessage, &b.HeadSHA, &b.Branch, &b.ImageURI, &b.LogsRef, &b.PRNumber,
+		&b.StartedAt, &b.FinishedAt, &b.CreatedAt, &b.UpdatedAt, &b.ErrorMessage, &b.FailReason, &provider); err != nil {
+		return err
+	}
+	b.Source = sourceForProvider(provider)
+	return nil
 }
 
 // ListBuilds returns the builds for an app in an environment.
@@ -98,10 +125,11 @@ func (h *Handler) ListBuilds(c *gin.Context) {
 	}
 
 	rows, err := h.pool.Query(c.Request.Context(),
-		`SELECT `+buildSelectCols+`
-		 FROM builds
-		 WHERE environment_id = $1 AND app_name = $2
-		 ORDER BY created_at DESC`,
+		`SELECT `+buildSelectColsWithSource+`
+		 FROM builds b
+		 JOIN git_repos gr ON gr.id = b.git_repo_id
+		 WHERE b.environment_id = $1 AND b.app_name = $2
+		 ORDER BY b.created_at DESC`,
 		envID, appName,
 	)
 	if err != nil {
@@ -113,7 +141,7 @@ func (h *Handler) ListBuilds(c *gin.Context) {
 	builds := []build{}
 	for rows.Next() {
 		var b build
-		if err := scanBuild(rows, &b); err != nil {
+		if err := scanBuildWithSource(rows, &b); err != nil {
 			respondError(c, http.StatusInternalServerError, "failed to scan build")
 			return
 		}
@@ -131,13 +159,14 @@ func (h *Handler) ListBuilds(c *gin.Context) {
 // Returns pgx.ErrNoRows if the build doesn't exist in the project.
 func (h *Handler) loadProjectBuild(c *gin.Context, projectID, buildID uuid.UUID, b *build) error {
 	row := h.pool.QueryRow(c.Request.Context(),
-		`SELECT `+buildSelectCols+`
+		`SELECT `+buildSelectColsWithSource+`
 		 FROM builds b
+		 JOIN git_repos gr ON gr.id = b.git_repo_id
 		 WHERE b.id = $1
 		   AND b.git_repo_id IN (SELECT id FROM git_repos WHERE project_id = $2)`,
 		buildID, projectID,
 	)
-	return scanBuild(row, b)
+	return scanBuildWithSource(row, b)
 }
 
 // GetBuild returns a single build.
@@ -255,12 +284,12 @@ func (h *Handler) TriggerBuild(c *gin.Context) {
 
 	// Resolve the linked repo for this app/env.
 	var gitRepoID uuid.UUID
-	var prodBranch string
+	var prodBranch, provider, cloneURL string
 	err = h.pool.QueryRow(c.Request.Context(),
-		`SELECT id, production_branch FROM git_repos
+		`SELECT id, production_branch, provider, clone_url FROM git_repos
 		 WHERE project_id = $1 AND environment_id = $2 AND app_name = $3`,
 		projectID, envID, appName,
-	).Scan(&gitRepoID, &prodBranch)
+	).Scan(&gitRepoID, &prodBranch, &provider, &cloneURL)
 	if err == pgx.ErrNoRows {
 		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
 			ProjectID:     projectID,
@@ -280,14 +309,20 @@ func (h *Handler) TriggerBuild(c *gin.Context) {
 	}
 
 	commitSHA := placeholderCommitSHA()
+	var headSHA *string
+	if provider == "archive" {
+		if id := archiveUploadIDFromCloneURL(cloneURL); id != "" {
+			headSHA = &id
+		}
+	}
 
 	var b build
 	row := h.pool.QueryRow(c.Request.Context(),
 		`INSERT INTO builds
-		   (git_repo_id, environment_id, app_name, commit_sha, branch, triggered_by, trigger, status)
-		 VALUES ($1, $2, $3, $4, $5, $6, 'manual', 'queued')
+		   (git_repo_id, environment_id, app_name, commit_sha, branch, head_sha, triggered_by, trigger, status)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, 'manual', 'queued')
 		 RETURNING `+buildSelectCols,
-		gitRepoID, envID, appName, commitSHA, prodBranch, claims.UserID,
+		gitRepoID, envID, appName, commitSHA, prodBranch, headSHA, claims.UserID,
 	)
 	if err := scanBuild(row, &b); err != nil {
 		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
@@ -302,6 +337,7 @@ func (h *Handler) TriggerBuild(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "failed to queue build")
 		return
 	}
+	b.Source = sourceForProvider(provider)
 
 	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
 		ProjectID:     projectID,

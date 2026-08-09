@@ -1405,7 +1405,10 @@ export interface Deployment {
   trigger: DeployTrigger;
   is_current: boolean;
   commit_sha?: string;
+  commit_message?: string;
+  head_sha?: string;
   branch?: string;
+  source?: "git" | "archive";
   created_at: string;
   updated_at: string;
 }
