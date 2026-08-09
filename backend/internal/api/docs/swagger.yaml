@@ -74,6 +74,33 @@ definitions:
       apex_domain:
         type: string
     type: object
+  api.adminDBMove:
+    properties:
+      created_at:
+        type: string
+      cutover_at:
+        type: string
+      datname:
+        type: string
+      error:
+        type: string
+      id:
+        type: string
+      lag_bytes:
+        type: integer
+      owner_role:
+        type: string
+      phase:
+        type: string
+      requested_by:
+        type: string
+      source_shard:
+        type: string
+      target_shard:
+        type: string
+      updated_at:
+        type: string
+    type: object
   api.agentChatClearContextRequest:
     properties:
       envId:
@@ -1041,6 +1068,13 @@ definitions:
       value:
         type: string
     type: object
+  api.startDBMoveRequest:
+    properties:
+      datname:
+        type: string
+      target_shard:
+        type: string
+    type: object
   api.submitFeedbackRequest:
     properties:
       message:
@@ -1500,6 +1534,90 @@ paths:
       security:
       - BearerAuth: []
       summary: Platform cost/revenue/margin drilldown (platform-admin only)
+      tags:
+      - admin
+  /admin/db-moves:
+    get:
+      description: Returns the most recent moves of logical databases between PostgreSQL
+        shards with their phase, replication lag, cutover time and failure reason.
+        Platform-admin and platform-analyst readers; every other caller gets 403.
+      operationId: listAdminDBMoves
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Database moves between shards (admin readers)
+      tags:
+      - admin
+    post:
+      consumes:
+      - application/json
+      description: 'Enqueues a move of one logical database to another PostgreSQL
+        shard. The source shard, the owner role and the checks are resolved live against
+        the instances: the database must exist on the shard it is currently routed
+        to, must not already exist on the target, and must not be owned by the superuser.
+        Returns the created move row; the move driver advances it through schema copy,
+        logical replication and cutover. Platform admins only.'
+      operationId: startAdminDBMove
+      parameters:
+      - description: Database and target shard
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.startDBMoveRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/api.adminDBMove'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Move a database to another shard (platform admins)
       tags:
       - admin
   /admin/db-shards:

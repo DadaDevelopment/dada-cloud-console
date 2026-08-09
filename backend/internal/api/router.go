@@ -643,6 +643,8 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 			api.GET("/admin/ai-gateway/usage", h.GetAIGatewayUsage)
 			api.GET("/admin/growth/campaigns", h.GetGrowthCampaigns)
 			api.GET("/admin/db-shards", h.GetAdminDBShards)
+			api.GET("/admin/db-moves", h.ListAdminDBMoves)
+			api.POST("/admin/db-moves", h.StartAdminDBMove)
 
 			// Concierge write-back for the Box private preview: which claim got
 			// which box. Mandatory — it is the only source for the repeat-use

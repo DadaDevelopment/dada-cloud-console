@@ -419,6 +419,125 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/db-moves": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the most recent moves of logical databases between PostgreSQL shards with their phase, replication lag, cutover time and failure reason. Platform-admin and platform-analyst readers; every other caller gets 403.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Database moves between shards (admin readers)",
+                "operationId": "listAdminDBMoves",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Enqueues a move of one logical database to another PostgreSQL shard. The source shard, the owner role and the checks are resolved live against the instances: the database must exist on the shard it is currently routed to, must not already exist on the target, and must not be owned by the superuser. Returns the created move row; the move driver advances it through schema copy, logical replication and cutover. Platform admins only.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Move a database to another shard (platform admins)",
+                "operationId": "startAdminDBMove",
+                "parameters": [
+                    {
+                        "description": "Database and target shard",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.startDBMoveRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/api.adminDBMove"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/admin/db-shards": {
             "get": {
                 "security": [
@@ -19241,6 +19360,47 @@ const docTemplate = `{
                 }
             }
         },
+        "api.adminDBMove": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "cutover_at": {
+                    "type": "string"
+                },
+                "datname": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "lag_bytes": {
+                    "type": "integer"
+                },
+                "owner_role": {
+                    "type": "string"
+                },
+                "phase": {
+                    "type": "string"
+                },
+                "requested_by": {
+                    "type": "string"
+                },
+                "source_shard": {
+                    "type": "string"
+                },
+                "target_shard": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "api.agentChatClearContextRequest": {
             "type": "object",
             "properties": {
@@ -20663,6 +20823,17 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "value": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.startDBMoveRequest": {
+            "type": "object",
+            "properties": {
+                "datname": {
+                    "type": "string"
+                },
+                "target_shard": {
                     "type": "string"
                 }
             }
