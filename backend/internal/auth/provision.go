@@ -60,14 +60,32 @@ func ResolveUser(ctx context.Context, db querier, kc *KeycloakClaims) (id uuid.U
 	// xmax = 0 is the standard Postgres tell for "this RETURNING row came from the
 	// INSERT branch of the upsert, not the ON CONFLICT UPDATE branch" — a fresh
 	// row has no prior transaction ID in its xmax.
+	//
+	// The signup audit row is written by the same statement, not by the caller.
+	// Two router paths reach this function — the main resolver
+	// (api/router.go) and optionalAuthResolver, which discards `created` — so a
+	// caller-side side effect leaves accounts born on the second path with a
+	// users row and no trace anywhere: mytake@yandex.ru registered with zero
+	// audit_events and zero ux_events, one of the two organic signups of that
+	// fortnight. Attaching the row to the INSERT branch here makes that
+	// unrepresentable for any future caller, and the FK to users(id) is
+	// satisfied because foreign keys are checked after the statement completes.
 	const upsertBySub = `
-		INSERT INTO users (keycloak_sub, username, email, display_name, password_hash)
-		VALUES ($1, $2, $3, $4, '')
-		ON CONFLICT (keycloak_sub) DO UPDATE
-		    SET email = EXCLUDED.email,
-		        display_name = EXCLUDED.display_name,
-		        updated_at = now()
-		RETURNING id, (xmax = 0) AS inserted`
+		WITH upserted AS (
+		    INSERT INTO users (keycloak_sub, username, email, display_name, password_hash)
+		    VALUES ($1, $2, $3, $4, '')
+		    ON CONFLICT (keycloak_sub) DO UPDATE
+		        SET email = EXCLUDED.email,
+		            display_name = EXCLUDED.display_name,
+		            updated_at = now()
+		    RETURNING id, (xmax = 0) AS inserted, email
+		), signup_event AS (
+		    INSERT INTO audit_events (actor_id, action, resource_kind, resource_name, outcome, metadata)
+		    SELECT id, 'SignUp', 'User', email, 'success', jsonb_build_object('source', 'provision')
+		    FROM upserted
+		    WHERE inserted
+		)
+		SELECT id, inserted FROM upserted`
 
 	err = db.QueryRow(ctx, upsertBySub, kc.Subject, username, email, displayName).Scan(&id, &created)
 	if err == nil {
