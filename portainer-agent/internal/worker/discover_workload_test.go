@@ -82,3 +82,55 @@ func TestRenderExternalVolumesYAMLEmpty(t *testing.T) {
 		t.Errorf("empty case should warn about bind mounts, got:\n%s", out)
 	}
 }
+
+// TestFleetObservabilityStackIsNeverOfferedForAdoption pins the leak found on
+// 2026-08-08: the fleet observability stack is deployed by Portainer as compose,
+// so its containers are named "<project>-<service>-<index>" and the old
+// exact-name filter never matched a single one. Two users imported our
+// prometheus-agent, fluent-bit, node-exporter and container-metrics into their
+// own projects, where the snapshots sat at Pending forever.
+func TestFleetObservabilityStackIsNeverOfferedForAdoption(t *testing.T) {
+	containers := []portainer.Container{
+		{
+			Names:  []string{"/edge-vm-observability-prometheus-agent-1"},
+			Image:  "prom/prometheus:v2.53.0",
+			State:  "running",
+			Mounts: []portainer.Mount{{Type: "volume", Name: "15bace96d92bd0ae", Destination: "/prometheus", RW: true}},
+		},
+		{Names: []string{"/edge-vm-observability-container-metrics-1"}, Image: "python:3.12-alpine", State: "running"},
+		{Names: []string{"/edge-vm-observability-fluent-bit-1"}, Image: "fluent/fluent-bit:3.0", State: "running"},
+		{Names: []string{"/edge-vm-observability-node-exporter-1"}, Image: "prom/node-exporter:v1.8.1", State: "running"},
+		{
+			Names:  []string{"/vm-observability-cadvisor-1"},
+			Image:  "gcr.io/cadvisor/cadvisor:v0.49.1",
+			State:  "running",
+			Labels: map[string]string{"com.docker.compose.project": "vm-observability", "com.docker.compose.service": "cadvisor"},
+		},
+		{Names: []string{"/portainer_edge_agent"}, Image: "portainer/agent:2.21.0", State: "running"},
+		{
+			Names:  []string{"/mystack-my-node-exporter-clone-1"},
+			Image:  "my/exporter:1",
+			State:  "running",
+			Labels: map[string]string{"com.docker.compose.project": "mystack", "com.docker.compose.service": "my-node-exporter-clone"},
+		},
+		{Names: []string{"/compose-nginx-1"}, Image: "nginx:1.25", State: "running"},
+	}
+
+	res := buildDiscoveryResult(7, containers)
+
+	if len(res.Containers) != 2 {
+		names := []string{}
+		for _, c := range res.Containers {
+			names = append(names, c.Name)
+		}
+		t.Fatalf("want only the 2 user containers, got %d: %v", len(res.Containers), names)
+	}
+	for _, c := range res.Containers {
+		if strings.Contains(c.Name, "observability") {
+			t.Errorf("platform sidecar %q offered for adoption", c.Name)
+		}
+	}
+	if strings.Contains(res.ExternalVolumesYAML, "15bace96d92bd0ae") {
+		t.Errorf("platform prometheus volume leaked into the external-volume block:\n%s", res.ExternalVolumesYAML)
+	}
+}

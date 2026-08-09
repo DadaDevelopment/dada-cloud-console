@@ -258,3 +258,41 @@ func TestRestatePlaceholderPhase(t *testing.T) {
 		t.Error("real: url must survive on an app running its real image")
 	}
 }
+
+// TestRestateUnreachablePhaseDemotesOnlyReady pins the second false-green
+// defect: the URL watcher had recorded 2057 consecutive failing probes against
+// oxygen since 2026-08-04 while the console kept showing a green Ready badge,
+// because "Ready" is replica readiness and says nothing about whether anything
+// bound the port.
+func TestRestateUnreachablePhaseDemotesOnlyReady(t *testing.T) {
+	urlAlert := []models.AppAlert{{Type: "url", Reason: "no_listener", Detail: "dial tcp 10.96.163.146:8080: i/o timeout"}}
+	apps := []models.ResourceSnapshot{
+		{Name: "silent", Phase: "Ready", Alerts: urlAlert, SummaryJSON: json.RawMessage(`{"url":"https://silent-a1b2c3.dada-tuda.ru"}`)},
+		{Name: "healthy", Phase: "Ready"},
+		{Name: "crashing", Phase: "CrashLoop", Alerts: urlAlert},
+		{Name: "stopped", Phase: "Stopped", Alerts: urlAlert},
+		{Name: "disk", Phase: "Ready", Alerts: []models.AppAlert{{Type: "volume"}}},
+	}
+	api.RestateUnreachablePhase(apps)
+
+	want := map[string]string{
+		"silent":   "Unreachable",
+		"healthy":  "Ready",
+		"crashing": "CrashLoop",
+		"stopped":  "Stopped",
+		"disk":     "Ready",
+	}
+	for _, a := range apps {
+		if a.Phase != want[a.Name] {
+			t.Errorf("%s: phase = %q, want %q", a.Name, a.Phase, want[a.Name])
+		}
+	}
+
+	var m map[string]any
+	if err := json.Unmarshal(apps[0].SummaryJSON, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := m["url"]; !ok {
+		t.Error("silent: url must survive — a worker that binds no port still needs its address shown")
+	}
+}

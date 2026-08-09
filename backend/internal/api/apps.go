@@ -197,6 +197,42 @@ func RestatePlaceholderPhase(apps []models.ResourceSnapshot, buildStatus map[str
 	}
 }
 
+// RestateUnreachablePhase demotes a "Ready" app that the URL watcher has proven
+// does not answer HTTP on its own in-cluster Service.
+//
+// "Ready" is written by the status reconciler from replica readiness alone, and
+// a container with no readinessProbe is Ready the instant it starts — whether or
+// not anything ever binds the port. So an app can sit green for days behind a
+// permanent 502. Confirmed live on 2026-08-08: telemost-bot and oxygen each had
+// 2057+ consecutive failing probes since 2026-08-04 while the console still
+// showed a green Ready badge, and a first-time user watched his app report Ready,
+// opened the offered URL, got "preview upstream unavailable", asked the assistant
+// for help, and deleted the app twelve minutes after deploying it.
+//
+// The alert this reads is already anti-flap gated by loadAppAlerts: the row is
+// only returned once consecutive_failures crossed appURLAlertFailureThreshold
+// and last_seen_at is inside appURLAlertFreshWindow, so a cold-starting app is
+// never demoted and a fixed one recovers within one missed tick.
+//
+// Only "Ready" is rewritten. CrashLoop, Failed and the placeholder phases are
+// already truthful and more specific, and masking them behind "Unreachable"
+// would lose the reason. The "url" is deliberately kept: unlike the pause
+// placeholder there is a real workload behind the domain, and an app that binds
+// no port on purpose (a long-poll bot) still needs its address visible.
+func RestateUnreachablePhase(apps []models.ResourceSnapshot) {
+	for i := range apps {
+		if apps[i].Phase != "Ready" {
+			continue
+		}
+		for _, al := range apps[i].Alerts {
+			if al.Type == appAlertTypeURL {
+				apps[i].Phase = "Unreachable"
+				break
+			}
+		}
+	}
+}
+
 // GitRepoRow is one git_repos row plus its latest build status — the inputs
 // SynthesizeGitRepoApps needs to decide whether to surface a NotDeployed
 // placeholder app for a repo that has no live snapshot yet.
@@ -404,6 +440,7 @@ func (h *Handler) ListApps(c *gin.Context) {
 	if ns := h.environmentNamespace(c.Request.Context(), envID); ns != "" {
 		if byApp, aerr := h.loadAppAlerts(c.Request.Context(), ns); aerr == nil {
 			applyAppAlerts(apps, byApp)
+			RestateUnreachablePhase(apps)
 		}
 	}
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/dada-tuda/console/portainer-agent/internal/db"
@@ -78,15 +79,94 @@ func (w *VMWatcher) doDiscoverWorkload(ctx context.Context, op db.Operation) err
 }
 
 // platformSidecars are the observability/agent containers the platform itself
-// injects onto every enrolled VM at bootstrap. They are NOT part of the user's
-// workload, so discovery excludes them — otherwise their images and (worse) their
-// named volumes would pollute the adopt inventory + external-volume block.
+// injects onto every enrolled VM at bootstrap, keyed by compose SERVICE name (or
+// by container name for the standalone edge agent, which runs outside compose).
+// They are NOT part of the user's workload, so discovery excludes them —
+// otherwise their images and (worse) their named volumes would pollute the adopt
+// inventory + external-volume block.
 var platformSidecars = map[string]bool{
 	"portainer_edge_agent": true,
 	"filebeat":             true,
+	"fluent-bit":           true,
 	"prometheus-agent":     true,
+	"container-metrics":    true,
 	"cadvisor":             true,
 	"node_exporter":        true,
+	"node-exporter":        true,
+}
+
+// composeProjectLabel and composeServiceLabel are what `docker compose` stamps on
+// every container it creates. They are the authoritative identity: a container's
+// NAME is "<project>-<service>-<index>", so matching a bare service name against
+// the name alone never fires for anything compose-managed.
+const (
+	composeProjectLabel = "com.docker.compose.project"
+	composeServiceLabel = "com.docker.compose.service"
+)
+
+// isPlatformSidecar reports whether a discovered container belongs to the
+// platform rather than to the user's workload.
+//
+// The bare-name map alone was not enough and let the whole fleet observability
+// stack leak into two user projects on 2026-08-08: the stack is deployed by
+// Portainer as compose, so its containers are named
+// "edge-vm-observability-fluent-bit-1", never "fluent-bit", and the exact-match
+// lookup could not fire. Both users then imported our prometheus-agent,
+// fluent-bit, node-exporter and container-metrics as their own apps.
+//
+// Identity is checked in order of trustworthiness: the compose project (the
+// entire fleet stack is platform-owned whatever services it grows next), then
+// the compose service, then — for endpoints whose proxy answer carries no labels
+// — the same two tokens recovered from the container name.
+func isPlatformSidecar(c portainer.Container, name string) bool {
+	if project := c.Labels[composeProjectLabel]; isFleetProject(project) {
+		return true
+	}
+	if platformSidecars[c.Labels[composeServiceLabel]] {
+		return true
+	}
+	if platformSidecars[name] {
+		return true
+	}
+	return composeNameLooksPlatform(name)
+}
+
+// isFleetProject matches the fleet observability compose project. Portainer
+// deploys an edge stack under an "edge-"-prefixed project name on some agent
+// versions and under the bare stack name on others, so both spellings count.
+func isFleetProject(project string) bool {
+	return project == fleetStackName || project == "edge-"+fleetStackName
+}
+
+// composeNameLooksPlatform is the label-less fallback: it decides whether a
+// container name of the form "<project>-<service>-<index>" belongs to the
+// platform. Both the project and the service may themselves contain dashes, so
+// the boundary between them is genuinely ambiguous from the name alone — every
+// split point is therefore tried, and the name is platform-owned if ANY reading
+// yields a known fleet project or a known sidecar service.
+//
+// Trying every split is safe because both sides are matched against fixed
+// platform vocabularies, never against user input: a user container is excluded
+// only if some substring of its name is exactly a platform service, which is the
+// same collision the bare-name map already accepted.
+func composeNameLooksPlatform(name string) bool {
+	idx := strings.LastIndex(name, "-")
+	if idx <= 0 {
+		return false
+	}
+	if _, err := strconv.Atoi(name[idx+1:]); err != nil {
+		return false
+	}
+	stem := name[:idx]
+	for i, ch := range stem {
+		if ch != '-' {
+			continue
+		}
+		if isFleetProject(stem[:i]) || platformSidecars[stem[i+1:]] {
+			return true
+		}
+	}
+	return false
 }
 
 // buildDiscoveryResult turns raw proxy containers into the console summary +
@@ -100,7 +180,7 @@ func buildDiscoveryResult(endpointID int, containers []portainer.Container) disc
 
 	for _, c := range containers {
 		name := strings.TrimPrefix(firstName(c.Names), "/")
-		if platformSidecars[name] {
+		if isPlatformSidecar(c, name) {
 			skipped++
 			continue
 		}
@@ -137,8 +217,8 @@ func buildDiscoveryResult(endpointID int, containers []portainer.Container) disc
 
 	if skipped > 0 {
 		res.Warnings = append(res.Warnings, fmt.Sprintf(
-			"excluded %d platform-managed sidecar container(s) (edge agent, filebeat, prometheus-agent, cadvisor, node_exporter) — they are not part of the workload to adopt",
-			skipped))
+			"excluded %d platform-managed sidecar container(s) (edge agent and the %s stack: prometheus-agent, fluent-bit, node-exporter, container-metrics, cadvisor) — they are not part of the workload to adopt",
+			skipped, fleetStackName))
 	}
 	res.ExternalVolumesYAML = renderExternalVolumesYAML(namedVols)
 	return res

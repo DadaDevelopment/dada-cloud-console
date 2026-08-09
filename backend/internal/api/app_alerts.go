@@ -53,6 +53,12 @@ func groupAppAlerts(rows []appAlertRow) map[string][]models.AppAlert {
 	return out
 }
 
+// appAlertTypeURL tags an alert raised by the URL-reality watcher, i.e. the app
+// is live but does not answer HTTP on its own in-cluster Service. Named because
+// RestateUnreachablePhase keys the phase demotion off it and the two must not
+// drift apart.
+const appAlertTypeURL = "url"
+
 // applyAppAlerts stamps each app's Alerts field from the grouped map, by
 // name. Apps with no matching alerts are left with a nil (omitted) slice.
 func applyAppAlerts(apps []models.ResourceSnapshot, byApp map[string][]models.AppAlert) {
@@ -154,7 +160,7 @@ func (h *Handler) loadAppAlerts(ctx context.Context, namespace string) (map[stri
 			urows.Close()
 			return nil, scanErr
 		}
-		r.Type = "url"
+		r.Type = appAlertTypeURL
 		rows = append(rows, r)
 	}
 	urows.Close()

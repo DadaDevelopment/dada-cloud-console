@@ -4,6 +4,9 @@
  * so a list page polls until it reaches one of these. NotDeployed/Stopped are
  * terminal on purpose: a connected-but-undeployed repo or a stopped app is a
  * stable state, not an in-flight one, and must not drive an endless poll.
+ * Unreachable is terminal for the same reason: the app is running and settled,
+ * it just does not answer HTTP, and only a redeploy changes that — polling would
+ * never see it move.
  */
 export const TERMINAL_PHASES = new Set([
   "ready",
@@ -11,6 +14,7 @@ export const TERMINAL_PHASES = new Set([
   "notdeployed",
   "stopped",
   "orphaned",
+  "unreachable",
 ]);
 
 /**
