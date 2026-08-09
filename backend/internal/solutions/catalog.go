@@ -64,6 +64,16 @@ const (
 	CategoryProductivity Category = "productivity"
 	CategoryMonitoring   Category = "monitoring"
 	CategoryAutomation   Category = "automation"
+	CategoryGames        Category = "games"
+)
+
+// Runtime is the substrate an entry can be installed onto, spelled the same way
+// the environments table spells it.
+type Runtime string
+
+const (
+	RuntimeK8s Runtime = "k8s"
+	RuntimeVM  Runtime = "vm"
 )
 
 // CategoryTitles is the display name of every category, in display order. The
@@ -83,6 +93,7 @@ var CategoryTitles = []struct {
 	{CategoryMonitoring, "Мониторинг"},
 	{CategorySecurity, "Безопасность"},
 	{CategoryMedia, "Медиа"},
+	{CategoryGames, "Игровые серверы"},
 }
 
 // ParamKind is how the console renders one install parameter, and how the API
@@ -173,6 +184,14 @@ type Solution struct {
 	// Volume is the persistent data directory an image entry needs. Only image
 	// entries may have one, because the build track has nowhere to put it.
 	Volume *Volume
+	// Runtimes overrides which substrates this entry may be installed onto.
+	// Leave it empty and the answer is derived from the track (see
+	// SupportsRuntime): an image runs anywhere, a repository only where the
+	// build pipeline does. Set it for the entries the derivation gets wrong —
+	// today that is a game server, which needs its own port reachable from the
+	// internet and therefore a VM, because a Kubernetes environment publishes
+	// nothing but HTTP through the shared ingress.
+	Runtimes []Runtime
 	// IconRepo is where the logo comes from for entries that have no Repo of
 	// their own to take it from: a GitHub account name, or "owner/name" when
 	// that reads better at the call site. Only the account half is used.
@@ -213,6 +232,13 @@ type Solution struct {
 // Ports and data paths come from upstream's own compose file or Dockerfile, not
 // from a guess: a wrong port makes a card that deploys green and answers
 // nothing, and a wrong data path makes one that loses everything on restart.
+//
+// Game servers are here for VM environments only, and only one of them so far.
+// An app declares a single TCP port and no command arguments, which is enough
+// for Minecraft Java and not enough for most of the rest: CS2, Rust, Factorio
+// and TeamSpeak want UDP, and Terraria is configured by process arguments
+// rather than by environment. Those wait on a multi-port app spec instead of
+// shipping as cards that deploy green and never accept a player.
 var V1 = []Solution{
 	{
 		Slug:     "excalidraw",
@@ -873,11 +899,104 @@ var V1 = []Solution{
 		Volume:   &Volume{Path: "/etc/searxng", Size: "1Gi"},
 		FirstRun: "Готово сразу: добавьте адрес приложения как поисковую систему в браузере.",
 	},
+	{
+		Slug:     "minecraft",
+		Name:     "Minecraft (Java)",
+		Tagline:  "Свой сервер Minecraft — заходят по адресу вашей машины",
+		Category: CategoryGames,
+		Homepage: "https://docker-minecraft-server.readthedocs.io",
+		License:  "Apache-2.0 (образ); сама игра — по лицензии Mojang",
+		Aliases:  []string{"майнкрафт", "minecraft", "мс сервер", "игровой сервер", "paper", "spigot", "fabric"},
+		About: "Сервер Minecraft Java Edition: создаётся при первом запуске, мир хранится на диске " +
+			"машины и переживает перезапуск. Версию и сборку (ванилла, Paper, Fabric) выбираете " +
+			"при установке, дальше сервер сам скачивает нужное ядро.",
+		Bullets: []string{
+			"Ванилла, Paper, Purpur или Fabric — на выбор",
+			"Мир и настройки на постоянном диске",
+			"Подключение по адресу машины и порту 25565",
+		},
+		Image:    "itzg/minecraft-server:java21",
+		IconRepo: "itzg",
+		Port:     25565,
+		Profile:  "medium",
+		Runtimes: []Runtime{RuntimeVM},
+		Volume:   &Volume{Path: "/data", Size: "10Gi"},
+		Env: map[string]string{
+			"MEMORY":      "2G",
+			"ENABLE_RCON": "false",
+		},
+		Params: []Param{
+			{
+				Key:      "eula",
+				EnvKey:   "EULA",
+				Label:    "Принимаю лицензионное соглашение Minecraft (EULA)",
+				Help:     "Сервер не запустится без согласия — так требует Mojang: https://aka.ms/MinecraftEULA",
+				Kind:     ParamSelect,
+				Required: true,
+				Options:  []string{"TRUE"},
+			},
+			{
+				Key:         "version",
+				EnvKey:      "VERSION",
+				Label:       "Версия игры",
+				Help:        "Например 1.21.4. Оставьте LATEST, чтобы поставить самую свежую.",
+				Kind:        ParamText,
+				Default:     "LATEST",
+				Placeholder: "LATEST",
+			},
+			{
+				Key:     "type",
+				EnvKey:  "TYPE",
+				Label:   "Сборка сервера",
+				Help:    "Paper быстрее ванили и держит плагины; Fabric нужен для модов.",
+				Kind:    ParamSelect,
+				Default: "PAPER",
+				Options: []string{"VANILLA", "PAPER", "PURPUR", "FABRIC"},
+			},
+			{
+				Key:         "motd",
+				EnvKey:      "MOTD",
+				Label:       "Надпись в списке серверов",
+				Kind:        ParamText,
+				Placeholder: "Наш сервер",
+			},
+		},
+		Warning:  "Сервер открыт для всех, кто знает адрес. Включите whitelist в настройках, если он только для своих.",
+		FirstRun: "Первый запуск дольше обычного: сервер скачивает ядро и генерирует мир. Адрес для подключения — адрес машины и порт 25565.",
+	},
 }
 
 // IsImage reports whether this entry runs a published image instead of being
 // built from its repository.
 func (s Solution) IsImage() bool { return s.Image != "" }
+
+// SupportedRuntimes is where this entry can be installed.
+//
+// The default is both substrates, and it holds for both tracks. An image app is
+// the same image under docker-compose, and its volume is an ordinary named
+// volume there. A built entry ends up in the same place: the pipeline hands its
+// image to CreateApp, and the operation is routed to compose or to Helm by the
+// environment, not by the catalog.
+//
+// Only an entry the substrate genuinely cannot host names its runtimes — see
+// Runtimes.
+func (s Solution) SupportedRuntimes() []Runtime {
+	if len(s.Runtimes) > 0 {
+		return s.Runtimes
+	}
+	return []Runtime{RuntimeK8s, RuntimeVM}
+}
+
+// SupportsRuntime reports whether this entry can be installed into an
+// environment of the given runtime.
+func (s Solution) SupportsRuntime(rt Runtime) bool {
+	for _, r := range s.SupportedRuntimes() {
+		if r == rt {
+			return true
+		}
+	}
+	return false
+}
 
 // Source is what the card tells the customer about where the running thing came
 // from: "image" for a published image, "repo" for our own build of the source.

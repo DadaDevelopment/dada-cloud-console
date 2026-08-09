@@ -680,6 +680,14 @@ func (h *Handler) CreateApp(c *gin.Context) {
 // A returned fault with Status 0 means the response is already written: the
 // billing gates own their own response shape (quota vs consumption) and the
 // caller must not write a second one.
+//
+// STORAGE. A volume means two different things per runtime. On Kubernetes it is
+// a Longhorn PVC, so it carries a size, a storage class and an fsGroup and it
+// counts against the organisation's storage quota. On a VM it is a Docker named
+// volume living on the customer's own disk, where none of those three exist and
+// the Longhorn quota measures nothing — so they are dropped and only the mount
+// path survives. Rejecting the request instead, as this did until the catalog
+// grew stateful entries, made every ready-made project undeployable on a VM.
 func (h *Handler) createAppOp(c *gin.Context, claims *auth.Claims, projectID, envID uuid.UUID, req createAppRequest) (*models.Operation, string, *opFault) {
 	rejectCreate := func(status int, reason, msg string) *opFault {
 		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
@@ -804,9 +812,11 @@ func (h *Handler) createAppOp(c *gin.Context, claims *auth.Claims, projectID, en
 		return nil, "", rejectCreate(http.StatusBadRequest, "invalid_volume", err.Error())
 	}
 	if appVolume != nil && isCompose {
-		return nil, "", rejectCreate(http.StatusBadRequest, "storage_not_supported", "persistent storage is only supported for Kubernetes apps")
+		appVolume.Size = ""
+		appVolume.StorageClass = ""
+		appVolume.FSGroup = 0
 	}
-	if appVolume != nil {
+	if appVolume != nil && !isCompose {
 		if orgID, orgErr := h.projectOrg(c.Request.Context(), projectID); orgErr == nil {
 			capBytes, limitGB, capErr := h.storageCapBytes(c.Request.Context(), orgID)
 			if capErr != nil {

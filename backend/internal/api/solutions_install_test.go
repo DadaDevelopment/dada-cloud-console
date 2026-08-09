@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
@@ -312,5 +313,113 @@ func TestInstallSolution_PastedRepoInstalls(t *testing.T) {
 	}
 	if branch != "main" || port != 8080 {
 		t.Fatalf("branch=%q port=%d, want the connect-repo defaults main/8080", branch, port)
+	}
+}
+
+// A game server is reachable only because the VM publishes its port. A
+// Kubernetes environment publishes HTTP through the shared ingress and nothing
+// else, so installing one there would deploy green and never accept a player.
+// The gate says so at install time instead, and names the substrate that works.
+func TestInstallSolution_GameServerIsRejectedOnKubernetes(t *testing.T) {
+	pool := testInstallPool(t)
+	projectID, envID, userID := seedInstallProject(t, pool, "acme", "k8s")
+	t.Cleanup(func() { dropSeededAudit(pool, "Solution", "") })
+
+	h := newInstallHandler(pool)
+	claims := &auth.Claims{UserID: userID, Groups: []string{"/platform-admins"}}
+	c, rec := newInstallCtx(projectID, envID, installSolutionRequest{Slug: "minecraft"}, claims)
+	h.InstallSolution(c)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("code=%d body=%s want 400", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "VM") {
+		t.Fatalf("the refusal must name the substrate that works: %s", rec.Body.String())
+	}
+
+	var appCount int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM operations WHERE environment_id = $1`, envID,
+	).Scan(&appCount); err != nil {
+		t.Fatalf("count operations: %v", err)
+	}
+	if appCount != 0 {
+		t.Fatalf("a refused install queued %d operations", appCount)
+	}
+}
+
+// A stateful catalog entry on a VM is what the whole VM track is for: the same
+// card the cloud offers, running as a compose service with its data on the
+// machine's own disk. It used to be impossible — the app core rejected any
+// volume outside Kubernetes with storage_not_supported, which made every
+// stateful ready-made project undeployable on a VM.
+func TestInstallSolution_StatefulImageInstallsOnVM(t *testing.T) {
+	pool := testInstallPool(t)
+	projectID, envID, userID := seedInstallProject(t, pool, "acme", "vm")
+	attachReadyAppServer(t, pool, projectID, envID)
+	t.Cleanup(func() { dropSeededAudit(pool, "Solution", "minecraft") })
+	t.Cleanup(func() { dropSeededAudit(pool, "App", "minecraft") })
+
+	h := newInstallHandler(pool)
+	claims := &auth.Claims{UserID: userID, Groups: []string{"/platform-admins"}}
+	body := installSolutionRequest{Slug: "minecraft", Params: map[string]string{"eula": "TRUE"}}
+	c, rec := newInstallCtx(projectID, envID, body, claims)
+	h.InstallSolution(c)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("code=%d body=%s want 202", rec.Code, rec.Body.String())
+	}
+
+	ctx := context.Background()
+	var image, volumePath, size string
+	if err := pool.QueryRow(ctx,
+		`SELECT payload->>'image', payload->'volume'->>'path', COALESCE(payload->'volume'->>'size', '')
+		 FROM operations WHERE environment_id = $1 AND action = 'CreateApp' AND resource_name = 'minecraft'`,
+		envID,
+	).Scan(&image, &volumePath, &size); err != nil {
+		t.Fatalf("CreateApp not queued: %v", err)
+	}
+	if image != "itzg/minecraft-server:java21" {
+		t.Fatalf("image = %q", image)
+	}
+	if volumePath != "/data" {
+		t.Fatalf("volume path = %q, want the catalog's data directory", volumePath)
+	}
+	// A VM volume is a Docker named volume on the machine's own disk: a Longhorn
+	// size would be a number nothing on the VM can honour.
+	if size != "" {
+		t.Fatalf("volume size = %q, want it dropped for a compose app", size)
+	}
+
+	var encrypted []byte
+	if err := pool.QueryRow(ctx,
+		`SELECT value_encrypted FROM env_vars WHERE environment_id = $1 AND app_name = 'minecraft' AND key = 'EULA'`,
+		envID,
+	).Scan(&encrypted); err != nil {
+		t.Fatalf("EULA not stored: %v", err)
+	}
+	eula, err := crypto.DecryptToken(installTestKey, encrypted)
+	if err != nil {
+		t.Fatalf("decrypt EULA: %v", err)
+	}
+	if string(eula) != "TRUE" {
+		t.Fatalf("EULA = %q; the server refuses to start without it", string(eula))
+	}
+}
+
+// attachReadyAppServer gives a VM environment the AppServer the app core
+// insists on before it will queue anything for compose.
+func attachReadyAppServer(t *testing.T, pool *pgxpool.Pool, projectID, envID uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	var serverID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO app_servers (project_id, name, status, source) VALUES ($1, $2, 'Ready', 'manual') RETURNING id`,
+		projectID, "vm-"+uuid.NewString()[:8],
+	).Scan(&serverID); err != nil {
+		t.Fatalf("seed app server: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE environments SET app_server_id = $1 WHERE id = $2`, serverID, envID); err != nil {
+		t.Fatalf("attach app server: %v", err)
 	}
 }

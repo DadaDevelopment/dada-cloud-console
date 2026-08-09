@@ -9,6 +9,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/buildagent"
 	"github.com/dada-tuda/console/backend/internal/cache"
+	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/dada-tuda/console/backend/internal/solutions"
 
 	"github.com/gin-gonic/gin"
@@ -48,7 +49,12 @@ func solutionPayload(s solutions.Solution) gin.H {
 	if s.Volume != nil {
 		volume = gin.H{"path": s.Volume.Path, "size": s.Volume.Size}
 	}
+	runtimes := make([]string, 0, 2)
+	for _, r := range s.SupportedRuntimes() {
+		runtimes = append(runtimes, string(r))
+	}
 	return gin.H{
+		"runtimes":   runtimes,
 		"slug":       s.Slug,
 		"name":       s.Name,
 		"tagline":    s.Tagline,
@@ -501,6 +507,19 @@ func (h *Handler) InstallSolution(c *gin.Context) {
 			rejectErr(http.StatusNotFound, "unknown_solution", "no such ready-made project")
 			return
 		}
+		rt, rtErr := h.envRuntime(c.Request.Context(), projectID, envID)
+		if rtErr == pgx.ErrNoRows {
+			respondNotFound(c)
+			return
+		}
+		if rtErr != nil {
+			rejectErr(http.StatusInternalServerError, "runtime_unknown", "failed to load environment runtime")
+			return
+		}
+		if !s.SupportsRuntime(solutions.Runtime(rt)) {
+			rejectErr(http.StatusBadRequest, "runtime_unsupported", runtimeUnsupportedMsg(rt))
+			return
+		}
 		if s.IsImage() {
 			h.installImageSolution(c, claims, projectID, envID, s, req)
 			return
@@ -752,6 +771,21 @@ func (h *Handler) installImageSolution(c *gin.Context, claims *auth.Claims, proj
 		"source":           "image",
 		"installed":        true,
 	})
+}
+
+// runtimeUnsupportedMsg says why this entry cannot go into this environment,
+// naming the substrate that would work. "Not supported" alone leaves the
+// customer guessing whether they picked the wrong card or the wrong project;
+// both halves of the answer are known here, so both are said.
+func runtimeUnsupportedMsg(rt models.EnvironmentRuntime) string {
+	switch {
+	case rt == models.EnvironmentRuntimeBox:
+		return "a box runs one image chosen through the box API; ready-made projects install into a cloud or VM environment"
+	case rt == models.EnvironmentRuntimeK8s:
+		return "this project needs its own network port reachable from the internet, which only a VM environment gives it"
+	default:
+		return "this project cannot be installed into this environment"
+	}
 }
 
 // repoShortName is the repository half of "owner/name".

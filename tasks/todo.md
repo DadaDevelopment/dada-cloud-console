@@ -414,3 +414,43 @@ Funnel reads from `GET /api/v1/admin/growth/campaigns`.
 - [x] DELETE AppServer на новом образе: VM снесена, `app_servers` пуст, IP отдан провайдеру
 - [x] Уборка: приложения удалены, A-запись `le-probe` снята, TXT зоны превью не тронут (это платформенная запись `pv.dada-tuda.ru`)
 - [ ] Осталось: строка окружения `le-probe` живёт (API удаления окружения нет) — стоимости не несёт
+
+## Review — VM-трек готовых решений (2026-08-08)
+
+Шаг 3 из плана «догнать каталог Бегета». Шаг 1 (image-трек) и шаг 2 (26 карточек
+с категориями + UI) уже выкачены; здесь — те же карточки на `app_servers`.
+
+- [x] `createAppOp`: том на compose-окружении больше не отбивается
+      `storage_not_supported` — Longhorn-поля (size/storageClass/fsGroup) снимаются,
+      остаётся путь монтирования. До этого ЛЮБОЕ stateful готовое решение было
+      недеплоибельно на VM.
+- [x] gitops-agent: `composeDesiredFromCreate` + `ComposeDataVolumeName` — том из
+      payload превращается в docker named volume `<app>-data`, рендерер пиннит его
+      `external: true`, деплой-воркер создаёт его перед стартом стека.
+- [x] `Solution.Runtimes` + `SupportedRuntimes()`: по умолчанию оба субстрата
+      (собранный из исходников апп тоже доезжает до VM — build-agent ставит
+      CreateApp, а маршрутизирует уже окружение). Сужение — только для того, что
+      субстрат физически не тянет.
+- [x] Категория «Игровые серверы» и первая карточка: Minecraft Java
+      (`itzg/minecraft-server:java21`, порт 25565, том `/data`, параметры EULA /
+      версия / сборка / MOTD), `Runtimes: [vm]`.
+- [x] Гейт в `InstallSolution`: несовместимая пара «карточка × runtime» — 400 с
+      объяснением, какой субстрат подходит, до постановки любой операции.
+- [x] Консоль: `runtimes` в типе `Solution`, проп `envRuntime`, карточки
+      фильтруются под окружение; на VM-окружении с привязанным AppServer каталог
+      теперь показывается (раньше пустой экран VM его прятал совсем).
+- [x] Тесты: worker (`compose_create_volume_test.go`), каталог (инварианты
+      runtime, VM-only для игр), API на реальной базе — установка Minecraft на
+      k8s даёт 400 и ноль операций, на VM — CreateApp с `/data` и снятым size,
+      EULA лежит в env_vars.
+
+Проверено: `go test ./internal/...` (backend, TEST_DATABASE_URL на локальном
+кластере) и `go test ./internal/worker` (gitops-agent) зелёные, `tsc --noEmit`
+чистый.
+
+Не сделано осознанно:
+- [ ] UDP-игры (CS2, Rust, TeamSpeak, Factorio) и Terraria — апп объявляет один
+      TCP-порт и не умеет аргументы команды. Нужен multi-port/protocol спек аппа,
+      иначе карточка деплоится зелёной и не принимает игрока.
+- [ ] FreePBX — по той же причине (SIP UDP + диапазон RTP).
+- [ ] Ни одна из карточек ещё не установлена в `agent-sandbox` вживую.

@@ -1505,6 +1505,42 @@ type composeDesired struct {
 
 // composeAppSummary marks an App snapshot as a first-class VM (compose)
 // Application and carries its desired service spec.
+// composeDesiredFromCreate turns a CreateApp payload into the desired compose
+// service of a VM app.
+//
+// A payload volume is a mount path and nothing else here: the size, storage
+// class and fsGroup it carries are Longhorn concepts the API strips for this
+// runtime, and what reaches the VM is an ordinary Docker named volume that the
+// aggregate renderer pins external and the deploy worker creates if missing.
+func composeDesiredFromCreate(payload []byte, appName string) composeDesired {
+	var p struct {
+		Image  string `json:"image"`
+		Port   int    `json:"port"`
+		Volume *struct {
+			Path string `json:"path"`
+		} `json:"volume"`
+	}
+	_ = json.Unmarshal(payload, &p)
+
+	var ports []string
+	if p.Port > 0 {
+		ports = []string{fmt.Sprintf("%d:%d", p.Port, p.Port)}
+	}
+	var volumes []string
+	if p.Volume != nil && p.Volume.Path != "" {
+		volumes = []string{ComposeDataVolumeName(appName) + ":" + p.Volume.Path}
+	}
+	return composeDesired{Image: p.Image, Ports: ports, Volumes: volumes}
+}
+
+// ComposeDataVolumeName is the named volume a compose app's persistent mount
+// gets. The name is derived from the app rather than random so a re-created app
+// re-attaches the data that is already on the VM's disk instead of silently
+// starting empty, and so the aggregate renderer can pin it external.
+func ComposeDataVolumeName(appName string) string {
+	return appName + "-data"
+}
+
 func composeAppSummary(desired composeDesired, extra map[string]any) json.RawMessage {
 	m := map[string]any{"runtime": "compose", "status": "Pending", "desired": desired}
 	for k, v := range extra {
@@ -1761,17 +1797,7 @@ func (w *DBWatcher) doAdoptComposeStack(ctx context.Context, op db.Operation) er
 // the former per-app compose.yaml skeleton: the app is now one service in the
 // shared per-environment stack (renderer.EnvComposeGitPath), not its own stack.
 func (w *DBWatcher) doCreateComposeApp(ctx context.Context, op db.Operation, appName string) error {
-	var p struct {
-		Image string `json:"image"`
-		Port  int    `json:"port"`
-	}
-	_ = json.Unmarshal(op.Payload, &p)
-
-	var ports []string
-	if p.Port > 0 {
-		ports = []string{fmt.Sprintf("%d:%d", p.Port, p.Port)}
-	}
-	summaryJSON := composeAppSummary(composeDesired{Image: p.Image, Ports: ports}, nil)
+	summaryJSON := composeAppSummary(composeDesiredFromCreate(op.Payload, appName), nil)
 	if err := db.UpsertSnapshot(ctx, w.pool,
 		op.ProjectID, op.EnvironmentID,
 		"App", appName, "Pending", summaryJSON, time.Now(),

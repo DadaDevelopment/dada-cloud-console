@@ -44,6 +44,14 @@ export interface TemplateDeployCardsProps {
    * apps empty state) rather than a secondary option next to Git.
    */
   hero?: boolean;
+  /**
+   * The runtime of the environment being deployed into. Entries the runtime
+   * cannot host are hidden rather than shown and refused at install time: a
+   * game server needs the machine to publish its port, which a cloud
+   * environment does not do. Unset means a cloud environment, which is what
+   * every placement without an explicit VM context is.
+   */
+  envRuntime?: string;
   className?: string;
 }
 
@@ -58,7 +66,7 @@ export interface TemplateDeployCardsProps {
  * project is a backend change and the console never disagrees with it about
  * which branch or port an entry builds with.
  */
-export function TemplateDeployCards({ projectId, envId, placement, compact, hero, className }: TemplateDeployCardsProps) {
+export function TemplateDeployCards({ projectId, envId, placement, compact, hero, envRuntime, className }: TemplateDeployCardsProps) {
   const { t } = useT();
   const router = useRouter();
   const [solutions, setSolutions] = useState<Solution[] | null>(null);
@@ -78,7 +86,8 @@ export function TemplateDeployCards({ projectId, envId, placement, compact, hero
       .list()
       .then((res) => {
         if (cancelled) return;
-        setSolutions(res.solutions ?? []);
+        const runtime = envRuntime || "k8s";
+        setSolutions((res.solutions ?? []).filter((s) => (s.runtimes ?? []).length === 0 || s.runtimes.includes(runtime)));
         setCategories(res.categories ?? []);
       })
       .catch(() => {
@@ -87,7 +96,7 @@ export function TemplateDeployCards({ projectId, envId, placement, compact, hero
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [envRuntime]);
 
   /**
    * Resolves what the customer typed, one debounced request per pause in the

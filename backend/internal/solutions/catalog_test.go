@@ -231,3 +231,53 @@ func TestResolveParams(t *testing.T) {
 		t.Fatal("newline in a value accepted")
 	}
 }
+
+// An entry that names no runtime at all is unreachable from every environment,
+// which is a card nobody can install.
+func TestDeclaredRuntimesAreInstallable(t *testing.T) {
+	known := map[Runtime]bool{RuntimeK8s: true, RuntimeVM: true}
+	for _, s := range V1 {
+		runtimes := s.SupportedRuntimes()
+		if len(runtimes) == 0 {
+			t.Fatalf("solution %q supports no runtime at all", s.Slug)
+		}
+		for _, r := range runtimes {
+			if !known[r] {
+				t.Fatalf("solution %q claims runtime %q", s.Slug, r)
+			}
+		}
+	}
+}
+
+func TestSupportedRuntimesDerivation(t *testing.T) {
+	for _, s := range []Solution{
+		{Slug: "built", Repo: "owner/name"},
+		{Slug: "img", Image: "owner/name:1"},
+	} {
+		if !s.SupportsRuntime(RuntimeVM) || !s.SupportsRuntime(RuntimeK8s) {
+			t.Fatalf("%q runs on both substrates by default, got %v", s.Slug, s.SupportedRuntimes())
+		}
+	}
+	vmOnly := Solution{Slug: "game", Image: "owner/name:1", Runtimes: []Runtime{RuntimeVM}}
+	if vmOnly.SupportsRuntime(RuntimeK8s) {
+		t.Fatalf("a declared runtime list must win over the derivation, got %v", vmOnly.SupportedRuntimes())
+	}
+}
+
+// A game server is reachable only because the VM publishes its port directly.
+// A Kubernetes environment publishes HTTP through the shared ingress and
+// nothing else, so installing one there deploys green and never accepts a
+// player — the gate exists to say that instead.
+func TestGameServersAreVMOnly(t *testing.T) {
+	for _, s := range V1 {
+		if s.Category != CategoryGames {
+			continue
+		}
+		if s.SupportsRuntime(RuntimeK8s) {
+			t.Fatalf("game %q claims Kubernetes, which cannot publish its port", s.Slug)
+		}
+		if s.Volume == nil {
+			t.Fatalf("game %q keeps its world on disk and needs a volume", s.Slug)
+		}
+	}
+}

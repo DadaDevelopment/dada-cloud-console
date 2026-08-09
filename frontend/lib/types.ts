@@ -1714,6 +1714,12 @@ export interface Solution {
   image: string;
   /** Set only for image entries that keep state on disk. */
   volume: SolutionVolume | null;
+  /**
+   * The environment runtimes this entry can be installed into. Most entries
+   * name both; a game server names "vm" alone, because its port is reachable
+   * only where the machine publishes it directly.
+   */
+  runtimes: string[];
   params: SolutionParam[] | null;
   about: string;
   bullets: string[] | null;
