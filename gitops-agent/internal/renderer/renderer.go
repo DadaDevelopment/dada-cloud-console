@@ -62,8 +62,8 @@ spec:
 {{- end }}
   backup:
     enabled: {{ .BackupEnabled }}
-    frequency: {{ .BackupSchedule }}
-    retention: {{ .BackupRetention }}
+    frequency: {{ .BackupSchedule | printf "%q" }}
+    retention: {{ .BackupRetention | printf "%q" }}
 `))
 
 func RenderServiceDatabase(spec ServiceDatabaseSpec) (string, error) {

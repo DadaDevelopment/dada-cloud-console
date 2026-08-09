@@ -132,8 +132,8 @@ func TestRenderServiceDatabase(t *testing.T) {
 		"engine: postgresql",
 		"database: myapp_db",
 		"enabled: true",
-		"frequency: daily",
-		"retention: 14d",
+		"frequency: \"daily\"",
+		"retention: \"14d\"",
 	}
 	for _, want := range wantSubstrings {
 		if !strings.Contains(got, want) {

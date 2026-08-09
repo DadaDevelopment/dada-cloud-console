@@ -23,5 +23,5 @@ manifests:
         database: n8n
         backup:
             enabled: true
-            frequency: daily
-            retention: 7d
+            frequency: "daily"
+            retention: "7d"

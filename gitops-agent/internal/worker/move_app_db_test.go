@@ -37,7 +37,7 @@ func TestRerenderServiceDatabaseForMoveSetsDstNamespace(t *testing.T) {
 		"dada.io/project: platform",
 		"dada.io/environment: prod",
 		"dada.io/operation: op-123",
-		"retention: 7d",
+		"retention: \"7d\"",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("rendered DB missing %q\n---\n%s", want, got)
@@ -137,7 +137,7 @@ func TestRepointResourcesValuesDBReplacesInPlace(t *testing.T) {
 		"kind: ServiceDatabaseV2",
 		"namespace: platform-prod",
 		"database: n8n",
-		"retention: 7d",
+		"retention: \"7d\"",
 		"dada.io/project: platform",
 		"dada.io/operation: op-123",
 		"kind: PublicApi",
