@@ -29,6 +29,16 @@ const gcMinInterval = 2 * time.Minute
 // goroutine (tick is sequential), not a field, to keep the struct edit minimal.
 var lastGC time.Time
 
+// gcMassMarkLimit caps how many App snapshots one sweep may soft-delete. A
+// healthy estate loses apps one at a time; a double-digit mark burst has never
+// been a real mass deletion, it has been one bad signal applied to every row at
+// once (2026-08-08: a single sweep marked the whole `platform` inventory and the
+// purge that followed destroyed ~40 rows of live infrastructure). Marking is the
+// one-way door — an unmarked row can always be marked on the next tick two
+// minutes later, but a purged row is gone — so the sweep refuses the whole burst
+// and screams instead of guessing which of the rows it got right.
+const gcMassMarkLimit = 5
+
 // reconcileOrphans garbage-collects App snapshots that no DeleteApp op ever
 // cleaned up — rows stranded when an app is re-homed/renamed between projects
 // and the incremental git-watcher missed the delete side of the diff (the
@@ -64,7 +74,9 @@ func (r *StatusReconciler) reconcileOrphans(ctx context.Context, live map[snapKe
 	repos := map[uuid.UUID]*git.Manager{}
 	var marked, cleared, purged int
 
-	for _, s := range snaps {
+	decisions := make([]gcAction, len(snaps))
+	markCount := 0
+	for i, s := range snaps {
 		liveBacked := live[snapKey{s.EnvID, s.Name}]
 
 		mgr, resolved := repos[s.ProjectID]
@@ -75,8 +87,33 @@ func (r *StatusReconciler) reconcileOrphans(ctx context.Context, live map[snapKe
 
 		gitVerifiable := mgr != nil
 		gitBacked := gitVerifiable && appGitExists(mgr, s.ProjectSlug, s.EnvSlug, s.Name)
+		if gitVerifiable && !gitBacked {
+			if where, ok := appGitExistsElsewhere(mgr, s.ProjectSlug, s.EnvSlug, s.Name); ok {
+				log.Warn().Str("project", s.ProjectSlug).Str("env", s.EnvSlug).
+					Str("app", s.Name).Str("manifest", where).
+					Msg("orphan-gc: manifest lives outside this row's project/env path — row misfiled, not deleted")
+				gitBacked = true
+			}
+		}
 
-		switch gcDecide(liveBacked, gitBacked, gitVerifiable, s.Phase, s.LastSyncedAt, s.OrphanedAt, now, r.cfg.OrphanMarkAfter, r.cfg.OrphanPurgeAfter) {
+		decisions[i] = gcDecide(liveBacked, gitBacked, gitVerifiable, s.Phase, s.LastSyncedAt, s.OrphanedAt, now, r.cfg.OrphanMarkAfter, r.cfg.OrphanPurgeAfter)
+		if decisions[i] == gcMark {
+			markCount++
+		}
+	}
+
+	if markCount > gcMassMarkLimit {
+		log.Error().Int("would_mark", markCount).Int("limit", gcMassMarkLimit).Int("snapshots", len(snaps)).
+			Msg("orphan-gc: mass-mark burst refused — a shared signal, not this many deleted apps; no row soft-deleted this sweep")
+	}
+
+	for i, s := range snaps {
+		action := decisions[i]
+		if action == gcMark && markCount > gcMassMarkLimit {
+			continue
+		}
+
+		switch action {
 		case gcClear:
 			if err := db.ClearSnapshotOrphan(ctx, r.pool, s.ID); err != nil {
 				log.Error().Err(err).Str("app", s.Name).Msg("orphan-gc: clear")
@@ -404,4 +441,37 @@ func appGitExists(mgr *git.Manager, projectSlug, envSlug, app string) bool {
 	rel := renderer.AppGitPath(projectSlug, envSlug, app)
 	_, err := os.Stat(filepath.Join(mgr.LocalPath(), rel))
 	return err == nil
+}
+
+// appGitExistsElsewhere reports whether an app.yaml for this app name exists
+// anywhere else in the repo, and where. appGitExists asks a single question —
+// "is the manifest at the path built from THIS ROW's project and env slug?" —
+// so it answers "deleted from git" for a row that is merely filed under the
+// wrong project or environment. That is not a hypothetical: the platform's
+// adopted infrastructure (jenkins, nexus) had snapshots under `platform` while
+// its manifests lived under `delivery`, and the sweep read the mismatch as a
+// deletion and purged the rows (2026-08-08, ~40 rows of live infra lost).
+//
+// A manifest found under another project is deliberately treated as "alive":
+// the row is misfiled, and re-homing it is a repair someone can make later,
+// while a purge is a decision nobody can take back. The cost of being wrong
+// here is a duplicate row in the console; the cost of being wrong the other way
+// is deleted inventory for a running system.
+func appGitExistsElsewhere(mgr *git.Manager, projectSlug, envSlug, app string) (string, bool) {
+	own := renderer.AppGitPath(projectSlug, envSlug, app)
+	pattern := filepath.Join(mgr.LocalPath(),
+		renderer.AppGitPath("*", "*", app))
+
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return "", false
+	}
+	for _, m := range matches {
+		rel, err := filepath.Rel(mgr.LocalPath(), m)
+		if err != nil || rel == own {
+			continue
+		}
+		return rel, true
+	}
+	return "", false
 }

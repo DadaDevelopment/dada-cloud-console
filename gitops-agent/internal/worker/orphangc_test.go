@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/dada-tuda/console/gitops-agent/internal/git"
+	"github.com/dada-tuda/console/gitops-agent/internal/renderer"
 )
 
 func TestGCDecide(t *testing.T) {
@@ -130,5 +133,51 @@ func TestTreeContentAndTerms(t *testing.T) {
 	}
 	if got := treeContent(filepath.Join(root, "missing-env"), cache); got != "" {
 		t.Fatalf("missing root must yield empty content, got %q", got)
+	}
+}
+
+// TestAppGitExistsElsewhere is the falsification case for the mismatch that
+// destroyed the platform inventory on 2026-08-08: the snapshot row said project
+// "platform", the manifest sat under project "delivery", and the exact-path
+// probe reported "deleted from git". The row's own path must never count as
+// "elsewhere", or every healthy app would be reported as misfiled.
+func TestAppGitExistsElsewhere(t *testing.T) {
+	mgr := git.New(git.RepoConfig{
+		RepoURL:   "https://example.com/dadadevelopment/argo-infra.git",
+		Branch:    "live",
+		LocalBase: t.TempDir(),
+	})
+
+	write := func(rel string) {
+		full := filepath.Join(mgr.LocalPath(), rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(full, []byte("kind: App\n"), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+
+	write(renderer.AppGitPath("delivery", "prod", "jenkins"))
+	write(renderer.AppGitPath("platform", "prod", "keycloak"))
+
+	if appGitExists(mgr, "platform", "prod", "jenkins") {
+		t.Fatal("precondition: jenkins must be absent at the platform path")
+	}
+
+	where, ok := appGitExistsElsewhere(mgr, "platform", "prod", "jenkins")
+	if !ok {
+		t.Fatal("misfiled manifest under another project must be found")
+	}
+	if where != renderer.AppGitPath("delivery", "prod", "jenkins") {
+		t.Fatalf("wrong path reported: %s", where)
+	}
+
+	if _, ok := appGitExistsElsewhere(mgr, "platform", "prod", "keycloak"); ok {
+		t.Fatal("an app's own manifest must not count as living elsewhere")
+	}
+
+	if _, ok := appGitExistsElsewhere(mgr, "platform", "prod", "never-existed"); ok {
+		t.Fatal("a genuinely deleted app must stay deletable")
 	}
 }
