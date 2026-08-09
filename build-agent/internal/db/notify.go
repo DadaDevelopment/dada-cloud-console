@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -10,26 +11,98 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// OwnerEmail resolves the notification recipient for a build: the email of the
-// user who owns the build's project (projects.owner_id -> users.email). This
-// join is exact for personal-org projects — verified live 2026-07-15 that all
-// external signups resolve to a real address. Returns ("", nil) when the owner
-// has no email or the row is missing, so callers treat a missing recipient as
-// "skip notification", not an error.
-func OwnerEmail(ctx context.Context, pool *pgxpool.Pool, projectID uuid.UUID) (string, error) {
-	var email string
-	err := pool.QueryRow(ctx,
+// Recipient sources, stored on every SendBuildNotification row so the question
+// "who did we pick, and why" is answerable from the journal alone. The names
+// match the alert ladder in backend/internal/api/app_health_watcher.go: the two
+// paths mail the same people about the same apps, and two vocabularies for one
+// answer make the rows uncomparable.
+const (
+	RecipientSourceOwner       = "owner"
+	RecipientSourceMember      = "member"
+	RecipientSourcePersonalOrg = "personal-org"
+)
+
+// isKeycloakLocalEmail reports whether email is one of the synthetic addresses
+// stamped on a Keycloak identity that carries no email claim
+// (<sub>@keycloak.local). Such an address is non-empty but is not a mailbox:
+// mailing it "succeeds" into the void and writes a success row that lies. Every
+// rung rejects it and falls through to the next candidate.
+func isKeycloakLocalEmail(email string) bool {
+	return strings.HasSuffix(strings.ToLower(email), "@keycloak.local")
+}
+
+// OwnerEmail resolves the notification recipient for a build and reports which
+// rung of the ladder produced it: projects.owner_id, then a project_members row
+// with role Owner/Admin, then the personal-org convention (projects.org_id
+// equals a user's username). Returns ("", "", nil) only when no rung yields a
+// real mailbox, so callers can record "nobody was reachable" as a fact rather
+// than infer it.
+//
+// It used to be the first rung alone. That is exactly the bug the backend alert
+// path already fixed once (P1-ALERT-OWNERLESS-DROP): a project whose owner_id is
+// NULL — a Keycloak-only identity with no users row, an adopted project, a
+// project created through a path that never stamped an owner — resolved to the
+// empty string, and the build-result email was dropped in silence. The person
+// whose deploy had just finished was told nothing, and the journal recorded
+// "no_recipient" as if the customer genuinely had no address.
+func OwnerEmail(ctx context.Context, pool *pgxpool.Pool, projectID uuid.UUID) (email, source string, err error) {
+	byOwnerID, err := queryEmail(ctx, pool,
 		`SELECT u.email
 		   FROM projects p
 		   JOIN users u ON u.id = p.owner_id
-		  WHERE p.id = $1`,
-		projectID,
-	).Scan(&email)
+		  WHERE p.id = $1`, projectID)
+	if err != nil {
+		return "", "", err
+	}
+	if byOwnerID != "" {
+		return byOwnerID, RecipientSourceOwner, nil
+	}
+
+	byMember, err := queryEmail(ctx, pool,
+		`SELECT u.email
+		   FROM project_members pm
+		   JOIN users u ON u.id = pm.user_id
+		  WHERE pm.project_id = $1 AND pm.role IN ('Owner', 'Admin')
+		    AND u.email <> '' AND lower(u.email) NOT LIKE '%@keycloak.local'
+		  ORDER BY CASE pm.role WHEN 'Owner' THEN 0 WHEN 'Admin' THEN 1 ELSE 2 END,
+		           pm.created_at ASC
+		  LIMIT 1`, projectID)
+	if err != nil {
+		return "", "", err
+	}
+	if byMember != "" {
+		return byMember, RecipientSourceMember, nil
+	}
+
+	byOrgUsername, err := queryEmail(ctx, pool,
+		`SELECT u.email
+		   FROM projects p
+		   JOIN users u ON u.username = p.org_id
+		  WHERE p.id = $1`, projectID)
+	if err != nil {
+		return "", "", err
+	}
+	if byOrgUsername != "" {
+		return byOrgUsername, RecipientSourcePersonalOrg, nil
+	}
+	return "", "", nil
+}
+
+// queryEmail runs one rung of the ladder. A missing row is not an error — it is
+// this rung answering "not me"; only a real database failure is returned, so a
+// broken pool is never silently reported to the operator as "this customer has
+// no address".
+func queryEmail(ctx context.Context, pool *pgxpool.Pool, sql string, projectID uuid.UUID) (string, error) {
+	var email string
+	err := pool.QueryRow(ctx, sql, projectID).Scan(&email)
 	if err == pgx.ErrNoRows {
 		return "", nil
 	}
 	if err != nil {
 		return "", err
+	}
+	if isKeycloakLocalEmail(email) {
+		return "", nil
 	}
 	return email, nil
 }
@@ -66,17 +139,25 @@ func ManagedHostname(ctx context.Context, pool *pgxpool.Pool, envID uuid.UUID, a
 //
 // The recipient address is deliberately not stored -- the project id already
 // identifies whose build it was, and an address in a telemetry table is
-// personal data (152-FZ). Status and, on a failure, the transport error are
-// what make the row worth reading.
+// personal data (152-FZ). What is stored instead is recipientSource: which rung
+// of the resolver ladder produced the address. That is the field that separates
+// "the owner was told" from "the owner was unreachable and we fell through to a
+// project member", and it was missing here while the backend alert path had it,
+// so build notifications were the one channel whose rows could not answer even
+// "who did we pick". Status and, on a failure, the transport error complete it.
 //
 // Best-effort by contract: a failure here is logged and swallowed, exactly like
 // the deploy audit row. Notification bookkeeping must never break a build.
-func RecordBuildNotify(ctx context.Context, pool *pgxpool.Pool, projectID, envID, buildID uuid.UUID, appName, buildStatus, failReason string, detail error) {
+func RecordBuildNotify(ctx context.Context, pool *pgxpool.Pool, projectID, envID, buildID uuid.UUID, appName, buildStatus, recipientSource, failReason string, detail error) {
 	if pool == nil {
 		return
 	}
 	outcome := "success"
-	meta := map[string]any{"build_status": buildStatus, "build_id": buildID.String()}
+	meta := map[string]any{
+		"build_status":     buildStatus,
+		"build_id":         buildID.String(),
+		"recipient_source": recipientSource,
+	}
 	if failReason != "" {
 		outcome = "failure"
 		meta["reason"] = failReason

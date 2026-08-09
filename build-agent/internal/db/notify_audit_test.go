@@ -37,7 +37,7 @@ func TestRecordBuildNotify_SuccessAndFailure(t *testing.T) {
 	projectID, envID := seedProjectEnv(t, pool, "small")
 	buildID := uuid.New()
 
-	RecordBuildNotify(context.Background(), pool, projectID, envID, buildID, "shop", "success", "", nil)
+	RecordBuildNotify(context.Background(), pool, projectID, envID, buildID, "shop", "success", RecipientSourceOwner, "", nil)
 	outcome, meta, gotEnv := readLastBuildNotify(t, pool, projectID)
 	if outcome != "success" {
 		t.Fatalf("outcome = %q, want success", outcome)
@@ -49,7 +49,7 @@ func TestRecordBuildNotify_SuccessAndFailure(t *testing.T) {
 		t.Fatalf("environment_id = %v, want %v", gotEnv, envID)
 	}
 
-	RecordBuildNotify(context.Background(), pool, projectID, envID, buildID, "shop", "failure", "send_failed",
+	RecordBuildNotify(context.Background(), pool, projectID, envID, buildID, "shop", "failure", RecipientSourceMember, "send_failed",
 		errors.New("smtp: 550 mailbox unavailable"))
 	outcome, meta, _ = readLastBuildNotify(t, pool, projectID)
 	if outcome != "failure" {
@@ -71,7 +71,7 @@ func TestRecordBuildNotify_NoRecipientIsRecorded(t *testing.T) {
 	pool := testPool(t)
 	projectID, envID := seedProjectEnv(t, pool, "small")
 
-	RecordBuildNotify(context.Background(), pool, projectID, envID, uuid.New(), "shop", "failure", "no_recipient", nil)
+	RecordBuildNotify(context.Background(), pool, projectID, envID, uuid.New(), "shop", "failure", "", "no_recipient", nil)
 
 	outcome, meta, _ := readLastBuildNotify(t, pool, projectID)
 	if outcome != "failure" {
@@ -92,7 +92,7 @@ func TestRecordBuildNotify_TruncatesLongErrorSafely(t *testing.T) {
 	pool := testPool(t)
 	projectID, envID := seedProjectEnv(t, pool, "small")
 
-	RecordBuildNotify(context.Background(), pool, projectID, envID, uuid.New(), "shop", "failure", "send_failed",
+	RecordBuildNotify(context.Background(), pool, projectID, envID, uuid.New(), "shop", "failure", RecipientSourceOwner, "send_failed",
 		errors.New(strings.Repeat("ошибка", 200)))
 
 	_, meta, _ := readLastBuildNotify(t, pool, projectID)
