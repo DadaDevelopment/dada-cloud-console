@@ -44,7 +44,9 @@
       переключения совпал со срезом до перелива
 - [x] 5. проверка: `/health` = `database: healthy`, `/auth/login/` = 401 JSON,
       `pg_stat_activity` показывает сессии `svc-fin-core` в `fin-core`
-- [ ] 6. `mydatabase` → `mydatabase--retired-<дата>` (не дропать сразу), прогон
+- [x] 6. `mydatabase` → `mydatabase--retired-2026-08-10` (122 MB держим как
+      откат, владелец `svc-mydatabase`), приложение перепроверено после
+      переименования
 - [ ] 7. архивные дампы `keycloakdb`, `codexlb`, `console-test` → дроп
 - [ ] 8. `DROP ROLE myuser`, вычистить `myuser` из `cm/postgresql-init-scripts`
       и из `secret/codex-lb`
@@ -61,7 +63,25 @@
   `dada_auth_<shard>`. Дыра не всплывала раньше, потому что все роли до распила
   на шарды до сих пор существуют на дефолтном шарде.
 - Временный костыль на время выката: роль `svc-fin-core` продублирована на
-  shard-1 тем же SCRAM-верификатором. **Снять после выката консоли.**
+  shard-1 тем же SCRAM-верификатором. Снят 10.08 после сборки #1028: в
+  `routes.ini` живут `dada_auth_shard-0`/`dada_auth_shard-1`, роль на shard-1
+  удалена (`pg_roles` там пуст по `svc-fin-core%`), обе реплики роутера
+  переподключены, под пересоздан — `/health` = `database: healthy`,
+  `/auth/login/` = 401 JSON, три сессии `fin-core|svc-fin-core`, внешний
+  `https://profi.dada-tuda.ru/` = 200. Фикс роутера доказан на живом без клона.
+
+## Что осталось за `myuser` (live, 2026-08-10)
+
+| шард | БД | объектов |
+|---|---|---|
+| shard-0 | `codexlb` | 119 |
+| shard-0 | `keycloakdb--junk-2026-08-10` | 398 |
+| shard-0 | `mydatabase--retired-2026-08-10` | 1777 + 13 схем |
+| shard-1 | `codexlb--moved-to-shard-0` | 119 |
+
+Пункты 7-9 упираются в `codexlb`: он в проекте `platform`, который read-only.
+`DROP ROLE myuser` до его разбора невозможен — роль ещё владеет объектами.
+Нужно явное добро владельца в диалоге.
 
 ## Инварианты
 
