@@ -1,8 +1,11 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { projectsApi, appsApi, databasesApi, customDomainsApi } from "@/lib/api";
+import { useProjectContext } from "@/lib/project-context";
+import { isAdmin } from "@/lib/rbac";
+import { DeleteImpactModal, deleteImpactTargetKey, type DeleteImpactTarget } from "@/components/resources/delete-impact-modal";
 import type { Project, Environment, ResourceSnapshot } from "@/lib/types";
 import { StateChip } from "@/components/ui/state-chip";
 import { Spinner } from "@/components/ui/spinner";
@@ -38,9 +41,12 @@ function pickDefaultEnv(envs: Environment[], defaultEnvironment?: string): Envir
 export default function ProjectOverviewPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
+  const router = useRouter();
+  const { role, refetchProjects } = useProjectContext();
   const { t } = useT();
 
   const [project, setProject] = useState<Project | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteImpactTarget | null>(null);
   const [counts, setCounts] = useState<Counts | null>(null);
   const [projectApps, setProjectApps] = useState<ResourceSnapshot[]>([]);
   const [envId, setEnvId] = useState<string | null>(null);
@@ -214,6 +220,35 @@ export default function ProjectOverviewPage() {
         </div>
       )}
 
+      {isAdmin(role) && (
+        <div className="mt-10 rounded-xl border border-red-200 dark:border-red-900 bg-white dark:bg-gray-900 px-5 py-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-red-700 dark:text-red-400">{t("overview.dangerZone.title")}</h2>
+              <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{t("overview.dangerZone.subtitle")}</p>
+            </div>
+            <button
+              onClick={() => setDeleteTarget({ kind: "project", projectId, projectName: project.name })}
+              className="inline-flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-900 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors shadow-sm"
+            >
+              {t("overview.dangerZone.delete")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <DeleteImpactModal
+          key={deleteImpactTargetKey(deleteTarget)}
+          target={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => {
+            setDeleteTarget(null);
+            refetchProjects();
+            router.push("/projects");
+          }}
+        />
+      )}
     </div>
   );
 }

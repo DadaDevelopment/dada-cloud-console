@@ -140,4 +140,11 @@ export const overview: Messages = {
     en: "Deploys, database and domain creations will appear here after your first action.",
   },
   "overview.ops.empty.action": { ru: "Развернуть приложение", en: "Deploy an app" },
+
+  "overview.dangerZone.title": { ru: "Опасная зона", en: "Danger zone" },
+  "overview.dangerZone.subtitle": {
+    ru: "Безвозвратное удаление проекта и всех его окружений, приложений и ресурсов.",
+    en: "Permanently delete this project and every environment, app, and resource in it.",
+  },
+  "overview.dangerZone.delete": { ru: "Удалить проект", en: "Delete project" },
 };
