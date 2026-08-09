@@ -112,7 +112,11 @@ func TestRetryOperation_NonFailedIsAudited(t *testing.T) {
 	}
 }
 
-func TestRetryOperation_SuccessIsAudited(t *testing.T) {
+// A retry that is accepted is audited as pending, not success: the handler has
+// re-queued the operation and knows nothing yet about how it ends. The row that
+// matters here is the environment link -- without it the retry is invisible to
+// the per-environment path analysis whatever its outcome says.
+func TestRetryOperation_AcceptedRetryIsAudited(t *testing.T) {
 	pool := testOptimisticPool(t)
 	h := &Handler{pool: pool, cfg: &config.Config{}}
 	userID := seedUser(t, pool)
@@ -129,8 +133,8 @@ func TestRetryOperation_SuccessIsAudited(t *testing.T) {
 	}
 
 	outcome, reason, gotEnv := lastAuditRow(t, pool, projectID, "RetryOperation")
-	if outcome != auditOutcomeSuccess || reason != "" {
-		t.Errorf("audit row = (%q, %q), want (success, no reason)", outcome, reason)
+	if outcome != auditOutcomePending || reason != "" {
+		t.Errorf("audit row = (%q, %q), want (pending, no reason) — the retry has been queued, not finished", outcome, reason)
 	}
 	if gotEnv == nil || *gotEnv != envID {
 		t.Errorf("environment_id = %v, want %v", gotEnv, envID)

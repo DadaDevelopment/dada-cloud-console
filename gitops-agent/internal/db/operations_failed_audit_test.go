@@ -132,11 +132,15 @@ func TestMarkCommitted_WritesSuccessAudit(t *testing.T) {
 	}
 }
 
-// TestMarkCommitted_LeavesHandlerAuditAlone pins the guard that keeps the
-// coverage fix from double-counting. CreateApp is audited by its handler at
-// enqueue; a second row on commit would inflate every count built on
-// audit_events, which is the table the funnel is read from.
-func TestMarkCommitted_LeavesHandlerAuditAlone(t *testing.T) {
+// TestMarkCommitted_ResolvesPendingHandlerAudit pins the half of the contract
+// that lives in this agent: the handler's enqueue-time row says only that the
+// user asked, and it is the commit that turns the intent into a result.
+//
+// Without the verdict row a CreateApp that never reached git is
+// indistinguishable from one that did, because nothing updates the intent row
+// afterwards -- audit_events is append-only. The pair must stay a pair: exactly
+// one intent, exactly one verdict, and the intent must not be rewritten.
+func TestMarkCommitted_ResolvesPendingHandlerAudit(t *testing.T) {
 	ctx, pool, projectID := setupCommitAuditTest(t)
 
 	var opID uuid.UUID
@@ -148,7 +152,7 @@ func TestMarkCommitted_LeavesHandlerAuditAlone(t *testing.T) {
 	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, outcome, metadata)
-		VALUES ($1, $2, $3, 'CreateApp', 'App', 'blog', 'success', '{}'::jsonb)`,
+		VALUES ($1, $2, $3, 'CreateApp', 'App', 'blog', 'pending', '{}'::jsonb)`,
 		systemActorID, projectID, opID); err != nil {
 		t.Fatalf("seed handler audit: %v", err)
 	}
@@ -157,13 +161,65 @@ func TestMarkCommitted_LeavesHandlerAuditAlone(t *testing.T) {
 		t.Fatalf("MarkCommitted: %v", err)
 	}
 
-	var n int
-	if err := pool.QueryRow(ctx,
-		`SELECT count(*) FROM audit_events WHERE operation_id = $1`, opID).Scan(&n); err != nil {
+	var pending, success int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FILTER (WHERE outcome = 'pending'),
+		       count(*) FILTER (WHERE outcome = 'success')
+		  FROM audit_events WHERE operation_id = $1`, opID).Scan(&pending, &success); err != nil {
 		t.Fatalf("count rows: %v", err)
 	}
+	if success != 1 {
+		t.Errorf("success rows = %d, want 1 — a committed operation whose intent stays pending reads as never deployed", success)
+	}
+	if pending != 1 {
+		t.Errorf("pending rows = %d, want 1 — the intent row records when the user pressed and must survive", pending)
+	}
+
+	if err := MarkCommitted(ctx, pool, opID, "deadbeef", "apps/blog/values.yaml"); err != nil {
+		t.Fatalf("MarkCommitted (repeat): %v", err)
+	}
+	var n int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM audit_events WHERE operation_id = $1 AND outcome = 'success'`, opID).Scan(&n); err != nil {
+		t.Fatalf("count success rows: %v", err)
+	}
 	if n != 1 {
-		t.Errorf("rows = %d, want 1 — an action already audited at enqueue must not get a second row", n)
+		t.Errorf("success rows = %d, want 1 — a retried terminal write must not stack verdicts", n)
+	}
+}
+
+// TestMarkCommitted_LeavesFailedVerdictAlone pins the other edge of the same
+// guard: an operation that already has a terminal verdict keeps it. A commit
+// arriving after a failure row -- a retry, a late worker -- must not quietly
+// turn a recorded failure into a success.
+func TestMarkCommitted_LeavesFailedVerdictAlone(t *testing.T) {
+	ctx, pool, projectID := setupCommitAuditTest(t)
+
+	var opID uuid.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO operations (actor_id, project_id, action, resource_kind, resource_name, status, payload)
+		VALUES ($1, $2, 'CreateApp', 'App', 'wiki', 'Processing', '{}'::jsonb)
+		RETURNING id`, systemActorID, projectID).Scan(&opID); err != nil {
+		t.Fatalf("seed operation: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, outcome, metadata)
+		VALUES ($1, $2, $3, 'CreateApp', 'App', 'wiki', 'failure', '{}'::jsonb)`,
+		systemActorID, projectID, opID); err != nil {
+		t.Fatalf("seed failure audit: %v", err)
+	}
+
+	if err := MarkCommitted(ctx, pool, opID, "deadbeef", "apps/wiki/values.yaml"); err != nil {
+		t.Fatalf("MarkCommitted: %v", err)
+	}
+
+	var n int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM audit_events WHERE operation_id = $1 AND outcome = 'success'`, opID).Scan(&n); err != nil {
+		t.Fatalf("count success rows: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("success rows = %d, want 0 — an operation already recorded as failed must not gain a success verdict", n)
 	}
 }
 

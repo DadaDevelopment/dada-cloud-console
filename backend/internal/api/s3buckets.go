@@ -491,8 +491,12 @@ func (h *Handler) GetS3BucketCredentials(c *gin.Context) {
 // a stuck reveal to report honestly instead of the browser's own "since"
 // clock, which resets on every reload or new tab. Two-tier lookup, in order
 // of how honestly each answers "when did this start":
-//  1. The earliest successful CreateS3Bucket audit row — the moment the user
-//     actually pressed create.
+//  1. The earliest CreateS3Bucket audit row that is not a failure — the moment
+//     the user actually pressed create. A bucket still being provisioned is
+//     exactly the case where that row is outcome=pending, since the handler's
+//     row is written at enqueue time and only turns into success once the
+//     operation finishes [audit.go writeAuditRow]; filtering on success alone
+//     would blind this lookup during the very window it exists to describe.
 //  2. resourceFirstSeenAt, the snapshot's own first_seen_at (migration 049),
 //     for buckets adopted from git that never went through the console's
 //     create flow and so have no audit row — but only while it is still
@@ -506,8 +510,8 @@ func (h *Handler) s3BucketProvisioningSince(ctx context.Context, projectID, envI
 	err := h.pool.QueryRow(ctx,
 		`SELECT MIN(created_at) FROM audit_events
 		 WHERE project_id = $1 AND environment_id = $2 AND action = 'CreateS3Bucket'
-		   AND resource_kind = 'S3Bucket' AND resource_name = $3 AND outcome = $4`,
-		projectID, envID, name, auditOutcomeSuccess,
+		   AND resource_kind = 'S3Bucket' AND resource_name = $3 AND outcome <> $4`,
+		projectID, envID, name, auditOutcomeFailure,
 	).Scan(&auditSince)
 	if err != nil {
 		log.Printf("s3buckets: provisioning-since lookup failed for project=%s env=%s bucket=%s: %v", projectID, envID, name, err)

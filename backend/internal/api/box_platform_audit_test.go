@@ -73,8 +73,8 @@ func TestEnqueueBoxReaperOperation_AuditsUnderTheOperationID(t *testing.T) {
 	if kind != models.ResourceKindBox || name != "reaped-box" {
 		t.Errorf("resource = %s/%s, want %s/reaped-box", kind, name, models.ResourceKindBox)
 	}
-	if outcome != auditOutcomeSuccess {
-		t.Errorf("outcome = %q, want %q", outcome, auditOutcomeSuccess)
+	if outcome != auditOutcomePending {
+		t.Errorf("outcome = %q, want %q — the reaper has enqueued a suspend, not performed one", outcome, auditOutcomePending)
 	}
 	if trigger != "platform" || reason != "idle_ttl" {
 		t.Errorf("metadata trigger/reason = %s/%s, want platform/idle_ttl", trigger, reason)

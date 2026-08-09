@@ -43,7 +43,44 @@ const (
 const (
 	auditOutcomeSuccess = "success"
 	auditOutcomeFailure = "failure"
+	auditOutcomePending = "pending"
 )
+
+// auditInsertSQL writes the row a handler asked for, except that a claimed
+// success on an operation that has not finished yet is stored as pending.
+//
+// Every handler audit row is written at enqueue time: the transaction that
+// inserts the operation with status Created commits, and the audit row follows
+// immediately, with no outcome set and therefore success. Nothing ever updates
+// it -- audit_events is append-only -- so an action that is merely accepted and
+// then fails, or never deploys at all, stays success forever. Activation
+// measured off outcome='success' counts clicks, not deploys.
+//
+// The verdict is written later as a second row against the same operation:
+// success from MarkCommitted/MarkReady in the agents, failure from
+// recordOperationFailureAudit. The pair reads as intent then result.
+//
+// The test is on the operation's status, not on a list of actions, so a caller
+// that starts writing terminal rows is not silently mislabelled: the caller's
+// outcome is kept whenever the operation is already terminal, is unknown to us,
+// or when the row carries no operation at all. A caller-supplied failure is
+// always kept -- a handler that knows it failed knows more than the status.
+const auditInsertSQL = `
+	INSERT INTO audit_events
+	  (actor_id, project_id, environment_id, operation_id, action, resource_kind, resource_name, outcome, metadata)
+	SELECT $1, $2, $3, $4, $5, $6, $7,
+	       CASE
+	         WHEN $8::text = 'success'
+	          AND $4::uuid IS NOT NULL
+	          AND EXISTS (
+	               SELECT 1 FROM operations o
+	                WHERE o.id = $4::uuid
+	                  AND o.status NOT IN ('Committed', 'Ready', 'Failed')
+	              )
+	         THEN 'pending'
+	         ELSE $8::text
+	       END,
+	       $9`
 
 // Dedupe windows. Both passive signals are emitted from endpoints the console
 // polls, so without collapsing they would drown the write-actions they are
@@ -228,10 +265,7 @@ func writeAuditRow(ctx context.Context, pool *pgxpool.Pool, actorID uuid.UUID, e
 		if len(unresolved) > 0 {
 			payload = mergeAuditMetadata(meta, unresolved)
 		}
-		_, err := pool.Exec(ctx,
-			`INSERT INTO audit_events
-			   (actor_id, project_id, environment_id, operation_id, action, resource_kind, resource_name, outcome, metadata)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		_, err := pool.Exec(ctx, auditInsertSQL,
 			actorID, nullableUUID(projectID), nullableUUID(environmentID), nullableUUID(operationID),
 			e.Action, e.ResourceKind, e.ResourceName, outcome, payload,
 		)

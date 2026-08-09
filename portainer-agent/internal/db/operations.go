@@ -158,11 +158,13 @@ func MarkReady(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) error {
 // zero audit rows, while the 3 DeployStack operations that FAILED were audited
 // [live psql, 30d] -- the trail recorded only the deploys that went wrong.
 //
-// The guard is the absence of ANY row for the operation, not the absence of a
-// success row: an action already audited at enqueue must not get a second row
-// saying the same thing, and an action that failed already has its terminal row
-// from recordFailureAudit. That also means an action added later inherits the
-// coverage without being named here.
+// The guard is the absence of a TERMINAL row, not of any row. A handler's
+// enqueue-time row is stored as outcome=pending [backend audit.go
+// writeAuditRow] because at that moment the only known fact is that the user
+// asked; this is the row that turns it into a result. A retried terminal write
+// must not stack a second verdict, and an operation that already failed keeps
+// the one it has. Guarding on outcome rather than on the action name also means
+// an action added later inherits the coverage without being named here.
 //
 // The row is built from the operations row itself so it cannot disagree with it
 // about actor, project, environment or resource.
@@ -178,7 +180,9 @@ func recordSuccessAudit(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) {
 		  FROM operations o
 		 WHERE o.id = $1
 		   AND NOT EXISTS (
-			SELECT 1 FROM audit_events a WHERE a.operation_id = o.id
+			SELECT 1 FROM audit_events a
+			 WHERE a.operation_id = o.id
+			   AND a.outcome IN ('success', 'failure')
 		   )
 	`, id); err != nil {
 		log.Warn().Err(err).Str("operation", id.String()).Msg("mark ready: audit row insert failed")

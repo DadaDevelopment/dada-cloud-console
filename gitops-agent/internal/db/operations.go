@@ -112,7 +112,11 @@ func ClaimPending(ctx context.Context, pool *pgxpool.Pool) ([]Operation, error) 
 }
 
 // MarkCommitted sets status=Committed, records the git commit SHA and path, and
-// for an operation nothing audited at enqueue records the success in audit_events.
+// records the success in audit_events.
+//
+// The status is written before the audit row on purpose: the row is the
+// operation's verdict, and it must not be able to claim success for an
+// operation the table still shows as unfinished.
 func MarkCommitted(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, sha, gitPath string) error {
 	_, err := pool.Exec(ctx, `
 		UPDATE operations
@@ -127,24 +131,28 @@ func MarkCommitted(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, sha, g
 }
 
 // recordSuccessAudit writes an outcome=success audit row for an operation that
-// committed with nothing in audit_events about it.
+// committed without a verdict of its own in audit_events.
 //
-// recordFailureAudit below assumes an API handler wrote a row at enqueue time,
-// so that only the async result was missing. That is true of everything a user
-// clicks, and false of the repairs this agent runs on its own behalf: on prod
-// AttachDefaultDomain had 15 operations against zero audit rows [live psql,
-// 30d]. Both of its call sites are self-repair -- reissueDefaultDomainDNS and
-// BackfillMissingDefaultDomains [backend domains.go] -- so no user asked and no
-// handler audited. The value there is not the click but the explanation: the
-// user's app suddenly has a public URL, or a different one, and until now
-// nothing recorded when that happened or what caused it.
+// A handler's row is written at enqueue time and says only that the user asked:
+// writeAuditRow [backend audit.go] stores it as outcome=pending precisely
+// because the operation has not finished. This is the row that finishes it. The
+// pair reads as intent then result, told apart by outcome, and success in
+// audit_events means the manifest actually reached git.
 //
-// The guard is the absence of ANY row for the operation, not the absence of a
-// success row: an action already audited at enqueue must not get a second row
-// saying the same thing, and an action that failed already has its terminal row.
-// ResizeApp is the case that makes this matter -- it is audited under two other
-// names, UpdateAppProfile for the user path and AutoscaleApp for the watcher,
-// so a name-based guard would double every resize.
+// Some operations have no intent row at all -- the repairs this agent runs on
+// its own behalf. On prod AttachDefaultDomain had 15 operations against zero
+// audit rows [live psql, 30d]; both of its call sites are self-repair,
+// reissueDefaultDomainDNS and BackfillMissingDefaultDomains [backend
+// domains.go], so no user asked and no handler audited. Those get their first
+// row here, and the value is not the click but the explanation: the user's app
+// suddenly has a public URL, and until now nothing recorded when or why.
+//
+// The guard is the absence of a TERMINAL row, not of any row: a pending intent
+// must still receive its verdict, while a retried terminal write must not stack
+// a second one, and an operation that already failed keeps that verdict. The
+// guard is on outcome rather than on the action name because ResizeApp is
+// audited under two other names -- UpdateAppProfile for the user path,
+// AutoscaleApp for the watcher -- so a name-based guard would miss both.
 //
 // The row is built from the operations row itself so it cannot disagree with it
 // about actor, project, environment or resource, and carries the commit so a
@@ -161,7 +169,9 @@ func recordSuccessAudit(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, s
 		  FROM operations o
 		 WHERE o.id = $1
 		   AND NOT EXISTS (
-			SELECT 1 FROM audit_events a WHERE a.operation_id = o.id
+			SELECT 1 FROM audit_events a
+			 WHERE a.operation_id = o.id
+			   AND a.outcome IN ('success', 'failure')
 		   )
 	`, id, sha); err != nil {
 		log.Printf("mark committed: audit row insert failed for op %s: %v", id, err)
