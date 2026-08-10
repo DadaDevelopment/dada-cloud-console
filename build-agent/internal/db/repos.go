@@ -22,7 +22,7 @@ type Repo struct {
 	Provider          string // github | gitlab
 	RepoFullName      string // org/repo
 	CloneURL          string
-	TokenEncrypted    []byte // GitLab only; nil for GitHub App
+	TokenEncrypted    []byte // PAT typed in connect-by-url (either provider); nil for GitHub App
 	WebhookSecret     string
 	ProductionBranch  string
 	RootDir           string

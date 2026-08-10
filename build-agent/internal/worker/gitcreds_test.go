@@ -112,3 +112,67 @@ func TestGitCredsGitLabForkUnsafeSkipsInjection(t *testing.T) {
 		t.Fatalf("fork-unsafe gitlab clone url should stay bare, got %q", cloneURL)
 	}
 }
+
+// TestGitCredsGitHubPATWhenNoInstallation locks in the fix for a PRIVATE github
+// repo linked through the connect-by-url dialog: the user typed a PAT, the
+// backend stored it encrypted, and gitCreds used to drop it on the floor because
+// the github branch only ever looked at installation_id. The clone then went out
+// anonymously and every build of that repo died with
+// "could not read Username for 'https://github.com'" (fail_reason
+// git_auth_failed) while a perfectly good credential sat in the row.
+func TestGitCredsGitHubPATWhenNoInstallation(t *testing.T) {
+	const key = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	const plainToken = "ghp-supersecret"
+
+	enc, err := db.EncryptToken(key, plainToken)
+	if err != nil {
+		t.Fatalf("EncryptToken: %v", err)
+	}
+
+	r := &Runner{cfg: &config.Config{EncryptionKey: key}}
+	repo := &db.Repo{
+		Provider:       "github",
+		InstallationID: 0,
+		CloneURL:       "https://github.com/acme/private.git",
+		TokenEncrypted: enc,
+	}
+
+	token, cloneURL, err := r.gitCreds(context.Background(), repo, &db.Build{})
+	if err != nil {
+		t.Fatalf("gitCreds: %v", err)
+	}
+	if token != plainToken {
+		t.Fatalf("gitCreds token = %q, want %q", token, plainToken)
+	}
+	wantURL := "https://x-access-token:" + plainToken + "@github.com/acme/private.git"
+	if cloneURL != wantURL {
+		t.Fatalf("gitCreds cloneURL = %q, want %q", cloneURL, wantURL)
+	}
+}
+
+// TestGitCredsGitHubPATForkUnsafeSkipsInjection mirrors the App-token and gitlab
+// fork-unsafe branches: a stored PAT must never be embedded in the clone url of
+// a fork-unsafe build.
+func TestGitCredsGitHubPATForkUnsafeSkipsInjection(t *testing.T) {
+	const key = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	enc, err := db.EncryptToken(key, "ghp-supersecret")
+	if err != nil {
+		t.Fatalf("EncryptToken: %v", err)
+	}
+
+	r := &Runner{cfg: &config.Config{EncryptionKey: key}}
+	repo := &db.Repo{
+		Provider:       "github",
+		InstallationID: 0,
+		CloneURL:       "https://github.com/acme/private.git",
+		TokenEncrypted: enc,
+	}
+
+	_, cloneURL, err := r.gitCreds(context.Background(), repo, &db.Build{ForkUnsafe: true})
+	if err != nil {
+		t.Fatalf("gitCreds: %v", err)
+	}
+	if cloneURL != repo.CloneURL {
+		t.Fatalf("fork-unsafe github clone url should stay bare, got %q", cloneURL)
+	}
+}

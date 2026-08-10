@@ -1324,16 +1324,31 @@ func shouldResolveHeadCommit(provider, commitSHA string) bool {
 }
 
 // gitCreds returns a clone token and the authenticated clone URL. GitHub uses a
-// per-build App installation token; GitLab uses the decrypted stored PAT. For a
-// fork-unsafe build no token is injected (the clone stays anonymous). A GitHub
-// repo linked without an installation id (a public template deploy that skipped
-// the OAuth wall) also clones anonymously: no token, plain clone URL. GitHub
-// allows unauthenticated HTTPS clone of any public repo, so this needs no creds.
+// per-build App installation token, or, when the repo was linked by URL without
+// the App, the decrypted PAT the user typed into the connect-by-url dialog;
+// GitLab uses the decrypted stored PAT. For a fork-unsafe build no token is
+// injected (the clone stays anonymous). A GitHub repo linked without an
+// installation id AND without a PAT (a public template deploy that skipped the
+// OAuth wall) clones anonymously: no token, plain clone URL. GitHub allows
+// unauthenticated HTTPS clone of any public repo, so that needs no creds — but a
+// private one does, and dropping the stored PAT there turned every such build
+// into `could not read Username for 'https://github.com'` (fail_reason
+// git_auth_failed) with the credential sitting unused in the row.
 func (r *Runner) gitCreds(ctx context.Context, repo *db.Repo, b *db.Build) (token, cloneURL string, err error) {
 	switch repo.Provider {
 	case "github":
 		if repo.InstallationID == 0 {
-			return "", repo.CloneURL, nil
+			if len(repo.TokenEncrypted) == 0 {
+				return "", repo.CloneURL, nil
+			}
+			tok, derr := db.DecryptToken(r.cfg.EncryptionKey, repo.TokenEncrypted)
+			if derr != nil {
+				return "", "", fmt.Errorf("decrypt github token: %w", derr)
+			}
+			if b.ForkUnsafe {
+				return tok, repo.CloneURL, nil
+			}
+			return tok, injectToken(repo.CloneURL, "x-access-token", tok), nil
 		}
 		tok, terr := r.github.InstallToken(ctx, repo.InstallationID)
 		if errors.Is(terr, github.ErrInstallationGone) {
