@@ -7,6 +7,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/dada-tuda/console/backend/internal/models"
 )
 
 // seedOrphanHostname inserts a domain_hostnames row in the given status/reason
@@ -215,6 +217,135 @@ func TestReapOrphanedAppHostnamesSkipsStaleEnvironment(t *testing.T) {
 	}
 	if reason != nil {
 		t.Fatalf("status_reason = %v, want nil (untouched, stale environment must not be reaped)", *reason)
+	}
+}
+
+// seedAppOperation inserts one operations row for the deletion-evidence arm of
+// ReapOrphanedAppHostnames. createdAgo backdates created_at so a test can order
+// a DeleteApp and a later CreateApp for the same app name without relying on
+// insert order resolution at the same timestamp.
+func seedAppOperation(t *testing.T, pool *pgxpool.Pool, projectID, envID uuid.UUID, appName, action, status string, createdAgo time.Duration) {
+	t.Helper()
+	userID := seedUser(t, pool)
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, created_at)
+		 VALUES ($1, $2, $3, $4, 'App', $5, $6, now() - $7::interval)`,
+		userID, projectID, envID, action, appName, status, createdAgo.String(),
+	); err != nil {
+		t.Fatalf("seed %s operation: %v", action, err)
+	}
+}
+
+// TestReapOrphanedAppHostnamesDemotesOnDeleteOperationWhenBlind is the second
+// proof arm: the environment has no App snapshot at all (the deleted app was
+// its only one, so the freshness guard can never be satisfied), but a committed
+// DeleteApp operation records the deletion directly. That evidence cannot be
+// faked by a wedged snapshot pipeline, so the row is reaped.
+func TestReapOrphanedAppHostnamesDemotesOnDeleteOperationWhenBlind(t *testing.T) {
+	pool := testAdvisoryPool(t)
+	ctx := context.Background()
+
+	projectID, envID := seedReattachProjectEnv(t, pool)
+	deletedApp := "gone-" + uuid.NewString()[:8]
+	hostnameID := seedOrphanHostname(t, pool, projectID, envID, deletedApp, deletedApp+".dada-tuda.ru", "active", "active", nil)
+	seedAppOperation(t, pool, projectID, envID, deletedApp, "DeleteApp", string(models.OperationStatusCommitted), time.Hour)
+
+	if err := ReapOrphanedAppHostnames(ctx, pool); err != nil {
+		t.Fatalf("ReapOrphanedAppHostnames: %v", err)
+	}
+
+	status, certStatus, reason, reattachCount, opID, _ := readReapedHostnameRow(t, pool, hostnameID)
+	if status != "failed" || certStatus != "failed" {
+		t.Fatalf("status/cert_status = %q/%q, want failed/failed", status, certStatus)
+	}
+	if reason == nil || *reason != hostnameReasonAppDeleted {
+		t.Fatalf("status_reason = %v, want %q", reason, hostnameReasonAppDeleted)
+	}
+	if reattachCount != 0 || opID != nil {
+		t.Fatalf("reattach_count/operation_id = %d/%v, want 0/nil", reattachCount, opID)
+	}
+}
+
+// TestReapOrphanedAppHostnamesSkipsRecreatedAppName is the name-reuse guard: an
+// app deleted and then created again under the same name in the same
+// environment leaves a stale DeleteApp row behind. Acting on it would demote a
+// live app's hostname, so a newer CreateApp operation disqualifies the
+// deletion evidence and the pass falls back to needing snapshot proof, which a
+// blind environment cannot give.
+func TestReapOrphanedAppHostnamesSkipsRecreatedAppName(t *testing.T) {
+	pool := testAdvisoryPool(t)
+	ctx := context.Background()
+
+	projectID, envID := seedReattachProjectEnv(t, pool)
+	appName := "reused-" + uuid.NewString()[:8]
+	hostnameID := seedOrphanHostname(t, pool, projectID, envID, appName, appName+".dada-tuda.ru", "active", "active", nil)
+	seedAppOperation(t, pool, projectID, envID, appName, "DeleteApp", string(models.OperationStatusCommitted), 2*time.Hour)
+	seedAppOperation(t, pool, projectID, envID, appName, "CreateApp", string(models.OperationStatusCommitted), time.Hour)
+
+	if err := ReapOrphanedAppHostnames(ctx, pool); err != nil {
+		t.Fatalf("ReapOrphanedAppHostnames: %v", err)
+	}
+
+	status, _, reason, _, _, _ := readReapedHostnameRow(t, pool, hostnameID)
+	if status != "active" {
+		t.Fatalf("status = %q, want unchanged active (app name was recreated)", status)
+	}
+	if reason != nil {
+		t.Fatalf("status_reason = %v, want nil (untouched)", *reason)
+	}
+}
+
+// TestReapOrphanedAppHostnamesSkipsUncommittedDeleteOperation requires the
+// deletion evidence to be committed: a DeleteApp operation still in flight (or
+// one that failed) proves an intent, not an outcome, and the app may well still
+// be serving traffic under that hostname.
+func TestReapOrphanedAppHostnamesSkipsUncommittedDeleteOperation(t *testing.T) {
+	pool := testAdvisoryPool(t)
+	ctx := context.Background()
+
+	projectID, envID := seedReattachProjectEnv(t, pool)
+	appName := "inflight-" + uuid.NewString()[:8]
+	hostnameID := seedOrphanHostname(t, pool, projectID, envID, appName, appName+".dada-tuda.ru", "active", "active", nil)
+	seedAppOperation(t, pool, projectID, envID, appName, "DeleteApp", string(models.OperationStatusCreated), time.Minute)
+
+	if err := ReapOrphanedAppHostnames(ctx, pool); err != nil {
+		t.Fatalf("ReapOrphanedAppHostnames: %v", err)
+	}
+
+	status, _, reason, _, _, _ := readReapedHostnameRow(t, pool, hostnameID)
+	if status != "active" {
+		t.Fatalf("status = %q, want unchanged active (delete not committed)", status)
+	}
+	if reason != nil {
+		t.Fatalf("status_reason = %v, want nil (untouched)", *reason)
+	}
+}
+
+// TestReapOrphanedAppHostnamesIgnoresDeleteOperationInOtherEnvironment pins the
+// join key: a committed DeleteApp for the same app NAME in a different
+// environment says nothing about this environment's hostname. Without the
+// environment_id predicate the two would be indistinguishable, since app names
+// are only unique per environment.
+func TestReapOrphanedAppHostnamesIgnoresDeleteOperationInOtherEnvironment(t *testing.T) {
+	pool := testAdvisoryPool(t)
+	ctx := context.Background()
+
+	projectID, envID := seedReattachProjectEnv(t, pool)
+	otherProjectID, otherEnvID := seedReattachProjectEnv(t, pool)
+	appName := "shared-" + uuid.NewString()[:8]
+	hostnameID := seedOrphanHostname(t, pool, projectID, envID, appName, appName+".dada-tuda.ru", "active", "active", nil)
+	seedAppOperation(t, pool, otherProjectID, otherEnvID, appName, "DeleteApp", string(models.OperationStatusCommitted), time.Hour)
+
+	if err := ReapOrphanedAppHostnames(ctx, pool); err != nil {
+		t.Fatalf("ReapOrphanedAppHostnames: %v", err)
+	}
+
+	status, _, reason, _, _, _ := readReapedHostnameRow(t, pool, hostnameID)
+	if status != "active" {
+		t.Fatalf("status = %q, want unchanged active (deletion belongs to another environment)", status)
+	}
+	if reason != nil {
+		t.Fatalf("status_reason = %v, want nil (untouched)", *reason)
 	}
 }
 

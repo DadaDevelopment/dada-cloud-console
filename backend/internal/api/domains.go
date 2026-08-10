@@ -1807,13 +1807,33 @@ const hostnameReapMaxRowsPerTick = 20
 // hostnameReapEnvFreshnessWindow. That is proof the snapshot pipeline for
 // this specific environment is alive right now, not just that it once was.
 //
-// One consequence follows directly from that guard and is intentional, not
-// an oversight: an environment whose only app was the one just deleted can
-// never produce that other fresh App snapshot, so its orphaned hostname is
-// never reaped by this pass. Reaping it would require trusting an empty
-// resource_snapshots result for that environment, which is exactly the
-// signal this pass cannot tell apart from total blindness. That row is left
-// for an operator or a future pass with more context, rather than gambled on.
+// That freshness guard has one structural hole, and it is the common case
+// rather than an edge case: an environment whose only app was the one just
+// deleted can never produce another fresh App snapshot, so no amount of
+// waiting will ever satisfy it. Ten such rows sat permanently in
+// overviewDomainIssues, incurable by definition -- the panel called them
+// breakage forever because the pass could not tell "this app is gone" apart
+// from "this environment went blind".
+//
+// So liveness is proven either way: the fresh sibling snapshot above, OR a
+// committed DeleteApp row in operations for this exact
+// (environment_id, app_name). The second proof is immune to the blindness
+// the first one guards against, because operations is written by the API
+// handler inside DeleteApp's own transaction and never derived from the
+// snapshot pipeline -- a wedged or empty resource_snapshots cannot fabricate
+// it. It is positive evidence that this app was deliberately deleted, which
+// is strictly stronger than the absence of a snapshot row.
+//
+// audit_events carries the same intent but cannot be used here: its
+// environment_id is NULL on most historical DeleteApp rows, so there is no
+// reliable key to join a hostname to.
+//
+// Name reuse is the one way that proof could go stale: delete "api", create
+// "api" again in the same environment, and the old DeleteApp row would
+// authorize demoting the new app's live hostname. Hence the guard against
+// any CreateApp operation for the same (environment_id, resource_name) newer
+// than the DeleteApp -- a recreated app leaves that row behind and this pass
+// falls back to needing the snapshot proof.
 func ReapOrphanedAppHostnames(ctx context.Context, pool *pgxpool.Pool) error {
 	_, err := pool.Exec(ctx,
 		`UPDATE domain_hostnames dh
@@ -1831,17 +1851,34 @@ func ReapOrphanedAppHostnames(ctx context.Context, pool *pgxpool.Pool) error {
 		                AND rs.kind = 'App' AND rs.name = dh2.app_name
 		                AND `+notOrphanedSnapshot+`
 		         )
-		         AND EXISTS (
-		             SELECT 1 FROM resource_snapshots rs
-		              WHERE rs.environment_id = dh2.environment_id
-		                AND rs.kind = 'App' AND `+notOrphanedSnapshot+`
-		                AND rs.last_synced_at > now() - ($3 * interval '1 second')
+		         AND (
+		             EXISTS (
+		                 SELECT 1 FROM resource_snapshots rs
+		                  WHERE rs.environment_id = dh2.environment_id
+		                    AND rs.kind = 'App' AND `+notOrphanedSnapshot+`
+		                    AND rs.last_synced_at > now() - ($3 * interval '1 second')
+		             )
+		             OR EXISTS (
+		                 SELECT 1 FROM operations o
+		                  WHERE o.environment_id = dh2.environment_id
+		                    AND o.resource_kind = 'App' AND o.resource_name = dh2.app_name
+		                    AND o.action = 'DeleteApp' AND o.status = $5
+		                    AND NOT EXISTS (
+		                        SELECT 1 FROM operations o2
+		                         WHERE o2.environment_id = o.environment_id
+		                           AND o2.resource_kind = 'App'
+		                           AND o2.resource_name = o.resource_name
+		                           AND o2.action = 'CreateApp'
+		                           AND o2.created_at > o.created_at
+		                    )
+		             )
 		         )
 		       ORDER BY dh2.updated_at ASC
 		       LIMIT $4
 		  )`,
 		hostnameReasonAppDeleted, models.EnvironmentRuntimeK8s,
 		hostnameReapEnvFreshnessWindow.Seconds(), hostnameReapMaxRowsPerTick,
+		models.OperationStatusCommitted,
 	)
 	return err
 }
