@@ -1049,6 +1049,30 @@ const hostnameDNSStuckAfter = 4 * time.Minute
 // without turning the reconciler into a hammer.
 const hostnameReissueCooldown = 15 * time.Minute
 
+// hostnameReattachCooldown bounds how often ReattachOrphanedHostnames may
+// re-drive a single failed row. The class of row this pass targets got
+// orphaned by a config error outside its control (DeleteApp removing the
+// Ingress, CreateApp under the same name never restoring it), and the same
+// query re-runs on every domain-maintenance tick -- without a per-row
+// cooldown a row that keeps re-failing for some other reason (e.g. the app
+// itself is unhealthy) would be re-driven every tick, hammering gitops with
+// operations for a domain that cannot actually come up. Six hours is long
+// enough that a spurious re-drive costs nothing meaningful, short enough that
+// a real fix (app comes back healthy) is picked up the same day.
+const hostnameReattachCooldown = 6 * time.Hour
+
+// hostnameReattachMaxAttempts caps how many times ReattachOrphanedHostnames
+// will re-drive the same row before giving up on it permanently. This is the
+// project's standing rule after the 56.5k-generation DNS self-feeding storm:
+// any background loop that re-drives its own failure state must have a hard
+// ceiling, not just a cooldown, or a row stuck for a reason the pass cannot
+// fix (app permanently misconfigured, hostname genuinely dead) retries
+// forever at a slower cadence instead of stopping. Three tries spaced by
+// hostnameReattachCooldown is 18 hours of chances -- past that the row stays
+// failed and the owner has to re-attach it by hand, which is also the
+// correct outcome for a hostname that is not this pass's job to save.
+const hostnameReattachMaxAttempts = 3
+
 // hostnameDNSLookupTimeout bounds each verify-resolve check.
 const hostnameDNSLookupTimeout = 3 * time.Second
 
@@ -1127,7 +1151,7 @@ var reissueActorID = uuid.MustParse("00000000-0000-0000-0000-000000000000")
 func ReconcilePendingHostnames(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config) error {
 	clientset := domainRouteClientsetFactory()
 	rows, err := pool.Query(ctx,
-		`SELECT dh.id, dh.hostname, dh.created_at, dh.managed, dh.environment_id, dh.app_name,
+		`SELECT dh.id, dh.hostname, COALESCE(dh.attach_started_at, dh.created_at), dh.managed, dh.environment_id, dh.app_name,
 		        dh.last_reissue_at, dh.status_reason, e.project_id, e.runtime, a.vm_ip
 		   FROM domain_hostnames dh
 		   JOIN environments e ON e.id = dh.environment_id
@@ -1137,22 +1161,22 @@ func ReconcilePendingHostnames(ctx context.Context, pool *pgxpool.Pool, cfg *con
 		return err
 	}
 	type pendingHost struct {
-		id            uuid.UUID
-		hostname      string
-		createdAt     time.Time
-		managed       bool
-		environmentID uuid.UUID
-		appName       string
-		lastReissue   *time.Time
-		statusReason  *string
-		projectID     uuid.UUID
-		runtime       models.EnvironmentRuntime
-		vmIP          *string
+		id              uuid.UUID
+		hostname        string
+		attachStartedAt time.Time
+		managed         bool
+		environmentID   uuid.UUID
+		appName         string
+		lastReissue     *time.Time
+		statusReason    *string
+		projectID       uuid.UUID
+		runtime         models.EnvironmentRuntime
+		vmIP            *string
 	}
 	var pending []pendingHost
 	for rows.Next() {
 		var p pendingHost
-		if err := rows.Scan(&p.id, &p.hostname, &p.createdAt, &p.managed, &p.environmentID,
+		if err := rows.Scan(&p.id, &p.hostname, &p.attachStartedAt, &p.managed, &p.environmentID,
 			&p.appName, &p.lastReissue, &p.statusReason, &p.projectID, &p.runtime, &p.vmIP); err != nil {
 			rows.Close()
 			return err
@@ -1191,7 +1215,7 @@ func ReconcilePendingHostnames(ctx context.Context, pool *pgxpool.Pool, cfg *con
 		if dnsTarget != "" && !hostnameDNSResolved(ctx, p.hostname, dnsTarget) {
 			reason = hostnameReasonDNSNotPointed
 		}
-		if hostnamePendingExpired(p.createdAt, now) {
+		if hostnamePendingExpired(p.attachStartedAt, now) {
 			ct, err := pool.Exec(ctx,
 				`UPDATE domain_hostnames SET status='failed', cert_status='failed', status_reason=$2, updated_at=now()
 				  WHERE id=$1 AND status='pending'`, p.id, hostnameReasonAttachTimeout)
@@ -1199,7 +1223,7 @@ func ReconcilePendingHostnames(ctx context.Context, pool *pgxpool.Pool, cfg *con
 				log.Warn().
 					Str("hostname", p.hostname).
 					Str("last_reason", reason).
-					Dur("pending_for", time.Since(p.createdAt)).
+					Dur("pending_for", time.Since(p.attachStartedAt)).
 					Msg("hostname failed: pending past attach window (DNS never moved, app retired or Ingress missing) -- re-attach to retry")
 			}
 			continue
@@ -1212,7 +1236,7 @@ func ReconcilePendingHostnames(ctx context.Context, pool *pgxpool.Pool, cfg *con
 		if !p.managed || cfg == nil || cfg.ClusterLBIP == "" {
 			continue
 		}
-		if now.Sub(p.createdAt) <= hostnameDNSStuckAfter {
+		if now.Sub(p.attachStartedAt) <= hostnameDNSStuckAfter {
 			continue
 		}
 		if p.lastReissue != nil && now.Sub(*p.lastReissue) <= hostnameReissueCooldown {
@@ -1227,7 +1251,7 @@ func ReconcilePendingHostnames(ctx context.Context, pool *pgxpool.Pool, cfg *con
 		}
 		log.Warn().
 			Str("hostname", p.hostname).
-			Dur("pending_for", time.Since(p.createdAt)).
+			Dur("pending_for", time.Since(p.attachStartedAt)).
 			Msg("managed hostname A record unresolved past window -- re-issued DNS write")
 	}
 	return nil
@@ -1615,6 +1639,151 @@ func enqueueDefaultDomainBackfill(ctx context.Context, pool *pgxpool.Pool, proje
 		environmentID, appName, hostname, opID,
 	); err != nil {
 		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// ReattachOrphanedHostnames finds domain_hostnames rows stuck in 'failed' whose
+// owning app is demonstrably alive and re-drives provisioning for them.
+//
+// This closes a gap distinct from BackfillMissingDefaultDomains and
+// reissueDefaultDomainDNS: those two recover a MISSING row and a managed row
+// whose DNS write was lost, but neither ever looks at a row that already
+// exists and already failed. That is exactly what DeleteApp followed by
+// CreateApp under the same name produces -- DeleteApp removes the whole
+// gitops-repo app directory (Ingress included), CreateApp restores the
+// workload but never re-reads or re-renders the surviving domain_hostnames
+// row, so the row sits there with a live app underneath it and no route to
+// it, forever. Neither ReconcilePendingHostnames (only walks 'pending' rows)
+// nor BackfillMissingDefaultDomains (its NOT EXISTS excludes any app that
+// already has a row, failed or not) ever revisits it.
+//
+// The three preconditions -- a live App snapshot for the same environment
+// and name, appNeedsDefaultDomain (excludes worker/portless apps, the same
+// judgment CreateApp itself uses), and the grace window against a
+// just-created app mid backfill -- are the same shape as
+// BackfillMissingDefaultDomains for the same reasons. What is different here
+// is the row already carries identity: hostname, record_type, and (for
+// unmanaged rows) authorization_id are never touched, only status is driven
+// back to pending. A managed (surrogate) row re-enqueues AttachDefaultDomain;
+// an unmanaged (user custom-domain) row re-enqueues AttachCustomHostname, but
+// ONLY when its authorization is still 'verified' -- an unmanaged row with no
+// authorization or a non-verified one must not be silently re-attached, since
+// that would (re-)issue a certificate for a domain nobody has proven
+// ownership of at this moment.
+func ReattachOrphanedHostnames(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config) error {
+	if cfg == nil {
+		return nil
+	}
+	rows, err := pool.Query(ctx,
+		`SELECT dh.id, dh.hostname, dh.app_name, dh.environment_id, dh.managed, dh.authorization_id,
+		        e.project_id, rs.summary_json, da.status
+		   FROM domain_hostnames dh
+		   JOIN environments e ON e.id = dh.environment_id
+		   JOIN resource_snapshots rs
+		     ON rs.environment_id = dh.environment_id AND rs.kind = 'App' AND rs.name = dh.app_name
+		   LEFT JOIN domain_authorizations da ON da.id = dh.authorization_id
+		  WHERE dh.status = 'failed'
+		    AND e.runtime = $1
+		    AND rs.last_synced_at < NOW() - ($2 * INTERVAL '1 second')
+		    AND dh.reattach_count < $3
+		    AND dh.updated_at < NOW() - ($4 * INTERVAL '1 second')`,
+		models.EnvironmentRuntimeK8s, defaultDomainBackfillGrace.Seconds(),
+		hostnameReattachMaxAttempts, hostnameReattachCooldown.Seconds(),
+	)
+	if err != nil {
+		return err
+	}
+	type orphanRow struct {
+		id            uuid.UUID
+		hostname      string
+		appName       string
+		environmentID uuid.UUID
+		managed       bool
+		authID        *uuid.UUID
+		projectID     uuid.UUID
+		summaryRaw    []byte
+		authStatus    *string
+	}
+	var orphans []orphanRow
+	for rows.Next() {
+		var o orphanRow
+		if err := rows.Scan(&o.id, &o.hostname, &o.appName, &o.environmentID, &o.managed, &o.authID,
+			&o.projectID, &o.summaryRaw, &o.authStatus); err != nil {
+			rows.Close()
+			return err
+		}
+		orphans = append(orphans, o)
+	}
+	rows.Close()
+
+	for _, o := range orphans {
+		var summary map[string]any
+		_ = json.Unmarshal(o.summaryRaw, &summary)
+		if !appNeedsDefaultDomain(summary) {
+			continue
+		}
+		action := "AttachDefaultDomain"
+		if !o.managed {
+			if o.authID == nil || o.authStatus == nil || *o.authStatus != "verified" {
+				continue
+			}
+			action = "AttachCustomHostname"
+		}
+		if err := reattachOrphanedHostname(ctx, pool, o.id, o.projectID, o.environmentID, o.appName, o.hostname, action); err != nil {
+			log.Warn().Err(err).Str("hostname", o.hostname).Str("app", o.appName).
+				Msg("reattach orphaned domain: failed to re-drive")
+			continue
+		}
+		log.Warn().Str("hostname", o.hostname).Str("app", o.appName).Str("action", action).
+			Msg("reattached orphaned domain: failed hostname re-driven for a live app")
+	}
+	return nil
+}
+
+// reattachOrphanedHostname re-drives one failed domain_hostnames row: a fresh
+// operation (AttachDefaultDomain for managed/surrogate rows,
+// AttachCustomHostname for unmanaged/custom rows) re-renders the hostname's
+// Ingress into git, and the row itself goes back to pending with a reset
+// attach clock, in one transaction so the row and its provisioning operation
+// never diverge. The UPDATE is guarded on status='failed' so a row that
+// changed underneath the SELECT (concurrent manual re-attach, another
+// maintenance tick) is left alone rather than clobbered; when that guard
+// finds nothing to update the whole transaction is rolled back instead of
+// committing an operation with no matching row change.
+func reattachOrphanedHostname(ctx context.Context, pool *pgxpool.Pool, hostnameID, projectID, environmentID uuid.UUID, appName, hostname, action string) error {
+	payload, err := json.Marshal(models.AttachCustomHostnamePayload{AppName: appName, Hostname: hostname})
+	if err != nil {
+		return err
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var opID uuid.UUID
+	if err := tx.QueryRow(ctx,
+		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
+		 VALUES ($1, $2, $3, $4, 'App', $5, 'Created', $6)
+		 RETURNING id`,
+		reissueActorID, projectID, environmentID, action, appName, payload,
+	).Scan(&opID); err != nil {
+		return err
+	}
+	ct, err := tx.Exec(ctx,
+		`UPDATE domain_hostnames
+		    SET status = 'pending', cert_status = 'pending', status_reason = NULL,
+		        operation_id = $2, attach_started_at = now(),
+		        reattach_count = reattach_count + 1, updated_at = now()
+		  WHERE id = $1 AND status = 'failed'`,
+		hostnameID, opID,
+	)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return nil
 	}
 	return tx.Commit(ctx)
 }

@@ -116,9 +116,9 @@ func runWithAdvisoryLock(ctx context.Context, pool *pgxpool.Pool, key int64, nam
 
 // RunDomainMaintenanceTick runs one pass of the custom-domain background
 // loops (TXT verification, hostname reconcile, active-route revalidation,
-// delegation poll, default-domain backfill) under the domain-reconcile
-// advisory lock, so with multiple backend replicas only one runs the pass per
-// tick. Called from main's DNS ticker.
+// delegation poll, default-domain backfill, orphaned-hostname reattach) under
+// the domain-reconcile advisory lock, so with multiple backend replicas only
+// one runs the pass per tick. Called from main's DNS ticker.
 func RunDomainMaintenanceTick(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config) {
 	runWithAdvisoryLock(ctx, pool, lockKeyDomainReconcile, "domain-maintenance", func(ctx context.Context) {
 		if err := VerifyPendingDomains(ctx, pool, cfg); err != nil && !errors.Is(err, context.Canceled) {
@@ -135,6 +135,9 @@ func RunDomainMaintenanceTick(ctx context.Context, pool *pgxpool.Pool, cfg *conf
 		}
 		if err := BackfillMissingDefaultDomains(ctx, pool, cfg); err != nil && !errors.Is(err, context.Canceled) {
 			log.Warn().Err(err).Msg("default-domain backfill failed")
+		}
+		if err := ReattachOrphanedHostnames(ctx, pool, cfg); err != nil && !errors.Is(err, context.Canceled) {
+			log.Warn().Err(err).Msg("orphaned-domain reattach failed")
 		}
 	})
 }
