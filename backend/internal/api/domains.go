@@ -1755,6 +1755,97 @@ func ReattachOrphanedHostnames(ctx context.Context, pool *pgxpool.Pool, cfg *con
 	return nil
 }
 
+// hostnameReapEnvFreshnessWindow bounds how old the newest live App
+// resource_snapshot in an environment may be for ReapOrphanedAppHostnames to
+// trust that environment's snapshot data at all. See ReapOrphanedAppHostnames
+// for why this exists.
+const hostnameReapEnvFreshnessWindow = 15 * time.Minute
+
+// hostnameReapMaxRowsPerTick caps how many domain_hostnames rows
+// ReapOrphanedAppHostnames may demote in a single tick, as a second,
+// independent bound on the same failure mode hostnameReapEnvFreshnessWindow
+// guards against: even if the freshness signal itself turns out to be wrong
+// in some case not anticipated here, one tick can only ever do this much
+// damage, and the next tick gets a fresh chance to reconsider rather than
+// compounding a bad call.
+const hostnameReapMaxRowsPerTick = 20
+
+// ReapOrphanedAppHostnames finds domain_hostnames rows bound to an
+// (environment_id, app_name) pair that no longer has a live App
+// resource_snapshot behind it, and drives those rows into the same terminal
+// shape demoteAppHostnames stamps at delete time: status='failed',
+// cert_status='failed', status_reason=hostnameReasonAppDeleted,
+// reattach_count=0, operation_id=NULL. demoteAppHostnames only runs inside
+// DeleteApp's own transaction, so every hostname row orphaned by an app
+// deleted before that safeguard existed -- and any row this pass itself has
+// not yet reached -- is left pointing at nothing, feeding
+// overviewDomainIssues as a fake, permanent poison-pill (see project memory
+// project_deleteapp_orphans_domain_row_under_live_app.md). This pass is the
+// forward-running, idempotent cleanup for that tail: its own WHERE excludes
+// rows already sitting in that exact terminal shape, so a row it touched
+// last tick is not touched again and updated_at does not keep advancing.
+//
+// "Does this app still exist" is answered the same way
+// BackfillMissingDefaultDomains and ReattachOrphanedHostnames already answer
+// it: a resource_snapshots row of kind='App' matching (environment_id, name),
+// filtered through notOrphanedSnapshot. That is the one source of truth this
+// file already trusts for that exact question; inventing a second one here
+// would just be a second thing that could disagree with it.
+//
+// The two existing passes both use a missing resource_snapshot row to decide
+// NOT to act (skip a backfill, skip a reattach), so if resource_snapshots
+// were empty or stale for an environment -- the sync job for that namespace
+// wedged or lost its data -- they simply do nothing, which is safe. This pass
+// runs that check backwards: it wants to act, demoting a row, BECAUSE a
+// resource_snapshot is missing. The same blindness that leaves the other two
+// passes harmlessly inert would make this one demote every hostname in the
+// environment, including ones sitting under apps that are alive and well.
+// Guarding against that needs a positive signal that the blindness has NOT
+// happened, not just the absence of the one row being checked -- so before
+// touching any row in an environment, this pass requires that same
+// environment to have at least one OTHER App resource_snapshot synced within
+// hostnameReapEnvFreshnessWindow. That is proof the snapshot pipeline for
+// this specific environment is alive right now, not just that it once was.
+//
+// One consequence follows directly from that guard and is intentional, not
+// an oversight: an environment whose only app was the one just deleted can
+// never produce that other fresh App snapshot, so its orphaned hostname is
+// never reaped by this pass. Reaping it would require trusting an empty
+// resource_snapshots result for that environment, which is exactly the
+// signal this pass cannot tell apart from total blindness. That row is left
+// for an operator or a future pass with more context, rather than gambled on.
+func ReapOrphanedAppHostnames(ctx context.Context, pool *pgxpool.Pool) error {
+	_, err := pool.Exec(ctx,
+		`UPDATE domain_hostnames dh
+		    SET status = 'failed', cert_status = 'failed', status_reason = $1,
+		        reattach_count = 0, operation_id = NULL, updated_at = now()
+		  WHERE dh.id IN (
+		      SELECT dh2.id
+		        FROM domain_hostnames dh2
+		        JOIN environments e ON e.id = dh2.environment_id
+		       WHERE e.runtime = $2
+		         AND (dh2.status <> 'failed' OR dh2.status_reason IS DISTINCT FROM $1)
+		         AND NOT EXISTS (
+		             SELECT 1 FROM resource_snapshots rs
+		              WHERE rs.environment_id = dh2.environment_id
+		                AND rs.kind = 'App' AND rs.name = dh2.app_name
+		                AND `+notOrphanedSnapshot+`
+		         )
+		         AND EXISTS (
+		             SELECT 1 FROM resource_snapshots rs
+		              WHERE rs.environment_id = dh2.environment_id
+		                AND rs.kind = 'App' AND `+notOrphanedSnapshot+`
+		                AND rs.last_synced_at > now() - ($3 * interval '1 second')
+		         )
+		       ORDER BY dh2.updated_at ASC
+		       LIMIT $4
+		  )`,
+		hostnameReasonAppDeleted, models.EnvironmentRuntimeK8s,
+		hostnameReapEnvFreshnessWindow.Seconds(), hostnameReapMaxRowsPerTick,
+	)
+	return err
+}
+
 // reattachOrphanedHostname re-drives one failed domain_hostnames row: a fresh
 // operation (AttachDefaultDomain for managed/surrogate rows,
 // AttachCustomHostname for unmanaged/custom rows) re-renders the hostname's

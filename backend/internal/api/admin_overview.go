@@ -540,7 +540,14 @@ type overviewDomainIssue struct {
 //
 //   - "hostname": domain_hostnames rows that are status=failed, or still
 //     pending after more than a day (the DNS record the owner was told to add
-//     never showed up, or cert issuance never completed).
+//     never showed up, or cert issuance never completed). Rows whose
+//     status_reason is hostnameReasonAppDeleted are excluded: demoteAppHostnames
+//     (DeleteApp) and ReapOrphanedAppHostnames (background pass) both stamp
+//     that reason deliberately, on an app the operator chose to remove, not
+//     something that broke. Counting it here made this panel report a fake
+//     poison-pill for every app deletion (see project memory
+//     project_admin_broken_panel_read_health_from_own_blindness.md's sibling
+//     bug: a terminal-by-design row is not the same thing as a stuck one).
 //   - "authorization": domain_authorizations rows that failed apex
 //     verification, or have sat in pending for over a day (the TXT record was
 //     never published).
@@ -553,10 +560,11 @@ func (h *Handler) overviewDomainIssues(ctx context.Context) ([]overviewDomainIss
 		FROM domain_hostnames dh
 		JOIN environments e ON e.id = dh.environment_id
 		JOIN projects p     ON p.id = e.project_id
-		WHERE dh.status = 'failed'
+		WHERE (dh.status = 'failed' AND (dh.status_reason IS NULL OR dh.status_reason <> $1))
 		   OR (dh.status = 'pending' AND dh.created_at < now() - interval '1 day')
 		ORDER BY dh.updated_at ASC
 		LIMIT 50`,
+		hostnameReasonAppDeleted,
 	)
 	if err != nil {
 		return nil, err
