@@ -379,8 +379,15 @@ func (h *Handler) DeleteApp(c *gin.Context) {
 	payload := models.DeleteAppPayload{Name: appName}
 	payloadBytes, _ := json.Marshal(payload)
 
+	tx, err := h.pool.Begin(c.Request.Context())
+	if err != nil {
+		rejectErr(http.StatusInternalServerError, "operation_insert_failed", "failed to create operation")
+		return
+	}
+	defer func() { _ = tx.Rollback(c.Request.Context()) }()
+
 	var op models.Operation
-	row := h.pool.QueryRow(c.Request.Context(),
+	row := tx.QueryRow(c.Request.Context(),
 		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
 		 VALUES ($1, $2, $3, 'DeleteApp', 'App', $4, 'Created', $5)
 		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
@@ -389,6 +396,16 @@ func (h *Handler) DeleteApp(c *gin.Context) {
 		claims.UserID, projectID, envID, appName, payloadBytes,
 	)
 	if err := scanOperation(row, &op); err != nil {
+		rejectErr(http.StatusInternalServerError, "operation_insert_failed", "failed to create operation")
+		return
+	}
+
+	if err := demoteAppHostnames(c.Request.Context(), tx, envID, appName); err != nil {
+		rejectErr(http.StatusInternalServerError, "hostname_demote_failed", "failed to demote app domains")
+		return
+	}
+
+	if err := tx.Commit(c.Request.Context()); err != nil {
 		rejectErr(http.StatusInternalServerError, "operation_insert_failed", "failed to create operation")
 		return
 	}
@@ -411,6 +428,37 @@ func (h *Handler) DeleteApp(c *gin.Context) {
 	)
 
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "App deletion queued"})
+}
+
+// demoteAppHostnames runs, in the caller's DeleteApp transaction, against
+// every domain_hostnames row still bound to (environmentID, appName) in
+// status 'active' or 'pending'. It flips them to 'failed' with
+// status_reason=hostnameReasonAppDeleted instead of deleting them: the row
+// carries a verified custom-domain authorization link (or a default-domain
+// assignment) that took a real DNS/TXT proof to earn, and DeleteApp itself
+// never touched domain_hostnames before this, leaving a hostname pointed at
+// an app the gitops path had already removed with no signal and no healing
+// path (see project memory project_deleteapp_orphans_domain_row_under_live_app.md).
+// Landing the row in 'failed' hands it to ReattachOrphanedHostnames, the
+// reconciler already proven to re-drive a failed row once a live App
+// snapshot with the same name reappears.
+//
+// reattach_count is reset to 0 so a row that had already exhausted
+// hostnameReattachMaxAttempts in a previous life of the app is not
+// permanently stuck once the app comes back under the same name, and
+// updated_at is stamped to now() so the hostnameReattachCooldown window
+// starts fresh from this delete rather than inheriting a stale clock left
+// over from before it. operation_id is cleared since the operation it
+// pointed at belonged to that previous life.
+func demoteAppHostnames(ctx context.Context, tx pgx.Tx, environmentID uuid.UUID, appName string) error {
+	_, err := tx.Exec(ctx,
+		`UPDATE domain_hostnames
+		    SET status = 'failed', cert_status = 'failed', status_reason = $3,
+		        reattach_count = 0, operation_id = NULL, updated_at = now()
+		  WHERE environment_id = $1 AND app_name = $2 AND status IN ('active', 'pending')`,
+		environmentID, appName, hostnameReasonAppDeleted,
+	)
+	return err
 }
 
 // DeleteProjectImpact previews the blast radius of deleting an entire project:

@@ -1104,6 +1104,13 @@ const hostnameReasonAttachTimeout = "attach_timeout"
 // "active": a live cert and a live route to serve it.
 const hostnameReasonRouteMissing = "route_missing"
 
+// hostnameReasonAppDeleted is the status_reason DeleteApp stamps on a
+// domain_hostnames row it demotes from 'active'/'pending' to 'failed'
+// (delete_impact.go, demoteAppHostnames) so ReattachOrphanedHostnames can
+// tell "the app underneath this row was deleted" apart from every other
+// reason a hostname failed.
+const hostnameReasonAppDeleted = "app_deleted"
+
 // domainRouteClientsetFactory builds the kube client the route checks dial,
 // indirected through a var (rather than calling newAppHealthClientset
 // directly) so tests can swap in a fake clientset and exercise the
