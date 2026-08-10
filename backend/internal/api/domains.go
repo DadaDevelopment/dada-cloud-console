@@ -1369,6 +1369,97 @@ func RevalidateActiveHostnameRoutes(ctx context.Context, pool *pgxpool.Pool) err
 	return nil
 }
 
+// hostnameCertLiveProbe indirects the TLS probe behind a var, the same way
+// domainRouteClientsetFactory indirects the kube client, so a test can assert
+// the heal decision without a real ingress to hand-shake against.
+var hostnameCertLiveProbe = hostnameCertLive
+
+// HealRecoveredFailedHostnames returns a failed hostname to active once it is
+// demonstrably serving again: certificate live on our own ingress AND (for
+// k8s runtimes) an Ingress rule that actually routes it -- the exact pair of
+// proofs ReconcilePendingHostnames demands before it calls a pending row
+// active.
+//
+// Without this, 'failed' is a one-way door. ReconcilePendingHostnames only
+// ever selects status='pending', so the moment the attach window expires the
+// row is frozen at failed/failed and no later success can ever move it: two
+// production domains (reels-tracker-d2aa30, dada-lending-server-e6cb0b) have
+// carried cert_status='failed' since their certificates were issued on
+// 2026-08-02, one of them answering HTTPS 200 the whole time. The owner reads
+// the admin broken-apps panel to find outages, and rows like these are half
+// its content -- our own blindness rendered as a fault.
+//
+// This is deliberately NOT ReattachOrphanedHostnames. That one re-drives
+// provisioning (enqueues an attach operation, bounded by reattach_count
+// because each attempt costs a certificate order), for a row whose route is
+// missing. This one has no side effect at all beyond telling the truth about
+// a domain that already works, so it needs no attempt cap: if the domain
+// stops working, RevalidateActiveHostnameRoutes sends it back to pending
+// through the ordinary path.
+//
+// Rows stamped hostnameReasonAppDeleted are excluded. That reason is terminal
+// by design -- the operator removed the app -- and a managed surrogate
+// hostname under our wildcard would otherwise pass the cert probe forever.
+func HealRecoveredFailedHostnames(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config) error {
+	clientset := domainRouteClientsetFactory()
+	rows, err := pool.Query(ctx,
+		`SELECT dh.id, dh.hostname, e.runtime, a.vm_ip
+		   FROM domain_hostnames dh
+		   JOIN environments e ON e.id = dh.environment_id
+		   LEFT JOIN app_servers a ON a.id = e.app_server_id
+		  WHERE dh.status = 'failed'
+		    AND (dh.status_reason IS NULL OR dh.status_reason <> $1)`,
+		hostnameReasonAppDeleted)
+	if err != nil {
+		return err
+	}
+	type failedHost struct {
+		id       uuid.UUID
+		hostname string
+		runtime  models.EnvironmentRuntime
+		vmIP     *string
+	}
+	var failed []failedHost
+	for rows.Next() {
+		var f failedHost
+		if err := rows.Scan(&f.id, &f.hostname, &f.runtime, &f.vmIP); err != nil {
+			rows.Close()
+			return err
+		}
+		failed = append(failed, f)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, f := range failed {
+		probeAddr, _, probeable := hostnameProbeTargets(cfg, f.hostname, f.runtime, f.vmIP)
+		if !probeable {
+			continue
+		}
+		if !hostnameCertLiveProbe(ctx, f.hostname, probeAddr) {
+			continue
+		}
+		routeLive, routeKnown := true, true
+		if f.runtime != models.EnvironmentRuntimeVM {
+			routeLive, routeKnown = hostnameRouteLive(ctx, clientset, f.hostname)
+		}
+		if hostnameCertRouteDecision(f.runtime, routeKnown, routeLive) != hostnameOutcomeActive {
+			continue
+		}
+		ct, err := pool.Exec(ctx,
+			`UPDATE domain_hostnames SET status='active', cert_status='active', status_reason=NULL, updated_at=now()
+			  WHERE id=$1 AND status='failed'`, f.id)
+		if err == nil && ct.RowsAffected() > 0 {
+			log.Info().
+				Str("hostname", f.hostname).
+				Msg("failed hostname is serving again (cert live, route present) -- restored to active")
+		}
+	}
+	return nil
+}
+
 // hostnameCertRouteOutcome is what ReconcilePendingHostnames does with a
 // pending hostname whose cert probe already passed, once the route check
 // weighs in.
