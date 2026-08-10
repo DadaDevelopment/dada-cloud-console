@@ -71,6 +71,11 @@ var (
 		Help: "Boxes that reached a failed state within the last hour. Alert on >0; it clears itself as failures age out, so it tracks live breakage rather than historical totals (same shape as dada_builds_failed_recent).",
 	})
 
+	boxFirstAttemptFailed = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "dada_box_first_attempt_failed",
+		Help: "One series per project whose ONLY experience of boxes is failure: it has a box that failed in the last 24h and has never had a single box reach Ready. dada_box_failed_recent cannot express this — it is one unlabelled number, so our own throwaway test boxes and a paying candidate's first attempt are the same digit in it, which is how the first real box customer was lost without anyone noticing. The project label is the point: it says WHO to talk to, and it makes our own sandbox visibly our own instead of camouflage.",
+	}, []string{"project"})
+
 	boxDestroys = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "dada_box_destroys_total",
 		Help: "Boxes destroyed, by cause (user|ttl|spend_cap|abuse|crystallized). cause=\"crystallized\" is a success: the box graduated to a permanent VM.",

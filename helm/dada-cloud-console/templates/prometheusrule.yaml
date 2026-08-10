@@ -235,6 +235,24 @@ spec:
               {{`{{ $value }}`}} box(es) reached a failed state in the last hour. An agent asked for
               a body and did not get one. Check operations.error_message for the box actions and
               the box-agent logs on the host.
+        - alert: BoxFirstAttemptFailed
+          expr: max by (namespace, service, project) (dada_box_first_attempt_failed) > 0
+          for: 5m
+          # The window behind the series is 24h, so a resolve means the project got a
+          # working box or a day passed. keep_firing_for is deliberately long: this
+          # alert is a person to contact, not a spike to ride out.
+          keep_firing_for: 6h
+          labels:
+            severity: critical
+          annotations:
+            summary: "First box ever failed for project {{`{{ $labels.project }}`}}"
+            description: >-
+              Project {{`{{ $labels.project }}`}} has a box that failed in the last 24h and has
+              never had a single box reach Ready. Its whole experience of the product is one
+              failure, so this is a customer about to leave silently rather than an error rate.
+              Read their box's logs in dada-app-logs-boxes-* and the audit rows for the box
+              actions, then contact them. If the project is one of ours, that is the label
+              doing its job -- close it and move on.
         - alert: DadaDBRouteUnaddressable
           expr: max by (namespace, service, reason) (dada_db_routes_dropped) > 0
           for: 10m

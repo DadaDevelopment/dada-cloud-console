@@ -9,6 +9,7 @@ dada_box_crystallize_state_loss_total counter kind
 dada_box_destroys_total counter cause
 dada_box_expose_duration_seconds histogram cert
 dada_box_failed_recent gauge 
+dada_box_first_attempt_failed gauge project
 dada_box_funnel_events_total counter event,locale
 dada_box_idle_minutes_total counter plan
 dada_box_meter_errors_total counter 

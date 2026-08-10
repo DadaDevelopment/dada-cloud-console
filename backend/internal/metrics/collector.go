@@ -294,6 +294,8 @@ func collectBoxes(ctx context.Context, pool *pgxpool.Pool) {
 		boxFailedRecent.Set(failedRecent)
 	}
 
+	collectBoxFirstAttemptFailures(ctx, pool)
+
 	// dada_box_pool_available and dada_box_pool_target are deliberately NOT written
 	// here, and this is the one place that has to say why out loud.
 	//
@@ -335,6 +337,68 @@ func collectBoxes(ctx context.Context, pool *pgxpool.Pool) {
 	// Gauge, so it still publishes 0 from registration and is never
 	// silent-by-absence before the first tick.
 	boxCrystallizationsPendingAge.Set(0)
+}
+
+// boxFirstAttemptSeriesLimit caps how many projects get their own series. The
+// label is a project name, so an unbounded query would be a cardinality bomb the
+// day a signup wave fails en masse.
+//
+// When the cap bites, the newest failures win the slots. Every candidate here is
+// inside the same 24h window, so "oldest" does not mean "most neglected", it
+// means "closest to falling out of the window anyway" — and the person who tried
+// the product an hour ago is the one still worth a message today.
+const boxFirstAttemptSeriesLimit = 20
+
+// collectBoxFirstAttemptFailures refreshes dada_box_first_attempt_failed: one
+// series per project that has a box which failed in the last 24h and has never,
+// in its whole history, had a box reach Ready.
+//
+// The distinction from dada_box_failed_recent is the entire reason this exists.
+// That gauge is a single unlabelled count, so a project on its tenth box failing
+// after nine good ones and a stranger whose very first box died read identically
+// in it, and our own throwaway test boxes add to the same digit. The one time it
+// mattered, that is exactly what happened: the number moved, the alert fired into
+// a stream that always has something in it, and nobody could tell that the digit
+// was a real person's first and only impression of the product.
+//
+// "Never reached Ready" is read from last_active_at, which is stamped by
+// markBoxReady (internal/api/box_boot.go) at the moment a box actually boots and
+// nowhere else. A project with no such stamp anywhere in its rows has never seen
+// a box work, whatever its rows say now.
+//
+// Reset() first, so a project that finally gets a working box stops producing a
+// series rather than freezing at 1 forever.
+func collectBoxFirstAttemptFailures(ctx context.Context, pool *pgxpool.Pool) {
+	rows, err := pool.Query(ctx,
+		`SELECT COALESCE(p.name, b.project_id::text), min(b.created_at)
+		   FROM boxes b
+		   LEFT JOIN projects p ON p.id = b.project_id
+		  WHERE b.status = 'Failed'
+		    AND b.updated_at > now() - interval '24 hours'
+		    AND NOT EXISTS (
+		          SELECT 1 FROM boxes ok
+		           WHERE ok.project_id = b.project_id
+		             AND ok.last_active_at IS NOT NULL)
+		  GROUP BY 1
+		  ORDER BY 2 DESC
+		  LIMIT `+strconv.Itoa(boxFirstAttemptSeriesLimit))
+	if err != nil {
+		collectErrors.Inc()
+		log.Warn().Err(err).Msg("metrics: box first-attempt failure query failed")
+		return
+	}
+	defer rows.Close()
+
+	boxFirstAttemptFailed.Reset()
+	for rows.Next() {
+		var project string
+		var oldest time.Time
+		if err := rows.Scan(&project, &oldest); err != nil {
+			collectErrors.Inc()
+			continue
+		}
+		boxFirstAttemptFailed.WithLabelValues(project).Set(1)
+	}
 }
 
 // collectBoxRepeatUse refreshes dada_box_repeat_use_7d_ratio, the brief's headline

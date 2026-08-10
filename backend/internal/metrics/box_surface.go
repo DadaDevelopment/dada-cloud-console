@@ -41,6 +41,7 @@ var boxMetricSpecs = []boxMetricSpec{
 	{"dada_box_destroys_total", "counter", []string{"cause"}, boxDestroys},
 	{"dada_box_expose_duration_seconds", "histogram", []string{"cert"}, boxExposeDuration},
 	{"dada_box_failed_recent", "gauge", nil, boxFailedRecent},
+	{"dada_box_first_attempt_failed", "gauge", []string{"project"}, boxFirstAttemptFailed},
 	{"dada_box_funnel_events_total", "counter", []string{"event", "locale"}, boxFunnelEvents},
 	{"dada_box_idle_minutes_total", "counter", []string{"plan"}, boxIdleMinutes},
 	{"dada_box_meter_errors_total", "counter", nil, boxMeterErrors},
