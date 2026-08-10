@@ -25,6 +25,17 @@ function phaseTone(phase: string): "error" | "needs-action" | "neutral" {
   return "neutral";
 }
 
+/** Compact age label for a raw elapsed-seconds count, e.g. "5 мин назад". */
+function ageLabel(seconds: number): string {
+  if (seconds < 60) return "только что";
+  const mins = Math.floor(seconds / 60);
+  if (mins < 60) return `${mins} мин назад`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} ч назад`;
+  const days = Math.floor(hours / 24);
+  return `${days} дн назад`;
+}
+
 export default function AdminOverviewPage() {
   const { t } = useT();
 
@@ -140,6 +151,38 @@ export default function AdminOverviewPage() {
     { key: "owner", header: t("adminOverview.notReady.col.owner"), render: (r) => <span className="text-gray-500 dark:text-gray-400">{r.owner_email || "—"}</span> },
   ];
 
+  const notReadyOtherColumns: Column<AdminOverviewResponse["not_ready_other"][number]>[] = [
+    { key: "kind", header: "Тип", render: (r) => <span className="text-gray-500 dark:text-gray-400">{r.kind}</span> },
+    { key: "name", header: "Имя", render: (r) => <span className="font-mono text-xs text-gray-900 dark:text-gray-100">{r.name}</span> },
+    { key: "project", header: t("adminOverview.notReady.col.project"), render: (r) => <span className="text-gray-700 dark:text-gray-200">{r.project_name}</span> },
+    { key: "phase", header: t("adminOverview.notReady.col.phase"), render: (r) => <StateChip tone={phaseTone(r.phase)}>{r.phase}</StateChip> },
+    { key: "age", header: "Как давно", render: (r) => <span className="text-xs text-gray-500 dark:text-gray-400">{ageLabel(r.age_seconds)}</span> },
+  ];
+
+  const domainIssueColumns: Column<AdminOverviewResponse["domain_issues"][number]>[] = [
+    { key: "hostname", header: "Домен", render: (r) => <span className="font-mono text-xs text-gray-900 dark:text-gray-100">{r.hostname}</span> },
+    { key: "stage", header: "Этап", render: (r) => <span className="text-gray-500 dark:text-gray-400">{r.stage === "hostname" ? "Хост" : "Валидация"}</span> },
+    { key: "status", header: t("adminOverview.notReady.col.phase"), render: (r) => <StateChip tone={r.status === "failed" ? "error" : "needs-action"}>{r.status}</StateChip> },
+    { key: "project", header: t("adminOverview.notReady.col.project"), render: (r) => <span className="text-gray-700 dark:text-gray-200">{r.project_name}</span> },
+    { key: "age", header: "Как давно", render: (r) => <span className="text-xs text-gray-500 dark:text-gray-400">{ageLabel(r.age_seconds)}</span> },
+  ];
+
+  const stuckOpsColumns: Column<AdminOverviewResponse["stuck_operations"]["oldest"][number]>[] = [
+    { key: "action", header: "Действие", render: (r) => <span className="text-gray-900 dark:text-gray-100">{r.action}</span> },
+    { key: "resource", header: "Ресурс", render: (r) => <span className="text-gray-700 dark:text-gray-200">{r.resource_kind} {r.resource_name}</span> },
+    { key: "status", header: t("adminOverview.notReady.col.phase"), render: (r) => <StateChip tone="needs-action">{r.status}</StateChip> },
+    { key: "project", header: t("adminOverview.notReady.col.project"), render: (r) => <span className="text-gray-700 dark:text-gray-200">{r.project_name}</span> },
+    { key: "age", header: "Как давно", render: (r) => <span className="text-xs text-gray-500 dark:text-gray-400">{ageLabel(r.age_seconds)}</span> },
+  ];
+
+  const failedBuildColumns: Column<AdminOverviewResponse["failed_builds"][number]>[] = [
+    { key: "app", header: t("adminOverview.notReady.col.name"), render: (r) => <span className="font-mono text-xs text-gray-900 dark:text-gray-100">{r.app_name}</span> },
+    { key: "project", header: t("adminOverview.notReady.col.project"), render: (r) => <span className="text-gray-700 dark:text-gray-200">{r.project_name}</span> },
+    { key: "commit", header: "Коммит", render: (r) => <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{(r.commit_sha || "").slice(0, 8) || "—"}</span> },
+    { key: "error", header: "Ошибка", render: (r) => <span className="text-xs text-gray-500 dark:text-gray-400">{r.error_message || "—"}</span> },
+    { key: "age", header: "Как давно", render: (r) => <span className="text-xs text-gray-500 dark:text-gray-400">{ageLabel(r.age_seconds)}</span> },
+  ];
+
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -157,6 +200,16 @@ export default function AdminOverviewPage() {
       </div>
 
       <AdminTabs active="overview" />
+
+      {data && data.not_ready_freshness.blind && (
+        <div className="mb-4 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-800 dark:text-red-300">
+          <p className="font-medium">Данные устарели, панели нельзя доверять</p>
+          <p className="mt-0.5">
+            Последний снапшот пришёл {ageLabel(data.not_ready_freshness.newest_sync_age_seconds ?? 0)}.
+            {" "}{data.not_ready_freshness.stale_apps} приложений не обновлялись больше 10 минут — сборщик состояния мог упасть или зависнуть.
+          </p>
+        </div>
+      )}
 
       {error && (
         <div className="mb-6 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-400">{error}</div>
@@ -296,8 +349,103 @@ export default function AdminOverviewPage() {
               columns={notReadyColumns}
               pageSize={10}
               emptyState={
+                data?.not_ready_freshness.blind ? (
+                  <div className="flex items-center justify-center rounded-lg border border-dashed border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/20 py-10">
+                    <p className="text-sm font-medium text-red-600 dark:text-red-400">Данные устарели — список может быть неполным, пустоту сейчас доверять нельзя</p>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center rounded-lg border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 py-10">
+                    <p className="text-sm font-medium text-green-600 dark:text-green-400">{t("adminOverview.notReady.empty")}</p>
+                  </div>
+                )
+              }
+            />
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader className="p-4 pb-2">
+            <CardTitle className="text-sm">Базы, модели и другие ресурсы</CardTitle>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Ресурсы вне приложений не в статусе Ready: базы данных, ML-модели, прочее</p>
+          </CardHeader>
+          <CardContent className="p-4 pt-0">
+            <DataTable
+              loading={isLoading}
+              rows={data?.not_ready_other ?? []}
+              getRowKey={(r) => `${r.kind}/${r.project_name}/${r.name}`}
+              columns={notReadyOtherColumns}
+              pageSize={10}
+              emptyState={
                 <div className="flex items-center justify-center rounded-lg border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 py-10">
-                  <p className="text-sm font-medium text-green-600 dark:text-green-400">{t("adminOverview.notReady.empty")}</p>
+                  <p className="text-sm font-medium text-green-600 dark:text-green-400">Все остальные ресурсы в порядке</p>
+                </div>
+              }
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="p-4 pb-2">
+            <CardTitle className="text-sm">Проблемы с доменами</CardTitle>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Ошибки выпуска сертификата и залежавшиеся в ожидании домены</p>
+          </CardHeader>
+          <CardContent className="p-4 pt-0">
+            <DataTable
+              loading={isLoading}
+              rows={data?.domain_issues ?? []}
+              getRowKey={(r) => `${r.stage}/${r.project_name}/${r.hostname}`}
+              columns={domainIssueColumns}
+              pageSize={10}
+              emptyState={
+                <div className="flex items-center justify-center rounded-lg border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 py-10">
+                  <p className="text-sm font-medium text-green-600 dark:text-green-400">С доменами всё в порядке</p>
+                </div>
+              }
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="p-4 pb-2">
+            <CardTitle className="text-sm">Зависшие операции</CardTitle>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Операции дольше окна перехвата не завершились
+              {data ? ` — всего ${data.stuck_operations.count}` : ""}
+            </p>
+          </CardHeader>
+          <CardContent className="p-4 pt-0">
+            <DataTable
+              loading={isLoading}
+              rows={data?.stuck_operations.oldest ?? []}
+              getRowKey={(r) => r.id}
+              columns={stuckOpsColumns}
+              pageSize={10}
+              emptyState={
+                <div className="flex items-center justify-center rounded-lg border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 py-10">
+                  <p className="text-sm font-medium text-green-600 dark:text-green-400">Зависших операций нет</p>
+                </div>
+              }
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="p-4 pb-2">
+            <CardTitle className="text-sm">Последняя сборка упала</CardTitle>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Приложение может быть Ready, а последняя сборка при этом сломана</p>
+          </CardHeader>
+          <CardContent className="p-4 pt-0">
+            <DataTable
+              loading={isLoading}
+              rows={data?.failed_builds ?? []}
+              getRowKey={(r) => `${r.project_name}/${r.app_name}`}
+              columns={failedBuildColumns}
+              pageSize={10}
+              emptyState={
+                <div className="flex items-center justify-center rounded-lg border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 py-10">
+                  <p className="text-sm font-medium text-green-600 dark:text-green-400">Упавших сборок нет</p>
                 </div>
               }
             />

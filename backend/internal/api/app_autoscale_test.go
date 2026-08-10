@@ -132,7 +132,7 @@ func TestGrowEnvelopeDoublesTheStarvedDimensionOnly(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.dimension, func(t *testing.T) {
-			got, grew, err := growEnvelope(from, tc.dimension)
+			got, grew, _, err := growEnvelope(from, tc.dimension, nil)
 			if err != nil {
 				t.Fatalf("growEnvelope: %v", err)
 			}
@@ -152,7 +152,7 @@ func TestGrowEnvelopeDoublesTheStarvedDimensionOnly(t *testing.T) {
 func TestGrowEnvelopePreservesTheRequestToLimitRatio(t *testing.T) {
 	from := resourceEnvelope{CPULimit: "1", MemoryLimit: "1Gi", CPUReq: "250m", MemoryReq: "256Mi"}
 
-	got, _, err := growEnvelope(from, "cpu")
+	got, _, _, err := growEnvelope(from, "cpu", nil)
 	if err != nil {
 		t.Fatalf("growEnvelope: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestGrowEnvelopePreservesTheRequestToLimitRatio(t *testing.T) {
 		t.Fatalf("cpu grew to %s/%s, want request to stay at a quarter of the limit", got.CPUReq, got.CPULimit)
 	}
 
-	got, _, err = growEnvelope(from, "memory")
+	got, _, _, err = growEnvelope(from, "memory", nil)
 	if err != nil {
 		t.Fatalf("growEnvelope: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestGrowEnvelopeStopsAtThePlatformCap(t *testing.T) {
 	at := resourceEnvelope{CPULimit: appAutoscaleMaxCPULimit, MemoryLimit: appAutoscaleMaxMemoryLimit, CPUReq: "2", MemoryReq: "4Gi"}
 
 	for _, dimension := range []string{"cpu", "memory"} {
-		got, grew, err := growEnvelope(at, dimension)
+		got, grew, _, err := growEnvelope(at, dimension, nil)
 		if err != nil {
 			t.Fatalf("%s: growEnvelope: %v", dimension, err)
 		}
@@ -190,7 +190,7 @@ func TestGrowEnvelopeStopsAtThePlatformCap(t *testing.T) {
 func TestGrowEnvelopeClampsTheLastStepToTheCap(t *testing.T) {
 	from := resourceEnvelope{CPULimit: "6", MemoryLimit: "12Gi", CPUReq: "3", MemoryReq: "6Gi"}
 
-	got, grew, err := growEnvelope(from, "cpu")
+	got, grew, _, err := growEnvelope(from, "cpu", nil)
 	if err != nil || !grew {
 		t.Fatalf("growEnvelope(cpu) = (%v, %v, %v), want a clamped step", got, grew, err)
 	}
@@ -198,7 +198,7 @@ func TestGrowEnvelopeClampsTheLastStepToTheCap(t *testing.T) {
 		t.Fatalf("cpu limit = %q, want the cap %q", got.CPULimit, appAutoscaleMaxCPULimit)
 	}
 
-	got, grew, err = growEnvelope(from, "memory")
+	got, grew, _, err = growEnvelope(from, "memory", nil)
 	if err != nil || !grew {
 		t.Fatalf("growEnvelope(memory) = (%v, %v, %v), want a clamped step", got, grew, err)
 	}
@@ -216,7 +216,7 @@ func TestGrowEnvelopeRefusesAnUnusableEnvelope(t *testing.T) {
 		"zero limit":       {CPULimit: "0", MemoryLimit: "1Gi", CPUReq: "0", MemoryReq: "256Mi"},
 		"empty":            {},
 	} {
-		if _, grew, err := growEnvelope(from, "cpu"); err == nil && grew {
+		if _, grew, _, err := growEnvelope(from, "cpu", nil); err == nil && grew {
 			t.Fatalf("%s: grew off an unusable envelope %v", name, from)
 		}
 	}
@@ -671,7 +671,7 @@ func TestGrowKeepsTheEphemeralEnvelopeUntouched(t *testing.T) {
 		CPULimit: "500m", MemoryLimit: "384Mi", CPUReq: "75m", MemoryReq: "256Mi",
 		EphemeralLimit: "1Gi", EphemeralReq: "200Mi",
 	}
-	to, room, err := growEnvelope(from, "memory")
+	to, room, _, err := growEnvelope(from, "memory", nil)
 	if err != nil || !room {
 		t.Fatalf("growEnvelope(%+v) = room %v, err %v", from, room, err)
 	}
@@ -680,6 +680,159 @@ func TestGrowKeepsTheEphemeralEnvelopeUntouched(t *testing.T) {
 	}
 	if to.MemoryLimit != "768Mi" {
 		t.Fatalf("memory limit = %q, want 768Mi", to.MemoryLimit)
+	}
+}
+
+// Mirrors the fonbet-value incident: a namespace LimitRange caps memory
+// tighter than the platform's own ceiling, so an app throttled on memory must
+// stop at the LimitRange, not at appAutoscaleMaxMemoryLimit, and the refusal
+// must say why in a way the audit trail can tell apart from an ordinary
+// at-cap refusal.
+func TestGrowEnvelopeStopsAtALimitRangeTighterThanThePlatformCap(t *testing.T) {
+	from := resourceEnvelope{CPULimit: "500m", MemoryLimit: "2Gi", CPUReq: "100m", MemoryReq: "1Gi"}
+	limitMax := corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("2Gi")}
+
+	got, grew, cappedBy, err := growEnvelope(from, "memory", limitMax)
+	if err != nil {
+		t.Fatalf("growEnvelope: %v", err)
+	}
+	if grew {
+		t.Fatalf("grew past the namespace LimitRange to %v", got)
+	}
+	if cappedBy != "limitrange" {
+		t.Fatalf("cappedBy = %q, want %q", cappedBy, "limitrange")
+	}
+}
+
+// A namespace with no LimitRange (nil map) must behave exactly as before
+// LimitRange existed: bounded only by the platform cap.
+func TestGrowEnvelopeIgnoresAnAbsentLimitRange(t *testing.T) {
+	from := resourceEnvelope{CPULimit: "500m", MemoryLimit: "512Mi", CPUReq: "100m", MemoryReq: "256Mi"}
+
+	got, grew, cappedBy, err := growEnvelope(from, "memory", nil)
+	if err != nil || !grew {
+		t.Fatalf("growEnvelope(%+v, nil) = (%v, %v, %v, %v), want an ordinary doubling", from, got, grew, cappedBy, err)
+	}
+	if got.MemoryLimit != "1Gi" {
+		t.Fatalf("memory limit = %q, want 1Gi", got.MemoryLimit)
+	}
+	if cappedBy != "" {
+		t.Fatalf("cappedBy = %q, want empty on a successful grow", cappedBy)
+	}
+}
+
+// A LimitRange looser than the platform cap must never let an app grow past
+// the platform's own absolute ceiling.
+func TestGrowEnvelopePlatformCapWinsOverALooserLimitRange(t *testing.T) {
+	at := resourceEnvelope{CPULimit: appAutoscaleMaxCPULimit, MemoryLimit: appAutoscaleMaxMemoryLimit, CPUReq: "2", MemoryReq: "4Gi"}
+	limitMax := corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse("32"),
+		corev1.ResourceMemory: resource.MustParse("64Gi"),
+	}
+
+	for _, dimension := range []string{"cpu", "memory"} {
+		got, grew, cappedBy, err := growEnvelope(at, dimension, limitMax)
+		if err != nil {
+			t.Fatalf("%s: growEnvelope: %v", dimension, err)
+		}
+		if grew {
+			t.Fatalf("%s: grew past the platform cap to %v", dimension, got)
+		}
+		if cappedBy != "platform" {
+			t.Fatalf("%s: cappedBy = %q, want %q", dimension, cappedBy, "platform")
+		}
+	}
+}
+
+// This is the self-healing case: an app's committed envelope already exceeds
+// its namespace's LimitRange (fonbet-value sat at a 4Gi memory limit against a
+// 2Gi max), so it must be clamped straight down to max, not merely refused
+// from growing further.
+func TestClampToLimitRangeShrinksAnEnvelopeAlreadyOverMax(t *testing.T) {
+	from := resourceEnvelope{CPULimit: "1", MemoryLimit: "4Gi", CPUReq: "250m", MemoryReq: "2Gi"}
+	max := corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("2Gi")}
+
+	got, moved, err := clampToLimitRange(from, max)
+	if err != nil {
+		t.Fatalf("clampToLimitRange: %v", err)
+	}
+	if !moved {
+		t.Fatal("expected the over-max memory limit to move")
+	}
+	if got.MemoryLimit != "2Gi" {
+		t.Fatalf("memory limit = %q, want 2Gi", got.MemoryLimit)
+	}
+	if got.MemoryReq != "1Gi" {
+		t.Fatalf("memory request = %q, want 1Gi (ratio preserved)", got.MemoryReq)
+	}
+	if got.CPULimit != "1" || got.CPUReq != "250m" {
+		t.Fatalf("cpu moved on a memory-only violation: %+v", got)
+	}
+}
+
+// An envelope already within the LimitRange must be left untouched — this is
+// what makes the repair pass a no-op on every tick after the first fix.
+func TestClampToLimitRangeLeavesACompliantEnvelopeAlone(t *testing.T) {
+	from := resourceEnvelope{CPULimit: "500m", MemoryLimit: "1Gi", CPUReq: "100m", MemoryReq: "512Mi"}
+	max := corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("2Gi")}
+
+	got, moved, err := clampToLimitRange(from, max)
+	if err != nil {
+		t.Fatalf("clampToLimitRange: %v", err)
+	}
+	if moved {
+		t.Fatalf("moved a compliant envelope: %+v", got)
+	}
+	if got != from {
+		t.Fatalf("clampToLimitRange(%v) = %v, want it unchanged", from, got)
+	}
+}
+
+// A resource the LimitRange says nothing about must never be touched, the
+// same as quotaHeadroom skipping dimensions the quota does not constrain.
+func TestClampToLimitRangeSkipsUnconstrainedDimensions(t *testing.T) {
+	from := resourceEnvelope{CPULimit: "8", MemoryLimit: "1Gi", CPUReq: "2", MemoryReq: "512Mi"}
+	max := corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("2Gi")}
+
+	got, moved, err := clampToLimitRange(from, max)
+	if err != nil {
+		t.Fatalf("clampToLimitRange: %v", err)
+	}
+	if moved {
+		t.Fatalf("moved despite no LimitRange entry for cpu: %+v", got)
+	}
+}
+
+// A ready replica must block the LimitRange repair -- this is the safety net
+// distinguishing a dead app like fonbet-value from a live one that would be
+// OOMKilled by shrinking it down to the LimitRange max.
+func TestDecideLimitRangeRepairSkipsWhenAReplicaIsReady(t *testing.T) {
+	if got := decideLimitRangeRepair(true, 1); got != limitRangeRepairSkipLive {
+		t.Fatalf("decideLimitRangeRepair(found=true, ready=1) = %v, want limitRangeRepairSkipLive", got)
+	}
+}
+
+// More than one ready replica must skip for the same reason as exactly one.
+func TestDecideLimitRangeRepairSkipsWithMultipleReadyReplicas(t *testing.T) {
+	if got := decideLimitRangeRepair(true, 3); got != limitRangeRepairSkipLive {
+		t.Fatalf("decideLimitRangeRepair(found=true, ready=3) = %v, want limitRangeRepairSkipLive", got)
+	}
+}
+
+// Zero ready replicas on an identified Deployment is the fonbet-value case:
+// nothing is running, so clamping the envelope down is a pure repair.
+func TestDecideLimitRangeRepairProceedsWhenNoReplicaIsReady(t *testing.T) {
+	if got := decideLimitRangeRepair(true, 0); got != limitRangeRepairProceed {
+		t.Fatalf("decideLimitRangeRepair(found=true, ready=0) = %v, want limitRangeRepairProceed", got)
+	}
+}
+
+// The Deployment could not be identified at all -- no match, more than one
+// match, or the read failed. This must never be treated as "dead": fail
+// closed rather than guess.
+func TestDecideLimitRangeRepairFailsClosedWhenDeploymentUnreadable(t *testing.T) {
+	if got := decideLimitRangeRepair(false, 0); got != limitRangeRepairSkipUnknown {
+		t.Fatalf("decideLimitRangeRepair(found=false, ready=0) = %v, want limitRangeRepairSkipUnknown", got)
 	}
 }
 

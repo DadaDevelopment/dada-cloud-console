@@ -208,34 +208,76 @@ func (e resourceEnvelope) String() string {
 	return fmt.Sprintf("cpu %s/%s, mem %s/%s", e.CPUReq, e.CPULimit, e.MemoryReq, e.MemoryLimit)
 }
 
+// effectiveGrowCap returns the tighter of the platform's absolute per-app cap
+// and a namespace LimitRange's per-container max for one dimension, and
+// reports which one is doing the limiting.
+//
+// The LimitRange is enforced by the API server on every pod create AND every
+// in-place resize, the same as the platform cap conceptually is, except the
+// platform never checked it: growing an envelope past a namespace's own
+// LimitRange is exactly how fonbet-value's Deployment got wedged at
+// FailedCreate for two days with zero running pods and no alert. limitMax
+// missing the resource entirely (a namespace with no LimitRange, or one that
+// does not constrain this dimension) leaves the platform cap as the only
+// ceiling, unchanged from before this existed. Pure, so it is unit-tested
+// without a live cluster.
+func effectiveGrowCap(platformCap string, limitMax corev1.ResourceList, name corev1.ResourceName) (effCap string, limitedByLimitRange bool, err error) {
+	lrQ, ok := limitMax[name]
+	if !ok {
+		return platformCap, false, nil
+	}
+	capQ, err := resource.ParseQuantity(platformCap)
+	if err != nil {
+		return "", false, err
+	}
+	if lrQ.Cmp(capQ) < 0 {
+		return lrQ.String(), true, nil
+	}
+	return platformCap, false, nil
+}
+
 // growEnvelope returns the envelope one resize up from cur along the starved
-// dimension, and whether there was any room left to grow.
+// dimension, whether there was any room left to grow, and — when there was
+// not — which ceiling stopped it: "limitrange" when the namespace's own
+// LimitRange is the tighter of the two caps, "platform" otherwise. limitMax is
+// the namespace's per-container max from namespaceContainerMax.
 //
 // Only the dimension under pressure moves. A CPU-throttled app given twice the
 // memory it was not short of is billed for hardware it cannot use, and the
 // resize still would not have relieved anything.
 //
-// Growth stops at the platform cap, clamping to it rather than refusing when
+// Growth stops at the effective cap, clamping to it rather than refusing when
 // the doubled value would overshoot: an app at 6 CPU that needs more should get
 // the remaining 2, not nothing. Only an app already sitting at the cap reports
 // no room. Pure arithmetic over parsed quantities, so it is unit-tested.
-func growEnvelope(cur resourceEnvelope, dimension string) (resourceEnvelope, bool, error) {
+func growEnvelope(cur resourceEnvelope, dimension string, limitMax corev1.ResourceList) (resourceEnvelope, bool, string, error) {
 	next := cur
-	switch dimension {
-	case "memory":
-		limit, req, grew, err := growPair(cur.MemoryLimit, cur.MemoryReq, appAutoscaleMaxMemoryLimit, resource.BinarySI)
-		if err != nil || !grew {
-			return cur, false, err
+	platformCap, resName, format := appAutoscaleMaxCPULimit, corev1.ResourceCPU, resource.DecimalSI
+	curLimit, curReq := cur.CPULimit, cur.CPUReq
+	if dimension == "memory" {
+		platformCap, resName, format = appAutoscaleMaxMemoryLimit, corev1.ResourceMemory, resource.BinarySI
+		curLimit, curReq = cur.MemoryLimit, cur.MemoryReq
+	}
+	effCap, limitedByLimitRange, err := effectiveGrowCap(platformCap, limitMax, resName)
+	if err != nil {
+		return cur, false, "", err
+	}
+	limit, req, grew, err := growPair(curLimit, curReq, effCap, format)
+	if err != nil {
+		return cur, false, "", err
+	}
+	if !grew {
+		if limitedByLimitRange {
+			return cur, false, "limitrange", nil
 		}
+		return cur, false, "platform", nil
+	}
+	if dimension == "memory" {
 		next.MemoryLimit, next.MemoryReq = limit, req
-	default:
-		limit, req, grew, err := growPair(cur.CPULimit, cur.CPUReq, appAutoscaleMaxCPULimit, resource.DecimalSI)
-		if err != nil || !grew {
-			return cur, false, err
-		}
+	} else {
 		next.CPULimit, next.CPUReq = limit, req
 	}
-	return next, true, nil
+	return next, true, "", nil
 }
 
 // growPair doubles a limit and moves its request with it, clamped to max.
@@ -367,6 +409,95 @@ func shrinkPair(limitQ, reqQ, floorLimitQ, floorReqQ string, format resource.For
 		newReq = &atFloor
 	}
 	return newLimit.String(), newReq.String(), true, nil
+}
+
+// clampToLimitRange reduces any dimension of cur whose limit exceeds max,
+// preserving the request/limit ratio the same way growPair and shrinkPair do.
+// A resource absent from max is left untouched — no LimitRange constrains it,
+// so there is nothing to clamp to. Reports whether anything actually moved.
+//
+// This is the self-healing half of LimitRange support: an envelope can end up
+// above a namespace's max without ever going through growEnvelope, for
+// instance when the namespace's own LimitRange is tightened after the app was
+// already sized, or when a hand-edited values.yaml commits a number nobody
+// checked. Pure arithmetic over parsed quantities, so it is unit-tested.
+func clampToLimitRange(cur resourceEnvelope, max corev1.ResourceList) (resourceEnvelope, bool, error) {
+	next := cur
+	moved := false
+	for _, d := range []struct {
+		name   corev1.ResourceName
+		limitQ *string
+		reqQ   *string
+		format resource.Format
+	}{
+		{corev1.ResourceCPU, &next.CPULimit, &next.CPUReq, resource.DecimalSI},
+		{corev1.ResourceMemory, &next.MemoryLimit, &next.MemoryReq, resource.BinarySI},
+	} {
+		maxQ, ok := max[d.name]
+		if !ok {
+			continue
+		}
+		curLimit, err := resource.ParseQuantity(*d.limitQ)
+		if err != nil {
+			return cur, false, fmt.Errorf("parse limit %q: %w", *d.limitQ, err)
+		}
+		if curLimit.MilliValue() <= 0 {
+			return cur, false, fmt.Errorf("limit %q is not a positive quantity", *d.limitQ)
+		}
+		if curLimit.Cmp(maxQ) <= 0 {
+			continue
+		}
+		curReq, err := resource.ParseQuantity(*d.reqQ)
+		if err != nil {
+			return cur, false, fmt.Errorf("parse request %q: %w", *d.reqQ, err)
+		}
+		newLimit := maxQ.DeepCopy()
+		ratio := float64(curReq.MilliValue()) / float64(curLimit.MilliValue())
+		newReqMilli := int64(float64(newLimit.MilliValue()) * ratio)
+		newReq := resource.NewMilliQuantity(newReqMilli, d.format)
+		if d.format == resource.BinarySI {
+			newReq = resource.NewQuantity(newReqMilli/1000, resource.BinarySI)
+		}
+		*d.limitQ = newLimit.String()
+		*d.reqQ = newReq.String()
+		moved = true
+	}
+	return next, moved, nil
+}
+
+// limitRangeRepairAction is what repairAppLimitRangeViolation should do once
+// it has read the live Deployment's readiness for an app whose committed
+// envelope already exceeds its namespace's LimitRange.
+type limitRangeRepairAction int
+
+const (
+	// limitRangeRepairProceed means no replica is Ready right now, so clamping
+	// the committed envelope down cannot OOMKill anything currently running --
+	// this is the fonbet-value case the repair pass exists for.
+	limitRangeRepairProceed limitRangeRepairAction = iota
+	// limitRangeRepairSkipLive means at least one replica is Ready. Shrinking a
+	// live app to its LimitRange max risks an OOMKill of a working workload, so
+	// the violation is left standing; it surfaces as a recorded refusal instead,
+	// since the app will hit the same wall unassisted on its next restart.
+	limitRangeRepairSkipLive
+	// limitRangeRepairSkipUnknown means the Deployment's readiness could not be
+	// established at all -- no match, more than one match, or the read itself
+	// failed. Absence of a Deployment is not evidence the app is dead: fail
+	// closed and leave the envelope alone.
+	limitRangeRepairSkipUnknown
+)
+
+// decideLimitRangeRepair turns a Deployment readiness read into the action
+// repairAppLimitRangeViolation should take. Pure, so it is unit-tested
+// without a live cluster.
+func decideLimitRangeRepair(found bool, readyReplicas int32) limitRangeRepairAction {
+	if !found {
+		return limitRangeRepairSkipUnknown
+	}
+	if readyReplicas >= 1 {
+		return limitRangeRepairSkipLive
+	}
+	return limitRangeRepairProceed
 }
 
 // halveQuantity divides a quantity in two, keeping it in the notation its
@@ -699,6 +830,69 @@ func (w *appAutoscaleWatcher) namespaceQuota(ctx context.Context, namespace stri
 	return &quotas.Items[0], nil
 }
 
+// namespaceContainerMax returns the strictest per-container cpu/memory
+// ceiling declared by any Container-type LimitRange in namespace, keyed by
+// resource name. A resource absent from the returned map is not constrained
+// by any LimitRange in the namespace -- including the case where the
+// namespace has no LimitRange at all, which returns an empty map and a nil
+// error.
+//
+// A namespace can carry more than one LimitRange; the strictest applies, the
+// same way the API server enforces it. Only Container-type entries matter
+// here -- Pod- and PersistentVolumeClaim-type limits do not bound what one
+// container's resources.limits may be, which is the only thing this watcher
+// ever writes.
+func (w *appAutoscaleWatcher) namespaceContainerMax(ctx context.Context, namespace string) (corev1.ResourceList, error) {
+	listCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	ranges, err := w.clientset.CoreV1().LimitRanges(namespace).List(listCtx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	out := corev1.ResourceList{}
+	for i := range ranges.Items {
+		for _, item := range ranges.Items[i].Spec.Limits {
+			if item.Type != corev1.LimitTypeContainer {
+				continue
+			}
+			for _, name := range []corev1.ResourceName{corev1.ResourceCPU, corev1.ResourceMemory} {
+				maxQ, ok := item.Max[name]
+				if !ok {
+					continue
+				}
+				if cur, has := out[name]; !has || maxQ.Cmp(cur) < 0 {
+					out[name] = maxQ
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
+// deploymentReadyReplicas reads how many replicas of appName's Deployment are
+// currently Ready, identifying the Deployment the same way podAppLabels and
+// resizeLivePods identify pods: by the dada.io/app label the workload chart
+// stamps on the workload, not by assuming the Deployment is named after the
+// app. found is false whenever that identification is not a sure thing --
+// zero matches, more than one, or the read itself failing -- so callers can
+// tell "confirmed no ready replicas" from "could not tell" and never confuse
+// the two.
+func (w *appAutoscaleWatcher) deploymentReadyReplicas(ctx context.Context, namespace, appName string) (readyReplicas int32, found bool) {
+	listCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	deps, err := w.clientset.AppsV1().Deployments(namespace).List(listCtx, metav1.ListOptions{
+		LabelSelector: "dada.io/app=" + appName,
+	})
+	if err != nil {
+		log.Printf("app-autoscale: list deployments for %s/%s failed: %v", namespace, appName, err)
+		return 0, false
+	}
+	if len(deps.Items) != 1 {
+		return 0, false
+	}
+	return deps.Items[0].Status.ReadyReplicas, true
+}
+
 // adoptEnvelope reads an app's CURRENT sizing off the running pod, for apps
 // whose snapshot carries neither an explicit envelope nor a known profile.
 //
@@ -779,6 +973,8 @@ func (w *appAutoscaleWatcher) tick(ctx context.Context) {
 		return
 	}
 
+	w.repairLimitRangeViolations(ctx, nsProjects)
+
 	cpuSamples, err := w.h.prometheus.QueryInstant(ctx, cpuThrottleQuery, time.Time{}, "")
 	if err != nil {
 		log.Printf("app-autoscale: cpu query failed: %v", err)
@@ -827,6 +1023,161 @@ func (w *appAutoscaleWatcher) tick(ctx context.Context) {
 	if w.h.cache.TryClaim(ctx, "autoscale:shrink-pass", appAutoscaleShrinkPassInterval) {
 		w.shrinkPass(ctx, nsProjects)
 	}
+}
+
+// appNamesForProject lists every App resource-snapshot name recorded for a
+// project, independent of any running pod. This is what lets the LimitRange
+// repair pass find an app that never got as far as creating a Pod object at
+// all: the starved-pod scan and podAppLabels both key off a live pod, and a
+// Deployment wedged at FailedCreate on admission never has one.
+func (h *Handler) appNamesForProject(ctx context.Context, projectID uuid.UUID) ([]string, error) {
+	rows, err := h.pool.Query(ctx,
+		`SELECT DISTINCT name FROM resource_snapshots WHERE project_id = $1 AND kind = 'App'`,
+		projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out = append(out, name)
+	}
+	return out, rows.Err()
+}
+
+// repairLimitRangeViolations shrinks any app whose already-committed envelope
+// exceeds its namespace's current LimitRange, and commits the correction.
+//
+// This is the only path that can recover an app like fonbet-value: a
+// Deployment wedged at FailedCreate on admission never gets a Pod object past
+// the API server, so it produces no Prometheus sample for the starved-pod scan
+// to find and no live pod spec for adoptEnvelope to read. The only surviving
+// copy of "how big this app thinks it is" is the resource_snapshots row this
+// function reads and corrects.
+//
+// Runs every tick, independent of starvation and of the LimitRange having
+// just changed: the violation does not clear itself, and every tick it is
+// missed is another 15 minutes the app stays down. Once repaired the envelope
+// no longer exceeds max, so the next tick's clampToLimitRange call reports no
+// movement and this becomes a no-op for that app.
+func (w *appAutoscaleWatcher) repairLimitRangeViolations(ctx context.Context, nsProjects map[string]namespaceEnv) {
+	for ns, env := range nsProjects {
+		max, err := w.namespaceContainerMax(ctx, ns)
+		if err != nil {
+			log.Printf("app-autoscale: read limitrange for %s failed: %v", ns, err)
+			continue
+		}
+		if len(max) == 0 {
+			continue
+		}
+		names, err := w.h.appNamesForProject(ctx, env.ProjectID)
+		if err != nil {
+			log.Printf("app-autoscale: list apps for %s failed: %v", ns, err)
+			continue
+		}
+		for _, appName := range names {
+			w.repairAppLimitRangeViolation(ctx, env.ProjectID, ns, appName, max)
+		}
+	}
+}
+
+// repairAppLimitRangeViolation clamps one app's committed envelope down to
+// its namespace's LimitRange max, if and only if it currently exceeds it AND
+// the app has no Ready replica right now.
+//
+// That second condition is the difference between fonbet-value and a live
+// app sitting under the same LimitRange: a Deployment wedged at FailedCreate
+// has nothing running to hurt, so clamping it down is strictly a repair, but
+// clamping a Ready replica's envelope down to the LimitRange max can OOMKill
+// a workload that is serving traffic right now. A scale-to-zero workload
+// reading Ready=True with zero pods (KServe/Knative) is deliberately treated
+// the same as any other live app here: its actual memory need at scale is
+// unmeasured, and this function has no basis to assume the LimitRange fits it.
+//
+// Outcome is recorded success on the repair path, unlike a refusal: this
+// shrink is guaranteed to pass the same admission check that was rejecting
+// the app, so "success" here means what it says, not what a refused grow's
+// audit row used to mean.
+func (w *appAutoscaleWatcher) repairAppLimitRangeViolation(ctx context.Context, projectID uuid.UUID, namespace, appName string, max corev1.ResourceList) {
+	st, err := w.h.loadAppProfileState(ctx, projectID, appName)
+	if err == pgx.ErrNoRows {
+		return
+	}
+	if err != nil {
+		log.Printf("app-autoscale: load state for %s/%s failed: %v", namespace, appName, err)
+		return
+	}
+	from, known := st.Envelope()
+	if !known {
+		return
+	}
+
+	to, moved, err := clampToLimitRange(from, max)
+	if err != nil {
+		log.Printf("app-autoscale: %s/%s has an unreadable envelope (%s): %v", namespace, appName, from, err)
+		return
+	}
+	if !moved {
+		return
+	}
+
+	ready, found := w.deploymentReadyReplicas(ctx, namespace, appName)
+	switch decideLimitRangeRepair(found, ready) {
+	case limitRangeRepairSkipLive:
+		log.Printf("app-autoscale: %s/%s exceeds its namespace LimitRange (%s, would clamp to %s) but has %d ready replica(s), refusing to shrink a live app",
+			namespace, appName, from, to, ready)
+		w.h.recordSystemAudit(ctx, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: st.EnvironmentID,
+			Action:        auditActionAutoscaleApp,
+			ResourceKind:  "App",
+			ResourceName:  appName,
+			Outcome:       auditOutcomeFailure,
+			Metadata: map[string]any{
+				"refusal":           "limitrange_violation_live",
+				"from_envelope":     from.String(),
+				"would_be_envelope": to.String(),
+				"ready_replicas":    ready,
+				"namespace":         namespace,
+				"claimed_by":        "app-autoscale-watcher",
+			},
+		})
+		return
+	case limitRangeRepairSkipUnknown:
+		log.Printf("app-autoscale: %s/%s exceeds its namespace LimitRange (%s, would clamp to %s) but its Deployment readiness could not be established, refusing to shrink (fail-closed)",
+			namespace, appName, from, to)
+		return
+	}
+
+	opID, err := w.h.applyResourceEnvelope(ctx, projectID, st.EnvironmentID, appName, to)
+	if err != nil {
+		log.Printf("app-autoscale: limitrange repair %s/%s %s -> %s failed: %v", namespace, appName, from, to, err)
+		return
+	}
+	live := w.resizeLivePods(ctx, namespace, appName, to)
+	log.Printf("app-autoscale: repaired %s/%s %s -> %s (committed envelope exceeded the namespace LimitRange) op=%s in_place=%s",
+		namespace, appName, from, to, opID, live)
+
+	w.h.recordSystemAudit(ctx, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: st.EnvironmentID,
+		OperationID:   opID,
+		Action:        auditActionAutoscaleApp,
+		ResourceKind:  "App",
+		ResourceName:  appName,
+		Outcome:       auditOutcomeSuccess,
+		Metadata: map[string]any{
+			"direction":     "down",
+			"reason":        "limitrange_repair",
+			"from_envelope": from.String(), "to_envelope": to.String(),
+			"namespace":  namespace,
+			"claimed_by": "app-autoscale-watcher",
+		},
+	})
 }
 
 // convergeLiveSizes puts back a size the app already earned but lost.
@@ -1292,14 +1643,25 @@ func (w *appAutoscaleWatcher) maybeResize(ctx context.Context, projectID uuid.UU
 		log.Printf("app-autoscale: %s/%s had no envelope in its snapshot, adopting its live sizing (%s)", namespace, appName, from)
 	}
 
-	to, room, err := growEnvelope(from, s.Reason)
+	limitMax, err := w.namespaceContainerMax(ctx, namespace)
+	if err != nil {
+		log.Printf("app-autoscale: %s/%s needs to grow but its LimitRange could not be read, skipping: %v", namespace, appName, err)
+		w.auditRefusal(ctx, projectID, st, namespace, appName, "limitrange_unreadable", s, map[string]any{"error": err.Error()})
+		return
+	}
+
+	to, room, cappedBy, err := growEnvelope(from, s.Reason, limitMax)
 	if err != nil {
 		log.Printf("app-autoscale: %s/%s has an unreadable envelope (%s): %v", namespace, appName, from, err)
 		w.auditRefusal(ctx, projectID, st, namespace, appName, "envelope_unreadable", s, map[string]any{"error": err.Error()})
 		return
 	}
 	if !room {
-		w.auditRefusal(ctx, projectID, st, namespace, appName, "at_ceiling", s, map[string]any{"envelope": from.String()})
+		reason := "at_ceiling"
+		if cappedBy == "limitrange" {
+			reason = "limitrange_capped"
+		}
+		w.auditRefusal(ctx, projectID, st, namespace, appName, reason, s, map[string]any{"envelope": from.String()})
 		w.notifyCeiling(ctx, projectID, namespace, appName, from, s)
 		return
 	}

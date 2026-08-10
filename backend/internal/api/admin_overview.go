@@ -35,6 +35,22 @@ const brokenAppSnapshotPredicate = `rs.kind = 'App'
 	AND rs.phase NOT IN ('Ready', 'Stopped', 'Orphaned')
 	AND rs.last_synced_at > now() - interval '10 minutes'`
 
+// appSnapshotFreshnessWindow mirrors the 10-minute freshness cutoff baked into
+// brokenAppSnapshotPredicate. It is pulled out as its own constant because
+// overviewNotReadyFreshness needs to reason about the SAME window from the
+// other side: not "how many broken apps are fresh" but "how many app
+// snapshots have gone stale altogether", which is what tells the operator
+// whether the not-ready list can be trusted at all.
+const appSnapshotFreshnessWindow = "10 minutes"
+
+// stuckOperationThreshold is how long an operation may sit in a non-terminal
+// status before the admin overview calls it stuck. It reuses boxOperationLease
+// (box_operations_worker.go) rather than inventing its own number: that lease
+// is the shortest reclaim window any operation processor in this codebase
+// runs on (12 minutes = 2x boxOperationTimeout), so an operation older than it
+// has outlived every retry budget we actually have, whichever agent owns it.
+const stuckOperationThreshold = boxOperationLease
+
 type overviewUsers struct {
 	Total     int `json:"total"`
 	New24h    int `json:"new_24h"`
@@ -167,6 +183,31 @@ func (h *Handler) GetAdminOverview(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "failed to list not-ready apps")
 		return
 	}
+	notReadyFreshness, err := h.overviewNotReadyFreshness(ctx)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check not-ready freshness")
+		return
+	}
+	notReadyOther, err := h.overviewNotReadyOtherResources(ctx)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to list not-ready resources")
+		return
+	}
+	domainIssues, err := h.overviewDomainIssues(ctx)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to list domain issues")
+		return
+	}
+	stuckOps, err := h.overviewStuckOperations(ctx)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to list stuck operations")
+		return
+	}
+	failedBuilds, err := h.overviewFailedLatestBuilds(ctx)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to list failed latest builds")
+		return
+	}
 	dynamics, err := h.overviewDynamics(ctx, days)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to aggregate dynamics")
@@ -174,14 +215,19 @@ func (h *Handler) GetAdminOverview(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"users":         users,
-		"projects":      projects,
-		"builds":        builds,
-		"domains":       domains,
-		"money":         h.overviewMoney(ctx),
-		"not_ready":     notReady,
-		"dynamics":      dynamics,
-		"dynamics_days": days,
+		"users":               users,
+		"projects":            projects,
+		"builds":              builds,
+		"domains":             domains,
+		"money":               h.overviewMoney(ctx),
+		"not_ready":           notReady,
+		"not_ready_freshness": notReadyFreshness,
+		"not_ready_other":     notReadyOther,
+		"domain_issues":       domainIssues,
+		"stuck_operations":    stuckOps,
+		"failed_builds":       failedBuilds,
+		"dynamics":            dynamics,
+		"dynamics_days":       days,
 	})
 }
 
@@ -347,6 +393,286 @@ func (h *Handler) overviewNotReadyApps(ctx context.Context) ([]overviewNotReadyA
 			return nil, err
 		}
 		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// overviewNotReadyFreshness answers the question overviewNotReadyApps cannot
+// ask about itself: is the not-ready LIST actually watching anything right
+// now? brokenAppSnapshotPredicate requires last_synced_at inside the last 10
+// minutes, so a dead or wedged gitops-agent status reconciler makes every App
+// snapshot age out of that window at once -- the not-ready list quietly goes
+// to zero and the panel reads as "all green" while it has simply gone blind.
+// StaleApps counts App/k8s snapshots that fell out of the freshness window;
+// NewestSyncAgeSeconds is how long ago the MOST recently reconciled App
+// snapshot was written, platform-wide -- the one number that tells the
+// operator whether the reconciler is alive at all. Blind is true once that
+// number itself exceeds the freshness window, meaning nothing has been
+// reconciled recently enough for the not-ready list to be trusted.
+type overviewNotReadyFreshness struct {
+	StaleApps            int  `json:"stale_apps"`
+	NewestSyncAgeSeconds *int `json:"newest_sync_age_seconds"`
+	Blind                bool `json:"blind"`
+}
+
+func (h *Handler) overviewNotReadyFreshness(ctx context.Context) (overviewNotReadyFreshness, error) {
+	var out overviewNotReadyFreshness
+	var newestAgeSeconds *float64
+	err := h.pool.QueryRow(ctx, `
+		SELECT
+			count(*) FILTER (WHERE rs.last_synced_at <= now() - interval '`+appSnapshotFreshnessWindow+`'),
+			extract(epoch FROM now() - max(rs.last_synced_at))
+		FROM resource_snapshots rs
+		WHERE rs.kind = 'App' AND rs.summary_json->>'live_source' = 'k8s'`,
+	).Scan(&out.StaleApps, &newestAgeSeconds)
+	if err != nil {
+		return out, err
+	}
+	if newestAgeSeconds != nil {
+		seconds := int(*newestAgeSeconds)
+		out.NewestSyncAgeSeconds = &seconds
+		out.Blind = time.Duration(seconds)*time.Second > 10*time.Minute
+	} else {
+		out.Blind = true
+	}
+	return out, nil
+}
+
+type overviewNotReadyResource struct {
+	Kind        string `json:"kind"`
+	Name        string `json:"name"`
+	ProjectName string `json:"project_name"`
+	Phase       string `json:"phase"`
+	AgeSeconds  int    `json:"age_seconds"`
+}
+
+// overviewNotReadyOtherResources is brokenAppSnapshotPredicate's sibling for
+// everything that predicate's `kind = 'App'` clause throws away: managed
+// databases (ServiceDatabaseV2, live_source=crossplane), KServe AI models, and
+// raw CRD-backed resources. These never showed up on the "what's broken" panel
+// at all, so a stuck database restore or a wedged model deploy was invisible
+// to anyone reading this dashboard. Unlike the App predicate this list does
+// NOT gate on a freshness window: sync cadence for non-k8s live sources isn't
+// established anywhere in this codebase, and a wrong guess here would silently
+// hide real breakage instead of surfacing it -- so every row carries its own
+// age and lets the operator judge staleness themselves. orphan-gc/-cleared are
+// excluded because those live_sources mark resources orphan-GC has already
+// swept, not something currently broken.
+func (h *Handler) overviewNotReadyOtherResources(ctx context.Context) ([]overviewNotReadyResource, error) {
+	rows, err := h.pool.Query(ctx, `
+		SELECT rs.kind, rs.name, p.display_name, rs.phase,
+		       extract(epoch FROM now() - rs.last_synced_at)::int
+		FROM resource_snapshots rs
+		JOIN projects p ON p.id = rs.project_id
+		WHERE rs.kind <> 'App'
+		  AND rs.summary_json->>'live_source' IN ('crossplane', 'crd', 'kserve')
+		  AND rs.phase NOT IN ('Ready', 'Stopped', 'Orphaned')
+		ORDER BY rs.last_synced_at ASC
+		LIMIT 100`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []overviewNotReadyResource{}
+	for rows.Next() {
+		var r overviewNotReadyResource
+		if err := rows.Scan(&r.Kind, &r.Name, &r.ProjectName, &r.Phase, &r.AgeSeconds); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+type overviewDomainIssue struct {
+	Stage       string `json:"stage"`
+	Hostname    string `json:"hostname"`
+	Status      string `json:"status"`
+	CertStatus  string `json:"cert_status,omitempty"`
+	ProjectName string `json:"project_name"`
+	AgeSeconds  int    `json:"age_seconds"`
+}
+
+// overviewDomainIssues surfaces the failed and stuck rows behind
+// overviewDomains' active/pending/failed counts, which the console panel
+// summed up but never rendered as a list an operator could act on. Two
+// stages, both cheap indexed lookups capped at 50 rows each:
+//
+//   - "hostname": domain_hostnames rows that are status=failed, or still
+//     pending after more than a day (the DNS record the owner was told to add
+//     never showed up, or cert issuance never completed).
+//   - "authorization": domain_authorizations rows that failed apex
+//     verification, or have sat in pending for over a day (the TXT record was
+//     never published).
+func (h *Handler) overviewDomainIssues(ctx context.Context) ([]overviewDomainIssue, error) {
+	out := []overviewDomainIssue{}
+
+	hostRows, err := h.pool.Query(ctx, `
+		SELECT dh.hostname, dh.status, dh.cert_status, p.display_name,
+		       extract(epoch FROM now() - dh.updated_at)::int
+		FROM domain_hostnames dh
+		JOIN environments e ON e.id = dh.environment_id
+		JOIN projects p     ON p.id = e.project_id
+		WHERE dh.status = 'failed'
+		   OR (dh.status = 'pending' AND dh.created_at < now() - interval '1 day')
+		ORDER BY dh.updated_at ASC
+		LIMIT 50`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	for hostRows.Next() {
+		var i overviewDomainIssue
+		i.Stage = "hostname"
+		if err := hostRows.Scan(&i.Hostname, &i.Status, &i.CertStatus, &i.ProjectName, &i.AgeSeconds); err != nil {
+			hostRows.Close()
+			return nil, err
+		}
+		out = append(out, i)
+	}
+	hostRows.Close()
+	if err := hostRows.Err(); err != nil {
+		return nil, err
+	}
+
+	authRows, err := h.pool.Query(ctx, `
+		SELECT da.apex_domain, da.status, p.display_name,
+		       extract(epoch FROM now() - da.updated_at)::int
+		FROM domain_authorizations da
+		JOIN projects p ON p.id = da.project_id
+		WHERE da.status = 'failed'
+		   OR (da.status = 'pending' AND da.created_at < now() - interval '1 day')
+		ORDER BY da.updated_at ASC
+		LIMIT 50`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	for authRows.Next() {
+		var i overviewDomainIssue
+		i.Stage = "authorization"
+		if err := authRows.Scan(&i.Hostname, &i.Status, &i.ProjectName, &i.AgeSeconds); err != nil {
+			authRows.Close()
+			return nil, err
+		}
+		out = append(out, i)
+	}
+	authRows.Close()
+	return out, authRows.Err()
+}
+
+type overviewStuckOperation struct {
+	ID           string `json:"id"`
+	Action       string `json:"action"`
+	ResourceKind string `json:"resource_kind"`
+	ResourceName string `json:"resource_name"`
+	Status       string `json:"status"`
+	ProjectName  string `json:"project_name"`
+	AgeSeconds   int    `json:"age_seconds"`
+}
+
+type overviewStuckOperations struct {
+	Count  int                      `json:"count"`
+	Oldest []overviewStuckOperation `json:"oldest"`
+}
+
+// overviewStuckOperations lists operations rows that never reached a terminal
+// status (Ready/Failed/Cancelled) within stuckOperationThreshold -- the
+// symptom is always the same regardless of resource_kind: whatever agent was
+// supposed to claim and finish the row (gitops-agent, portainer-agent, the
+// box worker) died, crashed, or lost the row, and it sits invisible in
+// operations forever unless someone runs a manual query. Capped to the 20
+// oldest so a genuine platform-wide stall (every agent down at once) cannot
+// balloon the payload; Count is the true total so the operator can tell "1
+// stuck operation" from "400 stuck operations, showing the 20 oldest".
+func (h *Handler) overviewStuckOperations(ctx context.Context) (overviewStuckOperations, error) {
+	var out overviewStuckOperations
+	thresholdSeconds := stuckOperationThreshold.Seconds()
+
+	if err := h.pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM operations o
+		WHERE o.status NOT IN ('Ready', 'Failed', 'Cancelled')
+		  AND o.created_at < now() - make_interval(secs => $1)`,
+		thresholdSeconds,
+	).Scan(&out.Count); err != nil {
+		return out, err
+	}
+
+	rows, err := h.pool.Query(ctx, `
+		SELECT o.id, o.action, o.resource_kind, o.resource_name, o.status,
+		       p.display_name, extract(epoch FROM now() - o.created_at)::int
+		FROM operations o
+		JOIN projects p ON p.id = o.project_id
+		WHERE o.status NOT IN ('Ready', 'Failed', 'Cancelled')
+		  AND o.created_at < now() - make_interval(secs => $1)
+		ORDER BY o.created_at ASC
+		LIMIT 20`,
+		thresholdSeconds,
+	)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+
+	out.Oldest = []overviewStuckOperation{}
+	for rows.Next() {
+		var op overviewStuckOperation
+		if err := rows.Scan(&op.ID, &op.Action, &op.ResourceKind, &op.ResourceName, &op.Status, &op.ProjectName, &op.AgeSeconds); err != nil {
+			return out, err
+		}
+		out.Oldest = append(out.Oldest, op)
+	}
+	return out, rows.Err()
+}
+
+type overviewFailedBuild struct {
+	AppName      string `json:"app_name"`
+	ProjectName  string `json:"project_name"`
+	CommitSha    string `json:"commit_sha"`
+	ErrorMessage string `json:"error_message,omitempty"`
+	AgeSeconds   int    `json:"age_seconds"`
+}
+
+// overviewFailedLatestBuilds lists apps whose MOST RECENT build failed, using
+// the same "latest build per git_repo via LATERAL" pattern apps.go already
+// uses for the app list's build-status badge. This is deliberately about the
+// latest build only, not any failed build ever: an app can be Ready right now
+// (last successful deploy still running) while its latest push is broken, and
+// that gap is invisible everywhere else on this panel -- Ready apps never
+// appear in overviewNotReadyApps, and overviewBuilds only reports a 7-day
+// failure COUNT with no way to tell which app it belongs to.
+func (h *Handler) overviewFailedLatestBuilds(ctx context.Context) ([]overviewFailedBuild, error) {
+	rows, err := h.pool.Query(ctx, `
+		SELECT gr.app_name, p.display_name, lb.commit_sha, COALESCE(lb.error_message, ''),
+		       extract(epoch FROM now() - lb.created_at)::int
+		FROM git_repos gr
+		JOIN projects p ON p.id = gr.project_id
+		JOIN LATERAL (
+			SELECT status, commit_sha, error_message, created_at
+			FROM builds b
+			WHERE b.git_repo_id = gr.id
+			ORDER BY b.created_at DESC
+			LIMIT 1
+		) lb ON true
+		WHERE lb.status = 'failed'
+		ORDER BY lb.created_at DESC
+		LIMIT 100`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []overviewFailedBuild{}
+	for rows.Next() {
+		var b overviewFailedBuild
+		if err := rows.Scan(&b.AppName, &b.ProjectName, &b.CommitSha, &b.ErrorMessage, &b.AgeSeconds); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
 	}
 	return out, rows.Err()
 }

@@ -1103,6 +1103,57 @@ export interface AdminOverviewNotReadyApp {
   owner_email: string;
 }
 
+/** Whether the not-ready app list itself can be trusted right now. */
+export interface AdminOverviewNotReadyFreshness {
+  stale_apps: number;
+  newest_sync_age_seconds: number | null;
+  blind: boolean;
+}
+
+/** A non-k8s resource (database, AI model, CRD) stuck out of Ready. */
+export interface AdminOverviewNotReadyResource {
+  kind: string;
+  name: string;
+  project_name: string;
+  phase: string;
+  age_seconds: number;
+}
+
+/** A domain hostname or apex authorization that failed or got stuck pending. */
+export interface AdminOverviewDomainIssue {
+  stage: "hostname" | "authorization";
+  hostname: string;
+  status: string;
+  cert_status?: string;
+  project_name: string;
+  age_seconds: number;
+}
+
+/** An operation that never reached a terminal status within the reclaim window. */
+export interface AdminOverviewStuckOperation {
+  id: string;
+  action: string;
+  resource_kind: string;
+  resource_name: string;
+  status: string;
+  project_name: string;
+  age_seconds: number;
+}
+
+export interface AdminOverviewStuckOperations {
+  count: number;
+  oldest: AdminOverviewStuckOperation[];
+}
+
+/** An app whose most recent build failed, regardless of the app's current phase. */
+export interface AdminOverviewFailedBuild {
+  app_name: string;
+  project_name: string;
+  commit_sha: string;
+  error_message?: string;
+  age_seconds: number;
+}
+
 export interface AdminOverviewDayPoint {
   date: string;
   signups: number;
@@ -1118,6 +1169,11 @@ export interface AdminOverviewResponse {
   domains: AdminOverviewDomains;
   money: AdminOverviewMoney;
   not_ready: AdminOverviewNotReadyApp[];
+  not_ready_freshness: AdminOverviewNotReadyFreshness;
+  not_ready_other: AdminOverviewNotReadyResource[];
+  domain_issues: AdminOverviewDomainIssue[];
+  stuck_operations: AdminOverviewStuckOperations;
+  failed_builds: AdminOverviewFailedBuild[];
   dynamics: AdminOverviewDayPoint[];
   dynamics_days: number;
 }
