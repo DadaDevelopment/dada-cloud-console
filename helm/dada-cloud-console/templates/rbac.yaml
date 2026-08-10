@@ -100,6 +100,17 @@ rules:
       - statefulsets
       - daemonsets
     verbs: ["get", "list", "watch"]
+  # An app whose committed envelope exceeds the namespace LimitRange has no pod
+  # at all: admission rejects every create, so the in-place resize path has
+  # nothing to patch. Rewriting values.yaml does not reach it either, because the
+  # app's Argo Application excludes
+  # ".spec.template.spec.containers[].resources" from its diff, so git says the
+  # clamped envelope and Argo still reports Synced without applying it. Patching
+  # the Deployment template is the only delivery path left for a wedged app.
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+    verbs: ["patch"]
   # AIModel live status comes from KServe InferenceService readiness.
   - apiGroups: ["serving.kserve.io"]
     resources:

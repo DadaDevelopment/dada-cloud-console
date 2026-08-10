@@ -228,3 +228,75 @@ func (e resourceEnvelope) requirements() (corev1.ResourceRequirements, error) {
 	}
 	return out, nil
 }
+
+// patchDeploymentTemplateEnvelope writes an envelope straight into a
+// Deployment's pod template, for the one case where nothing else can deliver
+// it: an app with no pod at all.
+//
+// The git commit is normally what makes a size survive, and for a running app
+// that is enough. It is not enough for an app wedged at FailedCreate, for two
+// compounding reasons measured on this cluster:
+//
+//   - there is no pod, so resizeLivePods has nothing to patch (in_place
+//     resized=0 pending=0 failed=0 skipped=0);
+//   - the app's ArgoCD Application declares
+//     ignoreDifferences[apps/Deployment].jqPathExpressions =
+//     ".spec.template.spec.containers[].resources", so a values.yaml carrying
+//     the corrected numbers produces no drift. ArgoCD reports Synced against
+//     the very revision that fixes the app and applies nothing. That exclusion
+//     is deliberate -- it is what stops selfHeal from reverting an in-place
+//     resize -- but it also means the git path cannot reach a template.
+//
+// The result was a deadlock with no exit: no pod to resize, no sync to apply
+// the fix, and the template keeps the oversized numbers that admission is
+// rejecting. fonbet-value sat in it for two days.
+//
+// Only the repair path calls this, and only for an app with zero ready
+// replicas, so the rollout it triggers costs nothing: there is no running pod
+// to disturb. The patch is deliberately narrow -- one container's resources --
+// so it cannot become a general-purpose Deployment writer.
+func (w *appAutoscaleWatcher) patchDeploymentTemplateEnvelope(ctx context.Context, namespace, appName string, to resourceEnvelope) error {
+	want, err := to.requirements()
+	if err != nil {
+		return fmt.Errorf("unreadable envelope %s: %w", to, err)
+	}
+	listCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	deps, err := w.clientset.AppsV1().Deployments(namespace).List(listCtx, metav1.ListOptions{
+		LabelSelector: "dada.io/app=" + appName,
+	})
+	if err != nil {
+		return fmt.Errorf("list deployments: %w", err)
+	}
+	if len(deps.Items) != 1 {
+		return fmt.Errorf("expected exactly one Deployment labelled dada.io/app=%s, found %d", appName, len(deps.Items))
+	}
+	dep := &deps.Items[0]
+	if len(dep.Spec.Template.Spec.Containers) != 1 {
+		return fmt.Errorf("expected exactly one container in %s, found %d", dep.Name, len(dep.Spec.Template.Spec.Containers))
+	}
+
+	body, err := json.Marshal(map[string]any{
+		"spec": map[string]any{
+			"template": map[string]any{
+				"spec": map[string]any{
+					"containers": []map[string]any{{
+						"name":      dep.Spec.Template.Spec.Containers[0].Name,
+						"resources": want,
+					}},
+				},
+			},
+		},
+	})
+	if err != nil {
+		return err
+	}
+	patchCtx, patchCancel := context.WithTimeout(ctx, 15*time.Second)
+	defer patchCancel()
+	if _, err := w.clientset.AppsV1().Deployments(namespace).Patch(
+		patchCtx, dep.Name, types.StrategicMergePatchType, body, metav1.PatchOptions{},
+	); err != nil {
+		return fmt.Errorf("patch deployment %s: %w", dep.Name, err)
+	}
+	return nil
+}

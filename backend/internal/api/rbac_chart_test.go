@@ -41,3 +41,47 @@ func TestChartGrantsEveryCoreResourceTheBackendReads(t *testing.T) {
 		}
 	}
 }
+
+// writesByBackend lists the mutating calls the backend makes against workloads.
+// A read that lacks its verb goes quiet; a write that lacks its verb leaves an
+// app wedged with no way out, which is what patchDeploymentTemplateEnvelope
+// exists to prevent.
+var writesByBackend = []struct {
+	apiGroup string
+	resource string
+	verb     string
+	caller   string
+}{
+	{"", "pods/resize", "patch", "resizeLivePods"},
+	{"apps", "deployments", "patch", "patchDeploymentTemplateEnvelope"},
+}
+
+// TestChartGrantsEveryWorkloadWriteTheBackendMakes checks that each mutating
+// call has a rule naming its apiGroup, resource and verb together. Matching the
+// three separately would pass on a chart that reads deployments and patches
+// something else entirely.
+func TestChartGrantsEveryWorkloadWriteTheBackendMakes(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "helm", "dada-cloud-console", "templates", "rbac.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	rules := strings.Split(string(raw), "- apiGroups:")
+
+	for _, write := range writesByBackend {
+		granted := false
+		for _, rule := range rules {
+			head, _, found := strings.Cut(rule, "\n")
+			if !found || !strings.Contains(head, `"`+write.apiGroup+`"`) {
+				continue
+			}
+			if strings.Contains(rule, "- "+write.resource+"\n") && strings.Contains(rule, `"`+write.verb+`"`) {
+				granted = true
+				break
+			}
+		}
+		if !granted {
+			t.Errorf("%s issues %s on %s/%s but no rule in %s grants it -- the call fails with \"forbidden\" and the app it was repairing stays wedged", write.caller, write.verb, write.apiGroup, write.resource, path)
+		}
+	}
+}

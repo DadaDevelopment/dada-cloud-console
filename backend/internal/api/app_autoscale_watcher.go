@@ -1159,8 +1159,17 @@ func (w *appAutoscaleWatcher) repairAppLimitRangeViolation(ctx context.Context, 
 		return
 	}
 	live := w.resizeLivePods(ctx, namespace, appName, to)
-	log.Printf("app-autoscale: repaired %s/%s %s -> %s (committed envelope exceeded the namespace LimitRange) op=%s in_place=%s",
-		namespace, appName, from, to, opID, live)
+	template := "not_needed"
+	if live.Total() == 0 {
+		if err := w.patchDeploymentTemplateEnvelope(ctx, namespace, appName, to); err != nil {
+			template = "failed"
+			log.Printf("app-autoscale: %s/%s has no pod to resize and its Deployment template could not be corrected: %v", namespace, appName, err)
+		} else {
+			template = "patched"
+		}
+	}
+	log.Printf("app-autoscale: repaired %s/%s %s -> %s (committed envelope exceeded the namespace LimitRange) op=%s in_place=%s template=%s",
+		namespace, appName, from, to, opID, live, template)
 
 	w.h.recordSystemAudit(ctx, auditEntry{
 		ProjectID:     projectID,
