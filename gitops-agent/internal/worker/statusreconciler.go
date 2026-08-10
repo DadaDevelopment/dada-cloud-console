@@ -69,6 +69,23 @@ type StatusReconciler struct {
 
 	dnsVerdicts map[string]dnsVerdict
 	deployments chan deploymentObservation
+
+	ambiguous map[string]bool
+}
+
+// projectLabel and environmentLabel are stamped on every CR the renderer writes
+// (internal/renderer). On a cluster-scoped CR they are the only signal that says
+// which project and environment own it.
+const (
+	projectLabel     = "dada.io/project"
+	environmentLabel = "dada.io/environment"
+)
+
+// envOwner is the project+environment slug pair an environment id renders as,
+// i.e. the labels a CR belonging to that environment carries.
+type envOwner struct {
+	project     string
+	environment string
 }
 
 // deploymentObservation is a just-committed application rollout that needs
@@ -96,6 +113,7 @@ func NewStatusReconciler(pool *pgxpool.Pool, cfg *config.Config, clients *dadak8
 		clients:     clients,
 		managers:    map[string]*git.Manager{},
 		dnsVerdicts: map[string]dnsVerdict{},
+		ambiguous:   map[string]bool{},
 		deployments: make(chan deploymentObservation, 64),
 		gcBase:      filepath.Join(cfg.RepoLocalPath, "orphan-gc"),
 	}
@@ -214,19 +232,124 @@ func (r *StatusReconciler) tick(ctx context.Context) {
 		r.discover(ctx)
 	}
 	live := r.reconcile(ctx)
-	r.reconcileModels(ctx)
-	r.reconcileDatabases(ctx)
-	r.reconcilePublicApis(ctx)
-	r.reconcileS3Buckets(ctx)
+	owners := r.snapshotEnvOwners(ctx)
+	r.reconcileModels(ctx, owners)
+	r.reconcileDatabases(ctx, owners)
+	r.reconcilePublicApis(ctx, owners)
+	r.reconcileS3Buckets(ctx, owners)
 	if r.cfg.OrphanGCEnabled {
 		r.reconcileOrphans(ctx, live)
+	}
+}
+
+// snapshotEnvOwners maps every k8s environment id to the project+environment
+// slugs a CR of that environment carries in its labels. It is read once per tick
+// and handed to each cluster-scoped pass so an ambiguous snapshot name can be
+// matched back to the single environment that really owns the live resource.
+func (r *StatusReconciler) snapshotEnvOwners(ctx context.Context) map[uuid.UUID]envOwner {
+	envs, err := db.ListK8sEnvironments(ctx, r.pool)
+	if err != nil {
+		log.Error().Err(err).Msg("status-reconciler: list environments for snapshot ownership")
+		return nil
+	}
+	projects, err := db.ListProjects(ctx, r.pool)
+	if err != nil {
+		log.Error().Err(err).Msg("status-reconciler: list projects for snapshot ownership")
+		return nil
+	}
+	projectNames := make(map[uuid.UUID]string, len(projects))
+	for _, p := range projects {
+		projectNames[p.ID] = p.Name
+	}
+	owners := make(map[uuid.UUID]envOwner, len(envs))
+	for _, e := range envs {
+		owners[e.EnvID] = envOwner{project: projectNames[e.ProjectID], environment: e.Name}
+	}
+	return owners
+}
+
+// resolveSnapshotEnv picks which environment's snapshot a cluster-scoped CR
+// (AIModel, ServiceDatabaseV2, PublicApi, S3Bucket) belongs to.
+//
+// Such a CR has a globally unique name, but resource_snapshots does not: two
+// projects can carry a row under the same name — a stale copy left behind by a
+// dead project, or a mis-attributed adoption import. Every pass used to skip an
+// ambiguous name with a bare `continue`, and because the ambiguity is a property
+// of the data rather than of the tick, that skip was both permanent and silent:
+// each row froze at its create-time phase forever while the CR itself was
+// healthy, and the admin panel rendered those frozen rows as live breakage.
+// Sixteen PublicApi names sat wedged that way for up to four weeks.
+//
+// So the tie is broken on the labels the renderer stamps on everything it
+// writes, and an ambiguity that survives that is said out loud once rather than
+// returning to silence — a reconciler that cannot decide is itself the finding.
+func (r *StatusReconciler) resolveSnapshotEnv(kind, name string, ids []uuid.UUID, crLabels map[string]string, owners map[uuid.UUID]envOwner) (uuid.UUID, bool) {
+	switch len(ids) {
+	case 0:
+		// No snapshot in any project: a CR this console does not track. That is
+		// the isolation guarantee holding, not a failure — never warn.
+		return uuid.Nil, false
+	case 1:
+		r.resolvedAmbiguity(kind, name)
+		return ids[0], true
+	}
+
+	project, environment := crLabels[projectLabel], crLabels[environmentLabel]
+	if project != "" && environment != "" {
+		var matched []uuid.UUID
+		for _, id := range ids {
+			if o, ok := owners[id]; ok && o.project == project && o.environment == environment {
+				matched = append(matched, id)
+			}
+		}
+		if len(matched) == 1 {
+			r.resolvedAmbiguity(kind, name)
+			return matched[0], true
+		}
+	}
+
+	r.warnAmbiguity(kind, name, ids, owners)
+	return uuid.Nil, false
+}
+
+// warnAmbiguity reports a snapshot name the reconciler cannot attribute. It logs
+// once per name per process: the condition repeats every 30s tick until the data
+// is corrected, and a line per tick would bury it.
+func (r *StatusReconciler) warnAmbiguity(kind, name string, ids []uuid.UUID, owners map[uuid.UUID]envOwner) {
+	key := kind + "/" + name
+	if r.ambiguous[key] {
+		return
+	}
+	r.ambiguous[key] = true
+
+	claims := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if o, ok := owners[id]; ok && o.project != "" {
+			claims = append(claims, o.project+"/"+o.environment)
+			continue
+		}
+		claims = append(claims, id.String())
+	}
+	sort.Strings(claims)
+	log.Warn().Str("kind", kind).Str("resource", name).Strs("claimed_by", claims).
+		Msg("status-reconciler: snapshot name claimed by several environments, live status frozen until one is removed")
+}
+
+// resolvedAmbiguity clears a previously reported name so that a later relapse is
+// reported again instead of being swallowed by the once-per-process guard.
+func (r *StatusReconciler) resolvedAmbiguity(kind, name string) {
+	key := kind + "/" + name
+	if r.ambiguous[key] {
+		delete(r.ambiguous, key)
+		log.Info().Str("kind", kind).Str("resource", name).
+			Msg("status-reconciler: snapshot name no longer ambiguous, live status syncing again")
 	}
 }
 
 // reconcileModels mirrors KServe InferenceService readiness onto AIModel
 // snapshots. Predictors usually live in a dedicated namespace (ml-prod), not the
 // env namespace, so each is matched to its env by unambiguous snapshot name.
-func (r *StatusReconciler) reconcileModels(ctx context.Context) {
+func (r *StatusReconciler) reconcileModels(ctx context.Context, owners map[uuid.UUID]envOwner) {
 	modelEnvs, err := db.SnapshotEnvsByKind(ctx, r.pool, "AIModel")
 	if err != nil {
 		log.Error().Err(err).Msg("status-reconciler: list aimodel envs")
@@ -246,9 +369,9 @@ func (r *StatusReconciler) reconcileModels(ctx context.Context) {
 	for i := range list.Items {
 		isvc := &list.Items[i]
 		name := isvc.GetName()
-		ids := modelEnvs[name]
-		if len(ids) != 1 {
-			continue // no AIModel snapshot for this name, or ambiguous
+		envID, ok := r.resolveSnapshotEnv("AIModel", name, modelEnvs[name], isvc.GetLabels(), owners)
+		if !ok {
+			continue
 		}
 		phase := isvcPhase(isvc)
 		patch, _ := json.Marshal(map[string]any{
@@ -257,7 +380,7 @@ func (r *StatusReconciler) reconcileModels(ctx context.Context) {
 			"live_source": "kserve",
 			"live_at":     time.Now().UTC().Format(time.RFC3339),
 		})
-		n, err := db.UpdateLiveStatus(ctx, r.pool, ids[0], "AIModel", name, phase, patch)
+		n, err := db.UpdateLiveStatus(ctx, r.pool, envID, "AIModel", name, phase, patch)
 		if err != nil {
 			log.Error().Err(err).Str("model", name).Msg("status-reconciler: update aimodel")
 			continue
@@ -306,7 +429,7 @@ func crDatabaseTier(cr *unstructured.Unstructured) string {
 	return tier
 }
 
-func (r *StatusReconciler) reconcileDatabases(ctx context.Context) {
+func (r *StatusReconciler) reconcileDatabases(ctx context.Context, owners map[uuid.UUID]envOwner) {
 	dbEnvs, err := db.SnapshotEnvsByKind(ctx, r.pool, "ServiceDatabaseV2")
 	if err != nil {
 		log.Error().Err(err).Msg("status-reconciler: list servicedatabase envs")
@@ -327,9 +450,9 @@ func (r *StatusReconciler) reconcileDatabases(ctx context.Context) {
 		cr := &list.Items[i]
 		r.syncRouterEndpoint(ctx, cr)
 		name := cr.GetName()
-		ids := dbEnvs[name]
-		if len(ids) != 1 {
-			continue // no DB snapshot for this name, or ambiguous
+		envID, ok := r.resolveSnapshotEnv("ServiceDatabaseV2", name, dbEnvs[name], cr.GetLabels(), owners)
+		if !ok {
+			continue
 		}
 		phase := crPhase(cr)
 		fields := map[string]any{
@@ -340,7 +463,7 @@ func (r *StatusReconciler) reconcileDatabases(ctx context.Context) {
 		fields["tier"] = crDatabaseTier(cr)
 		fields["shard"] = crDatabaseShard(cr)
 		patch, _ := json.Marshal(fields)
-		n, err := db.UpdateLiveStatus(ctx, r.pool, ids[0], "ServiceDatabaseV2", name, phase, patch)
+		n, err := db.UpdateLiveStatus(ctx, r.pool, envID, "ServiceDatabaseV2", name, phase, patch)
 		if err != nil {
 			log.Error().Err(err).Str("database", name).Msg("status-reconciler: update servicedatabase")
 			continue
@@ -363,7 +486,7 @@ func (r *StatusReconciler) reconcileDatabases(ctx context.Context) {
 // (app-env). The app Domains tab filters endpoints by app_name, so a snapshot
 // synced before app_name stamping (git-watcher 4100de1) is a real, live domain
 // invisible in the UI. Re-deriving it here fixes old rows and any future gap.
-func (r *StatusReconciler) reconcilePublicApis(ctx context.Context) {
+func (r *StatusReconciler) reconcilePublicApis(ctx context.Context, owners map[uuid.UUID]envOwner) {
 	apiEnvs, err := db.SnapshotEnvsByKind(ctx, r.pool, "PublicApi")
 	if err != nil {
 		log.Error().Err(err).Msg("status-reconciler: list publicapi envs")
@@ -393,8 +516,8 @@ func (r *StatusReconciler) reconcilePublicApis(ctx context.Context) {
 	for i := range list.Items {
 		cr := &list.Items[i]
 		name := cr.GetName()
-		ids := apiEnvs[name]
-		if len(ids) != 1 {
+		envID, ok := r.resolveSnapshotEnv("PublicApi", name, apiEnvs[name], cr.GetLabels(), owners)
+		if !ok {
 			continue
 		}
 		phase := crPhase(cr)
@@ -422,7 +545,7 @@ func (r *StatusReconciler) reconcilePublicApis(ctx context.Context) {
 			}
 		}
 		patch, _ := json.Marshal(fields)
-		n, err := db.UpdateLiveStatus(ctx, r.pool, ids[0], "PublicApi", name, phase, patch)
+		n, err := db.UpdateLiveStatus(ctx, r.pool, envID, "PublicApi", name, phase, patch)
 		if err != nil {
 			log.Error().Err(err).Str("publicapi", name).Msg("status-reconciler: update publicapi")
 			continue
@@ -500,7 +623,7 @@ func (r *StatusReconciler) dnsRecordLive(ctx context.Context, cr *unstructured.U
 // snapshot is written once at git-sync time and then never moves, which is why
 // buckets sat at "Pending" for days after the cluster had them Ready, and why a
 // provider rejection had no path to the console at all.
-func (r *StatusReconciler) reconcileS3Buckets(ctx context.Context) {
+func (r *StatusReconciler) reconcileS3Buckets(ctx context.Context, owners map[uuid.UUID]envOwner) {
 	bucketEnvs, err := db.SnapshotEnvsByKind(ctx, r.pool, "S3Bucket")
 	if err != nil {
 		log.Error().Err(err).Msg("status-reconciler: list s3bucket envs")
@@ -520,8 +643,8 @@ func (r *StatusReconciler) reconcileS3Buckets(ctx context.Context) {
 	for i := range list.Items {
 		cr := &list.Items[i]
 		name := cr.GetName()
-		ids := bucketEnvs[name]
-		if len(ids) != 1 {
+		envID, ok := r.resolveSnapshotEnv("S3Bucket", name, bucketEnvs[name], cr.GetLabels(), owners)
+		if !ok {
 			continue
 		}
 		phase := crPhase(cr)
@@ -535,7 +658,7 @@ func (r *StatusReconciler) reconcileS3Buckets(ctx context.Context) {
 			"provision_error_reason": reason,
 		}
 		patch, _ := json.Marshal(fields)
-		n, err := db.UpdateLiveStatus(ctx, r.pool, ids[0], "S3Bucket", name, phase, patch)
+		n, err := db.UpdateLiveStatus(ctx, r.pool, envID, "S3Bucket", name, phase, patch)
 		if err != nil {
 			log.Error().Err(err).Str("s3bucket", name).Msg("status-reconciler: update s3bucket")
 			continue
