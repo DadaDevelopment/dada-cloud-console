@@ -171,6 +171,14 @@ export const git: Messages = {
   "git.import.error.startInstall": { ru: "Не удалось начать установку", en: "Failed to start install" },
   "git.import.error.loadRepos": { ru: "Не удалось загрузить репозитории", en: "Failed to load repositories" },
   "git.import.error.connect": { ru: "Не удалось подключить репозиторий", en: "Failed to connect repository" },
+  "git.import.error.githubAccessRequired": {
+    ru: "Этот репозиторий приватный или недоступен нам - нет ни установки GitHub App, ни токена для доступа к нему.",
+    en: "This repository is private or unavailable to us - there is no GitHub App installation and no token that grants access to it.",
+  },
+  "git.import.error.githubAccessRequired.cta": {
+    ru: "Подключить доступ к GitHub",
+    en: "Connect GitHub access",
+  },
 
   "git.import.byUrl.open": { ru: "Подключить по URL", en: "Connect by URL" },
   "git.import.byUrl.title": { ru: "Подключить репозиторий по URL", en: "Connect a repository by URL" },

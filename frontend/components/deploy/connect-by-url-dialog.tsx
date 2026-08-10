@@ -2,7 +2,7 @@
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { gitApi, buildsApi, classifyConnectRepoConflict } from "@/lib/api";
+import { gitApi, buildsApi, classifyConnectRepoConflict, isGithubAccessRequiredError } from "@/lib/api";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
 import { useT } from "@/lib/i18n/console/context";
@@ -62,6 +62,7 @@ export function ConnectByUrlDialog({ projectId, envId, open, onClose }: ConnectB
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [alreadyConnected, setAlreadyConnected] = useState<string | null>(null);
+  const [githubAccessRequired, setGithubAccessRequired] = useState(false);
 
   function cloneUrlErrorMessage(code: ParseGitCloneUrlError): string {
     switch (code) {
@@ -119,6 +120,7 @@ export function ConnectByUrlDialog({ projectId, envId, open, onClose }: ConnectB
     setWorker(false);
     setError(null);
     setAlreadyConnected(null);
+    setGithubAccessRequired(false);
   }
 
   /**
@@ -155,6 +157,7 @@ export function ConnectByUrlDialog({ projectId, envId, open, onClose }: ConnectB
 
     setSubmitting(true);
     setError(null);
+    setGithubAccessRequired(false);
     try {
       await gitApi.linkRepo(projectId, envId, {
         repo_full_name: parsed.value.repoFullName,
@@ -177,6 +180,9 @@ export function ConnectByUrlDialog({ projectId, envId, open, onClose }: ConnectB
         setAlreadyConnected(trimmedName);
       } else if (conflict === "app_name_taken") {
         setError(t("git.import.byUrl.error.appNameTaken"));
+      } else if (isGithubAccessRequiredError(apiErr?.status, apiErr?.code)) {
+        setError(t("git.import.error.githubAccessRequired"));
+        setGithubAccessRequired(true);
       } else {
         setError(msg);
       }
@@ -308,6 +314,17 @@ export function ConnectByUrlDialog({ projectId, envId, open, onClose }: ConnectB
         {error && (
           <div role="alert" className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm text-red-700 dark:text-red-300">
             {error}
+            {githubAccessRequired && (
+              <div className="mt-2">
+                <Link
+                  href={`/projects/${projectId}/git/import${envId ? `?envId=${envId}` : ""}`}
+                  data-ux="git_import:byurl_github_access_required_connect"
+                  className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700"
+                >
+                  {t("git.import.error.githubAccessRequired.cta")}
+                </Link>
+              </div>
+            )}
             {alreadyConnected && (
               <div className="mt-2 flex flex-wrap items-center gap-3">
                 <button

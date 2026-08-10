@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState, FormEvent } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { gitApi, buildsApi } from "@/lib/api";
+import { gitApi, buildsApi, isGithubAccessRequiredError } from "@/lib/api";
 import type { GitInstallation, GitRemoteRepo, FrameworkDetection, Build, AvailableInstallation } from "@/lib/types";
 import { BuildLogViewer } from "@/components/deploy/build-log-viewer";
 import { FrameworkLogo } from "@/components/deploy/framework-logo";
@@ -245,6 +245,7 @@ export default function GitImportPage() {
   const [ghaGuideOpen, setGhaGuideOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [githubAccessRequired, setGithubAccessRequired] = useState(false);
   const [urlDialogOpen, setUrlDialogOpen] = useState(false);
 
   // Deploy phase. Linking the repo kicks off the first build; we stay on the same
@@ -512,6 +513,7 @@ export default function GitImportPage() {
     e.preventDefault();
     if (!selectedRepo) return;
     setSubmitError(null);
+    setGithubAccessRequired(false);
     setDeployError(null);
     setSubmitting(true);
     try {
@@ -528,6 +530,13 @@ export default function GitImportPage() {
         profile,
       });
     } catch (err) {
+      const apiErr = err as { status?: number; code?: string } | undefined;
+      if (isGithubAccessRequiredError(apiErr?.status, apiErr?.code)) {
+        setSubmitError(t("git.import.error.githubAccessRequired"));
+        setGithubAccessRequired(true);
+        setSubmitting(false);
+        return;
+      }
       const msg = err instanceof Error ? err.message : t("git.import.error.connect");
       // 409 → repo already linked to this app; not fatal, proceed to deploy.
       if (!/409|already/i.test(msg)) {
@@ -1140,6 +1149,19 @@ export default function GitImportPage() {
               {submitError && (
                 <div role="alert" className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
                   {submitError}
+                  {githubAccessRequired && (
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        data-ux="git_import:github_access_required_connect"
+                        onClick={() => void handleConnectProvider("github", true)}
+                        disabled={connectingProvider !== null}
+                        className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+                      >
+                        {t("git.import.error.githubAccessRequired.cta")}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 

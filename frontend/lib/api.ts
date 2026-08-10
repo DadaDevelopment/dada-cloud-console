@@ -268,6 +268,17 @@ export function classifyConnectRepoConflict(status: number | undefined, code: st
   return code === "repo_already_connected" ? "repo_already_connected" : "app_name_taken";
 }
 
+/**
+ * True when ConnectGitRepo rejected the request with a 400 and
+ * `code: "github_access_required"`: the repository is private (or does not
+ * exist for us) and the platform holds neither a GitHub App installation nor
+ * a token for it, so the row would never build. Match strictly on status +
+ * code, never on the error prose.
+ */
+export function isGithubAccessRequiredError(status: number | undefined, code: string | undefined): boolean {
+  return status === 400 && code === "github_access_required";
+}
+
 const UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
 
 /**

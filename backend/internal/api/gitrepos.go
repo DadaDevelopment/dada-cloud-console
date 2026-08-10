@@ -1223,6 +1223,65 @@ func (h *Handler) detectPortForConnect(ctx context.Context, req *connectGitRepoR
 	return *det.Port
 }
 
+// githubCloneProbeTimeout bounds how long linkGitRepo waits on github.com
+// before treating the probe as inconclusive and letting the connect through,
+// same non-blocking philosophy as connectPortDetectTimeout.
+const githubCloneProbeTimeout = 4 * time.Second
+
+// githubCloneProbeClient is the HTTP client githubRepoPubliclyClonable uses,
+// pulled out as a package var so tests can point requests at an httptest
+// server without a live network call.
+var githubCloneProbeClient = &http.Client{Timeout: githubCloneProbeTimeout}
+
+// githubCloneProbe is the seam linkGitRepo calls through, swappable in tests
+// so the classification logic in githubRepoPubliclyClonable can be pinned
+// without touching linkGitRepo itself or reaching the network.
+var githubCloneProbe = githubRepoPubliclyClonable
+
+// githubRepoPubliclyClonable asks github.com, unauthenticated, whether
+// repoFullName can be git-cloned without credentials. It hits the same
+// info/refs endpoint `git clone` itself uses, so a 200 here is the same
+// signal a public clone would get and a 401/403/404 is the same wall a
+// credential-less clone hits later during a build.
+//
+// decisive is false whenever the answer is not a clean yes/no from GitHub
+// (network error, timeout, 5xx, an unexpected status) -- callers must treat
+// that as "unknown" and let the connect through rather than block on a
+// flaky probe.
+//
+// linkGitRepo calls this only when a github connect carries neither a bound
+// installation nor a manual token, so there is no credential to clone with at
+// all. That is fine for a public repo; for a private or deleted one the row is
+// accepted anyway and the failure surfaces days later as a bare
+// "could not read Username for 'https://github.com'" on the first build
+// (observed on prod: keksmd/a2ahub-landing, dead 27 days). Failing the connect
+// on a decisive no moves that verdict to the moment the user can still act on
+// it.
+func githubRepoPubliclyClonable(ctx context.Context, repoFullName string) (clonable bool, decisive bool) {
+	probeURL := "https://github.com/" + repoFullName + ".git/info/refs?service=git-upload-pack"
+	pctx, cancel := context.WithTimeout(ctx, githubCloneProbeTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(pctx, http.MethodGet, probeURL, nil)
+	if err != nil {
+		return false, false
+	}
+	resp, err := githubCloneProbeClient.Do(req)
+	if err != nil {
+		return false, false
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return true, true
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+		return false, true
+	default:
+		return false, false
+	}
+}
+
 // linkGitRepo validates a link request, applies the server-side defaults and
 // writes the git_repos row.
 //
@@ -1320,6 +1379,12 @@ func (h *Handler) linkGitRepo(ctx context.Context, actorID, projectID, envID uui
 	if installationID == nil && req.Provider == "github" {
 		if resolved, ok := h.resolveInstallationByOwner(ctx, projectID, req.RepoFullName); ok {
 			installationID = &resolved
+		}
+	}
+
+	if req.Provider == "github" && installationID == nil && req.Token == "" {
+		if clonable, decisive := githubCloneProbe(ctx, req.RepoFullName); decisive && !clonable {
+			return nil, &opFault{http.StatusBadRequest, "github_access_required", "This repository is private or unavailable. Connect GitHub access to this project before linking it."}
 		}
 	}
 

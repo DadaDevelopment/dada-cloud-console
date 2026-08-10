@@ -307,7 +307,7 @@ export default function BuildDetailPage() {
                 <div className="mt-1 space-y-2">
                   <p>{t("apps.builds.fail.reason.gitAuthFailed")}</p>
                   <Link
-                    href={`/projects/${projectId}/apps/${appName}/settings${envId ? `?envId=${envId}` : ""}`}
+                    href={`/projects/${projectId}/apps/${appName}/settings?tab=git${envId ? `&envId=${envId}` : ""}`}
                     data-ux="build_fail_cta:reconnect_repo"
                     className="inline-block font-medium underline underline-offset-2"
                   >
