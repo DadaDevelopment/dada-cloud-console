@@ -336,6 +336,13 @@ buildAgent:
     BUILD_MAX_CONCURRENT: "4"
     BUILD_LOG_DB_RETENTION: "168h"
     JENKINS_JOB: "dada-build"
+  # Raw env entries, appended after `env` above. Unlike `env` (a plain map) these
+  # may carry valueFrom, so a credential can be pulled from a Secret the platform
+  # delivers instead of being written into values. Explicit env wins over envFrom,
+  # so an entry here overrides the same key coming from the agent's Secret.
+  # Order is preserved: kubelet expands $(VAR) top-down, so a var referenced in a
+  # later entry must be defined in an earlier one.
+  extraEnv: []
   existingSecret: ""
   # Service-unique secrets. DATABASE_URL + BUILD_AGENT_TOKEN_SECRET come from
   # global.shared via the build-agent Secret template.
