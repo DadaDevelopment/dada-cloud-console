@@ -393,6 +393,13 @@ portainerAgent:
     # credentials go in the secret). Empty disables them.
     PROMETHEUS_REMOTE_WRITE_URL: ""
     ELASTICSEARCH_URL: ""
+  # Raw env entries, appended after `env` above. Unlike `env` (a plain map) these
+  # may carry valueFrom, so a credential can be pulled from a Secret the platform
+  # delivers instead of being written into values. Explicit env wins over envFrom,
+  # so an entry here overrides the same key coming from the agent's Secret.
+  # Order is preserved: kubelet expands $(VAR) top-down, so a var referenced in a
+  # later entry must be defined in an earlier one.
+  extraEnv: []
   existingSecret: ""
   # Service-unique secrets only. Shared keys (DATABASE_URL, PORTAINER_URL,
   # PORTAINER_API_TOKEN, GITOPS_REPO_URL/USERNAME/TOKEN) come from global.shared.

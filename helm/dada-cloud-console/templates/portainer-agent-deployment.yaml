@@ -40,6 +40,9 @@ spec:
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
+            {{- with .Values.portainerAgent.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           volumeMounts:
             - name: tf-workspaces
               mountPath: {{ default "/var/lib/tf-workspaces" (index .Values.portainerAgent.env "TF_WORKSPACE_BASE") }}
