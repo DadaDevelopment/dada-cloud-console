@@ -25,9 +25,18 @@ rules:
   # resource profile. Without this the quota check cannot run, and a profile
   # that exceeds the quota is accepted into git and only rejected at
   # pod-creation time -- a resize that turns into an outage.
+  #
+  # LimitRange is the per-container ceiling and is enforced by a different
+  # admission path than the quota: a container whose limit exceeds max.memory
+  # is rejected outright, so the Deployment stays at readyReplicas=0 with no
+  # pod ever created. repairLimitRangeViolations clamps such an app back under
+  # the ceiling, and it can only do that if it can read the LimitRange. Without
+  # this verb the repair pass logs "read limitrange ... forbidden" once per
+  # namespace and skips every app -- deployed, green, and inert.
   - apiGroups: [""]
     resources:
       - resourcequotas
+      - limitranges
     verbs: ["get", "list", "watch"]
   # Preview gate resolves each app's Service port before reverse-proxying the
   # live preview (*.pv.dada-tuda.ru) to it.
