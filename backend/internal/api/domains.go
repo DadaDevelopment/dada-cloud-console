@@ -1111,6 +1111,29 @@ const hostnameReasonRouteMissing = "route_missing"
 // reason a hostname failed.
 const hostnameReasonAppDeleted = "app_deleted"
 
+// hostnameReasonAwaitingFirstDeploy is the status_reason for a pending
+// hostname whose app has no Ingress route in the cluster yet at all -- not
+// "route disappeared" (hostnameReasonRouteMissing, which only fires once a
+// cert has already gone live once), but "never existed", the ordinary state
+// of a managed default hostname between CreateApp and the app's first
+// successful build/deploy landing an Ingress. Before this reason existed,
+// ReconcilePendingHostnames had no way to tell that apart from a genuinely
+// stuck cert: both looked identical -- pending, no live cert -- so a hostname
+// under an app that simply had not built yet accrued toward
+// hostnamePendingFailAfter exactly like a truly broken one and was failed
+// after 48h with no way back (see project memory
+// project_orphan_gc_purged_live_infra_apps.md's sibling lesson: a background
+// pass punishing an app for a state it has not reached yet is the same class
+// of bug as punishing it for one it already left). A row in this state is
+// never subject to the fail-timeout: it can only progress by the app
+// actually acquiring a route, at which point attach_started_at is restamped
+// to that moment and the very next tick resumes the ordinary cert-check flow
+// above. Restamping is the half that makes the park honest -- without it an
+// app whose first build lands three days after CreateApp would get its
+// hostname failed on the very tick the route finally appeared, having spent
+// its whole attach window waiting for a workload that did not exist yet.
+const hostnameReasonAwaitingFirstDeploy = "awaiting_first_deploy"
+
 // domainRouteClientsetFactory builds the kube client the route checks dial,
 // indirected through a var (rather than calling newAppHealthClientset
 // directly) so tests can swap in a fake clientset and exercise the
@@ -1216,6 +1239,25 @@ func ReconcilePendingHostnames(ctx context.Context, pool *pgxpool.Pool, cfg *con
 					`UPDATE domain_hostnames SET status='active', cert_status='active', status_reason=NULL, updated_at=now()
 					  WHERE id=$1 AND status='pending'`, p.id)
 			}
+			continue
+		}
+		routeLive, routeKnown := true, true
+		if p.runtime != models.EnvironmentRuntimeVM {
+			routeLive, routeKnown = hostnameRouteLive(ctx, clientset, p.hostname)
+		}
+		awaitingFirstDeploy := p.statusReason != nil && *p.statusReason == hostnameReasonAwaitingFirstDeploy
+		if routeKnown && !routeLive {
+			if !awaitingFirstDeploy {
+				_, _ = pool.Exec(ctx,
+					`UPDATE domain_hostnames SET status_reason=$2, updated_at=now()
+					  WHERE id=$1 AND status='pending'`, p.id, hostnameReasonAwaitingFirstDeploy)
+			}
+			continue
+		}
+		if awaitingFirstDeploy && routeKnown && routeLive {
+			_, _ = pool.Exec(ctx,
+				`UPDATE domain_hostnames SET attach_started_at=now(), status_reason=NULL, updated_at=now()
+				  WHERE id=$1 AND status='pending'`, p.id)
 			continue
 		}
 		reason := hostnameReasonCertPending

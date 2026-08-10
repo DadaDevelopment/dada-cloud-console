@@ -548,6 +548,13 @@ type overviewDomainIssue struct {
 //     poison-pill for every app deletion (see project memory
 //     project_admin_broken_panel_read_health_from_own_blindness.md's sibling
 //     bug: a terminal-by-design row is not the same thing as a stuck one).
+//     Pending rows stamped hostnameReasonAwaitingFirstDeploy are excluded from
+//     the same "pending past a day" branch for the identical reason: a
+//     managed default hostname sits there by design until its app's first
+//     successful build/deploy lands an Ingress -- ReconcilePendingHostnames
+//     will not let that row fail on its own (see domains.go), so counting it
+//     here would report every app still waiting on its first build as a
+//     domain problem the operator needs to act on.
 //   - "authorization": domain_authorizations rows that failed apex
 //     verification, or have sat in pending for over a day (the TXT record was
 //     never published).
@@ -561,10 +568,11 @@ func (h *Handler) overviewDomainIssues(ctx context.Context) ([]overviewDomainIss
 		JOIN environments e ON e.id = dh.environment_id
 		JOIN projects p     ON p.id = e.project_id
 		WHERE (dh.status = 'failed' AND (dh.status_reason IS NULL OR dh.status_reason <> $1))
-		   OR (dh.status = 'pending' AND dh.created_at < now() - interval '1 day')
+		   OR (dh.status = 'pending' AND dh.created_at < now() - interval '1 day'
+		       AND (dh.status_reason IS NULL OR dh.status_reason <> $2))
 		ORDER BY dh.updated_at ASC
 		LIMIT 50`,
-		hostnameReasonAppDeleted,
+		hostnameReasonAppDeleted, hostnameReasonAwaitingFirstDeploy,
 	)
 	if err != nil {
 		return nil, err
