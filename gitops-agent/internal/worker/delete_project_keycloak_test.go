@@ -4,11 +4,12 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	gogit "github.com/go-git/go-git/v5"
 	gogitconfig "github.com/go-git/go-git/v5/config"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -42,93 +43,9 @@ func newKeycloakGroupFake(objs ...runtime.Object) *dynamicfake.FakeDynamicClient
 	)
 }
 
-// TestRetireProjectKeycloakGroups_FlipsOrphanToDelete is the regression for the
-// half of the teardown that git alone cannot do: removing the YAML prunes the
-// CRs, but deletionPolicy Orphan means the groups survive in Keycloak (project
-// client-a, deleted 2026-08-10, still had all five groups Ready). Every Group CR
-// of the doomed project must be flipped to Delete, and no other project's CR may
-// be touched.
-func TestRetireProjectKeycloakGroups_FlipsOrphanToDelete(t *testing.T) {
-	ctx := context.Background()
-
-	var objs []runtime.Object
-	for _, name := range renderer.ProjectGroupCRNames("client-a") {
-		objs = append(objs, keycloakGroupCR(name, "Orphan"))
-	}
-	objs = append(objs, keycloakGroupCR("org-survivor", "Orphan"))
-
-	dyn := newKeycloakGroupFake(objs...)
-	w := &DBWatcher{clients: &dadak8s.Clients{Dynamic: dyn}}
-
-	w.retireProjectKeycloakGroups(ctx, "client-a")
-
-	names := renderer.ProjectGroupCRNames("client-a")
-	if len(names) != 5 {
-		t.Fatalf("ProjectGroupCRNames = %v, want the org parent plus 4 role subgroups", names)
-	}
-	for _, name := range names {
-		live, err := dyn.Resource(keycloakGroupGVR).Get(ctx, name, metav1.GetOptions{})
-		if err != nil {
-			t.Fatalf("get %q after retire: %v", name, err)
-		}
-		policy, _, _ := unstructured.NestedString(live.Object, "spec", "deletionPolicy")
-		if policy != "Delete" {
-			t.Errorf("%q deletionPolicy = %q; want Delete, else the prune leaves the group alive in Keycloak", name, policy)
-		}
-	}
-
-	live, err := dyn.Resource(keycloakGroupGVR).Get(ctx, "org-survivor", metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("get survivor group: %v", err)
-	}
-	if policy, _, _ := unstructured.NestedString(live.Object, "spec", "deletionPolicy"); policy != "Orphan" {
-		t.Errorf("foreign project group deletionPolicy = %q; want it untouched at Orphan", policy)
-	}
-}
-
-// TestRetireProjectKeycloakGroups_ToleratesMissingAndAlreadyRetired covers the
-// re-drive and the partially-provisioned project: a CR that was never created
-// must not fail the teardown, and one already at Delete stays as it is.
-func TestRetireProjectKeycloakGroups_ToleratesMissingAndAlreadyRetired(t *testing.T) {
-	ctx := context.Background()
-
-	names := renderer.ProjectGroupCRNames("acme")
-	dyn := newKeycloakGroupFake(
-		keycloakGroupCR(names[0], "Delete"),
-		keycloakGroupCR(names[1], "Orphan"),
-	)
-	w := &DBWatcher{clients: &dadak8s.Clients{Dynamic: dyn}}
-
-	w.retireProjectKeycloakGroups(ctx, "acme")
-
-	for _, name := range names[:2] {
-		live, err := dyn.Resource(keycloakGroupGVR).Get(ctx, name, metav1.GetOptions{})
-		if err != nil {
-			t.Fatalf("get %q: %v", name, err)
-		}
-		if policy, _, _ := unstructured.NestedString(live.Object, "spec", "deletionPolicy"); policy != "Delete" {
-			t.Errorf("%q deletionPolicy = %q; want Delete", name, policy)
-		}
-	}
-	for _, name := range names[2:] {
-		if _, err := dyn.Resource(keycloakGroupGVR).Get(ctx, name, metav1.GetOptions{}); err == nil {
-			t.Errorf("%q must stay absent; the retire step never creates CRs", name)
-		}
-	}
-}
-
-// TestRetireProjectKeycloakGroups_NoClientIsNoop guards local dev and any
-// off-cluster run: with no dynamic client the retire must return silently rather
-// than panic, so a project teardown still completes (degrading only to orphaned
-// Keycloak groups, the pre-fix behaviour).
-func TestRetireProjectKeycloakGroups_NoClientIsNoop(t *testing.T) {
-	(&DBWatcher{}).retireProjectKeycloakGroups(context.Background(), "acme")
-	(&DBWatcher{clients: &dadak8s.Clients{}}).retireProjectKeycloakGroups(context.Background(), "acme")
-}
-
-// newKeycloakGroupsRepo seeds a bare remote carrying the org-groups YAML of two
-// projects and returns a Manager cloned from it, so removal is exercised against
-// a real git push rather than a stub.
+// newKeycloakGroupsRepo seeds a bare remote carrying the org-groups YAML of the
+// given projects and returns a Manager cloned from it, so the teardown is
+// exercised against a real git push rather than a stub.
 func newKeycloakGroupsRepo(t *testing.T, slugs ...string) *git.Manager {
 	t.Helper()
 
@@ -172,6 +89,121 @@ func newKeycloakGroupsRepo(t *testing.T, slugs ...string) *git.Manager {
 		t.Fatalf("clone: %v", err)
 	}
 	return mgr
+}
+
+// TestRetireProjectGroupsInGit_WritesDeletePolicy is the regression for the half
+// of the teardown git alone cannot do: removing the YAML prunes the CRs, but
+// deletionPolicy Orphan means the groups survive in Keycloak (project client-a,
+// deleted 2026-08-10, still had all five groups Ready). The policy must be
+// flipped in the manifest, and only for the doomed project.
+func TestRetireProjectGroupsInGit_WritesDeletePolicy(t *testing.T) {
+	mgr := newKeycloakGroupsRepo(t, "client-a", "survivor")
+
+	path, sha, err := retireProjectGroupsInGit(mgr, "client-a", "retire kc groups", "bot", "bot@dada")
+	if err != nil {
+		t.Fatalf("retireProjectGroupsInGit: %v", err)
+	}
+	if sha == "" {
+		t.Fatal("a present file must produce a commit; empty sha means the policy never reached git")
+	}
+	if path != renderer.ProjectGroupsGitPath("client-a") {
+		t.Errorf("path = %q, want the rendered org-groups path", path)
+	}
+
+	doomed, err := mgr.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read retired manifest: %v", err)
+	}
+	if strings.Contains(doomed, "deletionPolicy: Orphan") {
+		t.Error("retired manifest still carries deletionPolicy: Orphan; the prune would leave the groups in Keycloak")
+	}
+	if n := strings.Count(doomed, "deletionPolicy: Delete"); n != 9 {
+		t.Errorf("deletionPolicy: Delete count = %d, want 9 (org parent + 4 subgroups + 4 Roles)", n)
+	}
+
+	survivor, err := mgr.ReadFile(renderer.ProjectGroupsGitPath("survivor"))
+	if err != nil {
+		t.Fatalf("read foreign manifest: %v", err)
+	}
+	if !strings.Contains(survivor, "deletionPolicy: Orphan") {
+		t.Error("a living project's manifest was flipped to Delete; an accidental prune would wipe its real groups")
+	}
+}
+
+// TestRetireProjectGroupsInGit_AbsentFileIsNoop keeps the teardown idempotent: a
+// re-driven DeleteProject, or a project bootstrapped before group CRs existed,
+// must produce no commit and no error.
+func TestRetireProjectGroupsInGit_AbsentFileIsNoop(t *testing.T) {
+	mgr := newKeycloakGroupsRepo(t, "survivor")
+
+	path, sha, err := retireProjectGroupsInGit(mgr, "never-had-groups", "retire kc groups", "bot", "bot@dada")
+	if err != nil {
+		t.Fatalf("retireProjectGroupsInGit on absent file: %v", err)
+	}
+	if sha != "" {
+		t.Errorf("sha = %q, want empty: nothing was there to retire", sha)
+	}
+	if path != renderer.ProjectGroupsGitPath("never-had-groups") {
+		t.Errorf("path = %q, want the rendered org-groups path", path)
+	}
+}
+
+// TestWaitProjectGroupsRetired_TrueOnlyWhenPolicyLanded is the guard against the
+// bug that made the first fix useless: ArgoCD self-heal restores spec from git,
+// so the manifest may say Delete while the cluster still says Orphan (measured on
+// org-ssa, 2026-08-11 — a kubectl patch was reverted in under two minutes).
+// Removing the manifest in that window orphans the groups again, so the wait must
+// report false until every CR has converged.
+func TestWaitProjectGroupsRetired_TrueOnlyWhenPolicyLanded(t *testing.T) {
+	ctx := context.Background()
+	names := renderer.ProjectGroupCRNames("client-a")
+	if len(names) != 5 {
+		t.Fatalf("ProjectGroupCRNames = %v, want the org parent plus 4 role subgroups", names)
+	}
+
+	var mixed []runtime.Object
+	for i, name := range names {
+		policy := renderer.DeletionPolicyDelete
+		if i == len(names)-1 {
+			policy = "Orphan"
+		}
+		mixed = append(mixed, keycloakGroupCR(name, policy))
+	}
+	w := &DBWatcher{clients: &dadak8s.Clients{Dynamic: newKeycloakGroupFake(mixed...)}}
+
+	cancelCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer cancel()
+	if w.waitProjectGroupsRetired(cancelCtx, "client-a") {
+		t.Error("wait reported converged while one CR was still Orphan; the removal would orphan that group")
+	}
+
+	var all []runtime.Object
+	for _, name := range names {
+		all = append(all, keycloakGroupCR(name, renderer.DeletionPolicyDelete))
+	}
+	all = append(all, keycloakGroupCR("org-survivor", "Orphan"))
+	converged := &DBWatcher{clients: &dadak8s.Clients{Dynamic: newKeycloakGroupFake(all...)}}
+	if !converged.waitProjectGroupsRetired(ctx, "client-a") {
+		t.Error("wait reported pending while every CR of the project was already Delete")
+	}
+}
+
+// TestWaitProjectGroupsRetired_MissingCRsCountAsRetired covers the project torn
+// down before its groups were ever created, and the local/off-cluster run: no CRs
+// and no client must both let the teardown finish rather than stall it.
+func TestWaitProjectGroupsRetired_MissingCRsCountAsRetired(t *testing.T) {
+	ctx := context.Background()
+
+	empty := &DBWatcher{clients: &dadak8s.Clients{Dynamic: newKeycloakGroupFake()}}
+	if !empty.waitProjectGroupsRetired(ctx, "acme") {
+		t.Error("absent CRs must count as retired; nothing can orphan a group that was never created")
+	}
+	if !(&DBWatcher{}).waitProjectGroupsRetired(ctx, "acme") {
+		t.Error("no cluster client must not stall the teardown")
+	}
+	if !(&DBWatcher{clients: &dadak8s.Clients{}}).waitProjectGroupsRetired(ctx, "acme") {
+		t.Error("no dynamic client must not stall the teardown")
+	}
 }
 
 // TestRemoveProjectGroupsFromGit_RemovesOnlyTheDoomedProject is the regression

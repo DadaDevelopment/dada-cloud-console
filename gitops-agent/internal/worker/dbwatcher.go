@@ -1358,10 +1358,10 @@ func (w *DBWatcher) deleteAppGitRepo(ctx context.Context, projectID uuid.UUID, e
 // Keycloak teardown is NOT skipped. bootstrapProject writes the project's Group
 // CRs into the keycloak-config chart (ADR-009), and nothing used to remove them:
 // project client-a was fully torn down on 2026-08-10 and its five Group CRs were
-// still Ready, its YAML still on the branch. The two halves both matter — the
-// git removal (retire the CRs) and retireProjectKeycloakGroups (make that prune
-// reach Keycloak instead of orphaning the real groups), in that order, before
-// the DB wipe drops the operations row this commit is recorded against.
+// still Ready, its YAML still on the branch. deleteProjectKeycloakGroups does
+// both halves — flip deletionPolicy to Delete through git so the prune reaches
+// Keycloak, then remove the manifest — and runs before the DB wipe drops the
+// operations row its commits are recorded against.
 func (w *DBWatcher) doDeleteProject(ctx context.Context, op db.Operation) error {
 	var slug string
 	if err := w.pool.QueryRow(ctx,
@@ -1395,8 +1395,7 @@ func (w *DBWatcher) doDeleteProject(ctx context.Context, op db.Operation) error 
 		return err
 	}
 
-	w.retireProjectKeycloakGroups(ctx, slug)
-	w.deleteProjectGroupsFile(ctx, op, slug)
+	w.deleteProjectKeycloakGroups(ctx, op, slug)
 
 	tx, err := w.pool.Begin(ctx)
 	if err != nil {

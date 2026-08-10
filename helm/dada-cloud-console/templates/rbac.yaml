@@ -124,13 +124,14 @@ rules:
   # DeleteProject flips deletionPolicy Orphan -> Delete on the torn-down
   # project's own Keycloak Group CRs before removing their YAML, so the ArgoCD
   # prune deletes the groups in Keycloak instead of orphaning them (a project
-  # deleted in August 2026 still had its five groups Ready weeks later). patch is
-  # the write verb; get is what makes the flip idempotent and skips CRs that were
-  # never created.
+  # deleted in August 2026 still had its five groups Ready weeks later). The flip
+  # is written to git, never patched onto the live CR (ArgoCD self-heal restores
+  # spec from git within minutes), so read access is all the agent needs — it
+  # only waits until the policy has reached the cluster before removing the YAML.
   - apiGroups: ["group.keycloak.crossplane.io"]
     resources:
       - groups
-    verbs: ["get", "patch"]
+    verbs: ["get"]
   {{- with .Values.rbac.extraRules }}
   {{- toYaml . | nindent 2 }}
   {{- end }}
