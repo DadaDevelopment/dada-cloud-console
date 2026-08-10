@@ -1235,6 +1235,12 @@ func (w *DBWatcher) doDeleteApp(ctx context.Context, op db.Operation) error {
 	if err != nil {
 		return fmt.Errorf("git remove: %w", err)
 	}
+	if sha == "" {
+		if err := verifyDeleteRemovedApp(mgr.LocalPath(), p.Name, paths[0]); err != nil {
+			return err
+		}
+		log.Printf("[dbwatcher] op %s: DeleteApp %s removed nothing, app has no manifests in git", op.ID, p.Name)
+	}
 	if sha != "" {
 		opID := op.ID
 		_ = db.InsertCommit(ctx, w.pool, sha, mgr.RepoURL(), mgr.Branch(),
