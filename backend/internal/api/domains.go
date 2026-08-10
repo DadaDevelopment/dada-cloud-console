@@ -1468,9 +1468,15 @@ func reissueDefaultDomainDNS(ctx context.Context, pool *pgxpool.Pool, projectID,
 	return tx.Commit(ctx)
 }
 
-// defaultDomainBackfillGrace is how long a freshly-touched App snapshot is left
+// defaultDomainBackfillGrace is how long a freshly-CREATED App snapshot is left
 // alone before BackfillMissingDefaultDomains will consider its missing
 // domain_hostnames row abandoned rather than "CreateApp is still mid-flight".
+// It is measured against resource_snapshots.first_seen_at, the app's age.
+// Measuring it against last_synced_at inverts the filter: the snapshot sync
+// bumps last_synced_at every tick, so on prod 62 of 81 App snapshots are under
+// a minute old at any moment and those are precisely the LIVE apps -- such a
+// window would admit only stale, i.e. abandoned, snapshots and never fix the
+// app the pass exists for.
 // CreateApp writes the App snapshot and the domain_hostnames row from the same
 // request handler, so under normal operation the row appears within
 // milliseconds; this window only needs to clear worst-case request latency,
@@ -1560,7 +1566,8 @@ func BackfillMissingDefaultDomains(ctx context.Context, pool *pgxpool.Pool, cfg 
 		  WHERE rs.kind = 'App'
 		    AND rs.environment_id IS NOT NULL
 		    AND e.runtime = $1
-		    AND rs.last_synced_at < NOW() - ($2 * INTERVAL '1 second')
+		    AND `+notOrphanedSnapshot+`
+		    AND rs.first_seen_at < NOW() - ($2 * INTERVAL '1 second')
 		    AND NOT EXISTS (
 		        SELECT 1 FROM domain_hostnames dh
 		         WHERE dh.environment_id = rs.environment_id AND dh.app_name = rs.name
