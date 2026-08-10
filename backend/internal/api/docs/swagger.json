@@ -17698,6 +17698,90 @@
                 }
             }
         },
+        "/projects/{projectId}/git/detect-url": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Best-effort framework detection for the connect-by-URL flow: a token-authenticated or public GitHub repo with no App installation. Requires write access to the project.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "git"
+                ],
+                "summary": "Detect the framework of a repository connected by URL",
+                "operationId": "detectRepoByURL",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Repository and optional token",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.detectByURLRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "framework detection result",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/git/github/authorize": {
             "get": {
                 "security": [
@@ -19748,7 +19832,7 @@
                     "type": "string"
                 },
                 "port": {
-                    "description": "Intended app spec, applied by the first successful build when it creates the\napp. Defaulted server-side when omitted (8080 / 2 / small).",
+                    "description": "Intended app spec, applied by the first successful build when it creates the\napp. Defaulted server-side when omitted: framework detection's guess if it\nfinds one, else 8080. A pointer so the server can tell \"field omitted\" from\n\"client explicitly asked for 0\" — an explicit value always wins over detection.",
                     "type": "integer"
                 },
                 "production_branch": {
@@ -20314,6 +20398,20 @@
                     "type": "string"
                 },
                 "operation_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.detectByURLRequest": {
+            "type": "object",
+            "properties": {
+                "repo_full_name": {
+                    "type": "string"
+                },
+                "root_dir": {
+                    "type": "string"
+                },
+                "token": {
                     "type": "string"
                 }
             }

@@ -189,6 +189,40 @@ func (c *Client) DetectFramework(ctx context.Context, installationID int64, repo
 	return &out, nil
 }
 
+// DetectFrameworkByToken proxies POST /github/detect on the agent — framework
+// detection for a repo connected by URL with a caller-supplied token instead
+// of a GitHub App installation. token may be empty for a public repo.
+func (c *Client) DetectFrameworkByToken(ctx context.Context, repoFullName, rootDir, token string) (*FrameworkDetection, error) {
+	body, err := json.Marshal(map[string]string{
+		"repo_full_name": repoFullName,
+		"root_dir":       rootDir,
+		"token":          token,
+	})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.baseURL+"/github/detect", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http POST /github/detect: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return nil, fmt.Errorf("build-agent detect by token: status %d: %s", resp.StatusCode, string(b))
+	}
+	var out FrameworkDetection
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // SearchHit mirrors the agent's github.SearchHit.
 type SearchHit struct {
 	FullName      string `json:"full_name"`

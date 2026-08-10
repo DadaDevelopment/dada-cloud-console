@@ -491,11 +491,15 @@ func (h *Handler) InstallSolution(c *gin.Context) {
 		return
 	}
 
+	var requestedPort *int
+	if req.Port != 0 {
+		requestedPort = &req.Port
+	}
 	link := connectGitRepoRequest{
 		Provider:         "github",
 		ProductionBranch: req.Branch,
 		RootDir:          req.RootDir,
-		Port:             req.Port,
+		Port:             requestedPort,
 		Profile:          req.Profile,
 		AutoDeploy:       true,
 	}
@@ -531,8 +535,9 @@ func (h *Handler) InstallSolution(c *gin.Context) {
 		if link.RootDir == "" {
 			link.RootDir = s.RootDir
 		}
-		if link.Port == 0 {
-			link.Port = s.Port
+		if link.Port == nil && s.Port != 0 {
+			solutionPort := s.Port
+			link.Port = &solutionPort
 		}
 		if link.Profile == "" {
 			link.Profile = s.Profile
@@ -555,6 +560,10 @@ func (h *Handler) InstallSolution(c *gin.Context) {
 		}
 		link.RepoFullName = full
 		link.FrameworkOverride = req.Framework
+	}
+	if link.Port == nil {
+		defaultPort := 8080
+		link.Port = &defaultPort
 	}
 
 	if req.WithDatabase != nil {

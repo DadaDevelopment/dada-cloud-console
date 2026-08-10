@@ -540,6 +540,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/projects/:projectId/git/installations/:installationId/repos", h.ListInstallationRepos)
 		api.GET("/projects/:projectId/git/installations/:installationId/detect", h.DetectFramework)
 		api.GET("/projects/:projectId/git/detect", h.DetectPublicFramework)
+		api.POST("/projects/:projectId/git/detect-url", h.DetectRepoByURL)
 		// Git repos linked per environment.
 		api.GET("/projects/:projectId/environments/:envId/repos", h.ListGitRepos)
 		api.POST("/projects/:projectId/environments/:envId/repos", h.ConnectGitRepo)

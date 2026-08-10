@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { gitApi, buildsApi, classifyConnectRepoConflict } from "@/lib/api";
@@ -8,6 +8,10 @@ import { Spinner } from "@/components/ui/spinner";
 import { useT } from "@/lib/i18n/console/context";
 import { parseGitCloneUrl, type ParseGitCloneUrlError } from "@/lib/git-clone-url";
 import { trackBuildStart } from "@/lib/build-watch";
+
+function detectedPort(port: number | null | undefined): number | null {
+  return typeof port === "number" && Number.isFinite(port) && port > 0 ? port : null;
+}
 
 function toKubeName(s: string): string {
   return s
@@ -52,7 +56,8 @@ export function ConnectByUrlDialog({ projectId, envId, open, onClose }: ConnectB
   const [token, setToken] = useState("");
   const [branch, setBranch] = useState("main");
   const [rootDir, setRootDir] = useState(".");
-  const [port, setPort] = useState(8080);
+  const [port, setPort] = useState<number | null>(null);
+  const [portTouched, setPortTouched] = useState(false);
   const [worker, setWorker] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,6 +85,28 @@ export function ConnectByUrlDialog({ projectId, envId, open, onClose }: ConnectB
     if (parsed.ok) setAppName(deriveAppNameFromRepo(parsed.value.repoFullName));
   }
 
+  /**
+   * Best-effort port prefill: asks the backend what the repo actually
+   * listens on (Dockerfile EXPOSE / framework defaults) and fills the port
+   * field with it, the same way the GitHub-App import wizard does. A
+   * failed, slow, or empty lookup just leaves the field on its 8080
+   * placeholder - it never blocks or fails the connect itself.
+   */
+  const runPortDetect = useCallback(
+    async (url: string, withToken: string) => {
+      const parsed = parseGitCloneUrl(url);
+      if (!parsed.ok || parsed.value.provider !== "github") return;
+      try {
+        const d = await gitApi.detectByUrl(projectId, parsed.value.repoFullName, rootDir || ".", withToken);
+        const next = detectedPort(d.port);
+        if (next !== null && !portTouched) setPort(next);
+      } catch {
+        return;
+      }
+    },
+    [projectId, rootDir, portTouched]
+  );
+
   function reset() {
     setCloneUrl("");
     setAppName("");
@@ -87,7 +114,8 @@ export function ConnectByUrlDialog({ projectId, envId, open, onClose }: ConnectB
     setToken("");
     setBranch("main");
     setRootDir(".");
-    setPort(8080);
+    setPort(null);
+    setPortTouched(false);
     setWorker(false);
     setError(null);
     setAlreadyConnected(null);
@@ -136,7 +164,7 @@ export function ConnectByUrlDialog({ projectId, envId, open, onClose }: ConnectB
         production_branch: branch || "main",
         root_dir: rootDir || ".",
         auto_deploy: true,
-        port: worker ? 0 : port,
+        port: worker ? 0 : port ?? undefined,
         worker,
         token: token || undefined,
       });
@@ -180,6 +208,7 @@ export function ConnectByUrlDialog({ projectId, envId, open, onClose }: ConnectB
             type="text"
             value={cloneUrl}
             onChange={(e) => onCloneUrlChange(e.target.value)}
+            onBlur={() => void runPortDetect(cloneUrl, token)}
             placeholder={t("git.import.byUrl.cloneUrl.placeholder")}
             className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
@@ -194,6 +223,7 @@ export function ConnectByUrlDialog({ projectId, envId, open, onClose }: ConnectB
             type="password"
             value={token}
             onChange={(e) => setToken(e.target.value)}
+            onBlur={() => void runPortDetect(cloneUrl, token)}
             autoComplete="off"
             className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
@@ -250,14 +280,19 @@ export function ConnectByUrlDialog({ projectId, envId, open, onClose }: ConnectB
           </label>
           <input
             type="number"
-            required={!worker}
             disabled={worker}
             min={1}
             max={65535}
-            value={worker ? "" : port}
-            onChange={(e) => setPort(parseInt(e.target.value, 10) || 8080)}
+            value={worker ? "" : port ?? ""}
+            placeholder="8080"
+            onChange={(e) => {
+              setPortTouched(true);
+              const raw = e.target.value;
+              setPort(raw === "" ? null : parseInt(raw, 10) || null);
+            }}
             className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-gray-50 dark:disabled:bg-gray-900"
           />
+          <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("git.import.byUrl.port.hint")}</p>
         </div>
 
         <label className="flex items-start gap-3 rounded-lg border border-gray-200 dark:border-gray-800 px-4 py-3">

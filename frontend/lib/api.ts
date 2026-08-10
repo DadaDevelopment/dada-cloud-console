@@ -1293,6 +1293,18 @@ export const gitApi = {
       `/api/v1/projects/${projectId}/git/detect?repo=${encodeURIComponent(repoFullName)}&root_dir=${encodeURIComponent(rootDir)}`
     ),
 
+  /**
+   * Framework detection for the connect-by-URL flow: a repo the caller has
+   * no App installation for, reached with a caller-supplied token instead
+   * (or no token, for a public repo). Backs the port prefill in
+   * ConnectByUrlDialog.
+   */
+  detectByUrl: (projectId: string, repoFullName: string, rootDir = ".", token = "") =>
+    apiFetch<FrameworkDetection>(`/api/v1/projects/${projectId}/git/detect-url`, {
+      method: "POST",
+      body: { repo_full_name: repoFullName, root_dir: rootDir, token },
+    }),
+
   linkRepo: (
     projectId: string,
     envId: string,

@@ -838,6 +838,90 @@ func (h *Handler) DetectPublicFramework(c *gin.Context) {
 // only shifts when the repo's build files change, so a long TTL is safe.
 const publicDetectCacheTTL = 6 * time.Hour
 
+// detectByURLRequest is the body for DetectRepoByURL: a repo plus an optional
+// caller-supplied token, for the connect-by-URL flow where the caller has no
+// GitHub App installation.
+type detectByURLRequest struct {
+	RepoFullName string `json:"repo_full_name"`
+	RootDir      string `json:"root_dir"`
+	Token        string `json:"token"`
+}
+
+// DetectRepoByURL proxies framework auto-detection for the connect-by-URL flow:
+// a repo the caller reached by pasting a clone URL (optionally with a personal
+// access token) rather than through the GitHub App. The token travels in the
+// POST body, never a query string, so it never lands in access logs.
+//
+// @ID          detectRepoByURL
+// @Summary     Detect the framework of a repository connected by URL
+// @Description Best-effort framework detection for the connect-by-URL flow: a token-authenticated or public GitHub repo with no App installation. Requires write access to the project.
+// @Tags        git
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string              true "Project UUID"
+// @Param       body      body     detectByURLRequest  true "Repository and optional token"
+// @Success     200       {object} map[string]interface{} "framework detection result"
+// @Failure     400       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Failure     502       {object} map[string]string
+// @Router      /projects/{projectId}/git/detect-url [post]
+func (h *Handler) DetectRepoByURL(c *gin.Context) {
+	if h.buildagent == nil {
+		respondError(c, http.StatusServiceUnavailable, "git integration not configured")
+		return
+	}
+
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		return
+	}
+	if !canWrite(role) {
+		respondForbidden(c)
+		return
+	}
+
+	var req detectByURLRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	repo := strings.TrimSpace(req.RepoFullName)
+	if repo == "" {
+		respondError(c, http.StatusBadRequest, "repo_full_name is required")
+		return
+	}
+	rootDir := req.RootDir
+	if rootDir == "" {
+		rootDir = "."
+	}
+
+	det, err := h.buildagent.DetectFrameworkByToken(c.Request.Context(), repo, rootDir, req.Token)
+	if err != nil {
+		respondError(c, http.StatusBadGateway, "failed to detect framework via build-agent")
+		return
+	}
+	c.JSON(http.StatusOK, det)
+}
+
 // publicRepoFullName bounds the anonymous detect proxy to a plausible GitHub
 // "owner/name" so the query cannot be steered at other build-agent paths.
 var publicRepoFullName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,39}/[A-Za-z0-9._-]{1,100}$`)
@@ -933,8 +1017,10 @@ type connectGitRepoRequest struct {
 	FrameworkOverride string `json:"framework_override"`
 	AutoDeploy        bool   `json:"auto_deploy"`
 	// Intended app spec, applied by the first successful build when it creates the
-	// app. Defaulted server-side when omitted (8080 / 2 / small).
-	Port     int    `json:"port"`
+	// app. Defaulted server-side when omitted: framework detection's guess if it
+	// finds one, else 8080. A pointer so the server can tell "field omitted" from
+	// "client explicitly asked for 0" — an explicit value always wins over detection.
+	Port     *int   `json:"port"`
 	Replicas int    `json:"replicas"`
 	Profile  string `json:"profile"`
 	// Worker marks an app with no HTTP entrypoint: port stays 0, so nothing
@@ -1093,6 +1179,50 @@ func (h *Handler) ConnectGitRepo(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"repos": []gitRepo{*r}})
 }
 
+// defaultConnectPort is the port a link falls back to whenever detection is
+// unavailable, disabled, or fails — the pre-detection behavior of this code
+// path, preserved exactly so detection can only ever add correctness, never
+// remove a working default.
+const defaultConnectPort = 8080
+
+// connectPortDetectTimeout bounds how long linkGitRepo waits on build-agent
+// framework detection before giving up and falling back to
+// defaultConnectPort. A repo connect must never hang or fail because
+// detection is slow.
+const connectPortDetectTimeout = 8 * time.Second
+
+// detectPortForConnect resolves the port a newly connected repo should listen
+// on: the port build-agent's framework detection finds (Dockerfile EXPOSE,
+// then framework convention), or defaultConnectPort when detection is
+// unavailable, out of scope, or comes back empty. Detection only understands
+// the GitHub content API, so anything but provider "github" skips straight to
+// the default. Best-effort by construction — any error, timeout, or missing
+// port falls straight through, never blocking or failing the connect.
+func (h *Handler) detectPortForConnect(ctx context.Context, req *connectGitRepoRequest) int {
+	if h.buildagent == nil || req.Provider != "github" {
+		return defaultConnectPort
+	}
+
+	dctx, cancel := context.WithTimeout(ctx, connectPortDetectTimeout)
+	defer cancel()
+
+	var det *buildagent.FrameworkDetection
+	var err error
+	if req.Token != "" {
+		det, err = h.buildagent.DetectFrameworkByToken(dctx, req.RepoFullName, req.RootDir, req.Token)
+	} else {
+		det, err = cache.Fetch(dctx, h.cache,
+			fmt.Sprintf("git:detect:public:%s:%s", req.RepoFullName, req.RootDir), publicDetectCacheTTL,
+			func() (*buildagent.FrameworkDetection, error) {
+				return h.buildagent.DetectFramework(dctx, 0, req.RepoFullName, req.RootDir)
+			})
+	}
+	if err != nil || det == nil || det.Port == nil || *det.Port < 1 || *det.Port > 65535 {
+		return defaultConnectPort
+	}
+	return *det.Port
+}
+
 // linkGitRepo validates a link request, applies the server-side defaults and
 // writes the git_repos row.
 //
@@ -1124,8 +1254,13 @@ func (h *Handler) linkGitRepo(ctx context.Context, actorID, projectID, envID uui
 	if req.RootDir == "" {
 		req.RootDir = "."
 	}
-	if req.Port == 0 && !req.Worker {
-		req.Port = 8080
+	if req.Port == nil && !req.Worker {
+		detected := h.detectPortForConnect(ctx, req)
+		req.Port = &detected
+	}
+	port := 0
+	if req.Port != nil {
+		port = *req.Port
 	}
 	if req.Replicas == 0 {
 		req.Replicas = 1
@@ -1133,7 +1268,7 @@ func (h *Handler) linkGitRepo(ctx context.Context, actorID, projectID, envID uui
 	if req.Profile == "" {
 		req.Profile = "small"
 	}
-	if !req.Worker && (req.Port < 1 || req.Port > 65535) {
+	if !req.Worker && (port < 1 || port > 65535) {
 		return nil, &opFault{http.StatusBadRequest, "invalid_port", "port must be between 1 and 65535"}
 	}
 	if req.Replicas < 1 || req.Replicas > 10 {
@@ -1220,7 +1355,7 @@ func (h *Handler) linkGitRepo(ctx context.Context, actorID, projectID, envID uui
 		projectID, envID, req.AppName, installationID, req.Provider,
 		req.RepoFullName, cloneURL, tokenEncrypted, webhookSecret,
 		req.ProductionBranch, req.RootDir, frameworkOverride, req.AutoDeploy,
-		req.Port, req.Replicas, req.Profile, req.Worker, actorID, demoExpiresAt,
+		port, req.Replicas, req.Profile, req.Worker, actorID, demoExpiresAt,
 	)
 	if err := row.Scan(&r.ID, &r.ProjectID, &r.EnvironmentID, &r.AppName,
 		&r.InstallationID, &r.Provider, &r.RepoFullName, &r.ProductionBranch,

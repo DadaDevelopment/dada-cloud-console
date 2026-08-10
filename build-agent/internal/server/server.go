@@ -95,6 +95,8 @@ func (s *Server) Start(ctx context.Context) error {
 	// clone-based Nixpacks detect belongs in the build Job). Always 200 so the
 	// wizard falls back to manual framework selection rather than erroring.
 	mux.HandleFunc("GET /github/installations/{id}/detect", s.handleDetect)
+	// Token-based detection for repos connected by URL, no installation involved.
+	mux.HandleFunc("POST /github/detect", s.handleDetectByToken)
 
 	if s.hub != nil && s.tokenSecret != "" {
 		mux.HandleFunc("/ws/build", s.handleBuildWS)
@@ -705,9 +707,49 @@ func (s *Server) detectFramework(ctx context.Context, installationID int64, repo
 	return detectWithToken(ctx, token, repoFullName, rootDir)
 }
 
+// detectByTokenRequest is the body for handleDetectByToken: a repo plus a
+// caller-supplied token instead of a GitHub App installation id.
+type detectByTokenRequest struct {
+	RepoFullName string `json:"repo_full_name"`
+	RootDir      string `json:"root_dir"`
+	Token        string `json:"token"`
+}
+
+// handleDetectByToken mirrors handleDetect but runs detection with a
+// caller-supplied personal access token rather than a GitHub App installation
+// — the connect-by-URL flow, where the console backend never obtained an
+// installation for the repo. Token travels in the POST body, not a query
+// string, so it does not end up in access logs. Does not depend on s.gh: no
+// App key is needed when the caller brings its own token, so this is
+// registered unconditionally.
+func (s *Server) handleDetectByToken(w http.ResponseWriter, r *http.Request) {
+	var req detectByTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	repo := strings.TrimSpace(req.RepoFullName)
+	if repo == "" {
+		http.Error(w, "repo_full_name is required", http.StatusBadRequest)
+		return
+	}
+	rootDir := strings.TrimSpace(req.RootDir)
+	if rootDir == "." {
+		rootDir = ""
+	}
+	det, err := detectWithToken(r.Context(), req.Token, repo, rootDir)
+	if err != nil {
+		log.Warn().Err(err).Str("repo", repo).Str("root_dir", rootDir).Msg("token framework detect failed")
+		http.Error(w, "framework detection failed", http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, det)
+}
+
 // detectWithToken is the token-based detection core shared by the HTTP import
-// wizard (handleDetect) and the build-time path (DetectForBuild). It assumes
-// rootDir is already normalized ("" for repo root).
+// wizard (handleDetect, handleDetectByToken) and the build-time path
+// (DetectForBuild). It assumes rootDir is already normalized ("" for repo
+// root).
 func detectWithToken(ctx context.Context, token, repoFullName, rootDir string) (frameworkDetection, error) {
 	parts := strings.SplitN(repoFullName, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {

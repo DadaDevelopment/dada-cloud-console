@@ -193,6 +193,10 @@ export const git: Messages = {
   "git.import.byUrl.branch.label": { ru: "Ветка для продакшна", en: "Production branch" },
   "git.import.byUrl.rootDir.label": { ru: "Корневая директория", en: "Root directory" },
   "git.import.byUrl.port.label": { ru: "Порт", en: "Port" },
+  "git.import.byUrl.port.hint": {
+    ru: "Оставьте пустым - определим по репозиторию (Dockerfile или фреймворк), не выйдет - подставим 8080.",
+    en: "Leave blank to detect it from the repository (Dockerfile or framework); falls back to 8080 if detection fails.",
+  },
   "git.import.byUrl.worker.label": {
     ru: "Фоновый процесс без HTTP-порта (бот, воркер)",
     en: "Background process with no HTTP port (bot, worker)",

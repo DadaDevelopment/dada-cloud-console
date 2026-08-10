@@ -343,7 +343,9 @@ definitions:
       port:
         description: |-
           Intended app spec, applied by the first successful build when it creates the
-          app. Defaulted server-side when omitted (8080 / 2 / small).
+          app. Defaulted server-side when omitted: framework detection's guess if it
+          finds one, else 8080. A pointer so the server can tell "field omitted" from
+          "client explicitly asked for 0" — an explicit value always wins over detection.
         type: integer
       production_branch:
         type: string
@@ -735,6 +737,15 @@ definitions:
       message:
         type: string
       operation_id:
+        type: string
+    type: object
+  api.detectByURLRequest:
+    properties:
+      repo_full_name:
+        type: string
+      root_dir:
+        type: string
+      token:
         type: string
     type: object
   api.diagnoseResponse:
@@ -13498,6 +13509,63 @@ paths:
       security:
       - BearerAuth: []
       summary: Detect the framework of a public repository
+      tags:
+      - git
+  /projects/{projectId}/git/detect-url:
+    post:
+      consumes:
+      - application/json
+      description: 'Best-effort framework detection for the connect-by-URL flow: a
+        token-authenticated or public GitHub repo with no App installation. Requires
+        write access to the project.'
+      operationId: detectRepoByURL
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Repository and optional token
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.detectByURLRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: framework detection result
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Detect the framework of a repository connected by URL
       tags:
       - git
   /projects/{projectId}/git/github/authorize:
