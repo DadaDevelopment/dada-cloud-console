@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState, FormEvent } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { gitApi, buildsApi, isGithubAccessRequiredError } from "@/lib/api";
+import { gitApi, buildsApi, isGithubAccessRequiredError, classifyConnectRepoConflict } from "@/lib/api";
 import type { GitInstallation, GitRemoteRepo, FrameworkDetection, Build, AvailableInstallation } from "@/lib/types";
 import { BuildLogViewer } from "@/components/deploy/build-log-viewer";
 import { FrameworkLogo } from "@/components/deploy/framework-logo";
@@ -537,10 +537,14 @@ export default function GitImportPage() {
         setSubmitting(false);
         return;
       }
-      const msg = err instanceof Error ? err.message : t("git.import.error.connect");
-      // 409 → repo already linked to this app; not fatal, proceed to deploy.
-      if (!/409|already/i.test(msg)) {
-        setSubmitError(msg);
+      const conflict = classifyConnectRepoConflict(apiErr?.status, apiErr?.code);
+      if (conflict === "app_name_taken") {
+        setSubmitError(t("git.import.byUrl.error.appNameTaken"));
+        setSubmitting(false);
+        return;
+      }
+      if (conflict !== "repo_already_connected") {
+        setSubmitError(err instanceof Error ? err.message : t("git.import.error.connect"));
         setSubmitting(false);
         return;
       }
