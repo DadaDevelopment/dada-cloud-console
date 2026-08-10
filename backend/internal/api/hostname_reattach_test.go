@@ -36,15 +36,35 @@ func seedReattachProjectEnv(t *testing.T, pool *pgxpool.Pool) (projectID, envID 
 	return projectID, envID
 }
 
-// seedReattachApp inserts a live App resource_snapshot, synced well past
+// seedReattachApp inserts a live App resource_snapshot: first seen well past
 // defaultDomainBackfillGrace so ReattachOrphanedHostnames does not skip it as
-// mid-flight.
+// mid-flight, but synced just now, which is what a healthy app on prod
+// actually looks like -- the snapshot sync refreshes last_synced_at every
+// tick, so 62 of prod's 81 App snapshots are under a minute old at any moment.
+// A grace window measured against last_synced_at would therefore exclude every
+// live app and only ever match abandoned ones; the window has to be measured
+// against first_seen_at.
 func seedReattachApp(t *testing.T, pool *pgxpool.Pool, projectID, envID uuid.UUID, appName, summaryJSON string) {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO resource_snapshots (project_id, environment_id, kind, name, phase, summary_json, last_synced_at)
-		 VALUES ($1, $2, 'App', $3, 'Ready', $4::jsonb, now() - interval '1 hour')`,
+		`INSERT INTO resource_snapshots (project_id, environment_id, kind, name, phase, summary_json, first_seen_at, last_synced_at)
+		 VALUES ($1, $2, 'App', $3, 'Ready', $4::jsonb, now() - interval '1 hour', now())`,
+		projectID, envID, appName, summaryJSON,
+	); err != nil {
+		t.Fatalf("seed resource_snapshots: %v", err)
+	}
+}
+
+// seedFreshlyCreatedApp inserts an App snapshot that first appeared seconds
+// ago -- the mid-flight case the grace window exists for, where CreateApp's own
+// domain step may still be in progress.
+func seedFreshlyCreatedApp(t *testing.T, pool *pgxpool.Pool, projectID, envID uuid.UUID, appName, summaryJSON string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO resource_snapshots (project_id, environment_id, kind, name, phase, summary_json, first_seen_at, last_synced_at)
+		 VALUES ($1, $2, 'App', $3, 'Ready', $4::jsonb, now(), now())`,
 		projectID, envID, appName, summaryJSON,
 	); err != nil {
 		t.Fatalf("seed resource_snapshots: %v", err)
@@ -146,6 +166,42 @@ func TestReattachOrphanedHostnamesReattachesManagedRow(t *testing.T) {
 	}
 	if action != "AttachDefaultDomain" {
 		t.Errorf("operation action = %q, want AttachDefaultDomain for a managed row", action)
+	}
+}
+
+// TestReattachOrphanedHostnamesSkipsOnlyFreshlyCreatedApps pins which column
+// the grace window is measured against. resource_snapshots.last_synced_at is
+// bumped by every snapshot-sync tick, so on prod almost every LIVE app has a
+// last_synced_at seconds old while an ABANDONED one goes stale -- a grace
+// window on that column inverts the intended meaning and makes the whole pass
+// a no-op for exactly the apps it exists to save. first_seen_at is the app's
+// age, which is what "do not race CreateApp's own domain step" needs.
+func TestReattachOrphanedHostnamesSkipsOnlyFreshlyCreatedApps(t *testing.T) {
+	if os.Getenv("TEST_DATABASE_URL") == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping reattach DB integration test")
+	}
+	pool := testAdvisoryPool(t)
+	ctx := context.Background()
+
+	projectID, envID := seedReattachProjectEnv(t, pool)
+
+	oldApp := "old-app-" + uuid.NewString()[:8]
+	seedReattachApp(t, pool, projectID, envID, oldApp, `{"port":8080}`)
+	oldID := seedFailedHostname(t, pool, envID, oldApp, oldApp+"-ab12.dada-tuda.ru", true, nil, 0, 24*time.Hour)
+
+	newApp := "new-app-" + uuid.NewString()[:8]
+	seedFreshlyCreatedApp(t, pool, projectID, envID, newApp, `{"port":8080}`)
+	newID := seedFailedHostname(t, pool, envID, newApp, newApp+"-cd34.dada-tuda.ru", true, nil, 0, 24*time.Hour)
+
+	if err := ReattachOrphanedHostnames(ctx, pool, reattachTestConfig()); err != nil {
+		t.Fatalf("reattach: %v", err)
+	}
+
+	if status, _, _, _ := readHostnameRow(t, pool, oldID); status != "pending" {
+		t.Fatalf("long-lived app: status = %q, want pending -- a constantly re-synced snapshot must NOT be mistaken for mid-flight", status)
+	}
+	if status, _, _, _ := readHostnameRow(t, pool, newID); status != "failed" {
+		t.Fatalf("seconds-old app: status = %q, want failed -- CreateApp's own domain step may still be running", status)
 	}
 }
 

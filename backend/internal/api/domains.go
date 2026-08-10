@@ -1685,7 +1685,7 @@ func ReattachOrphanedHostnames(ctx context.Context, pool *pgxpool.Pool, cfg *con
 		   LEFT JOIN domain_authorizations da ON da.id = dh.authorization_id
 		  WHERE dh.status = 'failed'
 		    AND e.runtime = $1
-		    AND rs.last_synced_at < NOW() - ($2 * INTERVAL '1 second')
+		    AND rs.first_seen_at < NOW() - ($2 * INTERVAL '1 second')
 		    AND dh.reattach_count < $3
 		    AND dh.updated_at < NOW() - ($4 * INTERVAL '1 second')`,
 		models.EnvironmentRuntimeK8s, defaultDomainBackfillGrace.Seconds(),
