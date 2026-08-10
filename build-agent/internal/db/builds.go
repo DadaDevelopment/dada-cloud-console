@@ -298,33 +298,113 @@ func RequeueForRetry(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, reas
 	return tag.RowsAffected() == 1, nil
 }
 
+// buildFinishedAuditAction/Kind name the terminal-verdict audit row written by
+// MarkFailedWithReason, MarkCanceled and FinishSuccess. Before this, the only
+// audit row a build ever got was TriggerBuild at enqueue time (backend
+// builds.go) -- the actual outcome (success, failure, why) never left a trace,
+// so a user path read as "TriggerBuild then silence" whether the build failed,
+// hung, or the user just never checked back.
+const (
+	buildFinishedAuditAction = "BuildFinished"
+	buildFinishedAuditKind   = "Build"
+)
+
+// buildFinishedActorExpr resolves who a BuildFinished row is attributed to,
+// mirrored from handoffActor's fallback (deploy.go): a real console click
+// (triggered_by) wins, then the repo's owner (git_repos.created_by) for a
+// push/webhook build, then the system user for a repo connected before
+// migration 037 ever recorded an owner. audit_events.actor_id is NOT NULL, so
+// this must always resolve to something -- $%d is the SystemUserID parameter.
+func buildFinishedActorExpr(paramIdx int) string {
+	return fmt.Sprintf("COALESCE(u.triggered_by, g.created_by, $%d::uuid)", paramIdx)
+}
+
 // MarkFailedWithReason moves a build to failed, recording the error message,
 // the classified fail_reason code (empty when the failure was not
-// classified), and finished_at. Compare-and-set on `from` so it loses cleanly
-// against a concurrent cancel/supersede. Returns true when it changed a row.
+// classified), and finished_at, and -- in the SAME statement -- writes the
+// BuildFinished/failure audit row. One statement, not "update then insert":
+// two separate statements can diverge (the update commits, the audit write
+// is lost to a crash/network blip in between), which is exactly the gap this
+// change exists to close. The audit INSERT is itself an INNER JOIN off the
+// UPDATE's RETURNING via CTEs, so it only ever runs, and only ever runs once,
+// when this call is the one that actually won the failed transition -- a
+// second call against an already-failed row updates zero rows, so its CTE
+// chain inserts zero audit rows too. Compare-and-set on `from` so it loses
+// cleanly against a concurrent cancel/supersede. Returns true when it changed
+// a row.
 func MarkFailedWithReason(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, from, errMsg, failReason string) (bool, error) {
-	tag, err := pool.Exec(ctx, `
-		UPDATE builds
-		SET    status = 'failed', error_message = $3, fail_reason = NULLIF($4, ''), finished_at = NOW(), updated_at = NOW()
-		WHERE  id = $1 AND status = $2
-	`, id, from, errMsg, failReason)
+	var affected int
+	err := pool.QueryRow(ctx, `
+		WITH updated AS (
+			UPDATE builds
+			SET    status = 'failed', error_message = $3, fail_reason = NULLIF($4, ''), finished_at = NOW(), updated_at = NOW()
+			WHERE  id = $1 AND status = $2
+			RETURNING id, git_repo_id, environment_id, app_name, branch, commit_sha, triggered_by, attempt, fail_reason, started_at, finished_at
+		),
+		actor AS (
+			SELECT u.*, g.project_id, `+buildFinishedActorExpr(5)+` AS actor_id
+			FROM   updated u
+			JOIN   git_repos g ON g.id = u.git_repo_id
+		),
+		audit_ins AS (
+			INSERT INTO audit_events (actor_id, project_id, environment_id, action, resource_kind, resource_name, outcome, metadata)
+			SELECT actor_id, project_id, environment_id, '`+buildFinishedAuditAction+`', '`+buildFinishedAuditKind+`', app_name, 'failure',
+			       jsonb_strip_nulls(jsonb_build_object(
+			           'build_id', id, 'status', 'failed', 'fail_reason', fail_reason, 'attempt', attempt,
+			           'duration_seconds', ROUND(EXTRACT(EPOCH FROM (finished_at - started_at))::numeric, 2),
+			           'branch', branch, 'commit_sha', commit_sha
+			       ))
+			FROM   actor
+			RETURNING 1
+		)
+		SELECT count(*) FROM updated u LEFT JOIN audit_ins a ON true
+	`, id, from, errMsg, failReason, SystemUserID).Scan(&affected)
 	if err != nil {
 		return false, fmt.Errorf("mark failed %s: %w", id, err)
 	}
-	return tag.RowsAffected() == 1, nil
+	return affected == 1, nil
 }
 
-// MarkCanceled moves any non-terminal build to canceled (used by supersession).
+// MarkCanceled moves any non-terminal build to canceled (used by supersession)
+// and, in the same statement, writes the BuildFinished/canceled audit row.
+//
+// outcome is 'canceled', not 'failure': the only caller in this codebase is
+// supersede() (runner.go), which cancels a build because a newer commit on
+// the same repo+branch superseded it -- a system decision, not something the
+// user got wrong. Counting it as a failure would misread every fast-follow
+// push as a broken build. audit_events.outcome carries no CHECK constraint
+// (migration 068), so this needs no schema change.
 func MarkCanceled(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) (bool, error) {
-	tag, err := pool.Exec(ctx, `
-		UPDATE builds
-		SET    status = 'canceled', finished_at = NOW(), updated_at = NOW()
-		WHERE  id = $1 AND status IN ('queued','detecting','building','pushing')
-	`, id)
+	var affected int
+	err := pool.QueryRow(ctx, `
+		WITH updated AS (
+			UPDATE builds
+			SET    status = 'canceled', finished_at = NOW(), updated_at = NOW()
+			WHERE  id = $1 AND status IN ('queued','detecting','building','pushing')
+			RETURNING id, git_repo_id, environment_id, app_name, branch, commit_sha, triggered_by, attempt, started_at, finished_at
+		),
+		actor AS (
+			SELECT u.*, g.project_id, `+buildFinishedActorExpr(2)+` AS actor_id
+			FROM   updated u
+			JOIN   git_repos g ON g.id = u.git_repo_id
+		),
+		audit_ins AS (
+			INSERT INTO audit_events (actor_id, project_id, environment_id, action, resource_kind, resource_name, outcome, metadata)
+			SELECT actor_id, project_id, environment_id, '`+buildFinishedAuditAction+`', '`+buildFinishedAuditKind+`', app_name, 'canceled',
+			       jsonb_strip_nulls(jsonb_build_object(
+			           'build_id', id, 'status', 'canceled', 'attempt', attempt,
+			           'duration_seconds', ROUND(EXTRACT(EPOCH FROM (finished_at - started_at))::numeric, 2),
+			           'branch', branch, 'commit_sha', commit_sha
+			       ))
+			FROM   actor
+			RETURNING 1
+		)
+		SELECT count(*) FROM updated u LEFT JOIN audit_ins a ON true
+	`, id, SystemUserID).Scan(&affected)
 	if err != nil {
 		return false, fmt.Errorf("mark canceled %s: %w", id, err)
 	}
-	return tag.RowsAffected() == 1, nil
+	return affected == 1, nil
 }
 
 // ReapStuckBuilds fails builds left in a non-terminal in-flight state
@@ -364,17 +444,40 @@ func ReapStuckBuilds(ctx context.Context, pool *pgxpool.Pool, olderThan time.Dur
 }
 
 // FinishSuccess pins the immutable image URI and stamps finished_at as part of
-// the pushing→success transition.
+// the pushing→success transition, writing the BuildFinished/success audit row
+// in the same statement (see MarkFailedWithReason for why it must be the same
+// statement, not a follow-up write).
 func FinishSuccess(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, imageURI string) (bool, error) {
-	tag, err := pool.Exec(ctx, `
-		UPDATE builds
-		SET    status = 'success', image_uri = $2, finished_at = NOW(), updated_at = NOW()
-		WHERE  id = $1 AND status = 'pushing'
-	`, id, imageURI)
+	var affected int
+	err := pool.QueryRow(ctx, `
+		WITH updated AS (
+			UPDATE builds
+			SET    status = 'success', image_uri = $2, finished_at = NOW(), updated_at = NOW()
+			WHERE  id = $1 AND status = 'pushing'
+			RETURNING id, git_repo_id, environment_id, app_name, branch, commit_sha, triggered_by, attempt, started_at, finished_at
+		),
+		actor AS (
+			SELECT u.*, g.project_id, `+buildFinishedActorExpr(3)+` AS actor_id
+			FROM   updated u
+			JOIN   git_repos g ON g.id = u.git_repo_id
+		),
+		audit_ins AS (
+			INSERT INTO audit_events (actor_id, project_id, environment_id, action, resource_kind, resource_name, outcome, metadata)
+			SELECT actor_id, project_id, environment_id, '`+buildFinishedAuditAction+`', '`+buildFinishedAuditKind+`', app_name, 'success',
+			       jsonb_strip_nulls(jsonb_build_object(
+			           'build_id', id, 'status', 'success', 'attempt', attempt,
+			           'duration_seconds', ROUND(EXTRACT(EPOCH FROM (finished_at - started_at))::numeric, 2),
+			           'branch', branch, 'commit_sha', commit_sha
+			       ))
+			FROM   actor
+			RETURNING 1
+		)
+		SELECT count(*) FROM updated u LEFT JOIN audit_ins a ON true
+	`, id, imageURI, SystemUserID).Scan(&affected)
 	if err != nil {
 		return false, fmt.Errorf("finish success %s: %w", id, err)
 	}
-	return tag.RowsAffected() == 1, nil
+	return affected == 1, nil
 }
 
 // PinImage records the immutable image URI on a build without changing status.
