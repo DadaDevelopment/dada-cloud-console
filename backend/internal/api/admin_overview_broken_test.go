@@ -293,6 +293,8 @@ func TestOverviewStuckOperations(t *testing.T) {
 	stuckID := seedOp("Reconciling", stuckOperationThreshold+5*time.Minute, "stuck-"+suffix)
 	seedOp("Reconciling", 1*time.Minute, "fresh-"+suffix)
 	seedOp("Ready", stuckOperationThreshold+time.Hour, "old-but-done-"+suffix)
+	seedOp("Committed", stuckOperationThreshold+time.Hour, "committed-"+suffix)
+	seedOp("WaitingForApproval", stuckOperationThreshold+time.Hour, "awaiting-human-"+suffix)
 
 	out, err := h.overviewStuckOperations(context.Background())
 	if err != nil {
@@ -309,6 +311,12 @@ func TestOverviewStuckOperations(t *testing.T) {
 		}
 		if op.ResourceName == "old-but-done-"+suffix {
 			t.Fatal("a terminal (Ready) operation must never be reported as stuck regardless of age")
+		}
+		if op.ResourceName == "committed-"+suffix {
+			t.Fatal("Committed is where gitops-agent finishes an operation; reporting it as stuck is what made every finished deploy a false alarm")
+		}
+		if op.ResourceName == "awaiting-human-"+suffix {
+			t.Fatal("WaitingForApproval is parked on a human by design, not on a dead agent")
 		}
 	}
 	if !found {

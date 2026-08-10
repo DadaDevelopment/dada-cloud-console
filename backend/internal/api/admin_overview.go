@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
+	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/gin-gonic/gin"
 )
 
@@ -50,6 +51,43 @@ const appSnapshotFreshnessWindow = "10 minutes"
 // runs on (12 minutes = 2x boxOperationTimeout), so an operation older than it
 // has outlived every retry budget we actually have, whichever agent owns it.
 const stuckOperationThreshold = boxOperationLease
+
+// terminalOperationStatuses is the status set overviewStuckOperations excludes,
+// derived from classifyOperationStatus (deploy_hooks.go) rather than written out
+// again as SQL literals. It exists because this panel hand-wrote its own list
+// and left "Committed" out of it: gitops-agent ends an operation at Committed
+// (db.MarkCommitted) and nothing ever advances that row, so the panel reported
+// every finished deploy as a stuck operation -- 466 of them, all false, drowning
+// the handful of real breakages an operator opens this page to find. Three
+// definitions of "terminal" disagreed in one codebase; this makes the panel read
+// the same function the deploy-hook poller does, and TestStuckOperationsExcludes
+// AllTerminalStatuses pins them together so a new terminal status cannot be
+// added to the model without this query following it.
+var allOperationStatusesForStuckCheck = []models.OperationStatus{
+	models.OperationStatusCreated,
+	models.OperationStatusValidated,
+	models.OperationStatusQueued,
+	models.OperationStatusRendering,
+	models.OperationStatusCommittingToGit,
+	models.OperationStatusCommitted,
+	models.OperationStatusWaitingForArgoSync,
+	models.OperationStatusSyncing,
+	models.OperationStatusReconciling,
+	models.OperationStatusReady,
+	models.OperationStatusFailed,
+	models.OperationStatusCancelled,
+	models.OperationStatusWaitingForApproval,
+}
+
+var terminalOperationStatuses = func() []string {
+	out := []string{}
+	for _, s := range allOperationStatusesForStuckCheck {
+		if terminal, _ := classifyOperationStatus(s); terminal {
+			out = append(out, string(s))
+		}
+	}
+	return out
+}()
 
 type overviewUsers struct {
 	Total     int `json:"total"`
@@ -579,24 +617,30 @@ type overviewStuckOperations struct {
 }
 
 // overviewStuckOperations lists operations rows that never reached a terminal
-// status (Ready/Failed/Cancelled) within stuckOperationThreshold -- the
-// symptom is always the same regardless of resource_kind: whatever agent was
-// supposed to claim and finish the row (gitops-agent, portainer-agent, the
-// box worker) died, crashed, or lost the row, and it sits invisible in
-// operations forever unless someone runs a manual query. Capped to the 20
-// oldest so a genuine platform-wide stall (every agent down at once) cannot
-// balloon the payload; Count is the true total so the operator can tell "1
-// stuck operation" from "400 stuck operations, showing the 20 oldest".
+// status within stuckOperationThreshold -- the symptom is always the same
+// regardless of resource_kind: whatever agent was supposed to claim and finish
+// the row (gitops-agent, portainer-agent, the box worker) died, crashed, or
+// lost the row, and it sits invisible in operations forever unless someone runs
+// a manual query. Capped to the 20 oldest so a genuine platform-wide stall
+// (every agent down at once) cannot balloon the payload; Count is the true
+// total so the operator can tell "1 stuck operation" from "400 stuck
+// operations, showing the 20 oldest".
+//
+// Terminality comes from terminalOperationStatuses, not from literals written
+// out here. WaitingForApproval is excluded on top of it: that row is parked on
+// a human decision by design, so counting it as a dead agent would recreate the
+// same false-positive class in a new place.
 func (h *Handler) overviewStuckOperations(ctx context.Context) (overviewStuckOperations, error) {
 	var out overviewStuckOperations
 	thresholdSeconds := stuckOperationThreshold.Seconds()
+	settled := append(append([]string{}, terminalOperationStatuses...), string(models.OperationStatusWaitingForApproval))
 
 	if err := h.pool.QueryRow(ctx, `
 		SELECT count(*)
 		FROM operations o
-		WHERE o.status NOT IN ('Ready', 'Failed', 'Cancelled')
+		WHERE o.status <> ALL($2)
 		  AND o.created_at < now() - make_interval(secs => $1)`,
-		thresholdSeconds,
+		thresholdSeconds, settled,
 	).Scan(&out.Count); err != nil {
 		return out, err
 	}
@@ -606,11 +650,11 @@ func (h *Handler) overviewStuckOperations(ctx context.Context) (overviewStuckOpe
 		       p.display_name, extract(epoch FROM now() - o.created_at)::int
 		FROM operations o
 		JOIN projects p ON p.id = o.project_id
-		WHERE o.status NOT IN ('Ready', 'Failed', 'Cancelled')
+		WHERE o.status <> ALL($2)
 		  AND o.created_at < now() - make_interval(secs => $1)
 		ORDER BY o.created_at ASC
 		LIMIT 20`,
-		thresholdSeconds,
+		thresholdSeconds, settled,
 	)
 	if err != nil {
 		return out, err
