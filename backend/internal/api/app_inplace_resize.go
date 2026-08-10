@@ -7,6 +7,8 @@ import (
 	"log"
 	"time"
 
+	"github.com/google/uuid"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -260,20 +262,9 @@ func (w *appAutoscaleWatcher) patchDeploymentTemplateEnvelope(ctx context.Contex
 	if err != nil {
 		return fmt.Errorf("unreadable envelope %s: %w", to, err)
 	}
-	listCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	deps, err := w.clientset.AppsV1().Deployments(namespace).List(listCtx, metav1.ListOptions{
-		LabelSelector: "dada.io/app=" + appName,
-	})
+	dep, err := w.singleAppDeployment(ctx, namespace, appName)
 	if err != nil {
-		return fmt.Errorf("list deployments: %w", err)
-	}
-	if len(deps.Items) != 1 {
-		return fmt.Errorf("expected exactly one Deployment labelled dada.io/app=%s, found %d", appName, len(deps.Items))
-	}
-	dep := &deps.Items[0]
-	if len(dep.Spec.Template.Spec.Containers) != 1 {
-		return fmt.Errorf("expected exactly one container in %s, found %d", dep.Name, len(dep.Spec.Template.Spec.Containers))
+		return err
 	}
 
 	body, err := json.Marshal(map[string]any{
@@ -299,4 +290,130 @@ func (w *appAutoscaleWatcher) patchDeploymentTemplateEnvelope(ctx context.Contex
 		return fmt.Errorf("patch deployment %s: %w", dep.Name, err)
 	}
 	return nil
+}
+
+// singleAppDeployment resolves an app to the one Deployment that carries its
+// workload. Anything other than exactly one Deployment with exactly one
+// container is an error rather than a best guess: the callers here write to
+// what they find.
+func (w *appAutoscaleWatcher) singleAppDeployment(ctx context.Context, namespace, appName string) (*appsv1.Deployment, error) {
+	listCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	deps, err := w.clientset.AppsV1().Deployments(namespace).List(listCtx, metav1.ListOptions{
+		LabelSelector: "dada.io/app=" + appName,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list deployments: %w", err)
+	}
+	if len(deps.Items) != 1 {
+		return nil, fmt.Errorf("expected exactly one Deployment labelled dada.io/app=%s, found %d", appName, len(deps.Items))
+	}
+	dep := &deps.Items[0]
+	if len(dep.Spec.Template.Spec.Containers) != 1 {
+		return nil, fmt.Errorf("expected exactly one container in %s, found %d", dep.Name, len(dep.Spec.Template.Spec.Containers))
+	}
+	return dep, nil
+}
+
+// envelopeFromRequirements reads a container's declared resources back into an
+// envelope so the same clamping arithmetic can be applied to a live Deployment
+// template as to a committed envelope. Ephemeral storage is not carried: this
+// envelope only ever feeds clampToLimitRange and requirements(), and neither
+// touches it.
+func envelopeFromRequirements(r corev1.ResourceRequirements) (resourceEnvelope, bool) {
+	out := resourceEnvelope{}
+	for _, f := range []struct {
+		from corev1.ResourceList
+		name corev1.ResourceName
+		into *string
+	}{
+		{r.Limits, corev1.ResourceCPU, &out.CPULimit},
+		{r.Limits, corev1.ResourceMemory, &out.MemoryLimit},
+		{r.Requests, corev1.ResourceCPU, &out.CPUReq},
+		{r.Requests, corev1.ResourceMemory, &out.MemoryReq},
+	} {
+		q, ok := f.from[f.name]
+		if !ok {
+			return resourceEnvelope{}, false
+		}
+		*f.into = q.String()
+	}
+	return out, true
+}
+
+// repairWedgedDeploymentTemplate clamps a Deployment's own pod template down to
+// its namespace LimitRange when the app has no pod at all.
+//
+// This is a separate pass from repairAppLimitRangeViolation on purpose, because
+// the two read different sources and the committed one heals first.
+// repairAppLimitRangeViolation clamps the envelope stored in the database and
+// commits it to git; from the next tick onwards that envelope no longer exceeds
+// the LimitRange, so clampToLimitRange reports no movement and the function
+// returns before doing anything. The live Deployment template, meanwhile, still
+// carries the oversized numbers -- git cannot deliver them, because the app's
+// ArgoCD Application excludes container resources from its diff, and the
+// in-place path cannot either, because there is no pod. Left to those two, an
+// app is repaired in the database and stays down in the cluster forever, which
+// is exactly what fonbet-value did.
+//
+// The zero-pod condition is the safety property, and it is stricter than the
+// readiness check the committed path uses: a template patch rolls a new
+// ReplicaSet, so it must never run against an app that has any pod, running or
+// pending. An app with no pod has nothing to disturb, and the rollout it
+// triggers is the point.
+func (w *appAutoscaleWatcher) repairWedgedDeploymentTemplate(ctx context.Context, projectID uuid.UUID, namespace, appName string, max corev1.ResourceList) {
+	listCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	pods, err := w.clientset.CoreV1().Pods(namespace).List(listCtx, metav1.ListOptions{
+		LabelSelector: "dada.io/app=" + appName,
+	})
+	if err != nil {
+		log.Printf("app-autoscale: %s/%s template repair could not list pods: %v", namespace, appName, err)
+		return
+	}
+	if len(pods.Items) > 0 {
+		return
+	}
+
+	dep, err := w.singleAppDeployment(ctx, namespace, appName)
+	if err != nil {
+		return
+	}
+	cur, readable := envelopeFromRequirements(dep.Spec.Template.Spec.Containers[0].Resources)
+	if !readable {
+		return
+	}
+	to, moved, err := clampToLimitRange(cur, max)
+	if err != nil {
+		log.Printf("app-autoscale: %s/%s has an unreadable Deployment template envelope (%s): %v", namespace, appName, cur, err)
+		return
+	}
+	if !moved {
+		return
+	}
+
+	if err := w.patchDeploymentTemplateEnvelope(ctx, namespace, appName, to); err != nil {
+		log.Printf("app-autoscale: %s/%s has no pod and a template above its LimitRange (%s), correcting it to %s failed: %v", namespace, appName, cur, to, err)
+		return
+	}
+	log.Printf("app-autoscale: corrected the Deployment template of %s/%s %s -> %s (no pod exists, admission was rejecting every create)", namespace, appName, cur, to)
+
+	w.h.recordSystemAudit(ctx, auditEntry{
+		ProjectID:    projectID,
+		Action:       auditActionAutoscaleApp,
+		ResourceKind: "App",
+		ResourceName: appName,
+		Outcome:      auditOutcomeSuccess,
+		Metadata: map[string]any{
+			"repair":              "deployment_template_limitrange",
+			"from_envelope":       cur.String(),
+			"to_envelope":         to.String(),
+			"live_pods":           0,
+			"namespace":           namespace,
+			"claimed_by":          "app-autoscale-watcher",
+			"delivered_by":        "deployment_template_patch",
+			"delivery_bypasses":   "argocd_ignoredifferences_on_container_resources",
+			"delivery_bypass_why": "no pod to resize in place and no diff for argocd to apply",
+		},
+	})
 }
