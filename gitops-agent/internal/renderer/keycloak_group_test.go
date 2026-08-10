@@ -93,3 +93,44 @@ func TestProjectGroupsGitPath(t *testing.T) {
 		t.Errorf("got %q, want %q", path, want)
 	}
 }
+
+// TestProjectGroupCRNames_MatchesRenderedGroupCRs ties teardown to render: the
+// names DeleteProject flips to deletionPolicy Delete must be exactly the Group
+// CRs this renderer emits. A drift here is silent — the flip would patch nothing
+// and the real Keycloak groups would survive the project, which is the bug this
+// list exists to close.
+func TestProjectGroupCRNames_MatchesRenderedGroupCRs(t *testing.T) {
+	yaml, err := RenderProjectGroups(ProjectGroupSpec{
+		ProjectSlug: "acme",
+		Members:     map[string]string{"alice": "Owner"},
+	})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+
+	rendered := map[string]bool{}
+	for _, doc := range strings.Split(yaml, "---") {
+		if !strings.Contains(doc, "kind: Group\n") {
+			continue
+		}
+		for _, line := range strings.Split(doc, "\n") {
+			if name := strings.TrimPrefix(line, "  name: "); name != line {
+				rendered[name] = true
+				break
+			}
+		}
+	}
+
+	names := ProjectGroupCRNames("acme")
+	if len(names) != len(rendered) {
+		t.Fatalf("ProjectGroupCRNames = %v, rendered Group CRs = %v", names, rendered)
+	}
+	for _, name := range names {
+		if !rendered[name] {
+			t.Errorf("%q is not a rendered Group CR; the teardown patch would hit nothing", name)
+		}
+	}
+	if !rendered["org-acme"] || !rendered["org-acme-owner"] {
+		t.Errorf("rendered Group CRs missing the org parent or a role subgroup: %v", rendered)
+	}
+}

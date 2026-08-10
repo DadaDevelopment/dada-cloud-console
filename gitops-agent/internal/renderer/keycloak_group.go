@@ -78,7 +78,7 @@ spec:
 
 	// Role subgroups: /orgs/<slug>/<Role>, each role-mapped to the realm role <Role>.
 	for _, role := range wireRoles {
-		groupName := fmt.Sprintf("org-%s-%s", spec.ProjectSlug, strings.ToLower(role))
+		groupName := roleGroupCRName(spec.ProjectSlug, role)
 		fmt.Fprintf(&b, `---
 apiVersion: group.keycloak.crossplane.io/v1alpha1
 kind: Group
@@ -125,7 +125,7 @@ spec:
 			if len(members) == 0 {
 				continue
 			}
-			groupName := fmt.Sprintf("org-%s-%s", spec.ProjectSlug, strings.ToLower(role))
+			groupName := roleGroupCRName(spec.ProjectSlug, role)
 			fmt.Fprintf(&b, `---
 apiVersion: group.keycloak.crossplane.io/v1alpha1
 kind: Memberships
@@ -148,6 +148,32 @@ spec:
 	}
 
 	return b.String(), nil
+}
+
+// roleGroupCRName is the Group CR name of one role subgroup, /orgs/<slug>/<Role>.
+func roleGroupCRName(projectSlug, role string) string {
+	return fmt.Sprintf("org-%s-%s", projectSlug, strings.ToLower(role))
+}
+
+// ProjectGroupCRNames returns the names of every Group CR RenderProjectGroups
+// emits for one project: the org parent plus one subgroup per wire role, in
+// parent-first order.
+//
+// Teardown reads this. The rendered CRs carry deletionPolicy: Orphan, so simply
+// dropping the YAML (and letting ArgoCD prune the CRs) leaves the real Keycloak
+// groups behind forever — measured 2026-08-10 on project client-a, whose five
+// groups were still Ready weeks after the project was gone. DeleteProject flips
+// deletionPolicy to Delete on these live CRs first, so the prune reaches through
+// the Crossplane provider into Keycloak. Roles and Memberships CRs are not
+// listed: their external state lives inside the group, which the group delete
+// takes with it.
+func ProjectGroupCRNames(projectSlug string) []string {
+	names := make([]string, 0, len(wireRoles)+1)
+	names = append(names, fmt.Sprintf("org-%s", projectSlug))
+	for _, role := range wireRoles {
+		names = append(names, roleGroupCRName(projectSlug, role))
+	}
+	return names
 }
 
 // ProjectGroupsGitPath returns the path in the argo-infra state repo where the

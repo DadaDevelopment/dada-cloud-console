@@ -1351,10 +1351,17 @@ func (w *DBWatcher) deleteAppGitRepo(ctx context.Context, projectID uuid.UUID, e
 // FK-safe order. The commit sha is captured and the operation marked committed
 // BEFORE the DB wipe tx runs, because that tx deletes the operations row
 // (including this op) as part of the cascade — MarkCommitted has already
-// persisted by then. Namespace teardown and Keycloak cleanup are deliberately
-// skipped: single-org collapse means there is no per-project Keycloak group,
-// and Argo/git-prune plus namespace finalizers reap the namespace(s) without a
-// worker-side k8s client.
+// persisted by then. Namespace teardown is deliberately skipped: Argo/git-prune
+// plus namespace finalizers reap the namespace(s) without a worker-side k8s
+// client.
+//
+// Keycloak teardown is NOT skipped. bootstrapProject writes the project's Group
+// CRs into the keycloak-config chart (ADR-009), and nothing used to remove them:
+// project client-a was fully torn down on 2026-08-10 and its five Group CRs were
+// still Ready, its YAML still on the branch. The two halves both matter — the
+// git removal (retire the CRs) and retireProjectKeycloakGroups (make that prune
+// reach Keycloak instead of orphaning the real groups), in that order, before
+// the DB wipe drops the operations row this commit is recorded against.
 func (w *DBWatcher) doDeleteProject(ctx context.Context, op db.Operation) error {
 	var slug string
 	if err := w.pool.QueryRow(ctx,
@@ -1387,6 +1394,9 @@ func (w *DBWatcher) doDeleteProject(ctx context.Context, op db.Operation) error 
 	if err := db.MarkCommitted(ctx, w.pool, op.ID, sha, projectDir); err != nil {
 		return err
 	}
+
+	w.retireProjectKeycloakGroups(ctx, slug)
+	w.deleteProjectGroupsFile(ctx, op, slug)
 
 	tx, err := w.pool.Begin(ctx)
 	if err != nil {

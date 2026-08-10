@@ -121,6 +121,16 @@ rules:
     resources:
       - restorepoints
     verbs: ["get", "list", "watch"]
+  # DeleteProject flips deletionPolicy Orphan -> Delete on the torn-down
+  # project's own Keycloak Group CRs before removing their YAML, so the ArgoCD
+  # prune deletes the groups in Keycloak instead of orphaning them (a project
+  # deleted in August 2026 still had its five groups Ready weeks later). patch is
+  # the write verb; get is what makes the flip idempotent and skips CRs that were
+  # never created.
+  - apiGroups: ["group.keycloak.crossplane.io"]
+    resources:
+      - groups
+    verbs: ["get", "patch"]
   {{- with .Values.rbac.extraRules }}
   {{- toYaml . | nindent 2 }}
   {{- end }}
