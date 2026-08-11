@@ -123,3 +123,43 @@ func TestClusterScopedPassesGoThroughResolveSnapshotEnv(t *testing.T) {
 		}
 	}
 }
+
+// TestResolveSnapshotEnvUpstreamHintBreaksTheTie covers the CRs the renderer
+// never touched: an infra-rendered PublicApi carries no dada.io labels, so the
+// label tie-break cannot fire and nine live endpoints (n8n, svod, jenkins, ...)
+// stayed frozen for over a week. The namespace of the upstream Service is the
+// remaining fact that names exactly one owner.
+func TestResolveSnapshotEnvUpstreamHintBreaksTheTie(t *testing.T) {
+	live, stale := uuid.New(), uuid.New()
+	owners := map[uuid.UUID]envOwner{
+		live:  {project: "platform", environment: "prod"},
+		stale: {project: "example-project", environment: "prod"},
+	}
+
+	r := ambiguityReconciler()
+	got, ok := r.resolveSnapshotEnvHinted("PublicApi", "n8n", []uuid.UUID{stale, live}, nil, owners, live)
+	if !ok || got != live {
+		t.Fatalf("upstream hint: got (%v, %v), want (%v, true)", got, ok, live)
+	}
+	if r.ambiguous["PublicApi/n8n"] {
+		t.Fatal("a name the hint resolved must not stay marked ambiguous")
+	}
+}
+
+// TestResolveSnapshotEnvHintOutsideClaimantsIsRefused pins the isolation rule:
+// the hint may pick among the rows that already claim the name, never add one.
+func TestResolveSnapshotEnvHintOutsideClaimantsIsRefused(t *testing.T) {
+	a, b, foreign := uuid.New(), uuid.New(), uuid.New()
+	owners := map[uuid.UUID]envOwner{
+		a: {project: "one", environment: "prod"},
+		b: {project: "two", environment: "prod"},
+	}
+
+	r := ambiguityReconciler()
+	if _, ok := r.resolveSnapshotEnvHinted("PublicApi", "api-foreign-ru", []uuid.UUID{a, b}, nil, owners, foreign); ok {
+		t.Fatal("a hint pointing at an environment that holds no snapshot for the name must not be accepted")
+	}
+	if !r.ambiguous["PublicApi/api-foreign-ru"] {
+		t.Fatal("an unresolved ambiguity must still be reported")
+	}
+}

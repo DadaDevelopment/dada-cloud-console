@@ -284,6 +284,25 @@ func (r *StatusReconciler) snapshotEnvOwners(ctx context.Context) map[uuid.UUID]
 // writes, and an ambiguity that survives that is said out loud once rather than
 // returning to silence — a reconciler that cannot decide is itself the finding.
 func (r *StatusReconciler) resolveSnapshotEnv(kind, name string, ids []uuid.UUID, crLabels map[string]string, owners map[uuid.UUID]envOwner) (uuid.UUID, bool) {
+	return r.resolveSnapshotEnvHinted(kind, name, ids, crLabels, owners, uuid.Nil)
+}
+
+// resolveSnapshotEnvHinted is resolveSnapshotEnv plus a caller-supplied
+// environment hint, consulted only after the label tie-break has failed.
+//
+// The labels are the strongest signal but only the renderer stamps them, so
+// every CR written by the infra repo carries none: on 2026-08-11 nine PublicApi
+// names (n8n, svod, jenkins, jira, mlflow, nexus, portainer, rabbitmq-dada-prod,
+// reels-tracker) plus AIModel/ServiceDatabaseV2/S3Bucket twins were frozen this
+// way for over a week, and the admin breakage panel rendered the two of them
+// that were stuck at Pending as live outages while both apps served 200.
+//
+// The hint is the environment of the cluster object the CR actually points at
+// (for PublicApi, the namespace of its upstream Service). It is accepted only
+// when it is one of the claiming rows, so a hint can pick the right claimant but
+// can never invent an environment or leak status into a project that holds no
+// snapshot for the name.
+func (r *StatusReconciler) resolveSnapshotEnvHinted(kind, name string, ids []uuid.UUID, crLabels map[string]string, owners map[uuid.UUID]envOwner, hint uuid.UUID) (uuid.UUID, bool) {
 	switch len(ids) {
 	case 0:
 		// No snapshot in any project: a CR this console does not track. That is
@@ -305,6 +324,15 @@ func (r *StatusReconciler) resolveSnapshotEnv(kind, name string, ids []uuid.UUID
 		if len(matched) == 1 {
 			r.resolvedAmbiguity(kind, name)
 			return matched[0], true
+		}
+	}
+
+	if hint != uuid.Nil {
+		for _, id := range ids {
+			if id == hint {
+				r.resolvedAmbiguity(kind, name)
+				return hint, true
+			}
 		}
 	}
 
@@ -502,8 +530,10 @@ func (r *StatusReconciler) reconcilePublicApis(ctx context.Context, owners map[u
 		return
 	}
 	envNames := make(map[string]bool, len(envs))
+	envByNamespace := make(map[string]uuid.UUID, len(envs))
 	for _, e := range envs {
 		envNames[e.Name] = true
+		envByNamespace[e.Namespace] = e.EnvID
 	}
 
 	list, err := r.clients.Dynamic.Resource(pgvr("publicapis")).Namespace("").List(ctx, metav1.ListOptions{})
@@ -512,11 +542,14 @@ func (r *StatusReconciler) reconcilePublicApis(ctx context.Context, owners map[u
 		return
 	}
 
+	serviceEnvs := r.upstreamServiceEnvs(ctx, apiEnvs, envByNamespace)
+
 	updated := 0
 	for i := range list.Items {
 		cr := &list.Items[i]
 		name := cr.GetName()
-		envID, ok := r.resolveSnapshotEnv("PublicApi", name, apiEnvs[name], cr.GetLabels(), owners)
+		envID, ok := r.resolveSnapshotEnvHinted("PublicApi", name, apiEnvs[name], cr.GetLabels(), owners,
+			serviceEnvs[upstreamServiceName(cr)])
 		if !ok {
 			continue
 		}
@@ -555,6 +588,65 @@ func (r *StatusReconciler) reconcilePublicApis(ctx context.Context, owners map[u
 	if updated > 0 {
 		log.Debug().Int("updated", updated).Msg("status-reconciler: synced publicapi statuses")
 	}
+}
+
+// upstreamServiceName is the Service a PublicApi routes to, "" when the CR does
+// not declare one.
+func upstreamServiceName(cr *unstructured.Unstructured) string {
+	name, found, err := unstructured.NestedString(cr.Object, "spec", "upstream", "serviceName")
+	if err != nil || !found {
+		return ""
+	}
+	return name
+}
+
+// upstreamServiceEnvs maps a Service name to the environment that owns it, for
+// use as a tie-break hint when several projects claim the same PublicApi name.
+// A Service lives in exactly one namespace and a namespace belongs to exactly
+// one environment, so a name that resolves to a single environment identifies
+// the real owner of the endpoint; a name found in several environments (or in
+// none the console knows) is left out and the ambiguity is reported as before.
+//
+// The cluster-wide Service list is skipped entirely when no name is contested,
+// which is the normal state — the hint costs one LIST only while a stale twin
+// row exists.
+func (r *StatusReconciler) upstreamServiceEnvs(ctx context.Context, apiEnvs map[string][]uuid.UUID, envByNamespace map[string]uuid.UUID) map[string]uuid.UUID {
+	contested := false
+	for _, ids := range apiEnvs {
+		if len(ids) > 1 {
+			contested = true
+			break
+		}
+	}
+	if !contested {
+		return nil
+	}
+
+	svcs, err := r.client.CoreV1().Services("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Warn().Err(err).Msg("status-reconciler: list services for publicapi tie-break")
+		return nil
+	}
+
+	seen := make(map[string]uuid.UUID, len(svcs.Items))
+	for i := range svcs.Items {
+		envID, ok := envByNamespace[svcs.Items[i].Namespace]
+		if !ok {
+			continue
+		}
+		name := svcs.Items[i].Name
+		if prev, dup := seen[name]; dup && prev != envID {
+			seen[name] = uuid.Nil
+			continue
+		}
+		seen[name] = envID
+	}
+	for name, envID := range seen {
+		if envID == uuid.Nil {
+			delete(seen, name)
+		}
+	}
+	return seen
 }
 
 // dnsVerdictTTL bounds how long a PublicApi DNS verdict is reused. The
