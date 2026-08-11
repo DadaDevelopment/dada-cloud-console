@@ -3,7 +3,9 @@ package worker
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // TestFailureMessageAndReasonNeverEmpty is the contract this file exists to
@@ -70,5 +72,30 @@ func TestFailureMessageAndReasonNilCause(t *testing.T) {
 	msg, reason := failureMessageAndReason(nil)
 	if msg != "" || reason != "" {
 		t.Fatalf("nil cause produced msg=%q reason=%q, want both empty", msg, reason)
+	}
+}
+
+// TestFailureReasonCutIsRuneSafe: the reason is lifted from a build log, which
+// is routinely Russian. A cut at a byte offset lands inside a multi-byte rune
+// and ships a broken sequence into the failure email.
+func TestFailureReasonCutIsRuneSafe(t *testing.T) {
+	long := strings.Repeat("ошибка ", 200)
+	got := failureReason(errors.New(long))
+	if !utf8.ValidString(got) {
+		t.Errorf("failureReason produced invalid UTF-8: %q", got)
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("long reason must be marked as truncated: %q", got)
+	}
+	if n := utf8.RuneCountInString(strings.TrimSuffix(got, "…")); n != failureReasonMaxLen {
+		t.Errorf("truncated to %d runes, want %d", n, failureReasonMaxLen)
+	}
+}
+
+// TestFailureReasonKeepsShortTextIntact guards the common case: a one-line
+// cause under the cap must reach the reader unchanged, with no ellipsis.
+func TestFailureReasonKeepsShortTextIntact(t *testing.T) {
+	if got := failureReason(errors.New("npm ci exited 1\nnpm ERR! code 1")); got != "npm ci exited 1" {
+		t.Errorf("got %q, want first line only", got)
 	}
 }

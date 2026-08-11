@@ -562,6 +562,12 @@ func (r *Runner) handleBuildError(ctx context.Context, b *db.Build, repo *db.Rep
 
 // failureReason trims a build error into a one-line cause for the failure email,
 // capped so a long stack/log tail never bloats the message.
+//
+// The cut is rune-safe. The text comes from a build log, which is routinely
+// Russian, and slicing at a byte offset can land inside a multi-byte rune: the
+// reason then carries a broken sequence into the mail body and into whatever
+// stores it, which is the same trap buildNotifyErrorMaxLen already avoids on
+// the audit side.
 func failureReason(err error) string {
 	if err == nil {
 		return ""
@@ -570,11 +576,14 @@ func failureReason(err error) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
 		s = s[:i]
 	}
-	if len(s) > 200 {
-		s = s[:200] + "…"
+	if runes := []rune(s); len(runes) > failureReasonMaxLen {
+		s = string(runes[:failureReasonMaxLen]) + "…"
 	}
 	return s
 }
+
+// failureReasonMaxLen bounds the one-line cause carried into the failure email.
+const failureReasonMaxLen = 200
 
 // maxBuildAttempts bounds automatic retries of a build that keeps hitting
 // transient failures.

@@ -1,8 +1,11 @@
 package notify
 
 import (
+	"io"
+	"mime/quotedprintable"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testNotifier() *Notifier {
@@ -76,6 +79,59 @@ func TestRenderCyrillicHeader(t *testing.T) {
 	}
 	if !strings.Contains(msg, "\r\n\r\n") {
 		t.Errorf("missing header/body separator: %q", msg)
+	}
+}
+
+// TestRenderHasDateHeader locks the RFC-5322 mandatory header. Without it the
+// send still succeeds and the audit row still says "success", while the letter
+// is scored as spam at the receiver — a silence no metric of ours can see.
+func TestRenderHasDateHeader(t *testing.T) {
+	n := testNotifier()
+	msg := n.render("u@x.ru", "subject", "body")
+	if !strings.Contains(msg, "\r\nDate: ") {
+		t.Errorf("missing Date header: %q", msg)
+	}
+	header, _, ok := strings.Cut(msg, "\r\n\r\n")
+	if !ok {
+		t.Fatalf("missing header/body separator: %q", msg)
+	}
+	for _, line := range strings.Split(header, "\r\n") {
+		if strings.HasPrefix(line, "Date: ") {
+			if _, err := time.Parse(time.RFC1123Z, strings.TrimPrefix(line, "Date: ")); err != nil {
+				t.Errorf("Date header is not RFC1123Z: %q (%v)", line, err)
+			}
+		}
+	}
+}
+
+// TestRenderLongLineIsWrapped is the regression for the SMTP incident that
+// killed nine operator alerts: Postbox answers 500 "Line too long" past the
+// RFC 5321 limit of 1000 octets, so no rendered line may reach it however wide
+// the build log was.
+func TestRenderLongLineIsWrapped(t *testing.T) {
+	n := testNotifier()
+	_, body := n.Compose("myapp", "failure", "", strings.Repeat("stacktrace ", 400), "proj-1", "build-1")
+	msg := n.render("u@x.ru", "сборка не удалась", body)
+	if !strings.Contains(msg, "Content-Transfer-Encoding: quoted-printable") {
+		t.Errorf("body not declared quoted-printable: %q", msg)
+	}
+	for i, line := range strings.Split(msg, "\r\n") {
+		if len(line) > 998 {
+			t.Errorf("line %d is %d octets, over the RFC 5321 limit", i, len(line))
+		}
+	}
+}
+
+// TestEncodeBodyRoundTrips: the reader must see the original text, soft line
+// breaks and all, so wrapping never costs the letter its meaning.
+func TestEncodeBodyRoundTrips(t *testing.T) {
+	original := "Сборка приложения myapp не завершилась успешно.\n\nПричина: " + strings.Repeat("длинная строка ", 200) + "\n"
+	decoded, err := io.ReadAll(quotedprintable.NewReader(strings.NewReader(encodeBody(original))))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got := strings.ReplaceAll(string(decoded), "\r\n", "\n"); got != original {
+		t.Errorf("round trip lost content:\n got %q\nwant %q", got, original)
 	}
 }
 

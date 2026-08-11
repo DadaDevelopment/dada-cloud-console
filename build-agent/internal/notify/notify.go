@@ -8,10 +8,14 @@
 package notify
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
+	"io"
+	"mime/quotedprintable"
 	"net/smtp"
 	"strings"
+	"time"
 )
 
 // Notifier holds the SMTP endpoint used for deploy-result mail.
@@ -92,17 +96,54 @@ func (n *Notifier) Send(to, subject, body string) error {
 	return smtp.SendMail(addr, auth, n.from, []string{to}, []byte(msg))
 }
 
-// render assembles RFC-5322 headers + UTF-8 body. Pure — unit-tested.
+// render assembles RFC-5322 headers + UTF-8 body.
+//
+// Date is mandatory under RFC 5322 and its absence is a spam signal at exactly
+// the receivers our users have (mail.ru, yandex). This is the only channel that
+// reaches a person who has already closed the console, so a letter scored into
+// a spam folder is indistinguishable from the deploy finishing in silence: the
+// audit row says the send succeeded, because SMTP acceptance is all it can see.
+// The backend mailer grew the header in 9e795149; this path never did.
 func (n *Notifier) render(to, subject, body string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "From: %s\r\n", n.from)
 	fmt.Fprintf(&b, "To: %s\r\n", to)
 	fmt.Fprintf(&b, "Subject: %s\r\n", encodeHeader(subject))
+	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().UTC().Format(time.RFC1123Z))
 	b.WriteString("MIME-Version: 1.0\r\n")
 	b.WriteString("Content-Type: text/plain; charset=\"UTF-8\"\r\n")
+	b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n")
 	b.WriteString("\r\n")
-	b.WriteString(strings.ReplaceAll(body, "\n", "\r\n"))
+	b.WriteString(encodeBody(body))
 	return b.String()
+}
+
+// encodeBody quoted-printable-encodes a message body so no single long line can
+// kill the letter.
+//
+// RFC 5321 caps a line at 1000 octets and Postbox enforces it: it answers
+// 500 "Line too long" and drops the connection. That is how nine operator
+// alerts died before backend/internal/notify grew the same encoder. The build
+// mail carries a failure reason lifted from a build log, so the same wide line
+// can arrive here; writing the body raw only postponed the identical incident.
+//
+// It also makes the body byte-safe: quoted-printable escapes any byte the
+// sender could not represent, so a truncation that split a multi-byte rune
+// upstream degrades to an escape rather than to a broken message.
+//
+// On the encoder's own failure the raw body is returned: a letter that might be
+// rejected still beats no letter at all.
+func encodeBody(body string) string {
+	normalized := strings.ReplaceAll(body, "\r\n", "\n")
+	var out bytes.Buffer
+	w := quotedprintable.NewWriter(&out)
+	if _, err := io.WriteString(w, normalized); err != nil {
+		return strings.ReplaceAll(normalized, "\n", "\r\n")
+	}
+	if err := w.Close(); err != nil {
+		return strings.ReplaceAll(normalized, "\n", "\r\n")
+	}
+	return out.String()
 }
 
 // encodeHeader RFC-2047 base64-encodes a header value when it contains
