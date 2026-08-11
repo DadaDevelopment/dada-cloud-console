@@ -507,8 +507,15 @@ Funnel reads from `GET /api/v1/admin/growth/campaigns`.
 - [x] замер холодного бута в agent-sandbox: **4.98s против 16.7s**, под с emptyDir, PVC ноль
 - [x] первый живой suspend уронил бэкенд OOMKilled — minio под длину -1 просит буфер ~537MiB
       при лимите пода 512Mi; починено `a218e5be` (PartSize 16MiB) + тест на соотношение
-- [ ] повторить suspend/resume round-trip с файлом после раскатки `a218e5be`
-- [ ] убрать бокс `ephprobe1` из песочницы и проверить, что архив удалён вместе с ним
+- [x] round-trip на живом проде после раскатки `a218e5be`: 20 MB случайного файла в
+      `/workspace/proj/blob`, suspend 4.56s -> `Sleeping`, resume 14.29s -> `Ready`,
+      md5 `591d9632f7c00411d851e92b5b159c89` и метка `roundtrip-20260811T091602Z` совпали.
+      Под пересоздан (startTime 09:16:14Z против 09:12:44Z у прежнего тела), то есть
+      emptyDir приехал пустым и содержимое пришло из архива, а не пережило рестарт
+      контейнера. В бакете лежал `box-workspaces/box-w1786433239859449260.tar.gz`
+      на 20 003 530 байт — ровно несжимаемые 20 MB
+- [x] бокс `ephprobe1` удалён (`DeleteBox` 202), в `dada-boxes` ни подов, ни PVC,
+      префикс `box-workspaces/` пуст — `Destroy` унёс архив за собой
 
 ### Что осталось за рамками
 - `argo-infra@6e65676e` несёт протухший trailer «ноды managed Beget, SSH нет» — владелец
