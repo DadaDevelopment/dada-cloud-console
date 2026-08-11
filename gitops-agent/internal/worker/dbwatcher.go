@@ -1365,6 +1365,16 @@ func (w *DBWatcher) deleteAppGitRepo(ctx context.Context, projectID uuid.UUID, e
 // plus namespace finalizers reap the namespace(s) without a worker-side k8s
 // client.
 //
+// A delete that removes nothing pushes nothing, and RemoveAndPush reports
+// that as an empty sha with no error -- the same hole doDeleteApp had until
+// verifyDeleteRemovedApp closed it. For a project that hole is worse: the
+// wipe below is unconditional, so a false Committed would delete every DB row
+// the project owns (project_deleteproject_leaves_live_namespaces) while
+// Argo/the namespace never got the prune signal. verifyDeleteRemovedProject
+// gates on an empty sha, BEFORE InsertCommit/MarkCommitted and before the wipe
+// tx, and returns an error the caller marks the operation Failed on, so a
+// missed remove blocks the wipe instead of silently orphaning the project.
+//
 // Keycloak teardown is NOT skipped. bootstrapProject writes the project's Group
 // CRs into the keycloak-config chart (ADR-009), and nothing used to remove them:
 // project client-a was fully torn down on 2026-08-10 and its five Group CRs were
@@ -1395,6 +1405,12 @@ func (w *DBWatcher) doDeleteProject(ctx context.Context, op db.Operation) error 
 	sha, err := mgr.RemoveAndPush([]string{projectDir}, commitMsg, w.cfg.BotName, w.cfg.BotEmail)
 	if err != nil {
 		return fmt.Errorf("git remove project tree: %w", err)
+	}
+	if sha == "" {
+		if err := verifyDeleteRemovedProject(mgr.LocalPath(), slug, projectDir); err != nil {
+			return err
+		}
+		log.Printf("[dbwatcher] op %s: DeleteProject %s removed nothing, project has no manifests in git", op.ID, slug)
 	}
 	if sha != "" {
 		opID := op.ID
