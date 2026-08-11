@@ -294,6 +294,20 @@ export default function AppDetailPage() {
   const gitSha = summary.git_sha?.slice(0, 7);
   const gitValue = summary.repo_full_name ?? (gitSha ? t("apps.detail.config.gitCommit", { sha: gitSha }) : t("apps.detail.config.gitNone"));
   const hasGitSource = !!summary.repo_full_name || !!summary.git_sha;
+  /**
+   * Endpoints minus the ones already listed as hostnames. Attaching a default
+   * domain writes both a domain_hostnames row and a surrogate PublicApi for the
+   * same FQDN, so the tab printed every default domain twice — once as "Домен по
+   * умолчанию" and once as "auth: none" — with two independently computed
+   * badges that can disagree. The hostname row wins: its status is the one
+   * backed by a route + certificate check (RevalidateActiveHostnameRoutes).
+   */
+  const extraEndpoints = endpoints.filter((ep) => {
+    const s = ep.summary_json as { fqdn?: string; spec?: { dns?: { fqdn?: string } } };
+    const fqdn = s.spec?.dns?.fqdn ?? s.fqdn;
+    return !fqdn || !hostnames.some((h) => h.hostname === fqdn);
+  });
+
   const nextSteps =
     !isResource && isReadyNoAlerts && !isLoadingHostnames
       ? getAppNextSteps({
@@ -634,7 +648,7 @@ export default function AppDetailPage() {
 
         {isLoadingEndpoints ? (
           <div className="flex h-20 items-center justify-center"><Spinner /></div>
-        ) : endpoints.length === 0 && hostnames.length === 0 ? (
+        ) : extraEndpoints.length === 0 && hostnames.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 py-10">
             <svg className="mb-2 h-8 w-8 text-gray-300 dark:text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9" />
@@ -670,7 +684,7 @@ export default function AppDetailPage() {
                 <PhaseBadge phase={hn.status === "active" ? "Ready" : hn.status === "failed" ? "Failed" : "Pending"} />
               </div>
             ))}
-            {endpoints.map((ep) => {
+            {extraEndpoints.map((ep) => {
               const epSummary = ep.summary_json as {
                 fqdn?: string;
                 auth_scheme?: string;

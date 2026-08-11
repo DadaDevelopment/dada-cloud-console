@@ -67,8 +67,9 @@ type StatusReconciler struct {
 	managers map[string]*git.Manager
 	gcBase   string
 
-	dnsVerdicts map[string]dnsVerdict
-	deployments chan deploymentObservation
+	dnsVerdicts  map[string]dnsVerdict
+	addrVerdicts map[string]addrVerdict
+	deployments  chan deploymentObservation
 
 	ambiguous map[string]bool
 }
@@ -105,17 +106,24 @@ type dnsVerdict struct {
 	at   time.Time
 }
 
+// addrVerdict caches one endpoint's resolved addresses, see publicApiRouteMissing.
+type addrVerdict struct {
+	addrs []string
+	at    time.Time
+}
+
 func NewStatusReconciler(pool *pgxpool.Pool, cfg *config.Config, clients *dadak8s.Clients) *StatusReconciler {
 	return &StatusReconciler{
-		pool:        pool,
-		cfg:         cfg,
-		client:      clients.Typed,
-		clients:     clients,
-		managers:    map[string]*git.Manager{},
-		dnsVerdicts: map[string]dnsVerdict{},
-		ambiguous:   map[string]bool{},
-		deployments: make(chan deploymentObservation, 64),
-		gcBase:      filepath.Join(cfg.RepoLocalPath, "orphan-gc"),
+		pool:         pool,
+		cfg:          cfg,
+		client:       clients.Typed,
+		clients:      clients,
+		managers:     map[string]*git.Manager{},
+		dnsVerdicts:  map[string]dnsVerdict{},
+		addrVerdicts: map[string]addrVerdict{},
+		ambiguous:    map[string]bool{},
+		deployments:  make(chan deploymentObservation, 64),
+		gcBase:       filepath.Join(cfg.RepoLocalPath, "orphan-gc"),
 	}
 }
 
@@ -543,6 +551,7 @@ func (r *StatusReconciler) reconcilePublicApis(ctx context.Context, owners map[u
 	}
 
 	serviceEnvs := r.upstreamServiceEnvs(ctx, apiEnvs, envByNamespace)
+	routes := r.loadIngressRoutes(ctx)
 
 	updated := 0
 	for i := range list.Items {
@@ -559,6 +568,11 @@ func (r *StatusReconciler) reconcilePublicApis(ctx context.Context, owners map[u
 			phase = "Ready"
 			verdict = "dns"
 		}
+		routeMissing := phase == "Ready" && r.publicApiRouteMissing(ctx, cr, routes)
+		if routeMissing {
+			phase = "Pending"
+			verdict = publicApiVerdictRouteMissing
+		}
 		fields := map[string]any{
 			"status":      phase,
 			"live_source": "crossplane",
@@ -567,10 +581,15 @@ func (r *StatusReconciler) reconcilePublicApis(ctx context.Context, owners map[u
 		if verdict != "" {
 			fields["live_verdict"] = verdict
 		}
-		if phase == "Pending" {
+		switch {
+		case routeMissing:
+			fields["reason"] = publicApiRouteMissingReason
+		case phase == "Pending":
 			if msg, _, ok := crProvisionError(cr); ok {
 				fields["reason"] = msg
 			}
+		default:
+			fields["reason"] = ""
 		}
 		if inst := cr.GetLabels()["argocd.argoproj.io/instance"]; inst != "" {
 			if app := stripEnvSuffix(inst, envNames); app != "" && app != inst {
@@ -647,6 +666,148 @@ func (r *StatusReconciler) upstreamServiceEnvs(ctx context.Context, apiEnvs map[
 		}
 	}
 	return seen
+}
+
+// publicApiVerdictRouteMissing marks a snapshot demoted by the route check, so
+// live_verdict says which of the two live signals (DNS record, HTTP route)
+// decided the phase instead of only ever recording the promoting one.
+const publicApiVerdictRouteMissing = "route_missing"
+
+// publicApiRouteMissingReason is the text the app Domains tab prints under a
+// demoted endpoint. It names the missing object, because the fix is always to
+// restore the Ingress -- the DNS half of the endpoint is fine by construction
+// (the check only fires for records already pointing at our own edge).
+const publicApiRouteMissingReason = "DNS указывает на наш ingress, но Ingress-правила для этого хоста нет — запрос упадёт в 404"
+
+// ingressRoutes is the cluster's live HTTP routing table: every host any
+// Ingress claims, plus the edge addresses those Ingresses are published on.
+//
+// known is false when the list call failed. Every consumer treats that as
+// "leave the row alone" rather than "the route is gone", so an API-server blip
+// never flips a healthy endpoint to Pending.
+type ingressRoutes struct {
+	hosts     map[string]bool
+	wildcards map[string]bool
+	edgeAddrs map[string]bool
+	known     bool
+}
+
+// routed reports whether some Ingress claims host, counting the single-label
+// wildcard form Kubernetes defines (*.example.com matches foo.example.com but
+// never bar.foo.example.com nor the bare apex).
+func (ir ingressRoutes) routed(host string) bool {
+	if ir.hosts[host] {
+		return true
+	}
+	label, rest, found := strings.Cut(host, ".")
+	return found && label != "" && ir.wildcards[rest]
+}
+
+// atOurEdge reports whether any of addrs is an address our own ingress
+// controller answers on. This is what separates "the endpoint is broken" from
+// "this record was never ours to route": ns1/ns2, vpn and ipa are PublicApi
+// rows whose A record points at foreign infrastructure and whose upstream is
+// not even HTTP (port 53, 2096, 636). Demanding an Ingress for those would
+// paint six permanently-correct records red.
+func (ir ingressRoutes) atOurEdge(addrs []string) bool {
+	for _, a := range addrs {
+		if ir.edgeAddrs[a] {
+			return true
+		}
+	}
+	return false
+}
+
+// loadIngressRoutes builds the routing table once per tick. The list is
+// cluster-wide because a hostname is not always routed from its own app's
+// namespace -- PR previews under *.pv.dada-tuda.ru are served by one shared
+// wildcard Ingress in argocd-prod.
+//
+// The edge addresses come from the Ingresses' own status rather than config:
+// CLUSTER_LB_IP and GITOPS_DEFAULT_DOMAIN_DNS_TARGET already disagree in this
+// repo (93.189.231.60 vs 155.212.223.198), and a stale constant here would
+// silently switch the whole check off.
+func (r *StatusReconciler) loadIngressRoutes(ctx context.Context) ingressRoutes {
+	out := ingressRoutes{
+		hosts:     map[string]bool{},
+		wildcards: map[string]bool{},
+		edgeAddrs: map[string]bool{},
+	}
+	list, err := r.client.NetworkingV1().Ingresses(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Warn().Err(err).Msg("status-reconciler: list ingresses for publicapi route check")
+		return out
+	}
+	for i := range list.Items {
+		ing := &list.Items[i]
+		for _, rule := range ing.Spec.Rules {
+			if rule.Host == "" {
+				continue
+			}
+			if suffix, ok := strings.CutPrefix(rule.Host, "*."); ok {
+				out.wildcards[suffix] = true
+				continue
+			}
+			out.hosts[rule.Host] = true
+		}
+		for _, lb := range ing.Status.LoadBalancer.Ingress {
+			if lb.IP != "" {
+				out.edgeAddrs[lb.IP] = true
+			}
+		}
+	}
+	out.known = len(out.edgeAddrs) > 0
+	return out
+}
+
+// publicApiRouteMissing reports that an endpoint the composite calls Ready
+// cannot actually serve: its record points at our own ingress controller and no
+// Ingress there claims the host, so every visitor gets the default backend's
+// 404.
+//
+// This is the endpoint-side twin of RevalidateActiveHostnameRoutes in the
+// backend, which already does exactly this for domain_hostnames rows. PublicApi
+// snapshots never got the same treatment, so "Ready" on the app Domains tab has
+// only ever meant "the Beget DNS Request succeeded" -- development.dada-tuda.ru
+// carried a green badge for 16 hours while answering 404, and jira. and
+// payments.dada-tuda.ru are still green today with no Ingress and no TLS at all.
+//
+// Deliberately conservative: it never fires on an unreadable routing table, on
+// gateway-routed endpoints (their traffic enters through the shared gateway
+// Ingress, not one of their own), on records that do not resolve, or on records
+// answering from somewhere other than our edge.
+func (r *StatusReconciler) publicApiRouteMissing(ctx context.Context, cr *unstructured.Unstructured, routes ingressRoutes) bool {
+	if !routes.known {
+		return false
+	}
+	if gw, found, _ := unstructured.NestedBool(cr.Object, "spec", "gatewayRoute"); found && gw {
+		return false
+	}
+	fqdn, _, _ := unstructured.NestedString(cr.Object, "spec", "dns", "fqdn")
+	if fqdn == "" || routes.routed(fqdn) {
+		return false
+	}
+	return routes.atOurEdge(r.resolveAddrs(ctx, fqdn))
+}
+
+// resolveAddrs resolves fqdn behind the same TTL the DNS verdict uses, so the
+// route check adds at most one lookup per endpoint per window no matter how
+// often the reconciler ticks.
+func (r *StatusReconciler) resolveAddrs(ctx context.Context, fqdn string) []string {
+	if v, ok := r.addrVerdicts[fqdn]; ok && time.Since(v.at) < dnsVerdictTTL {
+		return v.addrs
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, dnsLookupTimeout)
+	defer cancel()
+	addrs, err := net.DefaultResolver.LookupHost(lookupCtx, fqdn)
+	if err != nil {
+		addrs = nil
+	}
+	if r.addrVerdicts == nil {
+		r.addrVerdicts = map[string]addrVerdict{}
+	}
+	r.addrVerdicts[fqdn] = addrVerdict{addrs: addrs, at: time.Now()}
+	return addrs
 }
 
 // dnsVerdictTTL bounds how long a PublicApi DNS verdict is reused. The
