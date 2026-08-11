@@ -1176,10 +1176,12 @@ func (r *StatusReconciler) reconcile(ctx context.Context) map[snapKey]bool {
 		if la.lastExitCode != nil {
 			patchFields["exit_code"] = *la.lastExitCode
 		}
-		if hostname, err := db.PrimaryHostname(ctx, r.pool, k.env, k.app, r.cfg.DefaultDomainBase); err != nil {
+		if hostInfo, err := db.PrimaryHostname(ctx, r.pool, k.env, k.app, r.cfg.DefaultDomainBase); err != nil {
 			log.Warn().Err(err).Str("app", k.app).Msg("status-reconciler: primary hostname lookup")
-		} else if hostname != "" {
-			patchFields["url"] = "https://" + hostname
+		} else if hostInfo.Hostname != "" {
+			patchFields["url"] = "https://" + hostInfo.Hostname
+			patchFields["url_status"] = hostInfo.Status
+			patchFields["url_reason"] = hostInfo.Reason
 		}
 		patch, _ := json.Marshal(patchFields)
 		n, err := db.UpdateLiveStatus(ctx, r.pool, k.env, "App", k.app, phase, patch)

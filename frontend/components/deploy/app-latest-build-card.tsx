@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ExternalLink, Rocket } from "lucide-react";
+import { ExternalLink, Rocket, AlertTriangle } from "lucide-react";
 import { buildsApi, cloudTasksApi, gitApi } from "@/lib/api";
 import type { Build } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
@@ -17,6 +17,7 @@ import { resolveCommit, formatCommitLabel } from "@/lib/build-commit";
 import { BuildProvenance } from "@/components/deploy/build-provenance";
 import { trackBuildStart } from "@/lib/build-watch";
 import { StarterNextStep } from "@/components/deploy/starter-next-step";
+import type { AppUrlStatus } from "@/lib/app-url-status";
 
 const POLL_MS = 3000;
 
@@ -25,6 +26,8 @@ interface AppLatestBuildCardProps {
   envId: string;
   appName: string;
   appUrl?: string;
+  appUrlStatus?: AppUrlStatus;
+  appUrlReason?: string | null;
   appReady: boolean;
   hasGitRepo: boolean;
   buildHref: (buildId: string) => string;
@@ -45,7 +48,7 @@ interface AppLatestBuildCardProps {
  * guarded per build id so polling never inflates it, mirroring the pattern
  * used for `BuildViewKey` below.
  */
-export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appReady, hasGitRepo, buildHref }: AppLatestBuildCardProps) {
+export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appUrlStatus, appUrlReason, appReady, hasGitRepo, buildHref }: AppLatestBuildCardProps) {
   const { t } = useT();
   const router = useRouter();
   const { role } = useProjectContext();
@@ -220,7 +223,7 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appReady
           <div className="min-w-0">
             <p className="text-sm font-semibold text-green-700 dark:text-green-400">{t("apps.latestBuild.success.heading")}</p>
             <BuildProvenance build={build} className="mt-0.5 min-w-0" />
-            {appUrl && appReady && (
+            {appUrl && appReady && (appUrlStatus === "active" || appUrlStatus === "unknown" || !appUrlStatus) && (
               <a
                 href={appUrl}
                 target="_blank"
@@ -230,6 +233,19 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appReady
               >
                 {appUrl}
               </a>
+            )}
+            {appUrl && appReady && appUrlStatus === "pending" && (
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {t("apps.url.pending.label")}
+                {appUrlReason ? ` — ${appUrlReason}` : ""}
+              </p>
+            )}
+            {appUrl && appReady && appUrlStatus === "failed" && (
+              <p className="mt-1 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                {t("apps.url.failed.label")}
+                {appUrlReason ? ` — ${appUrlReason}` : ""}
+              </p>
             )}
             {appUrl && !appReady && (
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("apps.latestBuild.success.notReady")}</p>
@@ -243,7 +259,7 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appReady
             >
               {t("apps.latestBuild.viewLogs")}
             </Link>
-            {appUrl && appReady && (
+            {appUrl && appReady && (appUrlStatus === "active" || appUrlStatus === "unknown" || !appUrlStatus) && (
               <a
                 href={appUrl}
                 target="_blank"

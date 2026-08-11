@@ -21,11 +21,13 @@ import { TemplateDeployCards } from "@/components/console/template-deploy-cards"
 import { UploadDeployCard } from "@/components/deploy/upload-deploy";
 import { useT } from "@/lib/i18n/console/context";
 import { QuotaUpsell } from "@/components/billing/quota-upsell";
-import { Globe, Database, ChevronDown } from "lucide-react";
+import { Globe, Database, ChevronDown, AlertTriangle } from "lucide-react";
 import { AppPreviewPane } from "@/components/app-preview-pane";
 import { LogsViewer } from "@/components/logs-viewer";
 import { classifyVMResource, extractIngressSpec, extractDatabaseSpec } from "@/lib/vm-resources";
 import { getAppAlerts, hasAlertType, type AppAlert } from "@/lib/app-alerts";
+import { normalizeAppUrlStatus, appUrlReasonMessageKey } from "@/lib/app-url-status";
+import { Tooltip } from "@/components/ui/tooltip";
 
 interface CreateAppForm {
   name: string;
@@ -46,6 +48,17 @@ function appHostname(url: string): string {
   } catch {
     return url;
   }
+}
+
+/**
+ * Human-readable `url_reason` text: the known code's own copy, or an honest
+ * fallback that still shows the raw code instead of staying silent about an
+ * unfamiliar one (backend newer than this bundle).
+ */
+function urlReasonText(reason: string | undefined, t: (key: string, vars?: Record<string, string>) => string): string | null {
+  if (!reason) return null;
+  const key = appUrlReasonMessageKey(reason);
+  return key ? t(key) : t("apps.url.reason.unknown", { reason });
 }
 
 export default function AppsPage() {
@@ -611,6 +624,8 @@ function AppRow({ app, env, projectId, expanded, onToggle, t }: AppRowProps) {
   const hasCrashAlert = hasAlertType(alerts, "crash");
   const hasVolumeAlert = hasAlertType(alerts, "volume");
   const hasURLAlert = hasAlertType(alerts, "url");
+  const urlStatus = normalizeAppUrlStatus(summary.url_status);
+  const urlReason = urlReasonText(summary.url_reason, t);
   const subtitle =
     resType === "ingress"
       ? ing?.host ?? summary.image ?? "—"
@@ -694,7 +709,7 @@ function AppRow({ app, env, projectId, expanded, onToggle, t }: AppRowProps) {
         </div>
 
         <div className="flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
-          {summary.url && (
+          {summary.url && (urlStatus === "active" || urlStatus === "unknown") && (
             <a
               href={summary.url}
               target="_blank"
@@ -704,6 +719,22 @@ function AppRow({ app, env, projectId, expanded, onToggle, t }: AppRowProps) {
               <Globe className="h-3.5 w-3.5 shrink-0" />
               {t("apps.card.openUrl", { hostname: appHostname(summary.url) })}
             </a>
+          )}
+          {summary.url && urlStatus === "pending" && (
+            <Tooltip label={urlReason ?? t("apps.url.pending.label")}>
+              <span className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-400 dark:text-gray-500">
+                <Globe className="h-3.5 w-3.5 shrink-0" />
+                {t("apps.url.pending.chip")}
+              </span>
+            </Tooltip>
+          )}
+          {summary.url && urlStatus === "failed" && (
+            <Tooltip label={urlReason ?? t("apps.url.failed.label")}>
+              <span className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-3 py-1.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                {t("apps.url.failed.chip")}
+              </span>
+            </Tooltip>
           )}
           <Link
             href={appHref}
@@ -723,7 +754,7 @@ function AppRow({ app, env, projectId, expanded, onToggle, t }: AppRowProps) {
         <div className="space-y-4 border-t border-gray-100 dark:border-gray-800 p-4">
           <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
             <div className="min-w-0">
-              {summary.url ? (
+              {summary.url && (urlStatus === "active" || urlStatus === "unknown") ? (
                 <AppPreviewPane
                   key={summary.preview_url ?? summary.url}
                   url={summary.preview_url ?? summary.url}
@@ -731,6 +762,17 @@ function AppRow({ app, env, projectId, expanded, onToggle, t }: AppRowProps) {
                   detailsUrl={`/projects/${projectId}/apps/${app.name}/settings?envId=${env.id}`}
                   title={app.name}
                 />
+              ) : summary.url && urlStatus === "pending" ? (
+                <div className="flex h-40 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-gray-200 dark:border-gray-800 px-4 text-center text-sm text-gray-400 dark:text-gray-500">
+                  <span>{t("apps.url.pending.label")}</span>
+                  {urlReason && <span className="text-xs">{urlReason}</span>}
+                </div>
+              ) : summary.url && urlStatus === "failed" ? (
+                <div className="flex h-40 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-amber-300 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20 px-4 text-center text-sm text-amber-700 dark:text-amber-300">
+                  <AlertTriangle className="h-5 w-5" />
+                  <span>{t("apps.url.failed.label")}</span>
+                  {urlReason && <span className="text-xs">{urlReason}</span>}
+                </div>
               ) : (
                 <div className="flex h-40 items-center justify-center rounded-lg border border-dashed border-gray-200 dark:border-gray-800 text-sm text-gray-400 dark:text-gray-500">
                   {t("apps.row.noUrl")}
@@ -759,7 +801,7 @@ function AppRow({ app, env, projectId, expanded, onToggle, t }: AppRowProps) {
                     <dd className="mt-0.5 text-gray-700 dark:text-gray-200">{summary.replicas ?? 1}</dd>
                   </div>
                 </div>
-                {summary.url && (
+                {summary.url && (urlStatus === "active" || urlStatus === "unknown") && (
                   <div>
                     <dt className="text-xs uppercase tracking-wide text-gray-400 dark:text-gray-500">URL</dt>
                     <dd className="mt-0.5 break-all">
@@ -771,6 +813,31 @@ function AppRow({ app, env, projectId, expanded, onToggle, t }: AppRowProps) {
                       >
                         {summary.url}
                       </a>
+                    </dd>
+                  </div>
+                )}
+                {summary.url && urlStatus === "pending" && (
+                  <div>
+                    <dt className="text-xs uppercase tracking-wide text-gray-400 dark:text-gray-500">URL</dt>
+                    <dd className="mt-0.5 break-all">
+                      <span className="font-mono text-xs text-gray-400 dark:text-gray-500">{summary.url}</span>
+                      <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                        {t("apps.url.pending.label")}
+                        {urlReason ? ` — ${urlReason}` : ""}
+                      </p>
+                    </dd>
+                  </div>
+                )}
+                {summary.url && urlStatus === "failed" && (
+                  <div>
+                    <dt className="text-xs uppercase tracking-wide text-gray-400 dark:text-gray-500">URL</dt>
+                    <dd className="mt-0.5 break-all">
+                      <span className="font-mono text-xs text-gray-500 dark:text-gray-400 line-through decoration-amber-500">{summary.url}</span>
+                      <p className="mt-0.5 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-300">
+                        <AlertTriangle className="h-3 w-3 shrink-0" />
+                        {t("apps.url.failed.label")}
+                        {urlReason ? ` — ${urlReason}` : ""}
+                      </p>
                     </dd>
                   </div>
                 )}

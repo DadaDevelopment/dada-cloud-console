@@ -337,22 +337,38 @@ func ResolveAppHealthAlert(ctx context.Context, pool *pgxpool.Pool, namespace, a
 	return nil
 }
 
-// PrimaryHostname returns the hostname to surface on an app's card, or ""
-// if the app has none. Preference order within domain_hostnames: an active
-// custom domain over an active surrogate (rows whose hostname ends in
-// domainBase are surrogates), then any row at all so a pending domain still
-// surfaces something. When the app has no domain_hostnames row whatsoever, it
-// falls back to the fqdn of a PublicApi snapshot in the same environment
-// tagged with this app_name: domains that entered the platform straight
-// through git (hand-recovered apps, manifests committed outside the console
-// API) exist only as PublicApi snapshots, and without this fallback such an
-// app never gets a url even though its domain is live.
+// PrimaryHostnameInfo carries the hostname to surface on an app's card
+// together with the health of the route behind it, so callers never present
+// a hostname without the state that backs it. Status is one of "active",
+// "pending", "failed" or "unknown"; unknown covers both an unrecognized
+// domain_hostnames.status value and the PublicApi fallback, where no
+// domain_hostnames row exists to attest route health at all. Reason mirrors
+// domain_hostnames.status_reason and is empty when there is none.
+type PrimaryHostnameInfo struct {
+	Hostname string
+	Status   string
+	Reason   string
+}
+
+// PrimaryHostname returns the hostname to surface on an app's card, and the
+// route health behind it, or a zero PrimaryHostnameInfo if the app has none.
+// Preference order within domain_hostnames: an active custom domain over an
+// active surrogate (rows whose hostname ends in domainBase are surrogates),
+// then any row at all so a pending domain still surfaces something. When the
+// app has no domain_hostnames row whatsoever, it falls back to the fqdn of a
+// PublicApi snapshot in the same environment tagged with this app_name:
+// domains that entered the platform straight through git (hand-recovered
+// apps, manifests committed outside the console API) exist only as PublicApi
+// snapshots, and without this fallback such an app never gets a url even
+// though its domain is live. The fallback carries no domain_hostnames row to
+// attest health, so it always reports status "unknown" rather than guessing.
 func PrimaryHostname(ctx context.Context, pool *pgxpool.Pool,
 	environmentID uuid.UUID, appName, domainBase string,
-) (string, error) {
-	var hostname string
+) (PrimaryHostnameInfo, error) {
+	var hostname, status string
+	var reason *string
 	err := pool.QueryRow(ctx, `
-		SELECT hostname
+		SELECT hostname, status, status_reason
 		FROM domain_hostnames
 		WHERE environment_id = $1 AND app_name = $2
 		ORDER BY
@@ -360,12 +376,16 @@ func PrimaryHostname(ctx context.Context, pool *pgxpool.Pool,
 			(right(hostname, length($3::text)) <> $3::text) DESC,
 			created_at ASC
 		LIMIT 1
-	`, environmentID, appName, domainBase).Scan(&hostname)
+	`, environmentID, appName, domainBase).Scan(&hostname, &status, &reason)
 	if err == nil {
-		return hostname, nil
+		info := PrimaryHostnameInfo{Hostname: hostname, Status: normalizeHostnameStatus(status)}
+		if reason != nil {
+			info.Reason = *reason
+		}
+		return info, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return "", fmt.Errorf("primary hostname: %w", err)
+		return PrimaryHostnameInfo{}, fmt.Errorf("primary hostname: %w", err)
 	}
 	err = pool.QueryRow(ctx, `
 		SELECT summary_json->'spec'->'dns'->>'fqdn'
@@ -378,9 +398,21 @@ func PrimaryHostname(ctx context.Context, pool *pgxpool.Pool,
 	`, environmentID, appName).Scan(&hostname)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return "", nil
+			return PrimaryHostnameInfo{}, nil
 		}
-		return "", fmt.Errorf("primary hostname publicapi fallback: %w", err)
+		return PrimaryHostnameInfo{}, fmt.Errorf("primary hostname publicapi fallback: %w", err)
 	}
-	return hostname, nil
+	return PrimaryHostnameInfo{Hostname: hostname, Status: "unknown"}, nil
+}
+
+// normalizeHostnameStatus maps domain_hostnames.status to the console's url_status
+// contract, folding any value the contract does not recognize into "unknown"
+// rather than letting it leak through unmapped.
+func normalizeHostnameStatus(status string) string {
+	switch status {
+	case "active", "pending", "failed":
+		return status
+	default:
+		return "unknown"
+	}
 }

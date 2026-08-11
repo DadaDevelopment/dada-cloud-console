@@ -535,6 +535,8 @@ export interface AppSummary {
   message: string;
   volume?: AppVolume;
   url?: string;
+  url_status?: string;
+  url_reason?: string;
   preview_url?: string;
 }
 

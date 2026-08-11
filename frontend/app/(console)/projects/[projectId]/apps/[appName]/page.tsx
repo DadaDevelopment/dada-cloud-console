@@ -20,12 +20,13 @@ import { DeployBadgeCard } from "@/components/deploy/deploy-badge-card";
 import { AppPreviewPane } from "@/components/app-preview-pane";
 import { AppAlertsBanner } from "@/components/deploy/app-alerts-banner";
 import { getAppAlerts } from "@/lib/app-alerts";
+import { normalizeAppUrlStatus, appUrlReasonMessageKey } from "@/lib/app-url-status";
 import { AppNextStepCard } from "@/components/deploy/app-next-step-card";
 import { AppLatestBuildCard } from "@/components/deploy/app-latest-build-card";
 import { getAppNextSteps } from "@/lib/app-next-step";
 import { useT } from "@/lib/i18n/console/context";
 import { GOAL_DEPLOY_SUCCESS, reachGoal } from "@/lib/metrika";
-import { Globe, Database } from "lucide-react";
+import { Globe, Database, AlertTriangle } from "lucide-react";
 import { classifyVMResource } from "@/lib/vm-resources";
 import { IngressDetail } from "@/components/resources/ingress-detail";
 import { ServiceDatabaseDetail } from "@/components/resources/service-database-detail";
@@ -266,7 +267,10 @@ export default function AppDetailPage() {
     );
   }
 
-  const summary = app.summary_json as { image?: string; port?: number; replicas?: number; ready?: number; restarts?: number; profile?: string; resources?: { cpu_limit: string; memory_limit: string }; observed_resources?: { cpu_request?: string; cpu_limit?: string; memory_request?: string; memory_limit?: string }; runtime?: string; volume?: AppVolume; repo_full_name?: string; source?: string; url?: string; preview_url?: string; git_sha?: string; git_message?: string };
+  const summary = app.summary_json as { image?: string; port?: number; replicas?: number; ready?: number; restarts?: number; profile?: string; resources?: { cpu_limit: string; memory_limit: string }; observed_resources?: { cpu_request?: string; cpu_limit?: string; memory_request?: string; memory_limit?: string }; runtime?: string; volume?: AppVolume; repo_full_name?: string; source?: string; url?: string; url_status?: string; url_reason?: string; preview_url?: string; git_sha?: string; git_message?: string };
+  const urlStatus = normalizeAppUrlStatus(summary.url_status);
+  const urlReasonKey = appUrlReasonMessageKey(summary.url_reason);
+  const urlReason = summary.url_reason ? (urlReasonKey ? t(urlReasonKey) : t("apps.url.reason.unknown", { reason: summary.url_reason })) : null;
   const isUploadedSource = summary.source === "archive";
   const isCompose = summary.runtime === "compose";
   const resType = classifyVMResource(app);
@@ -461,6 +465,8 @@ export default function AppDetailPage() {
           envId={envId}
           appName={appName}
           appUrl={summary.url}
+          appUrlStatus={urlStatus}
+          appUrlReason={urlReason}
           appReady={appPhaseReady}
           hasGitRepo={!!summary.repo_full_name}
           buildHref={(buildId) => `/projects/${projectId}/apps/${appName}/builds/${buildId}${envId ? `?envId=${envId}` : ""}`}
@@ -497,13 +503,36 @@ export default function AppDetailPage() {
         deploymentsHref={`/projects/${projectId}/apps/${appName}/deployments${envId ? `?envId=${envId}` : ""}`}
       />
 
-      {!isResource && summary.url && (
+      {!isResource && summary.url && (urlStatus === "active" || urlStatus === "unknown") && (
         <div className="mb-6">
           <AppPreviewPane
             url={summary.preview_url ?? summary.url}
             openUrl={summary.url}
             detailsUrl={`/projects/${projectId}/apps/${appName}/settings${envId ? `?envId=${envId}` : ""}`}
           />
+        </div>
+      )}
+
+      {!isResource && summary.url && (urlStatus === "pending" || urlStatus === "failed") && (
+        <div
+          className={
+            urlStatus === "failed"
+              ? "mb-6 rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 p-4"
+              : "mb-6 rounded-lg border border-dashed border-gray-200 dark:border-gray-800 p-4"
+          }
+        >
+          <p
+            className={
+              urlStatus === "failed"
+                ? "flex items-center gap-1.5 text-sm font-medium text-amber-700 dark:text-amber-300"
+                : "text-sm font-medium text-gray-500 dark:text-gray-400"
+            }
+          >
+            {urlStatus === "failed" && <AlertTriangle className="h-4 w-4 shrink-0" />}
+            {t(urlStatus === "failed" ? "apps.url.failed.label" : "apps.url.pending.label")}
+          </p>
+          <p className="mt-1 font-mono text-xs text-gray-500 dark:text-gray-400">{summary.url}</p>
+          {urlReason && <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{urlReason}</p>}
         </div>
       )}
 

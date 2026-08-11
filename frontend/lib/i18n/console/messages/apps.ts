@@ -76,6 +76,36 @@ export const apps: Messages = {
   "apps.card.syncedLabel": { ru: "Синхронизировано", en: "Synced" },
   "apps.row.noUrl": { ru: "У приложения пока нет URL", en: "The app has no URL yet" },
 
+  "apps.url.pending.label": { ru: "Адрес ещё готовится", en: "Address is still being prepared" },
+  "apps.url.pending.chip": { ru: "Готовится", en: "Preparing" },
+  "apps.url.failed.label": { ru: "Приложение работает, но публичный адрес не отвечает", en: "The app is running, but its public address is not responding" },
+  "apps.url.failed.chip": { ru: "Адрес не отвечает", en: "Address down" },
+  "apps.url.reason.dns_not_pointed": {
+    ru: "DNS ещё не указывает на платформу.",
+    en: "DNS does not point at the platform yet.",
+  },
+  "apps.url.reason.cert_pending": {
+    ru: "Выпускаем сертификат — обычно занимает минуту.",
+    en: "The certificate is being issued — usually takes a minute.",
+  },
+  "apps.url.reason.attach_timeout": {
+    ru: "Адрес так и не заработал за отведённое время. Проверьте DNS-запись и привяжите домен заново.",
+    en: "The address never came up in the allotted time. Check the DNS record and attach the domain again.",
+  },
+  "apps.url.reason.route_missing": {
+    ru: "Маршрута к приложению нет — платформа не отдаёт этот адрес. Передеплойте приложение или привяжите домен заново.",
+    en: "No route to the app exists — the platform does not serve this address. Redeploy the app or attach the domain again.",
+  },
+  "apps.url.reason.app_deleted": {
+    ru: "Приложение, на которое указывал этот адрес, удалено.",
+    en: "The app this address pointed to has been deleted.",
+  },
+  "apps.url.reason.awaiting_first_deploy": {
+    ru: "Ждём первый деплой приложения — адрес заработает сразу после него.",
+    en: "Waiting for the app's first deploy — the address goes live right after it.",
+  },
+  "apps.url.reason.unknown": { ru: "Причина: {reason}", en: "Reason: {reason}" },
+
   "apps.modal.create.title": { ru: "Создать приложение", en: "Create Application" },
   "apps.modal.create.name.label": { ru: "Имя приложения", en: "App name" },
   "apps.modal.create.name.title": {
