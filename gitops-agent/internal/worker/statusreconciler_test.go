@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/dada-tuda/console/gitops-agent/internal/db"
 	"github.com/google/uuid"
@@ -473,4 +474,77 @@ func TestCrDatabaseShard(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestApplyPodCrashStateRecovery(t *testing.T) {
+	now := time.Now()
+	recovered := func(upFor time.Duration, term corev1.ContainerStateTerminated) *corev1.Pod {
+		return &corev1.Pod{Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
+			Name:                 "profi",
+			Ready:                true,
+			RestartCount:         1,
+			State:                corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: metav1.NewTime(now.Add(-upFor))}},
+			LastTerminationState: corev1.ContainerState{Terminated: &term},
+		}}}}
+	}
+
+	t.Run("a healed error exit stops pinning the app at CrashLoop", func(t *testing.T) {
+		la := &liveApp{desired: 1, ready: 1}
+		applyPodCrashStateAt(la, recovered(time.Hour, corev1.ContainerStateTerminated{Reason: reasonError, ExitCode: 1}), now, crashRecoveryWindow)
+		if la.crashLooping {
+			t.Fatalf("container ready and up an hour must not read as crashlooping")
+		}
+		if got := livePhase(la); got != "Ready" {
+			t.Fatalf("livePhase = %q, want Ready", got)
+		}
+	})
+
+	t.Run("a healed OOM stops pinning the app at CrashLoop", func(t *testing.T) {
+		la := &liveApp{desired: 1, ready: 1}
+		applyPodCrashStateAt(la, recovered(8*24*time.Hour, corev1.ContainerStateTerminated{Reason: reasonOOMKilled, ExitCode: 137}), now, crashRecoveryWindow)
+		if la.crashLooping || la.reason != "" {
+			t.Fatalf("got crashLooping=%v reason=%q, want a clean app", la.crashLooping, la.reason)
+		}
+	})
+
+	t.Run("restarts are still counted for a recovered container", func(t *testing.T) {
+		la := &liveApp{desired: 1, ready: 1}
+		applyPodCrashStateAt(la, recovered(time.Hour, corev1.ContainerStateTerminated{Reason: reasonError, ExitCode: 1}), now, crashRecoveryWindow)
+		if la.restarts != 1 {
+			t.Fatalf("restarts = %d, want 1: the crash is history, not erased history", la.restarts)
+		}
+	})
+
+	// Reverse break: the gate must not hide a crash that just happened, nor a
+	// container that flaps faster than the window.
+	t.Run("a fresh crash still reads as CrashLoop", func(t *testing.T) {
+		la := &liveApp{desired: 1, ready: 1}
+		applyPodCrashStateAt(la, recovered(time.Minute, corev1.ContainerStateTerminated{Reason: reasonError, ExitCode: 1}), now, crashRecoveryWindow)
+		if !la.crashLooping || la.reason != reasonError {
+			t.Fatalf("got crashLooping=%v reason=%q, want a live crash", la.crashLooping, la.reason)
+		}
+		if got := livePhase(la); got != "CrashLoop" {
+			t.Fatalf("livePhase = %q, want CrashLoop", got)
+		}
+	})
+
+	t.Run("a flapping container never counts as recovered", func(t *testing.T) {
+		la := &liveApp{desired: 1, ready: 1}
+		pod := recovered(20*time.Second, corev1.ContainerStateTerminated{Reason: reasonOOMKilled, ExitCode: 137})
+		pod.Status.ContainerStatuses[0].RestartCount = 42
+		applyPodCrashStateAt(la, pod, now, crashRecoveryWindow)
+		if !la.crashLooping || la.reason != reasonOOMKilled {
+			t.Fatalf("got crashLooping=%v reason=%q, want OOMKilled", la.crashLooping, la.reason)
+		}
+	})
+
+	t.Run("up but not ready is not recovered", func(t *testing.T) {
+		la := &liveApp{desired: 1, ready: 0}
+		pod := recovered(24*time.Hour, corev1.ContainerStateTerminated{Reason: reasonError, ExitCode: 1})
+		pod.Status.ContainerStatuses[0].Ready = false
+		applyPodCrashStateAt(la, pod, now, crashRecoveryWindow)
+		if !la.crashLooping {
+			t.Fatal("a container failing readiness has not recovered")
+		}
+	})
 }

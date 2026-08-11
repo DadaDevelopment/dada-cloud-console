@@ -303,3 +303,86 @@ func TestRecordAppHealthAlertSend_FailureBacksOffWithoutBurningCooldown(t *testi
 		t.Fatalf("expected last_send_error cleared after a successful send, got %q", *after.lastSendError)
 	}
 }
+
+// recoveredContainer builds the live shape this cycle's bug was found on:
+// a container that crashed once in the past, restarted, and has been running
+// and ready ever since.
+func recoveredContainer(name string, upFor time.Duration, now time.Time, lastTerm corev1.ContainerStateTerminated) corev1.ContainerStatus {
+	return corev1.ContainerStatus{
+		Name:                 name,
+		Ready:                true,
+		RestartCount:         1,
+		State:                corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: metav1.NewTime(now.Add(-upFor))}},
+		LastTerminationState: corev1.ContainerState{Terminated: &lastTerm},
+	}
+}
+
+func TestDetectPodAlertRecoveredErrorExitIsNotCurrent(t *testing.T) {
+	now := time.Now()
+	pod := podWithStatus("web", recoveredContainer("web", time.Hour, now,
+		corev1.ContainerStateTerminated{Reason: "Error", ExitCode: 1}))
+	if alert, bad := detectPodAlertAt(pod, now, appHealthRecoveryWindow); bad {
+		t.Fatalf("a container ready and up for an hour must not read as crashing, got %+v", alert)
+	}
+}
+
+func TestDetectPodAlertRecoveredOOMIsNotCurrent(t *testing.T) {
+	now := time.Now()
+	pod := podWithStatus("web", recoveredContainer("web", 8*24*time.Hour, now,
+		corev1.ContainerStateTerminated{Reason: "OOMKilled", ExitCode: 137}))
+	if alert, bad := detectPodAlertAt(pod, now, appHealthRecoveryWindow); bad {
+		t.Fatalf("an OOM the container recovered from 8 days ago must not re-alert, got %+v", alert)
+	}
+}
+
+// The reverse break: the gate must not swallow a crash that just happened.
+// A container back up for less than the window is still an incident — this is
+// the case that fires the owner's email.
+func TestDetectPodAlertFreshCrashStillReported(t *testing.T) {
+	now := time.Now()
+	pod := podWithStatus("web", recoveredContainer("web", time.Minute, now,
+		corev1.ContainerStateTerminated{Reason: "Error", ExitCode: 1}))
+	alert, bad := detectPodAlertAt(pod, now, appHealthRecoveryWindow)
+	if !bad || alert.Reason != reasonError || alert.ExitCode != 1 {
+		t.Fatalf("a crash one minute old must still alert, got bad=%v alert=%+v", bad, alert)
+	}
+}
+
+// A container that is up but failing its readiness probe has not recovered,
+// however long it has been up.
+func TestDetectPodAlertUpButNotReadyIsNotRecovered(t *testing.T) {
+	now := time.Now()
+	cs := recoveredContainer("web", 24*time.Hour, now,
+		corev1.ContainerStateTerminated{Reason: "Error", ExitCode: 1})
+	cs.Ready = false
+	if _, bad := detectPodAlertAt(podWithStatus("web", cs), now, appHealthRecoveryWindow); !bad {
+		t.Fatal("a container that is not ready must not count as recovered")
+	}
+}
+
+// A flapping container never satisfies the uptime gate, so the long-standing
+// guarantee that a crashlooping app never reads healthy is untouched.
+func TestDetectPodAlertFlappingContainerStillCrashing(t *testing.T) {
+	now := time.Now()
+	cs := recoveredContainer("web", 20*time.Second, now,
+		corev1.ContainerStateTerminated{Reason: "OOMKilled", ExitCode: 137})
+	cs.RestartCount = 42
+	alert, bad := detectPodAlertAt(podWithStatus("web", cs), now, appHealthRecoveryWindow)
+	if !bad || alert.Reason != reasonOOMKilled {
+		t.Fatalf("a container up 20s after 42 restarts is still crashing, got bad=%v alert=%+v", bad, alert)
+	}
+}
+
+// Backoff is current state, not history: a container sitting in
+// CrashLoopBackOff is never gated, because it is not running at all.
+func TestDetectPodAlertBackoffUngatedByRecovery(t *testing.T) {
+	now := time.Now()
+	pod := podWithStatus("web", corev1.ContainerStatus{
+		Name:         "web",
+		RestartCount: 3,
+		State:        corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: reasonCrashLoopBackOff}},
+	})
+	if _, bad := detectPodAlertAt(pod, now, appHealthRecoveryWindow); !bad {
+		t.Fatal("CrashLoopBackOff must always report regardless of the recovery gate")
+	}
+}

@@ -52,6 +52,16 @@ const appHealthAlertRetryBackoff = 15 * time.Minute
 // reading as resolved between ticks.
 const appHealthAlertFreshWindow = 5 * appHealthWatchInterval
 
+// appHealthRecoveryWindow is how long a container must have been running and
+// ready before the crash it recovered from stops counting as a live incident
+// (see containerRecovered). Same 5x margin on the tick as the freshness
+// window, for the same reason — a container that flaps within a few tick
+// periods must never slip through as recovered between two crashes — but a
+// separate constant on purpose: this one answers "has the container healed",
+// not "is the stored alert row still current", and the two are free to move
+// apart.
+const appHealthRecoveryWindow = 5 * appHealthWatchInterval
+
 // appHealthLogTailLines bounds the best-effort log excerpt attached to the
 // alert email.
 const appHealthLogTailLines = 20
@@ -349,6 +359,36 @@ func (w *appHealthWatcher) tick(ctx context.Context) {
 	}
 }
 
+// containerRecovered reports whether a container's recorded termination is
+// old news rather than a live incident: the container is running right now,
+// its readiness probe passes, and it has stayed up for at least window.
+//
+// This gate exists because LastTerminationState is a permanent record on the
+// pod object — it is never cleared while the pod lives. Without the gate, a
+// container that crashed once and has been serving happily ever since keeps
+// matching the OOMKilled and reasonError branches on every single tick, so
+// last_seen_at is refreshed forever and the console shows an owner a red
+// "your app crashed" banner on a working app for the pod's entire lifetime
+// (observed live 2026-08-11 on artemmendeleev's fonbet-value: pod 1/1 Ready,
+// one restart, alert row re-touched every 3 minutes). For OOMKilled — which
+// is emailable — it also means one historical OOM mails the owner again every
+// time the 24h cooldown lapses.
+//
+// Uptime is read from State.Running.StartedAt rather than the termination's
+// FinishedAt: a container that is up now and has been up longer than window
+// proves by construction that whatever it terminated from is older than
+// window, and it does so without depending on a timestamp the recovered
+// state may not carry. A container that is not running, not ready, or whose
+// start time is unknown is never treated as recovered — the gate only ever
+// suppresses an alert on positive evidence of health.
+func containerRecovered(cs corev1.ContainerStatus, now time.Time, window time.Duration) bool {
+	running := cs.State.Running
+	if running == nil || !cs.Ready || running.StartedAt.IsZero() {
+		return false
+	}
+	return now.Sub(running.StartedAt.Time) >= window
+}
+
 // detectPodAlert inspects one pod's container statuses and returns the single
 // worst bad state found, if any. Pure and unit-tested against fixture pod
 // statuses (no cluster needed). Pods without the dada.io/app label are not
@@ -358,13 +398,26 @@ func (w *appHealthWatcher) tick(ctx context.Context) {
 // OOMKilled and the named waiting reasons, and only fires on a container that
 // has already restarted at least once (RestartCount >= 1) so a first attempt
 // still mid-flight is not misread as crashing.
+//
+// The two branches that read the historical LastTerminationState are gated by
+// containerRecovered: a crash the container has demonstrably recovered from
+// is history, not an incident. The CrashLoopBackOff/ImagePull branches read
+// the container's current Waiting state and need no such gate — a container
+// sitting in backoff has not recovered by definition.
 func detectPodAlert(pod *corev1.Pod) (appHealthAlert, bool) {
+	return detectPodAlertAt(pod, time.Now(), appHealthRecoveryWindow)
+}
+
+func detectPodAlertAt(pod *corev1.Pod, now time.Time, window time.Duration) (appHealthAlert, bool) {
 	appName := pod.Labels["dada.io/app"]
 	if appName == "" {
 		return appHealthAlert{}, false
 	}
 	for _, cs := range pod.Status.ContainerStatuses {
 		if cs.LastTerminationState.Terminated != nil && cs.LastTerminationState.Terminated.Reason == reasonOOMKilled {
+			if containerRecovered(cs, now, window) {
+				continue
+			}
 			return appHealthAlert{
 				Namespace: pod.Namespace,
 				AppName:   appName,
@@ -398,6 +451,9 @@ func detectPodAlert(pod *corev1.Pod) (appHealthAlert, bool) {
 			continue
 		}
 		if cs.RestartCount < 1 {
+			continue
+		}
+		if containerRecovered(cs, now, window) {
 			continue
 		}
 		return appHealthAlert{

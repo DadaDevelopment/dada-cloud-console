@@ -1376,6 +1376,48 @@ func isLivePod(p *corev1.Pod) bool {
 // max across containers/pods, not a sum, since the signal that matters is "is
 // anything still crashing", not a cluster-wide counter.
 func applyPodCrashState(la *liveApp, p *corev1.Pod) {
+	applyPodCrashStateAt(la, p, time.Now(), crashRecoveryWindow)
+}
+
+// crashRecoveryWindow is how long a container must have been running and
+// ready before the crash it recovered from stops counting as a live one. It
+// is deliberately many reconcile ticks wide (the reconciler visits pods every
+// ~30s) so a container that is genuinely flapping — up for seconds, down
+// again — never slips through as recovered between two crashes.
+const crashRecoveryWindow = 15 * time.Minute
+
+// containerRecovered reports whether a container's recorded termination is
+// old news rather than a live incident: it is running right now, its
+// readiness probe passes, and it has stayed up for at least window.
+//
+// LastTerminationState is a permanent record on the pod object and is never
+// cleared while the pod lives, so without this gate one historical non-zero
+// exit pins the app at phase "CrashLoop" for the pod's whole lifetime —
+// livePhase checks crashLooping before readiness, so the app can never read
+// "Ready" again no matter how healthy it is. Observed live 2026-08-11:
+// artemmendeleev's fonbet-value, pod 1/1 Ready with a single restart, sat in
+// the admin panel's not_ready list as "CrashLoop".
+//
+// This does not weaken the guarantee the livePhase comment relies on (a
+// crashlooping container must never read "Ready" just because readyReplicas
+// momentarily matches between crashes): a container that crashes every few
+// seconds or minutes cannot satisfy a 15-minute ready uptime, so it stays
+// "CrashLoop" exactly as before. Only positive evidence of sustained health
+// demotes the flag, and a container that is not running, not ready, or whose
+// start time is unknown is never treated as recovered.
+//
+// Mirrors containerRecovered in backend/internal/api/app_health_watcher.go;
+// the two live in separate Go modules and the same class of stale-crash
+// false positive had to be fixed on both sides.
+func containerRecovered(cs corev1.ContainerStatus, now time.Time, window time.Duration) bool {
+	running := cs.State.Running
+	if running == nil || !cs.Ready || running.StartedAt.IsZero() {
+		return false
+	}
+	return now.Sub(running.StartedAt.Time) >= window
+}
+
+func applyPodCrashStateAt(la *liveApp, p *corev1.Pod, now time.Time, window time.Duration) {
 	for _, cs := range p.Status.ContainerStatuses {
 		if cs.Name == "fluent-container" {
 			continue
@@ -1392,6 +1434,9 @@ func applyPodCrashState(la *liveApp, p *corev1.Pod) {
 			continue
 		}
 		if cs.LastTerminationState.Terminated != nil && cs.LastTerminationState.Terminated.Reason == reasonOOMKilled {
+			if containerRecovered(cs, now, window) {
+				continue
+			}
 			la.crashLooping = true
 			la.reason = reasonOOMKilled
 			code := cs.LastTerminationState.Terminated.ExitCode
@@ -1429,6 +1474,9 @@ func applyPodCrashState(la *liveApp, p *corev1.Pod) {
 			continue
 		}
 		if cs.RestartCount < 1 {
+			continue
+		}
+		if containerRecovered(cs, now, window) {
 			continue
 		}
 		la.crashLooping = true
