@@ -416,17 +416,43 @@ func MarkCanceled(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) (bool, 
 // at its own timeout) is never reaped out from under itself, and so a brief
 // two-pod overlap during a rolling deploy cannot kill the outgoing pod's build.
 // Returns the reaped ids for logging.
+//
+// The BuildFinished audit row is written in the SAME statement, for the same
+// reason MarkFailedWithReason does it (see there): a build killed by an agent
+// restart is exactly the case where a follow-up write is most likely to be
+// lost, and without the row the user's path reads as "TriggerBuild then
+// silence" -- indistinguishable from a build that is still running. This
+// reaps a set, not one row, so the CTE chain fans out over every reaped row.
 func ReapStuckBuilds(ctx context.Context, pool *pgxpool.Pool, olderThan time.Duration) ([]uuid.UUID, error) {
 	rows, err := pool.Query(ctx, `
-		UPDATE builds
-		SET    status = 'failed',
-		       error_message = 'build orphaned: build-agent restarted before completion; retry',
-		       fail_reason = 'platform_error',
-		       finished_at = NOW(), updated_at = NOW()
-		WHERE  status IN ('detecting','building','pushing')
-		  AND  started_at < NOW() - make_interval(secs => $1)
-		RETURNING id
-	`, olderThan.Seconds())
+		WITH updated AS (
+			UPDATE builds
+			SET    status = 'failed',
+			       error_message = 'build orphaned: build-agent restarted before completion; retry',
+			       fail_reason = 'platform_error',
+			       finished_at = NOW(), updated_at = NOW()
+			WHERE  status IN ('detecting','building','pushing')
+			  AND  started_at < NOW() - make_interval(secs => $1)
+			RETURNING id, git_repo_id, environment_id, app_name, branch, commit_sha, triggered_by, attempt, started_at, finished_at
+		),
+		actor AS (
+			SELECT u.*, g.project_id, `+buildFinishedActorExpr(2)+` AS actor_id
+			FROM   updated u
+			JOIN   git_repos g ON g.id = u.git_repo_id
+		),
+		audit_ins AS (
+			INSERT INTO audit_events (actor_id, project_id, environment_id, action, resource_kind, resource_name, outcome, metadata)
+			SELECT actor_id, project_id, environment_id, '`+buildFinishedAuditAction+`', '`+buildFinishedAuditKind+`', app_name, 'failure',
+			       jsonb_strip_nulls(jsonb_build_object(
+			           'build_id', id, 'status', 'failed', 'fail_reason', 'platform_error', 'attempt', attempt,
+			           'duration_seconds', ROUND(EXTRACT(EPOCH FROM (finished_at - started_at))::numeric, 2),
+			           'branch', branch, 'commit_sha', commit_sha, 'reaped', true
+			       ))
+			FROM   actor
+			RETURNING 1
+		)
+		SELECT id FROM updated
+	`, olderThan.Seconds(), SystemUserID)
 	if err != nil {
 		return nil, fmt.Errorf("reap stuck builds: %w", err)
 	}
