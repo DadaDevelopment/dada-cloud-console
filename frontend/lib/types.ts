@@ -1060,6 +1060,7 @@ export interface AdminOverviewApps {
   total: number;
   ready: number;
   broken: number;
+  no_signal: number;
   by_phase: Record<string, number>;
 }
 
@@ -1101,6 +1102,21 @@ export interface AdminOverviewNotReadyApp {
   project_name: string;
   phase: string;
   owner_email: string;
+}
+
+/**
+ * An app the platform holds no health signal about at all.
+ *
+ * broken counts only apps with a live k8s workload, so an app without one is
+ * neither ready nor broken and used to vanish from the panel entirely. age_seconds
+ * runs from first_seen_at, so a row re-synced seconds ago still shows its true age.
+ */
+export interface AdminOverviewNoSignalApp {
+  name: string;
+  project_name: string;
+  phase: string;
+  owner_email: string;
+  age_seconds: number;
 }
 
 /** Whether the not-ready app list itself can be trusted right now. */
@@ -1178,6 +1194,7 @@ export interface AdminOverviewResponse {
   domains: AdminOverviewDomains;
   money: AdminOverviewMoney;
   not_ready: AdminOverviewNotReadyApp[];
+  no_signal: AdminOverviewNoSignalApp[];
   not_ready_freshness: AdminOverviewNotReadyFreshness;
   not_ready_other: AdminOverviewNotReadyResource[];
   domain_issues: AdminOverviewDomainIssue[];

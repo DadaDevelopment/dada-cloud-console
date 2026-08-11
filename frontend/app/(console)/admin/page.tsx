@@ -162,6 +162,14 @@ export default function AdminOverviewPage() {
     { key: "owner", header: t("adminOverview.notReady.col.owner"), render: (r) => <span className="text-gray-500 dark:text-gray-400">{r.owner_email || "—"}</span> },
   ];
 
+  const noSignalColumns: Column<AdminOverviewResponse["no_signal"][number]>[] = [
+    { key: "name", header: t("adminOverview.notReady.col.name"), render: (r) => <span className="font-mono text-xs text-gray-900 dark:text-gray-100">{r.name}</span> },
+    { key: "project", header: t("adminOverview.notReady.col.project"), render: (r) => <span className="text-gray-700 dark:text-gray-200">{r.project_name}</span> },
+    { key: "phase", header: t("adminOverview.notReady.col.phase"), render: (r) => <StateChip tone="protected">{r.phase}</StateChip> },
+    { key: "owner", header: t("adminOverview.notReady.col.owner"), render: (r) => <span className="text-gray-500 dark:text-gray-400">{r.owner_email || "—"}</span> },
+    { key: "age", header: "Как давно", render: (r) => <span className="text-xs text-gray-500 dark:text-gray-400">{ageLabel(r.age_seconds)}</span> },
+  ];
+
   const notReadyOtherColumns: Column<AdminOverviewResponse["not_ready_other"][number]>[] = [
     { key: "kind", header: "Тип", render: (r) => <span className="text-gray-500 dark:text-gray-400">{r.kind}</span> },
     { key: "name", header: "Имя", render: (r) => <span className="font-mono text-xs text-gray-900 dark:text-gray-100">{r.name}</span> },
@@ -391,6 +399,33 @@ export default function AdminOverviewPage() {
                     <p className="text-sm font-medium text-green-600 dark:text-green-400">{t("adminOverview.notReady.empty")}</p>
                   </div>
                 )
+              }
+            />
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="mb-6 grid grid-cols-1 gap-4">
+        <Card>
+          <CardHeader className="p-4 pb-2">
+            <CardTitle className="text-sm">Приложения без сигнала о здоровье</CardTitle>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Счётчик «сломано» умеет обвинять только живой ворклоад в кластере, поэтому приложение без ворклоада не
+              попадало ни в «готово», ни в «сломано» и исчезало из панели вовсе. Здесь такие строки старше часа: платформа
+              не знает о них ничего — либо деплоя действительно не было, либо сборщик статуса смотрит не туда.
+            </p>
+          </CardHeader>
+          <CardContent className="p-4 pt-0">
+            <DataTable
+              loading={isLoading}
+              rows={data?.no_signal ?? []}
+              getRowKey={(r) => `${r.project_name}/${r.name}`}
+              columns={noSignalColumns}
+              pageSize={10}
+              emptyState={
+                <div className="flex items-center justify-center rounded-lg border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 py-10">
+                  <p className="text-sm font-medium text-green-600 dark:text-green-400">По каждому приложению есть сигнал о здоровье</p>
+                </div>
               }
             />
           </CardContent>

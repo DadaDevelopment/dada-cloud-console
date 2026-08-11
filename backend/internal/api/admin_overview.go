@@ -36,6 +36,33 @@ const brokenAppSnapshotPredicate = `rs.kind = 'App'
 	AND rs.phase NOT IN ('Ready', 'Stopped', 'Orphaned')
 	AND rs.last_synced_at > now() - interval '10 minutes'`
 
+// noSignalAppSnapshotPredicate is the blind spot brokenAppSnapshotPredicate
+// cannot describe from the inside. That predicate can only ever indict an app
+// the reconciler observes live (live_source = 'k8s'); an App row without a live
+// workload is therefore counted as neither ready nor broken, and the headline
+// broken number stays 0 no matter what state those rows are really in. Nine
+// such rows sat behind by_phase.Unknown while apps.broken read 0.
+//
+// "No health signal" is its own answer and belongs on the panel next to the
+// other two, for the same reason overviewNotReadyFreshness exists: an empty
+// broken list must mean "nothing is broken", never "we cannot see". The rows
+// that land here are the ones nobody can call healthy either -- most often an
+// app whose snapshot froze at git-watcher create time because its first build
+// never produced a workload, which is exactly the terminal state of a customer
+// who registered, created an app and never reached a live URL.
+//
+// Ready/Stopped/Orphaned are excluded because each is a settled answer, not an
+// absence of one. The grace window keys on first_seen_at (set once at insert,
+// migration 049) and NOT on last_synced_at: a just-created app legitimately has
+// no workload for the minutes its first build runs, while last_synced_at is
+// re-stamped every reconcile tick and would keep old rows looking new forever
+// (see project memory grace_filter_on_last_synced_at_excludes_live_apps).
+// Assumes table alias rs.
+const noSignalAppSnapshotPredicate = `rs.kind = 'App'
+	AND rs.summary_json->>'live_source' IS DISTINCT FROM 'k8s'
+	AND rs.phase NOT IN ('Ready', 'Stopped', 'Orphaned')
+	AND rs.first_seen_at < now() - interval '1 hour'`
+
 // appSnapshotFreshnessWindow mirrors the 10-minute freshness cutoff baked into
 // brokenAppSnapshotPredicate. It is pulled out as its own constant because
 // overviewNotReadyFreshness needs to reason about the SAME window from the
@@ -98,10 +125,11 @@ type overviewUsers struct {
 }
 
 type overviewApps struct {
-	Total   int            `json:"total"`
-	Ready   int            `json:"ready"`
-	Broken  int            `json:"broken"`
-	ByPhase map[string]int `json:"by_phase"`
+	Total    int            `json:"total"`
+	Ready    int            `json:"ready"`
+	Broken   int            `json:"broken"`
+	NoSignal int            `json:"no_signal"`
+	ByPhase  map[string]int `json:"by_phase"`
 }
 
 type overviewProjects struct {
@@ -221,6 +249,11 @@ func (h *Handler) GetAdminOverview(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "failed to list not-ready apps")
 		return
 	}
+	noSignal, err := h.overviewNoSignalApps(ctx)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to list apps without a health signal")
+		return
+	}
 	notReadyFreshness, err := h.overviewNotReadyFreshness(ctx)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to check not-ready freshness")
@@ -259,6 +292,7 @@ func (h *Handler) GetAdminOverview(c *gin.Context) {
 		"domains":             domains,
 		"money":               h.overviewMoney(ctx),
 		"not_ready":           notReady,
+		"no_signal":           noSignal,
 		"not_ready_freshness": notReadyFreshness,
 		"not_ready_other":     notReadyOther,
 		"domain_issues":       domainIssues,
@@ -352,6 +386,12 @@ func (h *Handler) overviewProjects(ctx context.Context) (overviewProjects, error
 		return out, err
 	}
 
+	if err := h.pool.QueryRow(ctx, `
+		SELECT count(*) FROM resource_snapshots rs
+		WHERE `+noSignalAppSnapshotPredicate).Scan(&out.Apps.NoSignal); err != nil {
+		return out, err
+	}
+
 	return out, nil
 }
 
@@ -429,6 +469,49 @@ func (h *Handler) overviewNotReadyApps(ctx context.Context) ([]overviewNotReadyA
 		var a overviewNotReadyApp
 		if err := rows.Scan(&a.Name, &a.ProjectName, &a.Phase, &a.OwnerEmail); err != nil {
 			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+type overviewNoSignalApp struct {
+	Name        string `json:"name"`
+	ProjectName string `json:"project_name"`
+	Phase       string `json:"phase"`
+	OwnerEmail  string `json:"owner_email"`
+	AgeSeconds  int    `json:"age_seconds"`
+}
+
+// overviewNoSignalApps names the rows counted by apps.no_signal so the operator
+// can act on them instead of reading a bare number. Oldest first: age is the
+// whole point, since a row that has been signal-less for days is an app that
+// never made it to a live URL, while a young one is usually mid-first-build.
+// Capped like the not-ready list so a mass event cannot balloon the payload.
+func (h *Handler) overviewNoSignalApps(ctx context.Context) ([]overviewNoSignalApp, error) {
+	rows, err := h.pool.Query(ctx, `
+		SELECT rs.name, p.display_name, rs.phase, COALESCE(u.email, ''),
+		       extract(epoch FROM now() - rs.first_seen_at)::int
+		FROM resource_snapshots rs
+		JOIN projects p     ON p.id = rs.project_id
+		LEFT JOIN users u   ON u.id = p.owner_id
+		WHERE `+noSignalAppSnapshotPredicate+`
+		ORDER BY rs.first_seen_at ASC
+		LIMIT 100`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []overviewNoSignalApp{}
+	for rows.Next() {
+		var a overviewNoSignalApp
+		if err := rows.Scan(&a.Name, &a.ProjectName, &a.Phase, &a.OwnerEmail, &a.AgeSeconds); err != nil {
+			return nil, err
+		}
+		if a.Phase == "" {
+			a.Phase = "Unknown"
 		}
 		out = append(out, a)
 	}
