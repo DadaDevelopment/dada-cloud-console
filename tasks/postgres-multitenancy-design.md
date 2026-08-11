@@ -490,8 +490,30 @@ read-only 1.0 / frozen 1.25 / снятие 0.9, принуждение чере�
       ёмкость по шардам, топ-15 баз по размеру. Положен в провайдер `infra`:
       его configMap уже смонтирован (697 КБ из 1 МиБ), новый провайдер стоил
       бы правки values kube-prometheus-stack ради одной панели.
-      Осталось: пул самого роутера (клиенты, ожидание) — у pg-router нет
-      экспортера, нужен sidecar pgbouncer_exporter.
+      Пул роутера закрыт 08-11: сайдкар `pgbouncer-exporter` v0.12.1 в поде
+      pg-router ходит в админ-консоль по loopback ролью `pgbouncer_auth`
+      (она уже в `stats_users`). Экспортёр именно сайдкаром, а не заданием в
+      консоли: пул — свойство ОДНОГО процесса pgbouncer, опрос через
+      балансируемый Service отвечал бы случайной репликой. Порт 9127 открыт
+      в NetworkPolicy явно — в namespace `databases` висит default-deny, и
+      без этого сайдкар работает, ServiceMonitor есть, а Prometheus
+      таймаутит. Живой скрейп: `pgbouncer_up 1`, девять пулов,
+      `count(pgbouncer_up)` = 2 (обе реплики).
+      Алерты `DadaDBRouterClientsWaiting` (maxwait > 5s: запрос клиента ещё
+      не начался), `DadaDBRouterClientSlotsLow` (> 80% `max_client_conn` —
+      слоты общие на весь роутер), `DadaDBRouterAdminUnreachable`
+      (`pgbouncer_up == 0`: телеметрия слепа, и `RECONNECT` при переезде
+      ходит той же ролью). Имена рядов сняты со скрейпа, не из README.
+      Метка `release: kube-prometheus-stack-monitoring` на PrometheusRule
+      обязательна: `ruleSelector` этого Prometheus — `matchLabels release`,
+      в отличие от `serviceMonitorSelector: {}`. Без неё объект применяется
+      без ошибки, Argo зелёный, а `/api/v1/rules` про группу не знает —
+      первая версия правил уехала именно так. Проверено на
+      `/api/v1/rules`: три правила, `health: ok`.
+      Дэшборд `dada-db-shards` дополнен тремя панелями пула (ожидающие
+      клиенты, maxwait, доля клиентских слотов) — до этого он весь рисовался
+      из реестрового рендера, то есть про то, куда роутер ДОЛЖЕН отправить,
+      а не доехал ли клиент. Шаг закрыт.
 
 - [x] 9. Обслуживающие механизмы под новую топологию (08-08). Переезд баз
       сам по себе не переносит то, что вокруг них ходит, и три вещи ходили по
