@@ -3,12 +3,14 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/dada-tuda/console/backend/internal/billing"
 	"github.com/dada-tuda/console/backend/internal/billing/costengine"
@@ -642,7 +644,11 @@ func (m *BoxMeter) stopOnSpendCap(ctx context.Context, r boxMeterRow, s boxSpend
 	metrics.RecordBoxSpendCapHit("stopped")
 	if _, err := enqueueBoxReaperOperation(ctx, m.pool, r.ProjectID, r.EnvironmentID, r.Name,
 		models.ActionSuspendBox, "spend_cap", models.SuspendBoxPayload{BoxID: r.BoxID, Reason: "spend_cap"}); err != nil {
-		log.Warn().Err(err).Str("box", r.BoxID.String()).Msg("box meter: failed to enqueue spend-cap suspend")
+		if errors.Is(err, errBoxOperationAlreadyPending) {
+			log.Info().Str("box", r.BoxID.String()).Msg("box meter: spend-cap suspend already pending, not queuing another")
+		} else {
+			log.Warn().Err(err).Str("box", r.BoxID.String()).Msg("box meter: failed to enqueue spend-cap suspend")
+		}
 	}
 	subject, body := notify.ComposeBoxSpendCapStopped(r.Name, s.Total, capRub)
 	m.mail(ctx, r, subject, body)
@@ -667,6 +673,11 @@ func (m *BoxMeter) clearSpendCap(ctx context.Context, r boxMeterRow) {
 // enforceDiskAccrualLimit is the one destructive branch in the meter: a box whose
 // SLEEPING disk alone has accrued twice its cap is warned once and destroyed a day
 // later if nothing changes.
+//
+// A skipped enqueue (errBoxOperationAlreadyPending) returns before
+// RecordBoxDestroy and the status flip to Deleting, for the same reason
+// box_reaper.go's enqueueDelete does: a delete for this box is already in
+// flight, so counting it again would double the destroy metric for one teardown.
 func (m *BoxMeter) enforceDiskAccrualLimit(ctx context.Context, r boxMeterRow, s boxSpend, capRub float64, now time.Time) {
 	if r.DeleteWarned == nil {
 		tag, err := m.pool.Exec(ctx,
@@ -685,7 +696,11 @@ func (m *BoxMeter) enforceDiskAccrualLimit(ctx context.Context, r boxMeterRow, s
 	}
 	if _, err := enqueueBoxReaperOperation(ctx, m.pool, r.ProjectID, r.EnvironmentID, r.Name,
 		models.ActionDeleteBox, "spend_cap", models.DeleteBoxPayload{BoxID: r.BoxID, Reason: "spend_cap"}); err != nil {
-		log.Warn().Err(err).Str("box", r.BoxID.String()).Msg("box meter: failed to enqueue disk-accrual delete")
+		if errors.Is(err, errBoxOperationAlreadyPending) {
+			log.Info().Str("box", r.BoxID.String()).Msg("box meter: disk-accrual delete already pending, not queuing another")
+		} else {
+			log.Warn().Err(err).Str("box", r.BoxID.String()).Msg("box meter: failed to enqueue disk-accrual delete")
+		}
 		return
 	}
 	metrics.RecordBoxSpendCapHit("stopped")
@@ -872,6 +887,14 @@ func (h *Handler) GetBoxUsage(c *gin.Context) {
 // platform suspended this because of the spend cap" from "a person clicked suspend".
 var boxSystemActorID = uuid.MustParse("00000000-0000-0000-0000-000000000000")
 
+// errBoxOperationAlreadyPending is returned by enqueueBoxReaperOperation when the
+// box already has a non-terminal operation of the same action and the insert was
+// skipped. It is not an error in the failure sense — the platform decision was
+// already made and is still in flight — so callers must not Warn-log it or treat
+// it as the enqueue failing; they log it at Info and otherwise proceed exactly as
+// if their own insert had won.
+var errBoxOperationAlreadyPending = errors.New("box operation already pending")
+
 // enqueueBoxReaperOperation inserts one platform-initiated box operation and
 // records it in the audit trail.
 //
@@ -889,17 +912,56 @@ var boxSystemActorID = uuid.MustParse("00000000-0000-0000-0000-000000000000")
 // The reason is a separate argument even though the payload already carries one:
 // the payload shape differs per action, and a trail that has to unmarshal three
 // structs to answer "why was this box killed" is a trail nobody queries.
+//
+// DEDUP IS IN THIS FUNCTION, not in the four call sites, for the same reason the
+// audit write is: this is the one door, and a caller added later inherits the
+// guard instead of having to remember it. ephprobe1's crash loop on 2026-08-11 is
+// why it exists — SuspendBox kept failing mid-archive (a separate minio-go bug),
+// boxes.status never reached Sleeping, and reapExpired/reapIdle called this
+// function again on every 60s tick with nothing stopping a second, third, Nth
+// SuspendBox row for the same box from queuing up behind the first. The insert and
+// the "does one already exist" check are ONE statement (INSERT...SELECT...WHERE
+// NOT EXISTS), not a SELECT followed by an INSERT: two replicas run this
+// unguarded (box_meter.go's two call sites take no advisory lock) and briefly
+// during a rolling deploy the reaper's own lock does not stop old and new pods
+// from both holding it across a restart, so a check-then-act pair would still
+// race. "Already exists" is read straight off terminalOperationStatuses
+// (admin_overview.go) rather than a second literal list of statuses: that list is
+// pinned to classifyOperationStatus by a dedicated test in admin_overview_
+// terminality_test.go, and this repo has already shipped one panel that
+// hand-rolled its own terminal set and drifted (Committed miscounted as
+// stuck). WaitingForApproval is
+// not in terminalOperationStatuses, so it counts as "already pending" here and
+// blocks a second insert — box actions never route through approval today, but if
+// one ever does, an operation parked on a human's decision is exactly the kind of
+// in-flight work a second automatic insert must not duplicate.
+//
+// The key is (project_id, environment_id, action, resource_name): idx_boxes_
+// project_name_live (migration 061) makes box names unique per project among
+// live rows, so this key cannot conflate two different boxes or miss a repeat of
+// the same one, and it uses columns the operations row already carries — no need
+// to unmarshal payload to recover a box id.
 func enqueueBoxReaperOperation(ctx context.Context, pool *pgxpool.Pool, projectID, environmentID uuid.UUID, boxName, action, reason string, payload any) (uuid.UUID, error) {
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return uuid.Nil, err
 	}
 	var opID uuid.UUID
-	if err := pool.QueryRow(ctx,
+	err = pool.QueryRow(ctx,
 		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
-		 VALUES ($1, $2, $3, $4, $5, $6, 'Created', $7)
+		 SELECT $1, $2, $3, $4::varchar, $5::varchar, $6::varchar, 'Created', $7
+		  WHERE NOT EXISTS (
+		        SELECT 1 FROM operations
+		         WHERE project_id = $2 AND environment_id = $3 AND action = $4
+		           AND resource_kind = $5 AND resource_name = $6
+		           AND status <> ALL($8::text[]))
 		 RETURNING id`,
-		boxSystemActorID, projectID, environmentID, action, models.ResourceKindBox, boxName, payloadBytes).Scan(&opID); err != nil {
+		boxSystemActorID, projectID, environmentID, action, models.ResourceKindBox, boxName, payloadBytes,
+		terminalOperationStatuses).Scan(&opID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, errBoxOperationAlreadyPending
+	}
+	if err != nil {
 		return uuid.Nil, fmt.Errorf("enqueue %s for box %s: %w", action, boxName, err)
 	}
 	writeAuditRow(ctx, pool, boxSystemActorID, auditEntry{

@@ -394,11 +394,33 @@ spec:
                 failFast: true,
                 'backend (go)': {
                     container('go-builder') {
+                        // The install is retried and its output is kept, because the
+                        // alternative was tried and it lied: `apk add ... >/dev/null 2>&1
+                        // || true` turned a transient fetch failure into `helm: not found`
+                        // + exit 127 three lines later, with the actual apk error thrown
+                        // away. Builds #1057 and #1059 died that way inside 25 minutes on
+                        // 2026-08-11 while #1056 and #1058 passed on the identical image,
+                        // and the OOM fix waiting behind them could not reach prod. The
+                        // package is present and the repo is right (`golang:1.25-alpine`
+                        // ships `community`, helm 3.19.0-r7 installs cleanly on demand) —
+                        // what fails is reaching the mirror, so reaching it twice more is
+                        // the fix that matches the cause. A swallowed failure must never
+                        // again be diagnosed from the corpse two commands downstream.
                         stage('Toolchain (Go)') {
                             sh '''
                                 set -eux
                                 go version
-                                apk add --no-cache helm git >/dev/null 2>&1 || true
+                                for attempt in 1 2 3; do
+                                    if apk add --no-cache helm git; then
+                                        break
+                                    fi
+                                    if [ "$attempt" = 3 ]; then
+                                        echo "apk add helm git failed three times; the alpine mirror is unreachable from this agent"
+                                        exit 1
+                                    fi
+                                    echo "apk add failed (attempt ${attempt}/3), retrying in $((attempt * 5))s"
+                                    sleep $((attempt * 5))
+                                done
                                 helm version --short
                             '''
                         }

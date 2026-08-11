@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/config"
@@ -348,6 +349,11 @@ func (r *BoxReaper) enqueueSuspend(ctx context.Context, c boxReapCandidate, reas
 	}
 	if _, err := enqueueBoxReaperOperation(ctx, r.pool, c.ProjectID, c.EnvironmentID, c.Name,
 		models.ActionSuspendBox, reason, models.SuspendBoxPayload{BoxID: c.BoxID, Reason: reason}); err != nil {
+		if errors.Is(err, errBoxOperationAlreadyPending) {
+			log.Info().Str("box", c.BoxID.String()).Str("reason", reason).
+				Msg("box reaper: suspend already pending, not queuing another")
+			return
+		}
 		log.Warn().Err(err).Str("box", c.BoxID.String()).Str("reason", reason).
 			Msg("box reaper: failed to enqueue suspend")
 		return
@@ -357,9 +363,20 @@ func (r *BoxReaper) enqueueSuspend(ctx context.Context, c boxReapCandidate, reas
 
 // enqueueDelete destroys a box and marks it Deleting so a concurrent read never
 // hands out a body that is being torn down (same ordering as the DeleteBox handler).
+//
+// A skipped insert (errBoxOperationAlreadyPending) returns BEFORE the status flip
+// and the RecordBoxDestroy metric: a delete is already in flight for this box, so
+// marking it Deleting again and counting a second destroy would double-count a
+// single teardown in the metric a cost dashboard reads as "how many boxes did we
+// tear down", which is exactly the kind of lie the platform actor convention
+// (boxSystemActorID) exists to prevent.
 func (r *BoxReaper) enqueueDelete(ctx context.Context, c boxReapCandidate, reason string) {
 	if _, err := enqueueBoxReaperOperation(ctx, r.pool, c.ProjectID, c.EnvironmentID, c.Name,
 		models.ActionDeleteBox, reason, models.DeleteBoxPayload{BoxID: c.BoxID, Reason: reason}); err != nil {
+		if errors.Is(err, errBoxOperationAlreadyPending) {
+			log.Info().Str("box", c.BoxID.String()).Msg("box reaper: delete already pending, not queuing another")
+			return
+		}
 		log.Warn().Err(err).Str("box", c.BoxID.String()).Msg("box reaper: failed to enqueue delete")
 		return
 	}
