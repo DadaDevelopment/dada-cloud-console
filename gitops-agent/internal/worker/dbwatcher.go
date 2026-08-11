@@ -1079,9 +1079,13 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 
 	gitPath := renderer.AppGitPath(projectName, envName, p.Name)
 	valuesPath := renderer.AppHelmValuesGitPath(projectName, envName, p.Name)
+	mergedValues, err := w.mergeAppValues(mgr, valuesPath, valuesYAML)
+	if err != nil {
+		return err
+	}
 	files := []git.FileChange{
 		{Path: gitPath, Content: yaml},
-		{Path: valuesPath, Content: valuesYAML},
+		{Path: valuesPath, Content: mergedValues},
 	}
 	if p.DefaultHostname == "" {
 		secretFile, err := w.renderEnvSecretFile(mgr, projectName, envName, envNamespace, p.Name, op.ID.String(), env)
@@ -2134,12 +2138,16 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 
 	gitPath := renderer.AppGitPath(projectName, envName, p.AppName)
 	valuesPath := renderer.AppHelmValuesGitPath(projectName, envName, p.AppName)
-	files := []git.FileChange{
-		{Path: gitPath, Content: yaml},
-		{Path: valuesPath, Content: valuesYAML},
-	}
 	if err := w.guardUnattendedClobber(op, mgr, valuesPath, valuesYAML); err != nil {
 		return err
+	}
+	mergedValues, err := w.mergeAppValues(mgr, valuesPath, valuesYAML)
+	if err != nil {
+		return err
+	}
+	files := []git.FileChange{
+		{Path: gitPath, Content: yaml},
+		{Path: valuesPath, Content: mergedValues},
 	}
 	secretFile, err := w.renderEnvSecretFile(mgr, projectName, envName, envNamespace, p.AppName, op.ID.String(), env)
 	if err != nil {
@@ -2172,6 +2180,36 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 		w.onDeploy(ctx, op)
 	}
 	return nil
+}
+
+// mergeAppValues folds a rendered values.yaml into the one already in git so a
+// deploy rewrites only the keys the console owns.
+//
+// The console renders the file from its database, and writing that render
+// wholesale deletes anything the database does not know about. That is not a
+// theoretical loss: an image bump on dada-development-site removed the
+// hand-added common.ingress block, and the app served nginx 404 on its custom
+// domain for sixteen hours while looking perfectly healthy on its default one.
+//
+// guardUnattendedClobber already refuses this for unattended operations, but a
+// console-initiated deploy is exempt from it by design -- someone is watching
+// and may legitimately be re-rendering. Watching is not the same as noticing:
+// the clobber is a side effect of a deploy the person asked for, several screens
+// away from what they were looking at. Merging removes the choice from them.
+//
+// A missing file is a first deploy and takes the render as-is. A file that does
+// not parse fails the operation rather than being overwritten -- Argo would
+// otherwise apply chart defaults over the live release.
+func (w *DBWatcher) mergeAppValues(mgr *git.Manager, valuesPath, renderedValues string) (string, error) {
+	existing, err := mgr.ReadFile(valuesPath)
+	if err != nil {
+		return renderedValues, nil
+	}
+	merged, err := renderer.MergeAppValues(existing, renderedValues)
+	if err != nil {
+		return "", fmt.Errorf("merging into %s: %w", valuesPath, err)
+	}
+	return merged, nil
 }
 
 // guardUnattendedClobber refuses an unattended deploy that would delete parts
@@ -2384,9 +2422,13 @@ func (w *DBWatcher) doUpdateAppStorage(ctx context.Context, op db.Operation) err
 
 	gitPath := renderer.AppGitPath(projectName, envName, p.AppName)
 	valuesPath := renderer.AppHelmValuesGitPath(projectName, envName, p.AppName)
+	mergedValues, err := w.mergeAppValues(mgr, valuesPath, valuesYAML)
+	if err != nil {
+		return err
+	}
 	files := []git.FileChange{
 		{Path: gitPath, Content: yaml},
-		{Path: valuesPath, Content: valuesYAML},
+		{Path: valuesPath, Content: mergedValues},
 	}
 	secretFile, err := w.renderEnvSecretFile(mgr, projectName, envName, envNamespace, p.AppName, op.ID.String(), env)
 	if err != nil {
