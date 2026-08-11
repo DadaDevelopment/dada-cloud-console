@@ -23,6 +23,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/rs/zerolog/log"
 )
 
 // isUniqueViolation reports whether err is a Postgres unique-constraint error (23505).
@@ -1238,6 +1239,45 @@ var githubCloneProbeClient = &http.Client{Timeout: githubCloneProbeTimeout}
 // without touching linkGitRepo itself or reaching the network.
 var githubCloneProbe = githubRepoPubliclyClonable
 
+// githubCloneProbeRetryDelay spaces the second probe attempt far enough from
+// the first to outlive a momentary connection reset without making the connect
+// form feel stuck.
+const githubCloneProbeRetryDelay = 400 * time.Millisecond
+
+// githubCloneProbeAttempts is how many times probeGithubCloneAccess asks
+// github.com before giving up on a verdict. Two, not more: the probe guards a
+// human waiting on a form, and every extra attempt costs a full
+// githubCloneProbeTimeout on the exact path where github.com is already slow.
+const githubCloneProbeAttempts = 2
+
+// probeGithubCloneAccess answers whether repoFullName clones without a
+// credential, retrying once when github.com gives no verdict.
+//
+// A single indecisive probe is not a neutral outcome here: the connect goes
+// through, the row is stored with no credential at all, and a private repo
+// then fails EVERY build with a bare "could not read Username" days later —
+// the exact dead end the gate exists to prevent (prod: keksmd/a2ahub-landing,
+// 27 days). One transport error, one timeout or one 5xx from github.com is
+// enough to reopen it, so a lone inconclusive answer is retried rather than
+// believed. What is deliberately NOT done is dropping the decisive
+// requirement: a hard fail-closed would reject perfectly good public repos on
+// every network flap, which is worse than the disease it treats.
+func probeGithubCloneAccess(ctx context.Context, repoFullName string) (clonable bool, decisive bool) {
+	for attempt := 0; attempt < githubCloneProbeAttempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return false, false
+			case <-time.After(githubCloneProbeRetryDelay):
+			}
+		}
+		if clonable, decisive = githubCloneProbe(ctx, repoFullName); decisive {
+			return clonable, true
+		}
+	}
+	return false, false
+}
+
 // githubRepoPubliclyClonable asks github.com, unauthenticated, whether
 // repoFullName can be git-cloned without credentials. It hits the same
 // info/refs endpoint `git clone` itself uses, so a 200 here is the same
@@ -1383,8 +1423,16 @@ func (h *Handler) linkGitRepo(ctx context.Context, actorID, projectID, envID uui
 	}
 
 	if req.Provider == "github" && installationID == nil && req.Token == "" {
-		if clonable, decisive := githubCloneProbe(ctx, req.RepoFullName); decisive && !clonable {
+		clonable, decisive := probeGithubCloneAccess(ctx, req.RepoFullName)
+		if decisive && !clonable {
 			return nil, &opFault{http.StatusBadRequest, "github_access_required", "This repository is private or unavailable. Connect GitHub access to this project before linking it."}
+		}
+		if !decisive {
+			log.Warn().
+				Str("repo", req.RepoFullName).
+				Str("project_id", projectID.String()).
+				Str("app_name", req.AppName).
+				Msg("github clone access unverified; linking credential-less repo anyway")
 		}
 	}
 
