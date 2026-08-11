@@ -184,6 +184,27 @@ func TestSuspendLeavesAClaimedBoxAlone(t *testing.T) {
 	}
 }
 
+// TestWorkspaceUploadPartSizeFitsTheBackendsMemory guards the allocation that
+// took the control plane down. The very first live suspend OOMKilled the backend
+// pod (512Mi limit) because minio-go, told the length was unknown, sized its
+// upload buffer for a hypothetical 5TiB object and asked for ~537MiB.
+func TestWorkspaceUploadPartSizeFitsTheBackendsMemory(t *testing.T) {
+	const absMinPartSize = 5 << 20
+	const backendMemoryLimit = 512 << 20
+	if workspaceUploadPartSize < absMinPartSize {
+		t.Fatalf("part size %d is below S3's 5MiB minimum: every upload would fail", workspaceUploadPartSize)
+	}
+	if workspaceUploadPartSize > backendMemoryLimit/8 {
+		t.Fatalf("part size %d is more than an eighth of the backend's %d memory limit: an archive would risk the OOM kill this test exists to prevent",
+			workspaceUploadPartSize, backendMemoryLimit)
+	}
+	const maxParts = 10000
+	largest := int64(boxcatalog.DefaultSize().DiskGB) << 30
+	if int64(workspaceUploadPartSize)*maxParts < largest {
+		t.Fatalf("part size %d over %d parts caps an archive below the %d-byte workspace the catalog sells", workspaceUploadPartSize, maxParts, largest)
+	}
+}
+
 // TestWorkspaceArchiveKeyFollowsThePodName pins the identity the archive is
 // stored under. A box loaded out of the boxes table carries the control plane's
 // uuid in ID and the pod name in InstanceRef, so keying on ID would archive under

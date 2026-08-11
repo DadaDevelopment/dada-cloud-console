@@ -41,6 +41,10 @@ type WorkspaceStore interface {
 // and let them discover it.
 var ErrNoWorkspaceArchive = errors.New("no workspace archive for this box")
 
+// workspaceUploadPartSize bounds what a single archive costs this process in
+// memory. See Put for what happens without it.
+const workspaceUploadPartSize = 16 << 20
+
 type minioWorkspaceStore struct {
 	client *minio.Client
 	bucket string
@@ -76,9 +80,17 @@ func (s *minioWorkspaceStore) objectName(key string) string {
 
 // Put streams the archive with an unknown length, so the control plane never
 // buffers a customer's workspace in memory to learn how big it is.
+//
+// PartSize is NOT optional here. minio-go answers an unknown length by assuming
+// the object could be 5TiB and sizing its single upload buffer to fit that in
+// 10000 parts, which is a ~537MiB allocation - more than this pod's whole 512Mi
+// limit. The first live suspend OOMKilled the backend at the moment it began the
+// archive. At 16MiB the buffer is bounded and 10000 parts still cover 160GiB,
+// which is sixteen times the largest workspace the catalog sells.
 func (s *minioWorkspaceStore) Put(ctx context.Context, key string, r io.Reader) error {
 	_, err := s.client.PutObject(ctx, s.bucket, s.objectName(key), r, -1, minio.PutObjectOptions{
 		ContentType: "application/gzip",
+		PartSize:    workspaceUploadPartSize,
 	})
 	if err != nil {
 		return fmt.Errorf("put workspace archive: %w", err)
