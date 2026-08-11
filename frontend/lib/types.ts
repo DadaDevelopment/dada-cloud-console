@@ -1110,13 +1110,22 @@ export interface AdminOverviewNotReadyFreshness {
   blind: boolean;
 }
 
-/** A non-k8s resource (database, AI model, CRD) stuck out of Ready. */
+/**
+ * A non-k8s resource (database, AI model, CRD) stuck out of Ready.
+ *
+ * kind_lag_seconds is how far this row's last sync lags behind the newest
+ * sync of its own kind. unmaintained is true once that lag passes 15
+ * minutes, meaning the status reconciler has provably stopped visiting this
+ * row -- it is not known to be broken, updates about it simply stopped.
+ */
 export interface AdminOverviewNotReadyResource {
   kind: string;
   name: string;
   project_name: string;
   phase: string;
   age_seconds: number;
+  kind_lag_seconds: number;
+  unmaintained: boolean;
 }
 
 /** A domain hostname or apex authorization that failed or got stuck pending. */

@@ -477,31 +477,70 @@ func (h *Handler) overviewNotReadyFreshness(ctx context.Context) (overviewNotRea
 }
 
 type overviewNotReadyResource struct {
-	Kind        string `json:"kind"`
-	Name        string `json:"name"`
-	ProjectName string `json:"project_name"`
-	Phase       string `json:"phase"`
-	AgeSeconds  int    `json:"age_seconds"`
+	Kind           string `json:"kind"`
+	Name           string `json:"name"`
+	ProjectName    string `json:"project_name"`
+	Phase          string `json:"phase"`
+	AgeSeconds     int    `json:"age_seconds"`
+	KindLagSeconds int    `json:"kind_lag_seconds"`
+	Unmaintained   bool   `json:"unmaintained"`
 }
+
+// otherSnapshotAbandonLagSeconds is how far a non-App snapshot may lag behind
+// the newest sync of its OWN kind before we stop calling it broken. The status
+// reconciler stamps every row it still maintains within a single tick, so rows
+// of one kind share a last_synced_at down to the second; a row left minutes
+// behind its own kind is one the reconciler has provably stopped visiting.
+// Fifteen minutes is thirty reconcile ticks -- far past any scheduling jitter,
+// far short of the days-long freezes this exists to catch.
+const otherSnapshotAbandonLagSeconds = 900
 
 // overviewNotReadyOtherResources is brokenAppSnapshotPredicate's sibling for
 // everything that predicate's `kind = 'App'` clause throws away: managed
 // databases (ServiceDatabaseV2, live_source=crossplane), KServe AI models, and
 // raw CRD-backed resources. These never showed up on the "what's broken" panel
 // at all, so a stuck database restore or a wedged model deploy was invisible
-// to anyone reading this dashboard. Unlike the App predicate this list does
-// NOT gate on a freshness window: sync cadence for non-k8s live sources isn't
-// established anywhere in this codebase, and a wrong guess here would silently
-// hide real breakage instead of surfacing it -- so every row carries its own
-// age and lets the operator judge staleness themselves. orphan-gc/-cleared are
-// excluded because those live_sources mark resources orphan-GC has already
-// swept, not something currently broken.
+// to anyone reading this dashboard. orphan-gc/-cleared are excluded because
+// those live_sources mark resources orphan-GC has already swept, not something
+// currently broken.
+//
+// Staleness is judged against the row's own kind rather than an absolute
+// window. A non-App snapshot only changes when the status reconciler visits
+// the matching live CR, and the reconciler visits every CR of a kind in one
+// pass -- so the newest last_synced_at for a kind is that writer's proof of
+// life, and a row far behind it has been abandoned by a writer that is
+// demonstrably still running. Three ways a row gets abandoned, all observed in
+// production: its CR was deleted (nothing left to iterate onto), its name is
+// claimed by several environments so the reconciler refuses to guess, or it
+// belongs to a kind whose writer was retired. None of them mean the resource
+// is broken, yet all three used to print here as breakage -- three PublicApi
+// rows sat in this list for 7 to 20 days while their pods served traffic.
+//
+// Unmaintained rows are still returned, never filtered: hiding them would
+// trade a false alarm for the blindness this panel already learned to fear.
+// They carry the lag that proves the abandonment so the operator can act on
+// the right thing -- the writer, not the resource. When a whole kind stops
+// being written, every row's lag stays near zero and the rows keep reading as
+// broken, which is the correct alarm for a dead reconciler.
 func (h *Handler) overviewNotReadyOtherResources(ctx context.Context) ([]overviewNotReadyResource, error) {
 	rows, err := h.pool.Query(ctx, `
+		WITH kind_freshness AS (
+			SELECT rs.kind,
+			       rs.summary_json->>'live_source' AS live_source,
+			       max(rs.last_synced_at) AS newest
+			FROM resource_snapshots rs
+			WHERE rs.kind <> 'App'
+			  AND rs.summary_json->>'live_source' IN ('crossplane', 'crd', 'kserve')
+			GROUP BY 1, 2
+		)
 		SELECT rs.kind, rs.name, p.display_name, rs.phase,
-		       extract(epoch FROM now() - rs.last_synced_at)::int
+		       extract(epoch FROM now() - rs.last_synced_at)::int,
+		       GREATEST(extract(epoch FROM kf.newest - rs.last_synced_at)::int, 0)
 		FROM resource_snapshots rs
 		JOIN projects p ON p.id = rs.project_id
+		JOIN kind_freshness kf
+		  ON kf.kind = rs.kind
+		 AND kf.live_source = rs.summary_json->>'live_source'
 		WHERE rs.kind <> 'App'
 		  AND rs.summary_json->>'live_source' IN ('crossplane', 'crd', 'kserve')
 		  AND rs.phase NOT IN ('Ready', 'Stopped', 'Orphaned')
@@ -516,9 +555,10 @@ func (h *Handler) overviewNotReadyOtherResources(ctx context.Context) ([]overvie
 	out := []overviewNotReadyResource{}
 	for rows.Next() {
 		var r overviewNotReadyResource
-		if err := rows.Scan(&r.Kind, &r.Name, &r.ProjectName, &r.Phase, &r.AgeSeconds); err != nil {
+		if err := rows.Scan(&r.Kind, &r.Name, &r.ProjectName, &r.Phase, &r.AgeSeconds, &r.KindLagSeconds); err != nil {
 			return nil, err
 		}
+		r.Unmaintained = r.KindLagSeconds > otherSnapshotAbandonLagSeconds
 		out = append(out, r)
 	}
 	return out, rows.Err()

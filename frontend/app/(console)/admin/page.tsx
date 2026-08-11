@@ -36,6 +36,17 @@ function ageLabel(seconds: number): string {
   return `${days} дн назад`;
 }
 
+/** Compact duration label for a raw elapsed-seconds count, without "назад" -- used for a lag/gap, not a point in time, e.g. "7 суток". */
+function durationLabel(seconds: number): string {
+  if (seconds < 60) return "меньше минуты";
+  const mins = Math.floor(seconds / 60);
+  if (mins < 60) return `${mins} мин`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} ч`;
+  const days = Math.floor(hours / 24);
+  return `${days} суток`;
+}
+
 export default function AdminOverviewPage() {
   const { t } = useT();
 
@@ -155,8 +166,30 @@ export default function AdminOverviewPage() {
     { key: "kind", header: "Тип", render: (r) => <span className="text-gray-500 dark:text-gray-400">{r.kind}</span> },
     { key: "name", header: "Имя", render: (r) => <span className="font-mono text-xs text-gray-900 dark:text-gray-100">{r.name}</span> },
     { key: "project", header: t("adminOverview.notReady.col.project"), render: (r) => <span className="text-gray-700 dark:text-gray-200">{r.project_name}</span> },
-    { key: "phase", header: t("adminOverview.notReady.col.phase"), render: (r) => <StateChip tone={phaseTone(r.phase)}>{r.phase}</StateChip> },
+    {
+      key: "phase",
+      header: t("adminOverview.notReady.col.phase"),
+      render: (r) =>
+        r.unmaintained ? (
+          <div className="flex flex-col items-start gap-0.5">
+            <StateChip tone="protected">Не обслуживается</StateChip>
+            <span className="text-[11px] text-gray-400 dark:text-gray-500">статус заморожен на {r.phase}</span>
+          </div>
+        ) : (
+          <StateChip tone={phaseTone(r.phase)}>{r.phase}</StateChip>
+        ),
+    },
     { key: "age", header: "Как давно", render: (r) => <span className="text-xs text-gray-500 dark:text-gray-400">{ageLabel(r.age_seconds)}</span> },
+    {
+      key: "lag",
+      header: "Отставание сборщика",
+      render: (r) =>
+        r.unmaintained ? (
+          <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{durationLabel(r.kind_lag_seconds)}</span>
+        ) : (
+          <span className="text-xs text-gray-300 dark:text-gray-600">—</span>
+        ),
+    },
   ];
 
   const domainIssueColumns: Column<AdminOverviewResponse["domain_issues"][number]>[] = [
@@ -368,7 +401,10 @@ export default function AdminOverviewPage() {
         <Card>
           <CardHeader className="p-4 pb-2">
             <CardTitle className="text-sm">Базы, модели и другие ресурсы</CardTitle>
-            <p className="text-xs text-gray-500 dark:text-gray-400">Ресурсы вне приложений не в статусе Ready: базы данных, ML-модели, прочее</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Ресурсы вне приложений не в статусе Ready: базы данных, ML-модели, прочее. «Не обслуживается» не значит
+              «сломано» — по такой строке просто перестали приходить обновления от сборщика статуса.
+            </p>
           </CardHeader>
           <CardContent className="p-4 pt-0">
             <DataTable
