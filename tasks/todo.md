@@ -490,3 +490,14 @@ Funnel reads from `GET /api/v1/admin/growth/campaigns`.
 - [ ] «Выделенный» у `odds-research` — факт размещения, а не гарантия в CR.
       Гарантия требует диска, которого в кластере нет.
 - [ ] Ответ клиенту (`tasks/reply-fonbet-postgres.md`) не отправлен.
+
+## 2026-08-11 — box cold start: 16.7s -> убрать Longhorn из горячего пути
+
+- [ ] `WorkspaceStore` (S3) + `NewWorkspaceStore` в пакете box
+- [ ] workspace = emptyDir(sizeLimit=DiskGB) когда стор включён; PVC остаётся для легаси
+- [ ] Suspend архивирует workspace в S3 ДО удаления пода; Resume восстанавливает после ready
+- [ ] Destroy убирает объект
+- [ ] config `BOX_WORKSPACE_S3_*` (дефолт = SOURCE_UPLOAD_S3_*), префикс `box-workspaces`
+- [ ] argo-infra: quota ephemeral-storage + LimitRange max, StorageClass WFFC + strict-local
+- [ ] тесты: canon-под не поехал, ephemeral-под, suspend/resume round-trip
+- [ ] замер холодного бута в agent-sandbox + suspend/resume с файлом

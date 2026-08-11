@@ -47,7 +47,11 @@ import (
 //     cannot take the namespace past what an operator sized it for.
 //   - PullSecret is the imagePullSecret name inside Namespace. Empty means the
 //     warm image is public or already present on the node.
-//   - StorageClass backs the per-box workspace PVC.
+//   - StorageClass backs the per-box workspace PVC. It is only reached when
+//     Workspaces is absent or disabled; see ephemeralWorkspace.
+//   - Workspaces is durable storage for a sleeping box's workspace. Setting it is
+//     what turns /workspace into an emptyDir and takes Longhorn out of the cold
+//     start; leaving it nil keeps the PVC-backed workspace.
 //   - BrokerPort is the port the box's own door binds inside the pod. It is also
 //     the pod's readiness signal, because a box whose door does not accept is not
 //     a box a tenant can use.
@@ -62,6 +66,7 @@ type ClusterRuntime struct {
 	Namespace    string
 	PullSecret   string
 	StorageClass string
+	Workspaces   WorkspaceStore
 	BrokerPort   int
 	ReadyTimeout time.Duration
 
@@ -120,6 +125,15 @@ const (
 	clusterReadyPollPeriod  = time.Second
 	clusterDestroyGraceSecs = 10
 )
+
+// clusterEphemeralOverheadGB is what an ephemeral-workspace box gets on top of
+// its advertised disk.
+//
+// The pod's ephemeral-storage limit covers everything the kubelet writes on the
+// node for it, not just /workspace: the container's own writable layer, its
+// logs, and the 2Gi /tmp emptyDir. Sizing the limit to the workspace alone would
+// evict a box that used exactly the disk it was sold.
+const clusterEphemeralOverheadGB = 3
 
 // clusterDefaultReadyTimeout bounds a single pod's wait for its startup probe.
 // It is deliberately much shorter than the 20-minute budget Warm's caller gives
@@ -313,11 +327,14 @@ func (c *ClusterRuntime) createBody(ctx context.Context, image, region, phase st
 	size := boxcatalog.DefaultSize()
 	boxID := fmt.Sprintf("w%d", c.clock.Now().UnixNano())
 
-	pvc := c.buildPVC(boxID, size)
-	if _, err := c.clientset.CoreV1().PersistentVolumeClaims(c.Namespace).Create(ctx, pvc, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
-		return nil, fmt.Errorf("create workspace claim: %w", err)
+	claimed := !c.ephemeralWorkspace()
+	if claimed {
+		pvc := c.buildPVC(boxID, size)
+		if _, err := c.clientset.CoreV1().PersistentVolumeClaims(c.Namespace).Create(ctx, pvc, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+			return nil, fmt.Errorf("create workspace claim: %w", err)
+		}
 	}
-	pod := c.BuildPod(boxID, img, size, region)
+	pod := c.buildPod(boxID, img, size, region, claimed)
 	pod.Labels[labelBoxPhase] = phase
 	if phase == phaseClaimed {
 		pod.Annotations[annBoxClaimedAt] = c.clock.Now().UTC().Format(time.RFC3339)
@@ -375,6 +392,25 @@ func (c *ClusterRuntime) buildPVC(boxID string, size boxcatalog.Size) *corev1.Pe
 // reason: inside the user namespace the box does not need them, and outside it
 // they would be the escape.
 func (c *ClusterRuntime) BuildPod(boxID string, img boxcatalog.Image, size boxcatalog.Size, region string) *corev1.Pod {
+	return c.buildPod(boxID, img, size, region, !c.ephemeralWorkspace())
+}
+
+// buildPod renders the box pod on either kind of workspace.
+//
+// claimed is not a preference, it is a fact about the box being built: a box that
+// owns a Longhorn claim must be rebuilt on it, and a box that does not must be
+// rebuilt on an emptyDir. Resume passes what it found rather than what this
+// runtime prefers, so a box created before ephemeral workspaces existed keeps
+// waking up on its own disk.
+//
+// The ephemeral shape sizes the container's ephemeral-storage REQUEST to the
+// whole workspace, not just its limit. The request is what the scheduler
+// accounts, so without it three boxes could be placed on one node and then fill
+// its disk between them - and a node whose disk fills does not just lose the
+// boxes: on 2026-07-30 a full node disk took the platform's own Postgres down
+// with it. Requesting the space is what makes the scheduler refuse to overcommit
+// it.
+func (c *ClusterRuntime) buildPod(boxID string, img boxcatalog.Image, size boxcatalog.Size, region string, claimed bool) *corev1.Pod {
 	ref := img.Ref
 	if img.Digest != "" {
 		ref = img.Ref + "@" + img.Digest
@@ -386,6 +422,21 @@ func (c *ClusterRuntime) BuildPod(boxID string, img boxcatalog.Image, size boxca
 	cpuLimit := resource.MustParse(fmt.Sprintf("%d", size.VCPU))
 	cpuRequest := resource.MustParse(fmt.Sprintf("%dm", size.VCPU*1000/3))
 	mem := resource.MustParse(fmt.Sprintf("%dMi", size.MemoryMB))
+
+	workspace := corev1.VolumeSource{
+		PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: clusterPVCName(boxID)},
+	}
+	ephemeralRequest := resource.MustParse("1Gi")
+	ephemeralLimit := resource.MustParse("4Gi")
+	if !claimed {
+		workspace = corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{
+				SizeLimit: ptr.To(resource.MustParse(fmt.Sprintf("%dGi", size.DiskGB))),
+			},
+		}
+		ephemeralRequest = resource.MustParse(fmt.Sprintf("%dGi", size.DiskGB+clusterEphemeralOverheadGB))
+		ephemeralLimit = ephemeralRequest
+	}
 
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -417,10 +468,8 @@ func (c *ClusterRuntime) BuildPod(boxID string, img boxcatalog.Image, size boxca
 			},
 			Volumes: []corev1.Volume{
 				{
-					Name: clusterWorkspaceVolume,
-					VolumeSource: corev1.VolumeSource{
-						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: clusterPVCName(boxID)},
-					},
+					Name:         clusterWorkspaceVolume,
+					VolumeSource: workspace,
 				},
 				{
 					Name: "tmp",
@@ -466,12 +515,12 @@ func (c *ClusterRuntime) BuildPod(boxID string, img boxcatalog.Image, size boxca
 					Requests: corev1.ResourceList{
 						corev1.ResourceCPU:              cpuRequest,
 						corev1.ResourceMemory:           mem,
-						corev1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
+						corev1.ResourceEphemeralStorage: ephemeralRequest,
 					},
 					Limits: corev1.ResourceList{
 						corev1.ResourceCPU:              cpuLimit,
 						corev1.ResourceMemory:           mem,
-						corev1.ResourceEphemeralStorage: resource.MustParse("4Gi"),
+						corev1.ResourceEphemeralStorage: ephemeralLimit,
 					},
 				},
 				VolumeMounts: []corev1.VolumeMount{
@@ -765,6 +814,7 @@ func exitCodeFrom(err error) (int, bool) {
 func (c *ClusterRuntime) Destroy(ctx context.Context, inst *Instance) error {
 	grace := int64(clusterDestroyGraceSecs)
 	err := c.clientset.CoreV1().Pods(c.Namespace).Delete(ctx, inst.InstanceRef, metav1.DeleteOptions{GracePeriodSeconds: &grace})
+	c.dropWorkspaceArchive(ctx, inst)
 	if err != nil && !apierrors.IsNotFound(err) {
 		_ = c.deleteClaim(ctx, clusterClaimNameFor(inst))
 		return fmt.Errorf("delete box pod: %w", err)
@@ -772,16 +822,40 @@ func (c *ClusterRuntime) Destroy(ctx context.Context, inst *Instance) error {
 	return c.deleteClaim(ctx, clusterClaimNameFor(inst))
 }
 
-// Suspend deletes the pod and KEEPS the workspace claim.
+// Suspend releases the body and keeps the work.
 //
 // That asymmetry with Destroy is the entire feature: a suspended box costs the
 // customer storage instead of compute and comes back with its work intact, so
-// deleting the claim here would turn a sleep into a data loss the API calls
-// non-destructive. The pod name is derived from the box id, so the body that
-// Resume creates lands on the same claim.
+// dropping the workspace here would turn a sleep into a data loss the API calls
+// non-destructive.
+//
+// HOW the work survives depends on what the box was built with, and the box is
+// asked rather than the runtime's own preference consulted. A box holding a
+// Longhorn claim keeps it - the pod name is derived from the box id, so the body
+// Resume creates lands back on the same claim. A box on an ephemeral workspace
+// has nothing that outlives its pod, so its /workspace is archived to object
+// storage FIRST and the pod is deleted only once that archive is written.
+//
+// The order is the safety property. Archiving after the delete, or best-effort
+// alongside it, would mean a suspend that reported success over a workspace that
+// no longer exists anywhere. A failed archive therefore fails the suspend and
+// leaves the box running: an idle box costs the platform money, and that is the
+// cheaper of the two mistakes.
 func (c *ClusterRuntime) Suspend(ctx context.Context, inst *Instance) error {
+	claimed, err := c.hasWorkspaceClaim(ctx, inst)
+	if err != nil {
+		return err
+	}
+	if !claimed {
+		if !c.ephemeralWorkspace() {
+			return fmt.Errorf("refusing to suspend %s: it has no workspace claim and no archive store to put its work in", inst.InstanceRef)
+		}
+		if err := c.archiveWorkspace(ctx, inst); err != nil {
+			return err
+		}
+	}
 	grace := int64(clusterDestroyGraceSecs)
-	err := c.clientset.CoreV1().Pods(c.Namespace).Delete(ctx, inst.InstanceRef, metav1.DeleteOptions{GracePeriodSeconds: &grace})
+	err = c.clientset.CoreV1().Pods(c.Namespace).Delete(ctx, inst.InstanceRef, metav1.DeleteOptions{GracePeriodSeconds: &grace})
 	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("delete box pod: %w", err)
 	}
@@ -791,9 +865,22 @@ func (c *ClusterRuntime) Suspend(ctx context.Context, inst *Instance) error {
 // Resume rebuilds the pod of a suspended box and waits for its door to accept.
 //
 // It does NOT go through the warm pool. A pool body is a fresh disk, and this box
-// already owns one; claiming a warm instance would hand the customer somebody
+// already owns its work; claiming a warm instance would hand the customer somebody
 // else's empty workspace under their own box's name. The cost is a cold start,
 // which is the honest price of having stopped paying for the running body.
+//
+// Which workspace the rebuilt body gets is decided by what the box actually has,
+// not by what this runtime would build today. A box with a Longhorn claim is
+// rebuilt on that claim; a box without one is rebuilt on an emptyDir and its
+// archive is streamed back in once the door accepts. Getting that backwards
+// either discards a pre-existing disk or restores over one.
+//
+// The restore runs AFTER waitReady and its failure fails the resume, because the
+// alternative is handing the customer a box that is up, answering, and empty. It
+// is skipped entirely when no archive store is configured, which is the mirror of
+// Suspend refusing to put such a box down: a deployment without a store never
+// produced an archive to restore, and reaching for one would fail every resume in
+// it.
 //
 // The rebuilt pod is born LIVE rather than parked, and that is not cosmetic. The
 // pool's inventory is every parked pod the kubelet calls Ready, so a resumed pod
@@ -824,7 +911,11 @@ func (c *ClusterRuntime) Resume(ctx context.Context, inst *Instance, spec Spec) 
 	if region == "" {
 		region = inst.Region
 	}
-	pod := c.BuildPod(boxID, img, boxcatalog.DefaultSize(), region)
+	claimed, err := c.hasWorkspaceClaim(ctx, inst)
+	if err != nil {
+		return err
+	}
+	pod := c.buildPod(boxID, img, boxcatalog.DefaultSize(), region, claimed)
 	pod.Labels[labelBoxPhase] = phaseLive
 	if boxName := spec.Env["BOX_NAME"]; boxName != "" {
 		pod.Labels[labelBoxName] = boxName
@@ -833,7 +924,13 @@ func (c *ClusterRuntime) Resume(ctx context.Context, inst *Instance, spec Spec) 
 		return fmt.Errorf("recreate box pod: %w", err)
 	}
 	inst.InstanceRef = pod.Name
-	return c.waitReady(ctx, inst)
+	if err := c.waitReady(ctx, inst); err != nil {
+		return err
+	}
+	if claimed || !c.ephemeralWorkspace() {
+		return nil
+	}
+	return c.restoreWorkspace(ctx, inst)
 }
 
 // RestartServices brings the box's declared services back up in a fresh body.

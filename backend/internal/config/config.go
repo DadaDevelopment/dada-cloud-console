@@ -177,6 +177,14 @@ type Config struct {
 	SourceUploadS3SecretKey string
 	SourceUploadS3Insecure  bool
 
+	BoxWorkspaceS3Endpoint  string
+	BoxWorkspaceS3Bucket    string
+	BoxWorkspaceS3Region    string
+	BoxWorkspaceS3AccessKey string
+	BoxWorkspaceS3SecretKey string
+	BoxWorkspaceS3Prefix    string
+	BoxWorkspaceS3Insecure  bool
+
 	// Portainer live-state proxy (read-only). Both must be set to enable the VM
 	// /state and /logs endpoints. Same values the portainer-agent uses.
 	PortainerURL      string // PORTAINER_URL
@@ -747,6 +755,13 @@ func Load() (*Config, error) {
 		SourceUploadS3AccessKey:     getEnv("SOURCE_UPLOAD_S3_ACCESS_KEY", ""),
 		SourceUploadS3SecretKey:     getEnv("SOURCE_UPLOAD_S3_SECRET_KEY", ""),
 		SourceUploadS3Insecure:      getEnv("SOURCE_UPLOAD_S3_INSECURE", "false") == "true",
+		BoxWorkspaceS3Endpoint:      getEnv("BOX_WORKSPACE_S3_ENDPOINT", getEnv("SOURCE_UPLOAD_S3_ENDPOINT", "")),
+		BoxWorkspaceS3Bucket:        getEnv("BOX_WORKSPACE_S3_BUCKET", getEnv("SOURCE_UPLOAD_S3_BUCKET", "")),
+		BoxWorkspaceS3Region:        getEnv("BOX_WORKSPACE_S3_REGION", getEnv("SOURCE_UPLOAD_S3_REGION", "us-east-1")),
+		BoxWorkspaceS3AccessKey:     getEnv("BOX_WORKSPACE_S3_ACCESS_KEY", getEnv("SOURCE_UPLOAD_S3_ACCESS_KEY", "")),
+		BoxWorkspaceS3SecretKey:     getEnv("BOX_WORKSPACE_S3_SECRET_KEY", getEnv("SOURCE_UPLOAD_S3_SECRET_KEY", "")),
+		BoxWorkspaceS3Prefix:        getEnv("BOX_WORKSPACE_S3_PREFIX", "box-workspaces"),
+		BoxWorkspaceS3Insecure:      getEnv("BOX_WORKSPACE_S3_INSECURE", getEnv("SOURCE_UPLOAD_S3_INSECURE", "false")) == "true",
 		PortainerURL:                getEnv("PORTAINER_URL", ""),
 		PortainerAPIToken:           getEnv("PORTAINER_API_TOKEN", ""),
 		PrometheusQueryURL:          getEnv("PROMETHEUS_QUERY_URL", ""),

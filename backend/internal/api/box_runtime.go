@@ -195,6 +195,14 @@ func (h *Handler) initClusterBoxRuntime(cfg *config.Config) {
 	if cfg.BoxClusterStorageClass != "" {
 		rt.StorageClass = cfg.BoxClusterStorageClass
 	}
+	rt.Workspaces = box.NewWorkspaceStore(
+		cfg.BoxWorkspaceS3Endpoint, cfg.BoxWorkspaceS3Bucket, cfg.BoxWorkspaceS3Region,
+		cfg.BoxWorkspaceS3AccessKey, cfg.BoxWorkspaceS3SecretKey, cfg.BoxWorkspaceS3Prefix,
+		cfg.BoxWorkspaceS3Insecure,
+	)
+	if !rt.Workspaces.Enabled() {
+		log.Warn().Msg("box: no workspace archive store (BOX_WORKSPACE_S3_*/SOURCE_UPLOAD_S3_*); boxes keep the Longhorn claim, which costs about 13s of provision and attach on every cold start and a parked disk for every sleeping box")
+	}
 
 	exposer := box.NewClusterExposer(rt, cfg.BoxHostnameBase)
 	if cfg.BoxClusterTLSSecret != "" {
