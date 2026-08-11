@@ -493,11 +493,25 @@ Funnel reads from `GET /api/v1/admin/growth/campaigns`.
 
 ## 2026-08-11 — box cold start: 16.7s -> убрать Longhorn из горячего пути
 
-- [ ] `WorkspaceStore` (S3) + `NewWorkspaceStore` в пакете box
-- [ ] workspace = emptyDir(sizeLimit=DiskGB) когда стор включён; PVC остаётся для легаси
-- [ ] Suspend архивирует workspace в S3 ДО удаления пода; Resume восстанавливает после ready
-- [ ] Destroy убирает объект
-- [ ] config `BOX_WORKSPACE_S3_*` (дефолт = SOURCE_UPLOAD_S3_*), префикс `box-workspaces`
-- [ ] argo-infra: quota ephemeral-storage + LimitRange max, StorageClass WFFC + strict-local
-- [ ] тесты: canon-под не поехал, ephemeral-под, suspend/resume round-trip
-- [ ] замер холодного бута в agent-sandbox + suspend/resume с файлом
+- [x] `WorkspaceStore` (S3) + `NewWorkspaceStore` в пакете box
+- [x] workspace = emptyDir(sizeLimit=DiskGB) когда стор включён; PVC остаётся для легаси
+- [x] Suspend архивирует workspace в S3 ДО удаления пода; Resume восстанавливает после ready
+- [x] Destroy убирает объект
+- [x] config `BOX_WORKSPACE_S3_*` (дефолт = SOURCE_UPLOAD_S3_*), префикс `box-workspaces`
+- [x] argo-infra: quota ephemeral-storage 45Gi + LimitRange max 16Gi (`87acb137`, живо в кластере)
+- [~] StorageClass WFFC + strict-local — ОТМЕНЕНО: после выноса боксов из горячего пути
+      единственный потребитель longhorn-box это кристаллизатор, там attach-latency не важна,
+      а `Replace=true` на StorageClass — риск ради нуля
+- [x] тесты: canon-под не поехал, ephemeral-под, отказ suspend без стора, ключ архива
+- [x] прогон стора против настоящего Beget S3 (`7da8fafc`), скипается без кредов
+- [x] замер холодного бута в agent-sandbox: **4.98s против 16.7s**, под с emptyDir, PVC ноль
+- [x] первый живой suspend уронил бэкенд OOMKilled — minio под длину -1 просит буфер ~537MiB
+      при лимите пода 512Mi; починено `a218e5be` (PartSize 16MiB) + тест на соотношение
+- [ ] повторить suspend/resume round-trip с файлом после раскатки `a218e5be`
+- [ ] убрать бокс `ephprobe1` из песочницы и проверить, что архив удалён вместе с ним
+
+### Что осталось за рамками
+- `argo-infra@6e65676e` несёт протухший trailer «ноды managed Beget, SSH нет» — владелец
+  поправил: sshd на внешних IP нод отвечает, ключ прокинут при создании кластера
+- через сутки после раскатки померить `box_usage`: доля `suspended_disk` должна упасть в ноль
+  для новых боксов (у них нет припаркованного тома)
