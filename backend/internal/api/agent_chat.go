@@ -263,6 +263,28 @@ func (h *Handler) agentChatInsertMessage(ctx context.Context, userSub, orgID str
 	h.transcript().AppendMessage(ctx, userSub, orgID, projectID, envID, role, content, toolName)
 }
 
+// agentChatFailedTurnAnswer is persisted when a turn ends with an error: the
+// upstream model call failed, or the loop burned its round budget without a
+// final answer.
+const agentChatFailedTurnAnswer = "Ход оборвался: не удалось получить ответ от модели. История диалога сохранена — повтори вопрос. Если повторяется, опиши проблему через обращение в поддержку."
+
+// agentChatEmptyTurnAnswer is persisted when a turn succeeds but the model
+// returns an empty final message, typically after a run of tool calls.
+const agentChatEmptyTurnAnswer = "Не удалось сформулировать ответ: модель завершила ход пустым сообщением после работы с инструментами. Повтори или уточни вопрос."
+
+// agentChatPersistTextlessTurn writes the transcript rows for a turn that
+// produced no assistant text: the tool results that did run, followed by an
+// explicit answer. Without it the conversation ends on the user's question
+// with nothing after it, which reads to the user as the assistant walking away
+// mid-sentence -- and on reload the transcript shows tool rows and silence.
+func (h *Handler) agentChatPersistTextlessTurn(ctx context.Context, userSub, orgID string, projectID, envID *uuid.UUID, toolLog []agentchat.ToolLogEntry, answer string) {
+	for _, t := range toolLog {
+		toolName := t.Name
+		h.agentChatInsertMessage(ctx, userSub, orgID, projectID, envID, "tool", agentChatTranscriptToolResult(t.Name, t.Result), &toolName)
+	}
+	h.agentChatInsertMessage(ctx, userSub, orgID, projectID, envID, "assistant", answer, nil)
+}
+
 // agentChatContextClearedAt returns the most recent "clear context" timestamp
 // for this user/project/env scope, or the zero time if the user has never
 // cleared it (in which case a `created_at > zeroTime` filter is always true,
@@ -1338,6 +1360,7 @@ func (h *Handler) AgentChat(c *gin.Context) {
 		log.Printf("agent-chat: turn %s on model %s failed: %v", trace.TraceID, llm.Model, err)
 		trace.Finish(agentchat.OutcomeError, agentChatUpstreamErrorCode(err))
 		h.agentChatRecordTurn(trace)
+		h.agentChatPersistTextlessTurn(ctx, userSub, orgID, projectID, envID, res.ToolLog, agentChatFailedTurnAnswer)
 		writeSSEEvent(c, flusher, "error", fmt.Sprintf(`{"code":"upstream","message":%q}`, "agent could not complete this turn, please try again"))
 		h.agentChatEmitTrace(c, flusher, req.Trace, trace)
 		writeSSEEvent(c, flusher, "done", `{"ok":false}`)
@@ -1367,9 +1390,11 @@ func (h *Handler) AgentChat(c *gin.Context) {
 		}
 	}
 
-	if assistantText != "" {
-		h.agentChatInsertMessage(ctx, userSub, orgID, projectID, envID, "assistant", assistantText, nil)
+	if assistantText == "" {
+		assistantText = agentChatEmptyTurnAnswer
+		writeSSEEvent(c, flusher, "token", assistantText)
 	}
+	h.agentChatInsertMessage(ctx, userSub, orgID, projectID, envID, "assistant", assistantText, nil)
 
 	trace.OutputText = agentchat.TruncateForTrace(assistantText, agentchat.MaxTraceTextLen)
 	trace.Finish(agentchat.OutcomeAnswered, "")
@@ -1750,6 +1775,7 @@ func (h *Handler) AgentChatConfirm(c *gin.Context) {
 		log.Printf("agent-chat: resumed turn %s on model %s failed: %v", trace.TraceID, llm.Model, err)
 		trace.Finish(agentchat.OutcomeError, agentChatUpstreamErrorCode(err))
 		h.agentChatRecordTurn(trace)
+		h.agentChatPersistTextlessTurn(ctx, userSub, row.orgID, row.projectID, row.envID, res.ToolLog, agentChatFailedTurnAnswer)
 		writeSSEEvent(c, flusher, "error", `{"code":"upstream","message":"agent could not complete this turn, please try again"}`)
 		h.agentChatEmitTrace(c, flusher, req.Trace, trace)
 		writeSSEEvent(c, flusher, "done", `{"ok":false}`)
@@ -1779,9 +1805,11 @@ func (h *Handler) AgentChatConfirm(c *gin.Context) {
 		}
 	}
 
-	if assistantText != "" {
-		h.agentChatInsertMessage(ctx, userSub, row.orgID, row.projectID, row.envID, "assistant", assistantText, nil)
+	if assistantText == "" {
+		assistantText = agentChatEmptyTurnAnswer
+		writeSSEEvent(c, flusher, "token", assistantText)
 	}
+	h.agentChatInsertMessage(ctx, userSub, row.orgID, row.projectID, row.envID, "assistant", assistantText, nil)
 
 	trace.OutputText = agentchat.TruncateForTrace(assistantText, agentchat.MaxTraceTextLen)
 	trace.Finish(agentchat.OutcomeAnswered, "")
