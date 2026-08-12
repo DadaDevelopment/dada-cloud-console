@@ -86,6 +86,24 @@ const previewUpstreamUnavailableBody = "Предпросмотр Dada Cloud не
 	"Обычные причины: приложение ещё поднимается после деплоя; оно не слушает тот порт, который указан в настройках; это не HTTP-приложение (например бот) и веб-порта у него нет вовсе; либо недоступна сама платформа.\n" +
 	"Что именно из этого — покажет состояние приложения в консоли."
 
+// previewErrorCodeHeader carries the machine-readable counterpart of
+// previewUpstreamUnavailableBody. The body is delivered as text/plain straight
+// into the iframe, so it cannot also carry a JSON sibling field the way
+// live_error.go does; the header is the equivalent out-of-band channel for any
+// consumer (monitoring, a future assistant tool) that must branch on what
+// happened rather than pattern-match the Russian prose a human reads.
+const previewErrorCodeHeader = "X-Dada-Preview-Error-Code"
+
+const previewUpstreamUnavailableCode = "preview_upstream_unavailable"
+
+// writePreviewUpstreamUnavailable is the single writer for the 502 both the
+// live ErrorHandler and its test hit, so the header and the body can never
+// drift apart.
+func writePreviewUpstreamUnavailable(w http.ResponseWriter) {
+	w.Header().Set(previewErrorCodeHeader, previewUpstreamUnavailableCode)
+	http.Error(w, previewUpstreamUnavailableBody, http.StatusBadGateway)
+}
+
 // NewPreviewGate wraps next with preview-host dispatch: requests whose Host is
 // under cfg.PreviewHostBase are proxied to the target app, everything else
 // falls through to next. Returns next unchanged when the gate is not
@@ -184,7 +202,7 @@ func (g *PreviewGate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			log.Debug().Err(err).Str("host", host).Msg("preview gate: upstream error")
-			http.Error(w, previewUpstreamUnavailableBody, http.StatusBadGateway)
+			writePreviewUpstreamUnavailable(w)
 		},
 	}
 	proxy.ServeHTTP(w, r)

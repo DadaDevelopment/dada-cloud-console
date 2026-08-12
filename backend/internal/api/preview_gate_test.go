@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -75,6 +76,26 @@ func TestPreviewHostFor_LabelTooLong(t *testing.T) {
 	longApp := strings.Repeat("a", 60)
 	if h := PreviewHostFor(longApp, uuid.New(), cfg); h != "" {
 		t.Errorf("expected empty host for oversized label, got %q", h)
+	}
+}
+
+func TestWritePreviewUpstreamUnavailable(t *testing.T) {
+	rec := httptest.NewRecorder()
+
+	writePreviewUpstreamUnavailable(rec)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadGateway)
+	}
+	if got := rec.Header().Get(previewErrorCodeHeader); got != previewUpstreamUnavailableCode {
+		t.Errorf("%s = %q, want %q", previewErrorCodeHeader, got, previewUpstreamUnavailableCode)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "платформы") {
+		t.Errorf("body must name itself as a platform response, got %q", body)
+	}
+	if !strings.Contains(body, "не вашего приложения") {
+		t.Errorf("body must disclaim the user's app as the cause, got %q", body)
 	}
 }
 
