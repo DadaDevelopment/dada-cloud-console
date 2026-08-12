@@ -26,6 +26,15 @@ export const feedback: Messages = {
   "feedback.widget.error": { ru: "Не удалось отправить. Попробуйте ещё раз.", en: "Couldn't send it. Try again." },
   "feedback.widget.retry": { ru: "Повторить", en: "Retry" },
 
+  "feedback.mine.heading": { ru: "Мои обращения", en: "My tickets" },
+  "feedback.mine.status.new": { ru: "Новое", en: "New" },
+  "feedback.mine.status.inProgress": { ru: "В работе", en: "In progress" },
+  "feedback.mine.status.resolved": { ru: "Решено", en: "Resolved" },
+  "feedback.mine.age.hours": { ru: "{count} ч назад", en: "{count}h ago" },
+  "feedback.mine.age.days": { ru: "{count} дн назад", en: "{count}d ago" },
+  "feedback.mine.resolutionLabel": { ru: "Ответ поддержки:", en: "Support's answer:" },
+  "feedback.mine.empty": { ru: "Обращений пока нет.", en: "No tickets yet." },
+
   "adminFeedback.crumb.feedback": { ru: "Обращения", en: "Feedback" },
   "adminFeedback.title": { ru: "Обращения пользователей", en: "User feedback" },
   "adminFeedback.subtitle": {

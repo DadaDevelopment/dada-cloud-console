@@ -56,6 +56,7 @@ import type {
   MLflowModelVersion,
   RevealAPIKeyResponse,
   PendingApprovalsResponse,
+  MyFeedbackListResponse,
   AuditEventsResponse,
   AuditCoverageResponse,
   AuditFacetsResponse,
@@ -370,6 +371,7 @@ export const api = {
 export const feedbackApi = {
   submit: (message: string, route: string) =>
     apiFetch<{ status: string }>("/api/v1/feedback", { method: "POST", body: { message, route } }),
+  mine: () => apiFetch<MyFeedbackListResponse>("/api/v1/feedback/mine"),
 };
 
 export const authApi = {

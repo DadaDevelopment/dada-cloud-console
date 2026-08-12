@@ -120,6 +120,72 @@ func (h *Handler) SubmitFeedback(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"status": "ok", "id": id})
 }
 
+const feedbackMineLimit = 20
+
+type myFeedbackItem struct {
+	ID         uuid.UUID  `json:"id"`
+	CreatedAt  time.Time  `json:"created_at"`
+	Status     string     `json:"status"`
+	Route      string     `json:"route"`
+	AppName    string     `json:"app_name"`
+	Message    string     `json:"message"`
+	Resolution string     `json:"resolution"`
+	ResolvedAt *time.Time `json:"resolved_at"`
+}
+
+// ListMyFeedback returns the signed-in caller's own support tickets, newest
+// first. This is the read side of SubmitFeedback: it filters on the same
+// user_sub that insert stamps from claims.UserID, so a caller only ever sees
+// rows their own bearer token wrote.
+//
+// @ID          listMyFeedback
+// @Summary     List my support tickets
+// @Description Returns the caller's own feedback tickets (newest first, up to 20), including status and resolution once an operator has closed one out. Never returns another user's tickets.
+// @Tags        feedback
+// @Produce     json
+// @Security    BearerAuth
+// @Success     200 {object} map[string]interface{} "object with an items array"
+// @Failure     401 {object} map[string]string
+// @Router      /feedback/mine [get]
+func (h *Handler) ListMyFeedback(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	userSub := claims.UserID.String()
+
+	rows, err := h.pool.Query(c.Request.Context(),
+		`SELECT id, created_at, status, route, app_name, message, resolution, resolved_at
+		   FROM feedback
+		  WHERE user_sub = $1
+		  ORDER BY created_at DESC
+		  LIMIT $2`,
+		userSub, feedbackMineLimit)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to list feedback")
+		return
+	}
+	defer rows.Close()
+
+	items := []myFeedbackItem{}
+	for rows.Next() {
+		var it myFeedbackItem
+		if err := rows.Scan(&it.ID, &it.CreatedAt, &it.Status, &it.Route, &it.AppName,
+			&it.Message, &it.Resolution, &it.ResolvedAt); err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to read feedback")
+			return
+		}
+		items = append(items, it)
+	}
+	if rows.Err() != nil {
+		respondError(c, http.StatusInternalServerError, "failed to read feedback")
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
 type feedbackNotice struct {
 	ID          uuid.UUID
 	SenderEmail string

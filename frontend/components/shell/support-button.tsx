@@ -1,10 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Modal } from "@/components/ui/modal";
 import { feedbackApi } from "@/lib/api";
+import { useAuth } from "@/lib/auth-provider";
 import { useT } from "@/lib/i18n/console/context";
+import type { MyFeedbackItem } from "@/lib/types";
+import { feedbackAgeParts, feedbackFirstLine, feedbackStatusBadgeClass, feedbackStatusLabelKey } from "@/lib/feedback-status";
 
 const SUPPORT_EMAIL = "development@dada-tuda.ru";
 
@@ -23,6 +26,66 @@ function SupportIcon() {
 type Status = "idle" | "sending" | "success" | "error";
 
 /**
+ * Compact "my tickets" list rendered under the feedback form. Refetched after
+ * a successful submit (via `refreshKey`) so the user sees their own new ticket
+ * without leaving the modal. Failures here stay silent -- the submit form must
+ * keep working even if this list can't load.
+ */
+function MyTickets({ refreshKey }: { refreshKey: number }) {
+  const { t } = useT();
+  const [items, setItems] = useState<MyFeedbackItem[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    feedbackApi
+      .mine()
+      .then((data) => {
+        if (!cancelled) setItems(data.items ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setItems(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshKey]);
+
+  if (items === null) return null;
+
+  return (
+    <div className="mt-4 border-t border-gray-200 pt-3 dark:border-gray-800">
+      <h3 className="mb-2 text-xs font-medium text-gray-500 dark:text-gray-400">{t("feedback.mine.heading")}</h3>
+      {items.length === 0 ? (
+        <p className="text-xs text-gray-400 dark:text-gray-500">{t("feedback.mine.empty")}</p>
+      ) : (
+        <ul className="space-y-2">
+          {items.map((item) => {
+            const { unit, count } = feedbackAgeParts(item.created_at);
+            return (
+              <li key={item.id} className="rounded-lg border border-gray-200 px-3 py-2 text-xs dark:border-gray-800">
+                <div className="mb-1 flex flex-wrap items-center gap-2">
+                  <span className={`rounded px-1.5 py-0.5 font-medium ${feedbackStatusBadgeClass(item.status)}`}>
+                    {t(feedbackStatusLabelKey(item.status))}
+                  </span>
+                  <span className="text-gray-400 dark:text-gray-500">{t(`feedback.mine.age.${unit}`, { count: String(count) })}</span>
+                  {item.app_name ? <span className="font-mono text-gray-400 dark:text-gray-500">{item.app_name}</span> : null}
+                </div>
+                <p className="text-gray-700 dark:text-gray-300">{feedbackFirstLine(item.message)}</p>
+                {item.resolution ? (
+                  <p className="mt-1 text-gray-500 dark:text-gray-400">
+                    <span className="font-medium">{t("feedback.mine.resolutionLabel")}</span> {item.resolution}
+                  </p>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/**
  * Unobtrusive floating support button in the authed console shell. Opens a
  * small modal that posts feedback to /api/v1/feedback (readable by the
  * support routine via psql). A mailto fallback stays available inside the
@@ -30,10 +93,12 @@ type Status = "idle" | "sending" | "success" | "error";
  */
 export function SupportButton() {
   const { t } = useT();
+  const { user } = useAuth();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState<Status>("idle");
+  const [ticketsRefreshKey, setTicketsRefreshKey] = useState(0);
 
   function close() {
     setOpen(false);
@@ -48,6 +113,7 @@ export function SupportButton() {
     try {
       await feedbackApi.submit(trimmed, pathname ?? "");
       setStatus("success");
+      setTicketsRefreshKey((k) => k + 1);
       setTimeout(close, 1500);
     } catch {
       setStatus("error");
@@ -125,6 +191,8 @@ export function SupportButton() {
             </div>
           </div>
         )}
+
+        {user ? <MyTickets refreshKey={ticketsRefreshKey} /> : null}
       </Modal>
     </>
   );

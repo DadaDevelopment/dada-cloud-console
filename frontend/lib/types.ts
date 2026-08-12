@@ -1050,6 +1050,21 @@ export interface FeedbackListResponse {
   new_count: number;
 }
 
+export interface MyFeedbackItem {
+  id: string;
+  created_at: string;
+  status: string;
+  route: string;
+  app_name: string;
+  message: string;
+  resolution: string;
+  resolved_at?: string | null;
+}
+
+export interface MyFeedbackListResponse {
+  items: MyFeedbackItem[];
+}
+
 export interface AdminOverviewUsers {
   total: number;
   new_24h: number;

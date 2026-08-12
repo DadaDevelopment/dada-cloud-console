@@ -2245,6 +2245,42 @@
                 }
             }
         },
+        "/feedback/mine": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the caller's own feedback tickets (newest first, up to 20), including status and resolution once an operator has closed one out. Never returns another user's tickets.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feedback"
+                ],
+                "summary": "List my support tickets",
+                "operationId": "listMyFeedback",
+                "responses": {
+                    "200": {
+                        "description": "object with an items array",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/git/github/oauth/callback": {
             "get": {
                 "description": "Public endpoint GitHub redirects to after user authorization. Consumes the one-time state, exchanges the code, binds the user's installations, redirects to the wizard.",
@@ -19714,6 +19750,9 @@
         "api.appHealthResponse": {
             "type": "object",
             "properties": {
+                "cause_kind": {
+                    "type": "string"
+                },
                 "live_source": {
                     "type": "string"
                 },

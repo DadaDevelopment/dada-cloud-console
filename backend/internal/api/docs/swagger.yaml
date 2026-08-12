@@ -188,6 +188,8 @@ definitions:
     type: object
   api.appHealthResponse:
     properties:
+      cause_kind:
+        type: string
       live_source:
         type: string
       log_excerpt:
@@ -2902,6 +2904,31 @@ paths:
       security:
       - BearerAuth: []
       summary: Submit in-product feedback
+      tags:
+      - feedback
+  /feedback/mine:
+    get:
+      description: Returns the caller's own feedback tickets (newest first, up to
+        20), including status and resolution once an operator has closed one out.
+        Never returns another user's tickets.
+      operationId: listMyFeedback
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with an items array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List my support tickets
       tags:
       - feedback
   /git/github/oauth/callback:

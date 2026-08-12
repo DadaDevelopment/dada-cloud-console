@@ -360,6 +360,9 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		// Auth
 		api.GET("/auth/me", h.Me)
 
+		// Feedback
+		api.GET("/feedback/mine", h.ListMyFeedback)
+
 		// Projects
 		api.GET("/projects", h.ListProjects)
 		api.POST("/projects", h.CreateProject)
