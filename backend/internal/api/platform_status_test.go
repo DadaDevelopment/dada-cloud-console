@@ -50,9 +50,9 @@ func TestGetPlatformStatus_RequiresAuth(t *testing.T) {
 // TestGetPlatformStatus_ComponentErrorReturnsUnknownNot500 proves the
 // contract clause that matters most for this endpoint: a component whose
 // query fails must never turn the whole request into a 500 the assistant has
-// to guess about. A Handler with a nil pool makes every component query
-// panic-free-fail, so this exercises the failure path deterministically for
-// all five components without needing a real database at all.
+// to guess about. A Handler holding an already-closed pool makes every
+// component query fail synchronously, so this exercises the failure path
+// deterministically for all five components without needing a real database.
 func TestGetPlatformStatus_ComponentErrorReturnsUnknownNot500(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	h := &Handler{pool: closedTestPool(t)}
