@@ -48,6 +48,8 @@ type autofixRequest struct {
 // @Failure     401       {object} map[string]string
 // @Failure     403       {object} map[string]string
 // @Failure     404       {object} map[string]string
+// @Failure     409       {object} map[string]string "an autofix run is already in flight for this app"
+// @Failure     422       {object} map[string]string "the refusal is a proven platform capacity limit, not app code -- no PR was opened"
 // @Failure     502       {object} map[string]string
 // @Failure     503       {object} map[string]string
 // @Router      /projects/{projectId}/environments/{envId}/apps/{appName}/autofix [post]
@@ -191,30 +193,67 @@ func respondAutofixError(c *gin.Context, err error) {
 // platform -- a build-failure summary or an LLM crash diagnosis -- so the
 // engine only ever fired from an alert. A customer describing the same bug in
 // their own words is the same input.
+//
+// Two guards run before any network call. Both exist because of the same
+// artemmendeleev/fonbet-value incident (2026-08-11 23:21): a double click
+// fired two parallel runs against the same repo (no in-flight check existed),
+// and separately the platform's own resource ceiling -- not the app's code --
+// was the real blocker, which no run could have fixed with a PR.
 func (h *Handler) launchAutofix(ctx context.Context, in autofixLaunch) (models.CloudTask, error) {
 	if h.dadagent == nil {
 		return models.CloudTask{}, &autofixError{status: http.StatusServiceUnavailable, message: "dadagent integration not configured"}
 	}
 
+	claim, err := h.claimAutofixRun(ctx, in)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return models.CloudTask{}, &autofixError{
+				status:  http.StatusConflict,
+				message: "по этому приложению уже идёт автопочинка, дождитесь её завершения",
+				code:    "autofix_already_running",
+			}
+		}
+		return models.CloudTask{}, &autofixError{status: http.StatusInternalServerError, message: "failed to record cloud task"}
+	}
+
+	claimID, err := uuid.Parse(claim.ID)
+	if err != nil {
+		return models.CloudTask{}, &autofixError{status: http.StatusInternalServerError, message: "failed to record cloud task"}
+	}
+
+	fail := func(af *autofixError) (models.CloudTask, error) {
+		h.failCloudTask(ctx, claimID, af.message)
+		return models.CloudTask{}, af
+	}
+
+	if reason, capped := h.platformCapacityRefusal(ctx, in.ProjectID, in.EnvID, in.AppName); capped {
+		log.Printf("autofix: app %s (project %s) refused: platform capacity cause %q, not opening a PR", in.AppName, in.ProjectID, reason)
+		return fail(&autofixError{
+			status:  http.StatusUnprocessableEntity,
+			message: autofixPlatformCapacityVerdict,
+			code:    "platform_capacity_limit",
+		})
+	}
+
 	repo, instID, gitRepoID, err := h.resolveGitRepo(ctx, in.ProjectID, in.EnvID, in.AppName)
 	if errors.Is(err, errRepoWithoutInstallation) {
-		return models.CloudTask{}, &autofixError{
+		return fail(&autofixError{
 			status:  http.StatusBadRequest,
 			message: "репозиторий подключён без доступа GitHub App: переподключите его через GitHub App, чтобы автофикс мог открыть PR",
 			code:    "repo_without_installation",
-		}
+		})
 	}
 	if err != nil {
-		return models.CloudTask{}, &autofixError{
+		return fail(&autofixError{
 			status:  http.StatusBadRequest,
 			message: "no connected git repo for app",
 			code:    "no_repo",
-		}
+		})
 	}
 
 	token, _, err := gh.MintInstallToken(ctx, h.cfg.GithubAppID, h.cfg.GithubAppPrivateKey, instID)
 	if err != nil {
-		return models.CloudTask{}, &autofixError{status: http.StatusBadGateway, message: "failed to mint install token"}
+		return fail(&autofixError{status: http.StatusBadGateway, message: "failed to mint install token"})
 	}
 
 	logs := h.fetchAutofixLogs(ctx, in.ProjectID, in.EnvID, in.AppName)
@@ -228,7 +267,7 @@ func (h *Handler) launchAutofix(ctx context.Context, in autofixLaunch) (models.C
 	})
 	if err != nil {
 		log.Printf("autofix: app %s (project %s) launch failed: %v", in.AppName, in.ProjectID, err)
-		return models.CloudTask{}, &autofixError{status: http.StatusBadGateway, message: "failed to launch auto-fix run"}
+		return fail(&autofixError{status: http.StatusBadGateway, message: "failed to launch auto-fix run"})
 	}
 
 	cloudTaskID := ""
@@ -238,17 +277,86 @@ func (h *Handler) launchAutofix(ctx context.Context, in autofixLaunch) (models.C
 		cloudTaskID = info.CloudTaskID
 	}
 
-	gitRepoUUID := gitRepoID
-	row, err := h.insertCloudTask(ctx, cloudTaskInsert{
-		ProjectID: in.ProjectID, EnvironmentID: in.EnvID, AppName: in.AppName,
-		GitRepoID: &gitRepoUUID, TaskType: "autofix",
-		IntentID: cloudTaskID, WorkflowID: res.RunID,
-		ActorID: in.ActorID,
-	})
+	row, err := h.finalizeCloudTask(ctx, claimID, gitRepoID, cloudTaskID, res.RunID)
 	if err != nil {
 		return models.CloudTask{}, &autofixError{status: http.StatusInternalServerError, message: "failed to record cloud task"}
 	}
 	return row, nil
+}
+
+// claimAutofixRun stakes the (project_id, environment_id, app_name) slot for
+// an autofix run before any network call is made: idx_cloud_tasks_autofix_
+// inflight (migration 113) allows only one status='running' task_type=autofix
+// row per app across every backend replica, so a second concurrent launch
+// fails the INSERT with a unique-violation instead of racing a second run
+// past the first. GitRepoID/IntentID/WorkflowID are filled in later by
+// finalizeCloudTask once they are known; the row is 'running' (the table
+// default) from the moment this returns.
+func (h *Handler) claimAutofixRun(ctx context.Context, in autofixLaunch) (models.CloudTask, error) {
+	return h.insertCloudTask(ctx, cloudTaskInsert{
+		ProjectID: in.ProjectID, EnvironmentID: in.EnvID, AppName: in.AppName,
+		TaskType: "autofix", ActorID: in.ActorID,
+	})
+}
+
+// autofixPlatformCapacityReasons is the subset of app-autoscale refusal
+// reasons (app_autoscale_watcher.go maybeResize/auditRefusal, metadata.
+// refusal) that are proven platform-capacity facts, not app bugs: the
+// autoscaler looked at a genuinely starved, genuinely Ready app and hit a
+// ceiling it does not control. Every other refusal reason on that same code
+// path -- app_not_ready, unsized_app, envelope_unreadable, limitrange_
+// unreadable, quota_unreadable, resize_failed -- stays out on purpose: those
+// can just as easily mean the app's own code is crash-looping or the platform
+// simply could not read its own state, so treating them as "definitely not
+// your code" would repeat the mistake platformCrashSignatures in notify.go
+// guards against -- a confident wrong verdict in either direction is worse
+// than staying silent and letting the run proceed normally.
+var autofixPlatformCapacityReasons = map[string]bool{
+	"limitrange_capped":   true,
+	"at_ceiling":          true,
+	"quota_blocked":       true,
+	"consumption_blocked": true,
+}
+
+// autofixPlatformCapacityWindow bounds how fresh the autoscaler's refusal
+// must be to still describe the app's current state. Set to appAutoscaleCooldown
+// (app_autoscale_watcher.go) -- the longest gap the watcher's own dedup can
+// leave between a refusal recurring and a fresh audit row proving it, so a
+// row older than this window could already be stale (quota raised, app since
+// resized, starvation gone) and must not be trusted.
+const autofixPlatformCapacityWindow = appAutoscaleCooldown
+
+// autofixPlatformCapacityVerdict is shown instead of opening a PR when the
+// freshest capacity refusal for this exact app is still inside the window:
+// no pull request can raise a ceiling the platform itself enforces, so
+// running the agent would only relabel the same failure under a different
+// name. Kubernetes/LimitRange/namespace never appear in user-facing text.
+const autofixPlatformCapacityVerdict = "причина отказа не в коде приложения: платформе не хватает выделенных приложению ресурсов в рамках текущего тарифа, и пул-реквест это не изменит. Поднимите лимиты ресурсов или тариф приложения и повторите запуск"
+
+// platformCapacityRefusal looks up the freshest app-autoscale refusal audit
+// row for this exact app and reports whether it names a reason in
+// autofixPlatformCapacityReasons within autofixPlatformCapacityWindow. Returns
+// found=false for everything else, including a query failure or no matching
+// row at all -- an unclassifiable or absent signal must fall through to a
+// normal PR-seeking run rather than guess.
+func (h *Handler) platformCapacityRefusal(ctx context.Context, projectID, envID uuid.UUID, appName string) (reason string, found bool) {
+	var refusal *string
+	err := h.pool.QueryRow(ctx,
+		`SELECT metadata->>'refusal' FROM audit_events
+		  WHERE project_id = $1 AND environment_id = $2 AND action = $3
+		    AND resource_kind = 'App' AND resource_name = $4 AND outcome = $5
+		    AND created_at >= NOW() - make_interval(secs => $6)
+		  ORDER BY created_at DESC LIMIT 1`,
+		projectID, envID, auditActionAutoscaleApp, appName, auditOutcomeFailure,
+		autofixPlatformCapacityWindow.Seconds()).
+		Scan(&refusal)
+	if err != nil || refusal == nil {
+		return "", false
+	}
+	if !autofixPlatformCapacityReasons[*refusal] {
+		return "", false
+	}
+	return *refusal, true
 }
 
 // formatBuildFailureSummary renders a short natural-language failure summary

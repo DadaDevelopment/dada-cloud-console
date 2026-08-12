@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 
 	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/google/uuid"
@@ -59,6 +60,31 @@ func (h *Handler) insertCloudTask(ctx context.Context, in cloudTaskInsert) (mode
 
 func (h *Handler) getCloudTask(ctx context.Context, id uuid.UUID) (models.CloudTask, error) {
 	return scanCloudTask(h.pool.QueryRow(ctx, `SELECT `+cloudTaskCols+` FROM cloud_tasks WHERE id=$1`, id))
+}
+
+// finalizeCloudTask attaches the git repo and the agent's own run identifiers
+// to a row inserted earlier as a claim (insertCloudTask with GitRepoID=nil,
+// IntentID="", WorkflowID=""). Status is left untouched -- the row was already
+// 'running' from insert, and stays that way until the webhook resolves it.
+func (h *Handler) finalizeCloudTask(ctx context.Context, id uuid.UUID, gitRepoID uuid.UUID, intentID, workflowID string) (models.CloudTask, error) {
+	row := h.pool.QueryRow(ctx,
+		`UPDATE cloud_tasks SET git_repo_id=$2, intent_id=NULLIF($3,''), workflow_id=$4, updated_at=NOW()
+		 WHERE id=$1 RETURNING `+cloudTaskCols,
+		id, gitRepoID, intentID, workflowID)
+	return scanCloudTask(row)
+}
+
+// failCloudTask marks a claimed-but-never-finished cloud task 'failed' so the
+// partial-unique in-flight index (idx_cloud_tasks_autofix_inflight for
+// task_type=autofix) releases the slot for a real retry. Best-effort: a
+// failure to write the failure itself must not mask the original error the
+// caller is already returning.
+func (h *Handler) failCloudTask(ctx context.Context, id uuid.UUID, reason string) {
+	if _, err := h.pool.Exec(ctx,
+		`UPDATE cloud_tasks SET status='failed', error=$2, updated_at=NOW() WHERE id=$1 AND status='running'`,
+		id, reason); err != nil {
+		log.Printf("cloud_tasks: failed to mark claim %s failed: %v", id, err)
+	}
 }
 
 func (h *Handler) listCloudTasks(ctx context.Context, projectID uuid.UUID, appName string) ([]models.CloudTask, error) {
