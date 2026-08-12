@@ -44,7 +44,7 @@ func authMiddleware(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 	signupNotifier := notify.New(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPFrom)
 
 	resolver := func(c *gin.Context, kc *auth.KeycloakClaims) (*auth.Claims, error) {
-		id, created, err := auth.ResolveUser(c.Request.Context(), pool, kc)
+		id, created, err := auth.ResolveUser(c.Request.Context(), pool, kc, cfg.SignupEnabled)
 		if err != nil {
 			return nil, err
 		}
@@ -114,7 +114,7 @@ func optionalAuthResolver(pool *pgxpool.Pool, cfg *config.Config) func(c *gin.Co
 		if verr != nil {
 			return nil, false
 		}
-		id, _, rerr := auth.ResolveUser(c.Request.Context(), pool, kc)
+		id, _, rerr := auth.ResolveUser(c.Request.Context(), pool, kc, cfg.SignupEnabled)
 		if rerr != nil {
 			return nil, false
 		}

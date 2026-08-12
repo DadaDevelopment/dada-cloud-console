@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -73,6 +74,10 @@ func KeycloakMiddleware(
 
 		claims, err := resolver(c, kc)
 		if err != nil {
+			if errors.Is(err, ErrSignupClosed) {
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "registration is closed", "code": "signup_closed"})
+				return
+			}
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "could not resolve identity"})
 			return
 		}

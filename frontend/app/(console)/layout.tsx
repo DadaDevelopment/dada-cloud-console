@@ -117,6 +117,31 @@ function ConsoleShell({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * Sits between {@link ProjectProvider} and the console shell so a
+ * `signup_closed` 403 on the first authenticated request - see
+ * {@link useProjectContext}'s `signupClosed` - renders the same dead-end
+ * treatment as an `authError` instead of a shell with an empty project
+ * switcher, which otherwise reads as a blank console.
+ */
+function ConsoleGate({ children }: { children: React.ReactNode }) {
+  const { signupClosed } = useProjectContext();
+  const { logout } = useAuth();
+
+  if (signupClosed) {
+    return (
+      <AuthErrorScreen variant="signupClosed" onRetry={() => window.location.reload()} onLogout={logout} />
+    );
+  }
+
+  return (
+    <>
+      <GlobalErrorReporter />
+      <ConsoleShell>{children}</ConsoleShell>
+    </>
+  );
+}
+
 export default function ConsoleLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { token, isLoading, authError, logout } = useAuth();
@@ -149,8 +174,7 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
       <ThemeProvider>
         <ConsoleLangProvider>
           <ProjectProvider>
-            <GlobalErrorReporter />
-            <ConsoleShell>{children}</ConsoleShell>
+            <ConsoleGate>{children}</ConsoleGate>
           </ProjectProvider>
         </ConsoleLangProvider>
       </ThemeProvider>

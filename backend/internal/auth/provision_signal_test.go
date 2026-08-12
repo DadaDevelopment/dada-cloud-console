@@ -81,7 +81,7 @@ func TestResolveUser_FreshSignupLeavesAuditRow(t *testing.T) {
 	pool := provisionSignalPool(t)
 	kc := throwawayClaims(t, pool)
 
-	id, created, err := ResolveUser(context.Background(), pool, kc)
+	id, created, err := ResolveUser(context.Background(), pool, kc, true)
 	if err != nil {
 		t.Fatalf("ResolveUser: %v", err)
 	}
@@ -115,12 +115,12 @@ func TestResolveUser_ReturningIdentityWritesNoSecondRow(t *testing.T) {
 	kc := throwawayClaims(t, pool)
 	ctx := context.Background()
 
-	id, created, err := ResolveUser(ctx, pool, kc)
+	id, created, err := ResolveUser(ctx, pool, kc, true)
 	if err != nil || !created {
 		t.Fatalf("first ResolveUser: id=%v created=%v err=%v", id, created, err)
 	}
 
-	againID, createdAgain, err := ResolveUser(ctx, pool, kc)
+	againID, createdAgain, err := ResolveUser(ctx, pool, kc, true)
 	if err != nil {
 		t.Fatalf("second ResolveUser: %v", err)
 	}

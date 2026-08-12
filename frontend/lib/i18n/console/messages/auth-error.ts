@@ -25,4 +25,10 @@ export const authError: Messages = {
   "authError.retry": { ru: "Повторить", en: "Retry" },
   "authError.retryLogin": { ru: "Войти заново", en: "Sign in again" },
   "authError.logout": { ru: "Выйти", en: "Sign out" },
+
+  "authError.title.signupClosed": { ru: "Регистрация закрыта", en: "Registration is closed" },
+  "authError.body.signupClosed": {
+    ru: "Вход прошёл нормально — дело не в этом. Мы временно не открываем новые аккаунты, попробуй зайти позже.",
+    en: "Sign-in went through fine - this isn't a login problem. We aren't opening new accounts right now, check back later.",
+  },
 };

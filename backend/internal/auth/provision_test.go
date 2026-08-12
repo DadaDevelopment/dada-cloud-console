@@ -60,7 +60,7 @@ func TestResolveUser_UpsertBySub(t *testing.T) {
 
 	got, created, err := ResolveUser(context.Background(), q, &KeycloakClaims{
 		Subject: "sub-1", PreferredUsername: "alice", Email: "alice@x.io", Name: "Alice",
-	})
+	}, true)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestResolveUser_UpsertBySub_ExistingRowNotCreated(t *testing.T) {
 
 	_, created, err := ResolveUser(context.Background(), q, &KeycloakClaims{
 		Subject: "sub-1", PreferredUsername: "alice", Email: "alice@x.io", Name: "Alice",
-	})
+	}, true)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestResolveUser_UsernameEmailCollisionLinks(t *testing.T) {
 
 	got, created, err := ResolveUser(context.Background(), q, &KeycloakClaims{
 		Subject: "sub-2", PreferredUsername: "legacy", Email: "legacy@x.io", Name: "Legacy",
-	})
+	}, true)
 	if err != nil {
 		t.Fatalf("resolve with collision: %v", err)
 	}
@@ -116,15 +116,77 @@ func TestResolveUser_UsernameEmailCollisionLinks(t *testing.T) {
 
 func TestResolveUser_NonUniqueErrorPropagates(t *testing.T) {
 	q := &fakeQuerier{replies: []pgx.Row{fakeRow{err: errors.New("connection refused")}}}
-	if _, _, err := ResolveUser(context.Background(), q, &KeycloakClaims{Subject: "sub-3"}); err == nil {
+	if _, _, err := ResolveUser(context.Background(), q, &KeycloakClaims{Subject: "sub-3"}, true); err == nil {
 		t.Fatal("expected error to propagate")
 	}
 }
 
 func TestResolveUser_MissingSubject(t *testing.T) {
 	q := &fakeQuerier{}
-	if _, _, err := ResolveUser(context.Background(), q, &KeycloakClaims{}); err == nil {
+	if _, _, err := ResolveUser(context.Background(), q, &KeycloakClaims{}, true); err == nil {
 		t.Fatal("expected error for empty subject")
+	}
+}
+
+func TestResolveUser_SignupClosed_UnknownIdentityDenied(t *testing.T) {
+	q := &fakeQuerier{replies: []pgx.Row{
+		fakeRow{err: pgx.ErrNoRows},
+		fakeRow{err: pgx.ErrNoRows},
+	}}
+	_, created, err := ResolveUser(context.Background(), q, &KeycloakClaims{
+		Subject: "sub-4", PreferredUsername: "nobody", Email: "nobody@x.io", Name: "Nobody",
+	}, false)
+	if !errors.Is(err, ErrSignupClosed) {
+		t.Fatalf("err = %v, want ErrSignupClosed", err)
+	}
+	if created {
+		t.Error("expected created=false when signup is closed")
+	}
+	if len(q.calls) != 2 {
+		t.Fatalf("expected refresh-by-sub then link-existing (2 queries), got %d", len(q.calls))
+	}
+}
+
+func TestResolveUser_SignupClosed_ExistingUserBySubResolves(t *testing.T) {
+	want := uuid.New()
+	q := &fakeQuerier{replies: []pgx.Row{fakeRow{id: want}}}
+	got, created, err := ResolveUser(context.Background(), q, &KeycloakClaims{
+		Subject: "sub-5", PreferredUsername: "alice", Email: "alice@x.io", Name: "Alice",
+	}, false)
+	if err != nil {
+		t.Fatalf("resolve existing under closed signup: %v", err)
+	}
+	if got != want {
+		t.Errorf("id = %v want %v", got, want)
+	}
+	if created {
+		t.Error("resolving an existing row must never report created=true")
+	}
+	if len(q.calls) != 1 {
+		t.Fatalf("expected a single refresh-by-sub query, got %d", len(q.calls))
+	}
+}
+
+func TestResolveUser_SignupClosed_LegacyRowLinks(t *testing.T) {
+	want := uuid.New()
+	q := &fakeQuerier{replies: []pgx.Row{
+		fakeRow{err: pgx.ErrNoRows},
+		fakeRow{id: want},
+	}}
+	got, created, err := ResolveUser(context.Background(), q, &KeycloakClaims{
+		Subject: "sub-6", PreferredUsername: "legacy", Email: "legacy@x.io", Name: "Legacy",
+	}, false)
+	if err != nil {
+		t.Fatalf("resolve legacy row under closed signup: %v", err)
+	}
+	if got != want {
+		t.Errorf("id = %v want %v", got, want)
+	}
+	if created {
+		t.Error("linking a legacy row must never report created=true")
+	}
+	if len(q.calls) != 2 {
+		t.Fatalf("expected refresh-by-sub then link-existing (2 queries), got %d", len(q.calls))
 	}
 }
 

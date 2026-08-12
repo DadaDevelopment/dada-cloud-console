@@ -158,6 +158,13 @@ backend:
     # provisioning, never on repeat logins or service accounts). Empty disables
     # the feature outright.
     SIGNUP_NOTIFY_EMAIL: ""
+    # Server-side registration gate. "false" (the default in code as well) means
+    # a Keycloak identity with no local users row is refused with 403
+    # signup_closed instead of being provisioned on its first authenticated
+    # request. Existing users keep logging in either way. This is the only gate
+    # that actually holds: the realm flag does not apply to IdP first-broker
+    # login, and NEXT_PUBLIC_EMAIL_SIGNUP_ENABLED only hides the button.
+    SIGNUP_ENABLED: "false"
     # YooKassa (payments slice 1) non-secret half; YOOKASSA_SECRET_KEY is in
     # backend.secret below. Empty shop id disables checkout (409
     # payments_not_configured), not a 500.

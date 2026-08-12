@@ -279,6 +279,17 @@ export function isGithubAccessRequiredError(status: number | undefined, code: st
   return status === 400 && code === "github_access_required";
 }
 
+/**
+ * True when the backend rejected an authenticated request because the
+ * caller's identity is new and self-serve registration is currently closed
+ * (`SIGNUP_ENABLED=false`) - see the backend's `respondErrorCode` call with
+ * `code: "signup_closed"`. Existing users resolve normally and never hit
+ * this; match strictly on status + code, never on the error prose.
+ */
+export function isSignupClosedError(status: number | undefined, code: string | undefined): boolean {
+  return status === 403 && code === "signup_closed";
+}
+
 const UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
 
 /**

@@ -2,13 +2,22 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// ErrSignupClosed is returned by ResolveUser when allowSignup is false and the
+// Keycloak identity does not match any existing local user (by keycloak_sub,
+// username, or email). It carries no PII by itself — callers log the identity
+// separately — so it is safe to compare with errors.Is across package
+// boundaries.
+var ErrSignupClosed = errors.New("signup is closed")
 
 // querier is the subset of pgxpool.Pool used by ResolveUser, so tests can pass a
 // real pool or a thin fake without depending on the concrete type.
@@ -37,7 +46,18 @@ var _ querier = (*pgxpool.Pool)(nil)
 // row's first-ever provisioning (a fresh INSERT, not a refresh of an existing
 // row or a legacy-account link). Callers use the created flag to fire
 // signup-only side effects exactly once.
-func ResolveUser(ctx context.Context, db querier, kc *KeycloakClaims) (id uuid.UUID, created bool, err error) {
+//
+// allowSignup is the single gate for whether a brand-new identity may
+// provision a row at all. It lives inside this function rather than in a
+// wrapper because this is the only door both router.go call sites walk
+// through — a wrapper is a door a third caller could simply not use. When
+// allowSignup is false, an identity that resolves to neither an existing
+// keycloak_sub row nor a legacy username/email row gets ErrSignupClosed
+// instead of a fresh users row: no INSERT, no audit_events row, nothing to
+// undo. An identity that already has a row — either path — keeps resolving
+// and refreshing normally regardless of this flag; the gate only blocks birth,
+// never blocks a return visit.
+func ResolveUser(ctx context.Context, db querier, kc *KeycloakClaims, allowSignup bool) (id uuid.UUID, created bool, err error) {
 	if kc == nil || kc.Subject == "" {
 		return uuid.Nil, false, fmt.Errorf("keycloak claims missing subject")
 	}
@@ -55,6 +75,10 @@ func ResolveUser(ctx context.Context, db querier, kc *KeycloakClaims) (id uuid.U
 	displayName := kc.Name
 	if displayName == "" {
 		displayName = username
+	}
+
+	if !allowSignup {
+		return resolveExistingOnly(ctx, db, kc.Subject, username, email, displayName)
 	}
 
 	// xmax = 0 is the standard Postgres tell for "this RETURNING row came from the
@@ -110,6 +134,46 @@ func ResolveUser(ctx context.Context, db querier, kc *KeycloakClaims) (id uuid.U
 	}
 
 	return uuid.Nil, false, fmt.Errorf("resolve keycloak user: %w", err)
+}
+
+// resolveExistingOnly is the allowSignup=false path: it may only resolve an
+// identity to a row that already exists, never create one. It tries the same
+// two matches ResolveUser's signup path would (by keycloak_sub, then by the
+// legacy username/email match), just as plain UPDATEs instead of an
+// INSERT ... ON CONFLICT — so neither branch can ever produce a fresh row or
+// a signup_event. Exhausting both is ErrSignupClosed, logged once so a closed
+// door someone is knocking on stays visible without a users row to query for.
+func resolveExistingOnly(ctx context.Context, db querier, sub, username, email, displayName string) (id uuid.UUID, created bool, err error) {
+	const refreshBySub = `
+		UPDATE users
+		    SET email = $2,
+		        display_name = $3,
+		        updated_at = now()
+		WHERE keycloak_sub = $1
+		RETURNING id`
+	if err = db.QueryRow(ctx, refreshBySub, sub, email, displayName).Scan(&id); err == nil {
+		return id, false, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, false, fmt.Errorf("refresh existing keycloak user: %w", err)
+	}
+
+	const linkExisting = `
+		UPDATE users
+		    SET keycloak_sub = $1,
+		        display_name = $2,
+		        updated_at = now()
+		WHERE username = $3 OR email = $4
+		RETURNING id`
+	if err = db.QueryRow(ctx, linkExisting, sub, displayName, username, email).Scan(&id); err == nil {
+		return id, false, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, false, fmt.Errorf("link existing user to keycloak sub: %w", err)
+	}
+
+	log.Printf("auth: signup closed, denying unknown identity keycloak_sub=%s email=%s", sub, email)
+	return uuid.Nil, false, ErrSignupClosed
 }
 
 // isUniqueViolation reports whether err is a Postgres unique-constraint

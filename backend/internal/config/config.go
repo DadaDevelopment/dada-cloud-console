@@ -527,6 +527,14 @@ type Config struct {
 	// hit is fixed. Same deploy-vs-send separation as the first wave.
 	ReactivationFixWaveEnabled bool
 
+	// SignupEnabled (SIGNUP_ENABLED, default false) gates whether an unknown
+	// Keycloak identity may provision a new local users row. Default false is
+	// current owner policy — registration stays closed until the first paid
+	// plan ships — enforced server-side in auth.ResolveUser, not just by
+	// hiding the signup button in the frontend. Existing users keep resolving
+	// and refreshing regardless of this flag.
+	SignupEnabled bool // SIGNUP_ENABLED (default false)
+
 	BillingEnabled          bool  // BILLING_ENABLED (default false) — guards metering ticker; billing endpoints always load plans read-only
 	BillingMeterIntervalSec int64 // BILLING_METER_INTERVAL_SECS (default 3600)
 	// BillingExemptOrgs (BILLING_EXEMPT_ORGS, comma-separated) never hit a quota
@@ -850,6 +858,7 @@ func Load() (*Config, error) {
 		GithubAppClientID:           getEnv("GITHUB_APP_CLIENT_ID", ""),
 		GithubOAuthRedirectURI:      getEnv("GITHUB_OAUTH_REDIRECT_URI", ""),
 		MetrikaOAuthToken:           getEnv("METRIKA_OAUTH_TOKEN", ""),
+		SignupEnabled:               getEnv("SIGNUP_ENABLED", "false") == "true",
 		BillingEnabled:              getEnv("BILLING_ENABLED", "false") == "true",
 		ReactivationCampaignEnabled: getEnv("REACTIVATION_CAMPAIGN_ENABLED", "false") == "true",
 		ReactivationFixWaveEnabled:  getEnv("REACTIVATION_FIX_WAVE_ENABLED", "false") == "true",

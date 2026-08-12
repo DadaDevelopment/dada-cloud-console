@@ -8,14 +8,26 @@ import { ConsoleLangProvider, useT } from "@/lib/i18n/console/context";
  * settled into an error while the console was already carrying the user.
  * `denied` and `callback` belong to the /callback route, where the failure
  * happened inside the authorize round-trip and the honest next step is to
- * start sign-in over rather than reload a spent redirect URL.
+ * start sign-in over rather than reload a spent redirect URL. `signupClosed`
+ * is different in kind from the other three: sign-in itself succeeded, but
+ * the backend refused every request because the identity is new and
+ * self-serve registration is currently closed - reloading or signing in
+ * again cannot fix that, so this variant hides the retry button.
  */
-export type AuthErrorVariant = "session" | "denied" | "callback";
+export type AuthErrorVariant = "session" | "denied" | "callback" | "signupClosed";
+
+const TITLE_KEY: Record<AuthErrorVariant, string> = {
+  session: "authError.title",
+  denied: "authError.title",
+  callback: "authError.title",
+  signupClosed: "authError.title.signupClosed",
+};
 
 const BODY_KEY: Record<AuthErrorVariant, string> = {
   session: "authError.body",
   denied: "authError.body.denied",
   callback: "authError.body.callback",
+  signupClosed: "authError.body.signupClosed",
 };
 
 interface AuthErrorScreenProps {
@@ -28,10 +40,12 @@ function AuthErrorContent({ onRetry, onLogout, variant = "session" }: AuthErrorS
   const { t } = useT();
   return (
     <div className="flex h-dvh flex-col items-center justify-center gap-4 bg-gray-50 p-8 text-center dark:bg-gray-950">
-      <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{t("authError.title")}</h2>
+      <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{t(TITLE_KEY[variant])}</h2>
       <p className="max-w-md text-sm text-gray-600 dark:text-gray-400">{t(BODY_KEY[variant])}</p>
       <div className="flex flex-wrap items-center justify-center gap-3">
-        <Button onClick={onRetry}>{t(variant === "session" ? "authError.retry" : "authError.retryLogin")}</Button>
+        {variant !== "signupClosed" && (
+          <Button onClick={onRetry}>{t(variant === "session" ? "authError.retry" : "authError.retryLogin")}</Button>
+        )}
         <Button variant="outline" onClick={onLogout}>
           {t("authError.logout")}
         </Button>

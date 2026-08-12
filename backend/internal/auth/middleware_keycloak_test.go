@@ -3,6 +3,7 @@ package auth
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -73,6 +74,29 @@ func TestKeycloakMiddleware_MissingHeader(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/x", nil))
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", w.Code)
+	}
+}
+
+func TestKeycloakMiddleware_SignupClosedReturns403(t *testing.T) {
+	mk := newMockKeycloak(t)
+	v := newVerifier(t, mk, false)
+	resolver := func(c *gin.Context, kc *KeycloakClaims) (*Claims, error) {
+		return nil, ErrSignupClosed
+	}
+
+	r := gin.New()
+	r.GET("/x", KeycloakMiddleware(v, resolver), func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req.Header.Set("Authorization", "Bearer "+mk.mint(t, "key-1", nil))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403, body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"code":"signup_closed"`) {
+		t.Errorf("body = %s, want code=signup_closed", w.Body.String())
 	}
 }
 

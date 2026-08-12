@@ -23,7 +23,7 @@ import {
   useRef,
 } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { projectsApi } from "./api";
+import { projectsApi, isSignupClosedError } from "./api";
 import type { Project, Environment, MemberRole } from "./types";
 
 interface ProjectContextValue {
@@ -43,6 +43,14 @@ interface ProjectContextValue {
   refetch: () => void;
   // re-fetch the switcher list (e.g. after creating a project).
   refetchProjects: () => void;
+  /**
+   * Set when the projects-list call - the first authenticated request the
+   * console makes after login - came back 403 `signup_closed`: the caller's
+   * identity is new and self-serve registration is currently closed. The
+   * shell must show a dead-end screen instead of a project switcher with
+   * zero projects, which otherwise reads as a blank console.
+   */
+  signupClosed: boolean;
   // environment selection
   selectedEnv: Environment | null;
   setSelectedEnvId: (envId: string) => void;
@@ -68,6 +76,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
+  const [signupClosed, setSignupClosed] = useState(false);
 
   const [project, setProject] = useState<Project | null>(null);
   const [environments, setEnvironments] = useState<Environment[]>([]);
@@ -94,6 +103,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setProjectsLoading(true);
+    setSignupClosed(false);
     projectsApi
       .list()
       .then(async (d) => {
@@ -120,7 +130,12 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         }
         setProjects(list);
       })
-      .catch(() => !cancelled && setProjects([]))
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setProjects([]);
+        const e = err as { status?: number; code?: string } | undefined;
+        setSignupClosed(isSignupClosedError(e?.status, e?.code));
+      })
       .finally(() => !cancelled && setProjectsLoading(false));
     return () => {
       cancelled = true;
@@ -225,6 +240,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     error,
     refetch,
     refetchProjects,
+    signupClosed,
     selectedEnv,
     setSelectedEnvId,
   };
