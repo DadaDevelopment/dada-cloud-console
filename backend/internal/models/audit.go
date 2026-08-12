@@ -59,6 +59,7 @@ type AppAlert struct {
 	Detail     string    `json:"detail,omitempty"`
 	Cause      string    `json:"cause,omitempty"`
 	CauseLine  string    `json:"cause_line,omitempty"`
+	CauseKind  string    `json:"cause_kind,omitempty"`
 	Ratio      *float64  `json:"ratio,omitempty"`
 	DetectedAt time.Time `json:"detected_at"`
 }

@@ -28,6 +28,26 @@ function crashTextKey(reason?: string): string {
 }
 
 /**
+ * Maps the backend's crash `cause_kind` to the verdict message key. Only
+ * `app_code` blames the user's own code; the platform kinds say plainly that
+ * the failure was on our side. An unknown or absent kind returns null so the
+ * banner prints no verdict line at all, rather than defaulting to "your
+ * code" without the backend having said so.
+ */
+function crashCauseKey(kind?: string): string | null {
+  switch (kind) {
+    case "app_code":
+      return "apps.alerts.crash.cause.appCode";
+    case "platform_network":
+      return "apps.alerts.crash.cause.platformNetwork";
+    case "platform_storage":
+      return "apps.alerts.crash.cause.platformStorage";
+    default:
+      return null;
+  }
+}
+
+/**
  * Maps the URL watcher's reason to the message key: `no_listener` means the
  * app never accepted the connection (bot/worker not listening on the port at
  * all), `not_http` means the port answered but the response was not an HTTP
@@ -122,7 +142,15 @@ export function AppAlertsBanner({ alerts, logsHref, storageHref, projectId, envI
               </div>
               {(alert.cause || alert.cause_line) && (
                 <div className="mt-2 space-y-1.5">
-                  {alert.cause && <p className="text-xs">{t("apps.alerts.crash.cause.appCode")}</p>}
+                  {alert.cause &&
+                    crashCauseKey(alert.cause_kind) &&
+                    (alert.cause_kind === "platform_network" || alert.cause_kind === "platform_storage" ? (
+                      <p className="text-xs font-semibold text-red-800 dark:text-red-200">
+                        {t(crashCauseKey(alert.cause_kind)!)}
+                      </p>
+                    ) : (
+                      <p className="text-xs">{t(crashCauseKey(alert.cause_kind)!)}</p>
+                    ))}
                   {alert.cause_line && (
                     <div className="overflow-x-auto rounded-md bg-red-100/70 dark:bg-red-950/60 px-2.5 py-1.5">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-red-500 dark:text-red-400">

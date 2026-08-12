@@ -50,6 +50,52 @@ func TestClassifyCrashLogEmpty(t *testing.T) {
 	}
 }
 
+func TestClassifyCrashCausePlatformNetworkInsidePythonTraceback(t *testing.T) {
+	excerpt := "Traceback (most recent call last):\n" +
+		"  File \"/app/db.py\", line 14, in connect\n" +
+		"    conn = psycopg.connect(dsn)\n" +
+		"psycopg.OperationalError: connection to server at \"10.96.137.111\", port 5432 failed: No route to host\n" +
+		"\tIs the server running on that host and accepting TCP/IP connections?"
+	kind, text := ClassifyCrashCause(excerpt)
+	if kind != CauseKindPlatformNetwork {
+		t.Fatalf("expected cause_kind %q, got %q", CauseKindPlatformNetwork, kind)
+	}
+	if strings.Contains(text, "это ошибка в коде приложения") {
+		t.Fatalf("platform_network text must not blame the app's code, got %q", text)
+	}
+	if !strings.Contains(text, "платформы") {
+		t.Fatalf("expected platform_network text to name our platform, got %q", text)
+	}
+	if line := ExtractCauseLine(excerpt); !strings.Contains(line, "No route to host") {
+		t.Fatalf("expected ExtractCauseLine to surface the No route to host line, got %q", line)
+	}
+}
+
+func TestClassifyCrashCausePlainAppCodeStillAppCode(t *testing.T) {
+	excerpt := "Traceback (most recent call last):\n  File \"app.py\", line 3\nModuleNotFoundError: No module named 'flask'"
+	kind, text := ClassifyCrashCause(excerpt)
+	if kind != CauseKindAppCode {
+		t.Fatalf("expected cause_kind %q, got %q", CauseKindAppCode, kind)
+	}
+	if !strings.Contains(text, "коде приложения") {
+		t.Fatalf("expected app_code text to blame the app's code, got %q", text)
+	}
+}
+
+func TestClassifyCrashCauseEnospc(t *testing.T) {
+	excerpt := "OSError: [Errno 28] no space left on device"
+	kind, text := ClassifyCrashCause(excerpt)
+	if kind != CauseKindPlatformStorage {
+		t.Fatalf("expected cause_kind %q, got %q", CauseKindPlatformStorage, kind)
+	}
+	if strings.Contains(text, "это ошибка в коде приложения") {
+		t.Fatalf("platform_storage text must not blame the app's code, got %q", text)
+	}
+	if line := ExtractCauseLine(excerpt); !strings.Contains(line, "no space left on device") {
+		t.Fatalf("expected ExtractCauseLine to surface the ENOSPC line, got %q", line)
+	}
+}
+
 func TestExtractCauseLine(t *testing.T) {
 	tests := []struct {
 		name    string

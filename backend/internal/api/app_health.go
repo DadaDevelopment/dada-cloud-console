@@ -60,6 +60,7 @@ type appHealthResponse struct {
 	SnapshotStale      bool             `json:"snapshot_stale"`
 	PlatformReason     string           `json:"platform_reason,omitempty"`
 	PlatformReasonAt   string           `json:"platform_reason_at,omitempty"`
+	CauseKind          string           `json:"cause_kind,omitempty"`
 	LogExcerpt         []string         `json:"log_excerpt"`
 	Note               string           `json:"note,omitempty"`
 }
@@ -154,7 +155,7 @@ func (h *Handler) GetAppHealth(c *gin.Context) {
 	}
 
 	ns := h.environmentNamespace(ctx, envID)
-	reason, reasonAt := h.latestHealthAlertReasonWithTime(ctx, ns, appName)
+	reason, reasonAt, causeKind := h.latestHealthAlertReasonWithTime(ctx, ns, appName)
 
 	entries := h.fetchDiagnoseLogs(ctx, ns, appName)
 	lines := buildLogLines(entries)
@@ -173,6 +174,7 @@ func (h *Handler) GetAppHealth(c *gin.Context) {
 		SnapshotStale:      stale,
 		PlatformReason:     reason,
 		PlatformReasonAt:   reasonAt,
+		CauseKind:          causeKind,
 		LogExcerpt:         excerpt,
 		Note:               appHealthNote(verdict, stale),
 	})
@@ -255,26 +257,30 @@ func appHealthNote(verdict appHealthVerdict, stale bool) string {
 }
 
 // latestHealthAlertReasonWithTime is latestHealthAlertReason plus the
-// timestamp the assistant needs to say how fresh the platform's own read is.
-// Returns two empty strings when there is no fresh row (including for a
-// VM/compose environment where namespace is "").
-func (h *Handler) latestHealthAlertReasonWithTime(ctx context.Context, namespace, appName string) (reason, at string) {
+// timestamp the assistant needs to say how fresh the platform's own read is,
+// and the cause_kind (app_code/platform_network/platform_storage) so both the
+// console banner and the chat assistant can say whose fault a crash actually
+// is instead of guessing from a language-runtime traceback alone. Returns
+// three empty strings when there is no fresh row (including for a VM/compose
+// environment where namespace is "").
+func (h *Handler) latestHealthAlertReasonWithTime(ctx context.Context, namespace, appName string) (reason, at, causeKind string) {
 	if namespace == "" || h.pool == nil {
-		return "", ""
+		return "", "", ""
 	}
 	var (
-		reasonVal string
-		atVal     time.Time
+		reasonVal    string
+		atVal        time.Time
+		causeKindVal string
 	)
 	err := h.pool.QueryRow(ctx,
-		`SELECT COALESCE(reason, ''), COALESCE(last_seen_at, last_sent_at) FROM app_health_alerts
+		`SELECT COALESCE(reason, ''), COALESCE(last_seen_at, last_sent_at), COALESCE(cause_kind, '') FROM app_health_alerts
 		  WHERE namespace = $1 AND app_name = $2
 		    AND COALESCE(last_seen_at, last_sent_at) > now() - make_interval(secs => $3)
 		  ORDER BY COALESCE(last_seen_at, last_sent_at) DESC
 		  LIMIT 1`,
-		namespace, appName, appHealthAlertFreshWindow.Seconds()).Scan(&reasonVal, &atVal)
+		namespace, appName, appHealthAlertFreshWindow.Seconds()).Scan(&reasonVal, &atVal, &causeKindVal)
 	if err != nil {
-		return "", ""
+		return "", "", ""
 	}
-	return reasonVal, atVal.UTC().Format(time.RFC3339)
+	return reasonVal, atVal.UTC().Format(time.RFC3339), causeKindVal
 }

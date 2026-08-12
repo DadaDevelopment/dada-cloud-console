@@ -7,17 +7,26 @@ export type AppAlertType = "crash" | "volume" | "url";
  * out at detection time (see backend notify.ClassifyCrashLog /
  * ExtractCauseLine). `cause` is prose written by the backend in Russian and is
  * therefore NOT rendered directly — it is only a flag that the platform
- * recognised an application-code failure, so the console can show its own
- * localised wording. `cause_line` is the raw matched log line: language
- * neutral, and the single most useful thing to put in front of the owner.
- * Both are absent whenever the log read failed or nothing matched.
+ * recognised a crash cause, so the console can show its own localised
+ * wording keyed off `cause_kind`. `cause_line` is the raw matched log line:
+ * language neutral, and the single most useful thing to put in front of the
+ * owner. Both are absent whenever the log read failed or nothing matched.
+ *
+ * `cause_kind` tells the console WHO is at fault: `"app_code"` means the
+ * app's own code, `"platform_network"` / `"platform_storage"` mean the
+ * platform side broke (network route or disk/volume) and the user's code is
+ * not to blame. Missing or empty means the backend could not classify it —
+ * the console must not guess "your code" in that case.
  */
+export type AppAlertCauseKind = "app_code" | "platform_network" | "platform_storage";
+
 export interface AppAlert {
   type: AppAlertType;
   reason?: string;
   detail?: string;
   cause?: string;
   cause_line?: string;
+  cause_kind?: AppAlertCauseKind;
   ratio?: number;
   detected_at: string;
 }

@@ -24,7 +24,7 @@ func TestTouchAppHealthAlertSeenDoesNotResetCooldown(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM app_health_alerts WHERE namespace = $1`, ns)
 	})
 
-	touchAppHealthAlertSeen(ctx, pool, ns, "web", "CrashLoopBackOff", "pod-1/web", "", "")
+	touchAppHealthAlertSeen(ctx, pool, ns, "web", "CrashLoopBackOff", "pod-1/web", "", "", "")
 
 	var lastSent time.Time
 	var lastSeen *time.Time
@@ -46,7 +46,7 @@ func TestTouchAppHealthAlertSeenDoesNotResetCooldown(t *testing.T) {
 
 	firstSeen := *lastSeen
 	time.Sleep(10 * time.Millisecond)
-	touchAppHealthAlertSeen(ctx, pool, ns, "web", "CrashLoopBackOff", "pod-1/web", "", "")
+	touchAppHealthAlertSeen(ctx, pool, ns, "web", "CrashLoopBackOff", "pod-1/web", "", "", "")
 
 	var sentAfterSecondTouch time.Time
 	var seenAfterSecondTouch time.Time
@@ -118,7 +118,7 @@ func TestTouchAppHealthAlertSeenPersistsCauseForNonEmailableReason(t *testing.T)
 	})
 
 	touchAppHealthAlertSeen(ctx, pool, ns, "worker", "Error", "pod-1/worker exit=1",
-		"Судя по логам, это ошибка в коде приложения (Python).", "ModuleNotFoundError: No module named 'flask'")
+		"Судя по логам, это ошибка в коде приложения (Python).", "ModuleNotFoundError: No module named 'flask'", "app_code")
 
 	var cause, causeLine string
 	if err := pool.QueryRow(ctx,
@@ -147,8 +147,8 @@ func TestTouchAppHealthAlertSeenPreservesCauseWhenNotRefreshed(t *testing.T) {
 	})
 
 	touchAppHealthAlertSeen(ctx, pool, ns, "worker", "CrashLoopBackOff", "pod-1/worker",
-		"Судя по логам, это похоже на ошибку в коде приложения.", "panic: boom")
-	touchAppHealthAlertSeen(ctx, pool, ns, "worker", "CrashLoopBackOff", "pod-1/worker", "", "")
+		"Судя по логам, это похоже на ошибку в коде приложения.", "panic: boom", "app_code")
+	touchAppHealthAlertSeen(ctx, pool, ns, "worker", "CrashLoopBackOff", "pod-1/worker", "", "", "")
 
 	var cause, causeLine string
 	if err := pool.QueryRow(ctx,
@@ -178,7 +178,7 @@ func TestCurrentAlertCauseStateDrivesRefreshDecision(t *testing.T) {
 		t.Fatalf("expected an error (no row yet) before the first touch")
 	}
 
-	touchAppHealthAlertSeen(ctx, pool, ns, "worker", "OOMKilled", "pod-1/worker", "hint", "evidence line")
+	touchAppHealthAlertSeen(ctx, pool, ns, "worker", "OOMKilled", "pod-1/worker", "hint", "evidence line", "app_code")
 
 	reason, hasCause, err := currentAlertCauseState(ctx, pool, ns, "worker")
 	if err != nil {
@@ -208,7 +208,7 @@ func TestCurrentAlertCauseStateForcesRefreshOnPoisonedCauseLine(t *testing.T) {
 	})
 
 	touchAppHealthAlertSeen(ctx, pool, ns, "worker", "CrashLoopBackOff", "pod-1/worker",
-		"ошибка в коде приложения (Python)", "Traceback (most recent call last):")
+		"ошибка в коде приложения (Python)", "Traceback (most recent call last):", "app_code")
 
 	reason, hasCause, err := currentAlertCauseState(ctx, pool, ns, "worker")
 	if err != nil {
@@ -222,7 +222,7 @@ func TestCurrentAlertCauseStateForcesRefreshOnPoisonedCauseLine(t *testing.T) {
 	}
 
 	touchAppHealthAlertSeen(ctx, pool, ns, "worker", "CrashLoopBackOff", "pod-1/worker",
-		"ошибка в коде приложения (Python)", "RuntimeError: no objects found under 's3://models/buffalo_l'")
+		"ошибка в коде приложения (Python)", "RuntimeError: no objects found under 's3://models/buffalo_l'", "app_code")
 
 	if _, hasCause, err = currentAlertCauseState(ctx, pool, ns, "worker"); err != nil {
 		t.Fatalf("currentAlertCauseState after repair: %v", err)

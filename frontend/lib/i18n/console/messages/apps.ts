@@ -656,6 +656,14 @@ export const apps: Messages = {
     ru: "Похоже на ошибку в коде вашего приложения",
     en: "Looks like an error in your app's own code",
   },
+  "apps.alerts.crash.cause.platformNetwork": {
+    ru: "Похоже на проблему сети на стороне Dada Cloud — приложение не смогло достучаться до адреса внутри нашего кластера. Это не ошибка в вашем коде.",
+    en: "Looks like a network problem on Dada Cloud's side — the app could not reach an address inside our cluster. This is not a bug in your code.",
+  },
+  "apps.alerts.crash.cause.platformStorage": {
+    ru: "Похоже на проблему с диском или томом на стороне Dada Cloud. Это не ошибка в вашем коде.",
+    en: "Looks like a disk or volume problem on Dada Cloud's side. This is not a bug in your code.",
+  },
   "apps.alerts.crash.cause.line": { ru: "Из логов:", en: "From the logs:" },
   "apps.alerts.crash.cta": { ru: "Смотреть логи", en: "View logs" },
   "apps.alerts.crash.diagnose": { ru: "Разобраться", en: "Diagnose" },

@@ -314,12 +314,62 @@ func ComposeReactivationFixHTML(planName, expires string, promoLink, pixelURL, h
 	return b.String()
 }
 
+// Cause-kind values for the crash alert's cause_kind field (console banner
+// and app_health_alerts.cause_kind). Empty/absent means unknown -- an app_code
+// signature carries no ambiguity so ClassifyCrashCause never returns "".
+const (
+	CauseKindAppCode         = "app_code"
+	CauseKindPlatformNetwork = "platform_network"
+	CauseKindPlatformStorage = "platform_storage"
+)
+
 // crashLogSignature is one entry in the ordered pattern table ClassifyCrashLog
 // walks: pattern is matched with strings.Contains against the log excerpt,
 // label is the human hint appended to the pattern name in the parenthetical.
 type crashLogSignature struct {
 	pattern string
 	label   string
+}
+
+// platformCrashSignature is one entry in platformCrashSignatures: pattern is
+// matched with strings.Contains, kind is the cause_kind value it proves, text
+// is the full Russian sentence shown to the owner (unlike crashLogSignature's
+// label, this is the whole message, not a parenthetical -- the platform text
+// makes an unambiguous, standalone claim about which side broke).
+type platformCrashSignature struct {
+	pattern string
+	kind    string
+	text    string
+}
+
+// platformCrashSignatures is checked BEFORE pythonCrashSignatures and
+// nodeCrashSignatures by ClassifyCrashCause: a platform failure (network path
+// to a cluster-internal service, a full or unreadable volume) can surface
+// inside a language runtime's own traceback -- e.g. psycopg raising
+// OperationalError("No route to host") prints a normal Python traceback, and
+// the Python table's first entry (the bare "Traceback (most recent call
+// last)" header) would otherwise match first and tell the owner their own
+// code is at fault for something the platform's network broke. Kept
+// deliberately small: every pattern here must be a string only OUR
+// infrastructure produces, never one an application can also print on its
+// own, because a false "it's the platform" is exactly as bad as a false
+// "it's your code".
+var platformCrashSignatures = []platformCrashSignature{
+	{
+		pattern: "No route to host",
+		kind:    CauseKindPlatformNetwork,
+		text:    "Судя по логам, это похоже на сбой сети нашей платформы (нет маршрута до сервиса), а не на ошибку в коде приложения.",
+	},
+	{
+		pattern: "no space left on device",
+		kind:    CauseKindPlatformStorage,
+		text:    "Судя по логам, это похоже на нехватку места на томе нашей платформы, а не на ошибку в коде приложения.",
+	},
+	{
+		pattern: "Input/output error",
+		kind:    CauseKindPlatformStorage,
+		text:    "Судя по логам, это похоже на сбой тома нашей платформы (ошибка ввода-вывода), а не на ошибку в коде приложения.",
+	},
 }
 
 // pythonCrashSignatures, nodeCrashSignatures and genericCrashSignatures are
@@ -339,26 +389,42 @@ var nodeCrashSignatures = []crashLogSignature{
 	{pattern: "ReferenceError", label: "Node.js"},
 }
 
-// ClassifyCrashLog looks at a crashed container's log excerpt for known
-// application-code error signatures (as opposed to infra failures like
-// OOMKilled or ImagePullBackOff) and returns a short Russian hint pointing
-// the owner at their own code. Returns "" when nothing recognizable matched,
-// so callers can omit the line entirely rather than show a wrong guess.
-func ClassifyCrashLog(excerpt string) string {
+// ClassifyCrashCause looks at a crashed container's log excerpt and returns
+// both a machine-readable cause_kind and the matching human Russian text.
+// platformCrashSignatures is checked FIRST, ahead of the app_code language
+// tables, so a platform failure (network, storage) wrapped in a user-language
+// traceback is never labelled as the owner's own code -- see
+// platformCrashSignatures for why that ordering matters. Everything the
+// language tables recognize is app_code. Returns ("", "") when nothing
+// recognizable matched, so callers can omit the line entirely rather than
+// show a wrong guess.
+func ClassifyCrashCause(excerpt string) (kind, text string) {
+	for _, sig := range platformCrashSignatures {
+		if strings.Contains(excerpt, sig.pattern) {
+			return sig.kind, sig.text
+		}
+	}
 	for _, sig := range pythonCrashSignatures {
 		if strings.Contains(excerpt, sig.pattern) {
-			return fmt.Sprintf("Судя по логам, это ошибка в коде приложения (%s).", sig.label)
+			return CauseKindAppCode, fmt.Sprintf("Судя по логам, это ошибка в коде приложения (%s).", sig.label)
 		}
 	}
 	for _, sig := range nodeCrashSignatures {
 		if strings.Contains(excerpt, sig.pattern) {
-			return fmt.Sprintf("Судя по логам, это ошибка в коде приложения (%s).", sig.label)
+			return CauseKindAppCode, fmt.Sprintf("Судя по логам, это ошибка в коде приложения (%s).", sig.label)
 		}
 	}
 	if strings.Contains(excerpt, "panic:") {
-		return "Судя по логам, это похоже на ошибку в коде приложения."
+		return CauseKindAppCode, "Судя по логам, это похоже на ошибку в коде приложения."
 	}
-	return ""
+	return "", ""
+}
+
+// ClassifyCrashLog is ClassifyCrashCause with the cause_kind dropped, kept for
+// callers that only ever showed the human text (the alert email body).
+func ClassifyCrashLog(excerpt string) string {
+	_, text := ClassifyCrashCause(excerpt)
+	return text
 }
 
 // causeLineMaxRunes bounds ExtractCauseLine's return value. Counted in runes,
@@ -368,13 +434,19 @@ func ClassifyCrashLog(excerpt string) string {
 // string.
 const causeLineMaxRunes = 300
 
-// crashLineSignaturePatterns flattens pythonCrashSignatures and
-// nodeCrashSignatures plus the bare "panic:" match ClassifyCrashLog also
-// checks, so ExtractCauseLine walks the exact same signature set
-// ClassifyCrashLog does instead of maintaining a second copy that could
-// silently drift out of sync with it.
+// crashLineSignaturePatterns flattens platformCrashSignatures,
+// pythonCrashSignatures and nodeCrashSignatures plus the bare "panic:" match
+// ClassifyCrashCause also checks, so ExtractCauseLine walks the exact same
+// signature set ClassifyCrashCause does instead of maintaining a second copy
+// that could silently drift out of sync with it. Without the platform
+// patterns here, a platform_network/platform_storage failure would classify
+// correctly but still show no cause_line -- the console banner would state a
+// cause with no evidence line under it.
 func crashLineSignaturePatterns() []string {
-	patterns := make([]string, 0, len(pythonCrashSignatures)+len(nodeCrashSignatures)+1)
+	patterns := make([]string, 0, len(platformCrashSignatures)+len(pythonCrashSignatures)+len(nodeCrashSignatures)+1)
+	for _, sig := range platformCrashSignatures {
+		patterns = append(patterns, sig.pattern)
+	}
 	for _, sig := range pythonCrashSignatures {
 		patterns = append(patterns, sig.pattern)
 	}
