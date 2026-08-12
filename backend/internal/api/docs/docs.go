@@ -9793,6 +9793,73 @@ const docTemplate = `{
                 }
             }
         },
+        "/projects/{projectId}/environments/{envId}/apps/{appName}/health": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Read-only health facts for one app: the same ready/not_ready/no_signal/stopped/orphaned verdict admin_overview.go proves, the platform's freshest known failure reason, and a collapsed log tail. Makes no LLM call. Read role required.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "app"
+                ],
+                "summary": "Get an app's health verdict",
+                "operationId": "getAppHealth",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "App name",
+                        "name": "appName",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.appHealthResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/environments/{envId}/apps/{appName}/hostnames": {
             "get": {
                 "security": [
@@ -19615,6 +19682,60 @@ const docTemplate = `{
                     "type": "boolean"
                 }
             }
+        },
+        "api.appHealthResponse": {
+            "type": "object",
+            "properties": {
+                "live_source": {
+                    "type": "string"
+                },
+                "log_excerpt": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "note": {
+                    "type": "string"
+                },
+                "phase": {
+                    "type": "string"
+                },
+                "platform_reason": {
+                    "type": "string"
+                },
+                "platform_reason_at": {
+                    "type": "string"
+                },
+                "snapshot_age_seconds": {
+                    "type": "integer"
+                },
+                "snapshot_stale": {
+                    "type": "boolean"
+                },
+                "verdict": {
+                    "$ref": "#/definitions/api.appHealthVerdict"
+                }
+            }
+        },
+        "api.appHealthVerdict": {
+            "type": "string",
+            "enum": [
+                "ready",
+                "not_ready",
+                "no_signal",
+                "stopped",
+                "orphaned",
+                "unknown"
+            ],
+            "x-enum-varnames": [
+                "appHealthReady",
+                "appHealthNotReady",
+                "appHealthNoSignal",
+                "appHealthStopped",
+                "appHealthOrphaned",
+                "appHealthUnknown"
+            ]
         },
         "api.appVolumeReq": {
             "type": "object",

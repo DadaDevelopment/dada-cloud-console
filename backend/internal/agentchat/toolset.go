@@ -25,9 +25,16 @@ import (
 // call the LLM gateway themselves, so an LLM turn would recurse into another
 // paid LLM run), every /admin/* and /mlflow/* operation, ingestLogs and
 // ingestMetrics, and everything in denyTools.
+//
+// getAppHealth is how the assistant now answers "is this app broken" without
+// touching the LLM gateway: it reuses the same verdict predicates
+// admin_overview.go proves (brokenAppSnapshotPredicate,
+// noSignalAppSnapshotPredicate) and does one DB read, so it costs nothing to
+// expose. diagnoseApp still stays out for the LLM-recursion reason above --
+// health facts no longer require it.
 var keepTools = []string{
 	"listProjects", "getProject",
-	"listApps", "getAppState", "getAppLogs", "getAppMetrics",
+	"listApps", "getAppState", "getAppHealth", "getAppLogs", "getAppMetrics",
 	"listDeployments", "listBuilds", "getBuild",
 	"listEnvVars", "listHostnames", "listEndpoints", "listDatabases",
 	"listOperations", "getOperation",

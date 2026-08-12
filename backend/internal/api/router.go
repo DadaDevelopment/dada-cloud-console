@@ -512,6 +512,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/projects/:projectId/cloud-tasks/:taskId/artifacts/:fileId", h.ProxyCloudTaskArtifact)
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/autofix", h.TriggerAutofix)
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/diagnose", h.DiagnoseApp)
+		api.GET("/projects/:projectId/environments/:envId/apps/:appName/health", h.GetAppHealth)
 
 		// Aggregated log search (Elasticsearch/filebeat proxy, read-only).
 		api.GET("/projects/:projectId/logs", h.SearchLogs)

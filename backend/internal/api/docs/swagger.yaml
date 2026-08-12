@@ -186,6 +186,45 @@ definitions:
     required:
     - path
     type: object
+  api.appHealthResponse:
+    properties:
+      live_source:
+        type: string
+      log_excerpt:
+        items:
+          type: string
+        type: array
+      note:
+        type: string
+      phase:
+        type: string
+      platform_reason:
+        type: string
+      platform_reason_at:
+        type: string
+      snapshot_age_seconds:
+        type: integer
+      snapshot_stale:
+        type: boolean
+      verdict:
+        $ref: '#/definitions/api.appHealthVerdict'
+    type: object
+  api.appHealthVerdict:
+    enum:
+    - ready
+    - not_ready
+    - no_signal
+    - stopped
+    - orphaned
+    - unknown
+    type: string
+    x-enum-varnames:
+    - appHealthReady
+    - appHealthNotReady
+    - appHealthNoSignal
+    - appHealthStopped
+    - appHealthOrphaned
+    - appHealthUnknown
   api.appVolumeReq:
     properties:
       fs_group:
@@ -8046,6 +8085,52 @@ paths:
       summary: Set many environment variables at once
       tags:
       - env-var
+  /projects/{projectId}/environments/{envId}/apps/{appName}/health:
+    get:
+      description: 'Read-only health facts for one app: the same ready/not_ready/no_signal/stopped/orphaned
+        verdict admin_overview.go proves, the platform''s freshest known failure reason,
+        and a collapsed log tail. Makes no LLM call. Read role required.'
+      operationId: getAppHealth
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.appHealthResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get an app's health verdict
+      tags:
+      - app
   /projects/{projectId}/environments/{envId}/apps/{appName}/hostnames:
     get:
       operationId: listHostnames
