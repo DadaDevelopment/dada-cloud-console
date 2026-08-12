@@ -96,6 +96,36 @@ func TestClassifyCrashCauseEnospc(t *testing.T) {
 	}
 }
 
+func TestClassifyCrashCauseWithReasonOOMKilledOverridesNodeSignature(t *testing.T) {
+	excerpt := "Error: Cannot find module '/tmp/index.js'\nnode:internal/modules/cjs/loader:1080"
+	kind, text := ClassifyCrashCauseWithReason("OOMKilled", excerpt)
+	if kind != CauseKindResourceLimit {
+		t.Fatalf("expected cause_kind %q for an OOMKilled reason even with a Node.js-looking log, got %q", CauseKindResourceLimit, kind)
+	}
+	if strings.Contains(text, "это ошибка в коде") {
+		t.Fatalf("resource_limit text must not blame the app's code, got %q", text)
+	}
+	if strings.Contains(text, "сбой") || strings.Contains(text, "проблем") {
+		t.Fatalf("resource_limit text must not read as a platform bug either (it is a plan limit, not a fault), got %q", text)
+	}
+	if !strings.Contains(text, "лимит") {
+		t.Fatalf("expected resource_limit text to name the memory limit, got %q", text)
+	}
+}
+
+func TestClassifyCrashCauseWithReasonNonOOMDelegatesUnchanged(t *testing.T) {
+	excerpt := "Error: Cannot find module '/tmp/index.js'"
+	wantKind, wantText := ClassifyCrashCause(excerpt)
+	gotKind, gotText := ClassifyCrashCauseWithReason("CrashLoopBackOff", excerpt)
+	if gotKind != wantKind || gotText != wantText {
+		t.Fatalf("expected a non-OOMKilled reason to behave exactly like ClassifyCrashCause, got kind=%q text=%q want kind=%q text=%q",
+			gotKind, gotText, wantKind, wantText)
+	}
+	if gotKind != CauseKindAppCode {
+		t.Fatalf("sanity check failed: expected %q for a plain Node.js signature, got %q", CauseKindAppCode, gotKind)
+	}
+}
+
 func TestExtractCauseLine(t *testing.T) {
 	tests := []struct {
 		name    string

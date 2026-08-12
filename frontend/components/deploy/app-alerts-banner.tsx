@@ -30,9 +30,12 @@ function crashTextKey(reason?: string): string {
 /**
  * Maps the backend's crash `cause_kind` to the verdict message key. Only
  * `app_code` blames the user's own code; the platform kinds say plainly that
- * the failure was on our side. An unknown or absent kind returns null so the
- * banner prints no verdict line at all, rather than defaulting to "your
- * code" without the backend having said so.
+ * the failure was on our side, and `resource_limit` (OOMKilled) says plainly
+ * that the container hit its plan's memory ceiling — neither the user's
+ * fault nor a platform bug, so it renders with the same neutral styling as
+ * the platform kinds, never the accusatory app_code styling. An unknown or
+ * absent kind returns null so the banner prints no verdict line at all,
+ * rather than defaulting to "your code" without the backend having said so.
  */
 function crashCauseKey(kind?: string): string | null {
   switch (kind) {
@@ -42,6 +45,8 @@ function crashCauseKey(kind?: string): string | null {
       return "apps.alerts.crash.cause.platformNetwork";
     case "platform_storage":
       return "apps.alerts.crash.cause.platformStorage";
+    case "resource_limit":
+      return "apps.alerts.crash.cause.resourceLimit";
     default:
       return null;
   }
@@ -144,7 +149,9 @@ export function AppAlertsBanner({ alerts, logsHref, storageHref, projectId, envI
                 <div className="mt-2 space-y-1.5">
                   {alert.cause &&
                     crashCauseKey(alert.cause_kind) &&
-                    (alert.cause_kind === "platform_network" || alert.cause_kind === "platform_storage" ? (
+                    (alert.cause_kind === "platform_network" ||
+                    alert.cause_kind === "platform_storage" ||
+                    alert.cause_kind === "resource_limit" ? (
                       <p className="text-xs font-semibold text-red-800 dark:text-red-200">
                         {t(crashCauseKey(alert.cause_kind)!)}
                       </p>

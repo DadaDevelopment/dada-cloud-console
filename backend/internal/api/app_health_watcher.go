@@ -568,23 +568,37 @@ func recordAppHealthAlertSend(ctx context.Context, pool *pgxpool.Pool, namespace
 // is never reset by a touch.
 //
 // cause/cause_line/causeKind are the console-facing crash explanation
-// (notify.ClassifyCrashCause / notify.ExtractCauseLine); pass "" for any of
-// them when this tick did not recompute it (see maybeCauseRefresh) rather
-// than dropping the column update — a plain overwrite with "" would erase a
-// cause recorded on an earlier tick just because this tick chose not to
-// re-fetch the log. NULLIF/COALESCE on the UPDATE side keep an existing cause
-// exactly as long as no fresher one is available; the INSERT side just
-// stores whatever came in, since a brand-new row has nothing to preserve.
-func touchAppHealthAlertSeen(ctx context.Context, pool *pgxpool.Pool, namespace, appName, reason, detail, cause, causeLine, causeKind string) {
+// (notify.ClassifyCrashCauseWithReason / notify.ExtractCauseLine); pass "" for
+// any of them when this tick did not recompute it (see maybeCauseRefresh)
+// rather than dropping the column update — a plain overwrite with "" would
+// erase a cause recorded on an earlier tick just because this tick chose not
+// to re-fetch the log.
+//
+// refreshed distinguishes the two reasons cause can arrive empty here, and
+// they must NOT be treated the same:
+//   - refreshed=false means maybeCauseRefresh skipped the log read entirely
+//     (nothing changed since the row already had a cause for the same
+//     reason) — the stored cause is still correct, so COALESCE keeps it.
+//   - refreshed=true means the log WAS re-read this tick and the classifier
+//     still came back empty — the row's reason has changed since that cause
+//     was written (e.g. an app_code verdict left over from a crash that has
+//     since flipped to OOMKilled), so the old cause is now stale evidence for
+//     the wrong failure and must be cleared, not kept. Without this branch a
+//     stale verdict from a past crash silently outlives the reason it
+//     explained.
+//
+// The INSERT path always just stores whatever came in via NULLIF, since a
+// brand-new row has nothing to preserve either way.
+func touchAppHealthAlertSeen(ctx context.Context, pool *pgxpool.Pool, namespace, appName, reason, detail, cause, causeLine, causeKind string, refreshed bool) {
 	_, err := pool.Exec(ctx,
 		`INSERT INTO app_health_alerts (namespace, app_name, last_sent_at, last_seen_at, reason, detail, cause, cause_line, cause_kind)
 		 VALUES ($1, $2, to_timestamp(0), now(), $3, $4, NULLIF($5, ''), NULLIF($6, ''), NULLIF($7, ''))
 		 ON CONFLICT (namespace, app_name) DO UPDATE SET
 		     last_seen_at = now(), reason = $3, detail = $4,
-		     cause = COALESCE(NULLIF($5, ''), app_health_alerts.cause),
-		     cause_line = COALESCE(NULLIF($6, ''), app_health_alerts.cause_line),
-		     cause_kind = COALESCE(NULLIF($7, ''), app_health_alerts.cause_kind)`,
-		namespace, appName, reason, detail, cause, causeLine, causeKind)
+		     cause = CASE WHEN $8 THEN NULLIF($5, '') ELSE COALESCE(NULLIF($5, ''), app_health_alerts.cause) END,
+		     cause_line = CASE WHEN $8 THEN NULLIF($6, '') ELSE COALESCE(NULLIF($6, ''), app_health_alerts.cause_line) END,
+		     cause_kind = CASE WHEN $8 THEN NULLIF($7, '') ELSE COALESCE(NULLIF($7, ''), app_health_alerts.cause_kind) END`,
+		namespace, appName, reason, detail, cause, causeLine, causeKind, refreshed)
 	if err != nil {
 		log.Printf("app-health: touch-seen for %s/%s failed: %v", namespace, appName, err)
 	}
@@ -627,20 +641,38 @@ func currentAlertCauseState(ctx context.Context, pool *pgxpool.Pool, namespace, 
 // is already known and has not changed. So the log is only actually read
 // when there is no cause on record yet, or the detected reason changed since
 // the last tick (e.g. CrashLoopBackOff flipping to OOMKilled genuinely needs
-// a fresh read). ClassifyCrashCause and ExtractCauseLine are cheap pure
-// string scans, so they always run together once the log is fetched — no
-// reason to split that cost further. Returns ("", "", "", "") when skipping,
-// and the caller (touchAppHealthAlertSeen) already treats "" as "keep
-// whatever is stored".
-func (w *appHealthWatcher) maybeCauseRefresh(ctx context.Context, alert appHealthAlert) (logExcerpt, cause, causeLine, causeKind string) {
+// a fresh read). ClassifyCrashCauseWithReason and ExtractCauseLine are cheap
+// pure string/reason scans, so they always run together once the log is
+// fetched — no reason to split that cost further.
+//
+// The returned refreshed bool tells the caller whether this call actually
+// did the log read (true) or short-circuited on an already-current cause
+// (false); touchAppHealthAlertSeen needs that distinction to tell "nothing
+// to report this tick, keep the stored cause" apart from "checked again,
+// there genuinely is no cause anymore" — see touchAppHealthAlertSeen's doc
+// comment for why conflating the two lets a stale verdict survive a reason
+// change. When refreshed is false the other four return values are always
+// "".
+//
+// A CauseKindResourceLimit verdict deliberately carries NO cause_line. That
+// verdict rests on the kube-reported OOMKilled state, not on anything in the
+// log, and ExtractCauseLine would happily surface whatever runtime error the
+// process half-printed while being killed — the console would then state
+// "exceeded its memory limit" and show "Error: Cannot find module ..." as the
+// evidence directly underneath it, which reads as a self-contradiction and
+// re-plants exactly the blame this classification removes. Better no evidence
+// line than evidence for the wrong failure.
+func (w *appHealthWatcher) maybeCauseRefresh(ctx context.Context, alert appHealthAlert) (logExcerpt, cause, causeLine, causeKind string, refreshed bool) {
 	prevReason, hasCause, err := currentAlertCauseState(ctx, w.h.pool, alert.Namespace, alert.AppName)
 	if err == nil && hasCause && prevReason == alert.Reason {
-		return "", "", "", ""
+		return "", "", "", "", false
 	}
 	logExcerpt = w.tailLog(ctx, alert)
-	causeKind, cause = notify.ClassifyCrashCause(logExcerpt)
-	causeLine = notify.ExtractCauseLine(logExcerpt)
-	return logExcerpt, cause, causeLine, causeKind
+	causeKind, cause = notify.ClassifyCrashCauseWithReason(alert.Reason, logExcerpt)
+	if causeKind != notify.CauseKindResourceLimit {
+		causeLine = notify.ExtractCauseLine(logExcerpt)
+	}
+	return logExcerpt, cause, causeLine, causeKind, true
 }
 
 // maybeNotify sends the owner alert for one detected bad-state app, gated by
@@ -677,8 +709,8 @@ func (w *appHealthWatcher) maybeNotify(ctx context.Context, projectID uuid.UUID,
 		detail = fmt.Sprintf("%s exit=%d", detail, alert.ExitCode)
 	}
 
-	logExcerpt, cause, causeLine, causeKind := w.maybeCauseRefresh(ctx, alert)
-	touchAppHealthAlertSeen(ctx, w.h.pool, alert.Namespace, alert.AppName, alert.Reason, detail, cause, causeLine, causeKind)
+	logExcerpt, cause, causeLine, causeKind, refreshed := w.maybeCauseRefresh(ctx, alert)
+	touchAppHealthAlertSeen(ctx, w.h.pool, alert.Namespace, alert.AppName, alert.Reason, detail, cause, causeLine, causeKind, refreshed)
 
 	if !emailableReason(alert.Reason) {
 		return

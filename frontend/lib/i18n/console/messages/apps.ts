@@ -664,6 +664,10 @@ export const apps: Messages = {
     ru: "Похоже на проблему с диском или томом на стороне Dada Cloud. Это не ошибка в вашем коде.",
     en: "Looks like a disk or volume problem on Dada Cloud's side. This is not a bug in your code.",
   },
+  "apps.alerts.crash.cause.resourceLimit": {
+    ru: "Контейнер был остановлен: приложение превысило лимит памяти, выделенный по тарифу. Это не ошибка в коде — нужен профиль с большим лимитом или меньше потребление памяти.",
+    en: "The container was stopped: the app exceeded the memory limit included in its plan. This is not a bug in your code — it needs a bigger profile or lower memory usage.",
+  },
   "apps.alerts.crash.cause.line": { ru: "Из логов:", en: "From the logs:" },
   "apps.alerts.crash.cta": { ru: "Смотреть логи", en: "View logs" },
   "apps.alerts.crash.diagnose": { ru: "Разобраться", en: "Diagnose" },

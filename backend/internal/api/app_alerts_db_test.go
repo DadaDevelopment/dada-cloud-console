@@ -24,7 +24,7 @@ func TestTouchAppHealthAlertSeenDoesNotResetCooldown(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM app_health_alerts WHERE namespace = $1`, ns)
 	})
 
-	touchAppHealthAlertSeen(ctx, pool, ns, "web", "CrashLoopBackOff", "pod-1/web", "", "", "")
+	touchAppHealthAlertSeen(ctx, pool, ns, "web", "CrashLoopBackOff", "pod-1/web", "", "", "", false)
 
 	var lastSent time.Time
 	var lastSeen *time.Time
@@ -46,7 +46,7 @@ func TestTouchAppHealthAlertSeenDoesNotResetCooldown(t *testing.T) {
 
 	firstSeen := *lastSeen
 	time.Sleep(10 * time.Millisecond)
-	touchAppHealthAlertSeen(ctx, pool, ns, "web", "CrashLoopBackOff", "pod-1/web", "", "", "")
+	touchAppHealthAlertSeen(ctx, pool, ns, "web", "CrashLoopBackOff", "pod-1/web", "", "", "", false)
 
 	var sentAfterSecondTouch time.Time
 	var seenAfterSecondTouch time.Time
@@ -118,7 +118,7 @@ func TestTouchAppHealthAlertSeenPersistsCauseForNonEmailableReason(t *testing.T)
 	})
 
 	touchAppHealthAlertSeen(ctx, pool, ns, "worker", "Error", "pod-1/worker exit=1",
-		"Судя по логам, это ошибка в коде приложения (Python).", "ModuleNotFoundError: No module named 'flask'", "app_code")
+		"Судя по логам, это ошибка в коде приложения (Python).", "ModuleNotFoundError: No module named 'flask'", "app_code", true)
 
 	var cause, causeLine string
 	if err := pool.QueryRow(ctx,
@@ -147,8 +147,8 @@ func TestTouchAppHealthAlertSeenPreservesCauseWhenNotRefreshed(t *testing.T) {
 	})
 
 	touchAppHealthAlertSeen(ctx, pool, ns, "worker", "CrashLoopBackOff", "pod-1/worker",
-		"Судя по логам, это похоже на ошибку в коде приложения.", "panic: boom", "app_code")
-	touchAppHealthAlertSeen(ctx, pool, ns, "worker", "CrashLoopBackOff", "pod-1/worker", "", "", "")
+		"Судя по логам, это похоже на ошибку в коде приложения.", "panic: boom", "app_code", true)
+	touchAppHealthAlertSeen(ctx, pool, ns, "worker", "CrashLoopBackOff", "pod-1/worker", "", "", "", false)
 
 	var cause, causeLine string
 	if err := pool.QueryRow(ctx,
@@ -158,6 +158,49 @@ func TestTouchAppHealthAlertSeenPreservesCauseWhenNotRefreshed(t *testing.T) {
 	}
 	if cause == "" || causeLine == "" {
 		t.Fatalf("expected the earlier cause/cause_line to survive an empty touch, got cause=%q cause_line=%q", cause, causeLine)
+	}
+}
+
+// TestTouchAppHealthAlertSeenClearsStaleCauseWhenRefreshed is RED-proof for
+// the reason-change bug reported live on mmccok998-gmail-com-prod/mycloudtty:
+// reason flipped to OOMKilled but the console kept showing the app_code
+// verdict ("Cannot find module") from the PREVIOUS crash reason, because the
+// old COALESCE-always UPDATE kept whatever cause was already stored no
+// matter what. This proves that once maybeCauseRefresh actually re-reads the
+// log (refreshed=true) and the classifier comes back empty -- the case where
+// the fresh log carries no recognizable signature for the new reason -- the
+// stale cause/cause_line/cause_kind are cleared to NULL rather than left
+// pointing at the wrong failure.
+func TestTouchAppHealthAlertSeenClearsStaleCauseWhenRefreshed(t *testing.T) {
+	pool := testAdvisoryPool(t)
+	ctx := context.Background()
+	ns := "test-ns-cause-stale-" + uuid.NewString()[:8]
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM app_health_alerts WHERE namespace = $1`, ns)
+	})
+
+	touchAppHealthAlertSeen(ctx, pool, ns, "mycloudtty", "CrashLoopBackOff", "pod-1/mycloudtty",
+		"Судя по логам, это ошибка в коде приложения (Node.js).", "Error: Cannot find module '/tmp/index.js'", "app_code", true)
+
+	var cause, causeLine, causeKind string
+	if err := pool.QueryRow(ctx,
+		`SELECT COALESCE(cause, ''), COALESCE(cause_line, ''), COALESCE(cause_kind, '') FROM app_health_alerts WHERE namespace = $1 AND app_name = 'mycloudtty'`,
+		ns).Scan(&cause, &causeLine, &causeKind); err != nil {
+		t.Fatalf("read back seeded row: %v", err)
+	}
+	if cause == "" || causeLine == "" || causeKind == "" {
+		t.Fatalf("expected the seeded app_code cause to be stored, got cause=%q cause_line=%q cause_kind=%q", cause, causeLine, causeKind)
+	}
+
+	touchAppHealthAlertSeen(ctx, pool, ns, "mycloudtty", "OOMKilled", "pod-1/mycloudtty", "", "", "", true)
+
+	if err := pool.QueryRow(ctx,
+		`SELECT COALESCE(cause, ''), COALESCE(cause_line, ''), COALESCE(cause_kind, '') FROM app_health_alerts WHERE namespace = $1 AND app_name = 'mycloudtty'`,
+		ns).Scan(&cause, &causeLine, &causeKind); err != nil {
+		t.Fatalf("read back row after refreshed touch: %v", err)
+	}
+	if cause != "" || causeLine != "" || causeKind != "" {
+		t.Fatalf("expected the stale app_code cause to be cleared once reason changed and refresh found no cause, got cause=%q cause_line=%q cause_kind=%q", cause, causeLine, causeKind)
 	}
 }
 
@@ -178,7 +221,7 @@ func TestCurrentAlertCauseStateDrivesRefreshDecision(t *testing.T) {
 		t.Fatalf("expected an error (no row yet) before the first touch")
 	}
 
-	touchAppHealthAlertSeen(ctx, pool, ns, "worker", "OOMKilled", "pod-1/worker", "hint", "evidence line", "app_code")
+	touchAppHealthAlertSeen(ctx, pool, ns, "worker", "OOMKilled", "pod-1/worker", "hint", "evidence line", "app_code", true)
 
 	reason, hasCause, err := currentAlertCauseState(ctx, pool, ns, "worker")
 	if err != nil {
@@ -208,7 +251,7 @@ func TestCurrentAlertCauseStateForcesRefreshOnPoisonedCauseLine(t *testing.T) {
 	})
 
 	touchAppHealthAlertSeen(ctx, pool, ns, "worker", "CrashLoopBackOff", "pod-1/worker",
-		"ошибка в коде приложения (Python)", "Traceback (most recent call last):", "app_code")
+		"ошибка в коде приложения (Python)", "Traceback (most recent call last):", "app_code", true)
 
 	reason, hasCause, err := currentAlertCauseState(ctx, pool, ns, "worker")
 	if err != nil {
@@ -222,7 +265,7 @@ func TestCurrentAlertCauseStateForcesRefreshOnPoisonedCauseLine(t *testing.T) {
 	}
 
 	touchAppHealthAlertSeen(ctx, pool, ns, "worker", "CrashLoopBackOff", "pod-1/worker",
-		"ошибка в коде приложения (Python)", "RuntimeError: no objects found under 's3://models/buffalo_l'", "app_code")
+		"ошибка в коде приложения (Python)", "RuntimeError: no objects found under 's3://models/buffalo_l'", "app_code", true)
 
 	if _, hasCause, err = currentAlertCauseState(ctx, pool, ns, "worker"); err != nil {
 		t.Fatalf("currentAlertCauseState after repair: %v", err)

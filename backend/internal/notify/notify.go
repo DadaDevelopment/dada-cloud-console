@@ -321,7 +321,15 @@ const (
 	CauseKindAppCode         = "app_code"
 	CauseKindPlatformNetwork = "platform_network"
 	CauseKindPlatformStorage = "platform_storage"
+	CauseKindResourceLimit   = "resource_limit"
 )
+
+// resourceLimitCrashText is the cause_kind=CauseKindResourceLimit verdict
+// shown for an OOMKilled container. This is deliberately worded as neither
+// "your code is broken" nor "the platform is broken": the kernel killed the
+// process for exceeding the memory ceiling attached to the app's plan, which
+// is a capacity fact, not a bug on either side.
+const resourceLimitCrashText = "Контейнер был остановлен нашей платформой: приложение превысило лимит памяти, выделенный по тарифу. Это не ошибка в коде — нужен профиль с большим лимитом или меньше потребление памяти."
 
 // crashLogSignature is one entry in the ordered pattern table ClassifyCrashLog
 // walks: pattern is matched with strings.Contains against the log excerpt,
@@ -425,6 +433,27 @@ func ClassifyCrashCause(excerpt string) (kind, text string) {
 func ClassifyCrashLog(excerpt string) string {
 	_, text := ClassifyCrashCause(excerpt)
 	return text
+}
+
+// ClassifyCrashCauseWithReason is ClassifyCrashCause plus the one signal the
+// log text itself cannot carry: the container's kube-reported termination
+// reason. A reason of "OOMKilled" is an authoritative platform fact (the
+// kernel/kubelet killed the process for exceeding its memory ceiling) and
+// must win outright over whatever the log excerpt happens to contain --
+// otherwise a coincidental language-runtime line in the same log (e.g. a
+// half-printed Node.js stack as the process died) gets classified app_code
+// and the owner is told their code is broken when the real cause is the
+// plan's memory limit. Every other reason is unaffected: this delegates
+// straight to ClassifyCrashCause, so passing an empty or unrecognized reason
+// reproduces the old text-only behavior exactly. The literal "OOMKilled"
+// string mirrors the kube API's own TerminationReason value (see
+// api.reasonOOMKilled); notify does not import the api package to avoid a
+// cycle, so the string is duplicated deliberately rather than shared.
+func ClassifyCrashCauseWithReason(reason, excerpt string) (kind, text string) {
+	if reason == "OOMKilled" {
+		return CauseKindResourceLimit, resourceLimitCrashText
+	}
+	return ClassifyCrashCause(excerpt)
 }
 
 // causeLineMaxRunes bounds ExtractCauseLine's return value. Counted in runes,
