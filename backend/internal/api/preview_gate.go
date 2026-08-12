@@ -69,6 +69,23 @@ type previewTarget struct {
 
 const previewTargetTTL = 60 * time.Second
 
+// previewUpstreamUnavailableBody is what the user actually reads inside the
+// preview pane when the gate cannot reach the app, so it has to say whose
+// answer it is. The old body was the bare string "preview upstream
+// unavailable": it named neither the sender nor the nature of the failure, and
+// on 2026-08-08 a first-time user read it as a verdict about his own code,
+// asked the assistant, and deleted the app twelve minutes after deploying
+// (RestateUnreachablePhase in apps.go documents that incident). The assistant
+// misread it the same way, which is the same class of defect the tool-error
+// framing closed on the MCP path: our own failure text must announce that it
+// is ours, and must not pretend to know a cause it has not proven. The gate
+// genuinely does not know why the connection failed, so the text lists the
+// real candidates instead of picking one.
+const previewUpstreamUnavailableBody = "Предпросмотр Dada Cloud не смог открыть соединение с приложением (ответ шлюза предпросмотра, HTTP 502).\n\n" +
+	"Это ответ платформы, а не вашего приложения: до самого приложения запрос не дошёл, поэтому его код тут ни при чём.\n\n" +
+	"Обычные причины: приложение ещё поднимается после деплоя; оно не слушает тот порт, который указан в настройках; это не HTTP-приложение (например бот) и веб-порта у него нет вовсе; либо недоступна сама платформа.\n" +
+	"Что именно из этого — покажет состояние приложения в консоли."
+
 // NewPreviewGate wraps next with preview-host dispatch: requests whose Host is
 // under cfg.PreviewHostBase are proxied to the target app, everything else
 // falls through to next. Returns next unchanged when the gate is not
@@ -167,7 +184,7 @@ func (g *PreviewGate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			log.Debug().Err(err).Str("host", host).Msg("preview gate: upstream error")
-			http.Error(w, "preview upstream unavailable", http.StatusBadGateway)
+			http.Error(w, previewUpstreamUnavailableBody, http.StatusBadGateway)
 		},
 	}
 	proxy.ServeHTTP(w, r)
