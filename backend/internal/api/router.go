@@ -14,6 +14,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/metrics"
 	"github.com/dada-tuda/console/backend/internal/notify"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -55,19 +56,29 @@ func authMiddleware(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 		// Authorization is decoded from the native Keycloak claims (group paths +
 		// scope). The /platform-admins staff god-mode is handled inside the claim
 		// decode, not here (ADR-009 §4).
-		return &auth.Claims{
-			UserID:      id,
-			Username:    kc.PreferredUsername,
-			Email:       kc.Email,
-			DisplayName: kc.Name,
-			Groups:      kc.Groups,
-			Roles:       kc.Roles,
-			Scope:       kc.Scope,
-			SessionID:   kc.SessionID,
-		}, nil
+		return claimsFromKeycloak(id, kc), nil
 	}
 
 	return auth.KeycloakMiddleware(verifier, resolver)
+}
+
+// claimsFromKeycloak is the ONE mapping from a verified Keycloak token to the
+// *auth.Claims handlers read. Both the mandatory middleware and the optional
+// resolver go through it: they used to build the struct separately, and the
+// optional one carried only UserID and Groups, so every request that reached a
+// public route with a valid session lost its identity fields. The visible cost
+// was support tickets from signed-in customers arriving as "аноним".
+func claimsFromKeycloak(id uuid.UUID, kc *auth.KeycloakClaims) *auth.Claims {
+	return &auth.Claims{
+		UserID:      id,
+		Username:    kc.PreferredUsername,
+		Email:       kc.Email,
+		DisplayName: kc.Name,
+		Groups:      kc.Groups,
+		Roles:       kc.Roles,
+		Scope:       kc.Scope,
+		SessionID:   kc.SessionID,
+	}
 }
 
 func optionalAuthResolver(pool *pgxpool.Pool, cfg *config.Config) func(c *gin.Context) (*auth.Claims, bool) {
@@ -118,7 +129,7 @@ func optionalAuthResolver(pool *pgxpool.Pool, cfg *config.Config) func(c *gin.Co
 		if rerr != nil {
 			return nil, false
 		}
-		return &auth.Claims{UserID: id, Groups: kc.Groups}, true
+		return claimsFromKeycloak(id, kc), true
 	}
 }
 

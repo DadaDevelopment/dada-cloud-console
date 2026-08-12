@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/google/uuid"
 )
 
@@ -99,5 +100,43 @@ func TestShouldNotifyAutofixSkipsRunningAndOtherTaskTypes(t *testing.T) {
 	}
 	if shouldNotifyAutofix(cloudTaskTransition{Matched: false, TaskType: "autofix", OldStatus: "running", NewStatus: "completed"}) {
 		t.Fatal("an update that matched no row must not notify")
+	}
+}
+
+// TestClaimsFromKeycloakCarriesIdentity pins the fields a public route needs
+// from an authenticated caller. The optional resolver used to build its own
+// struct with UserID and Groups only, which turned every signed-in support
+// ticket into "аноним" in the operator email.
+func TestClaimsFromKeycloakCarriesIdentity(t *testing.T) {
+	id := uuid.MustParse("11111111-2222-3333-4444-555555555555")
+	kc := &auth.KeycloakClaims{
+		PreferredUsername: "artem",
+		Email:             "artem@example.com",
+		Name:              "Artem M",
+		Groups:            []string{"/orgs/dada/Owner"},
+		Roles:             []string{"user"},
+		Scope:             "openid email",
+		SessionID:         "sess-1",
+	}
+
+	got := claimsFromKeycloak(id, kc)
+
+	if got.UserID != id {
+		t.Fatalf("user id = %s, want %s", got.UserID, id)
+	}
+	if got.Email != kc.Email {
+		t.Fatalf("email = %q, want %q", got.Email, kc.Email)
+	}
+	if got.Username != kc.PreferredUsername {
+		t.Fatalf("username = %q, want %q", got.Username, kc.PreferredUsername)
+	}
+	if got.DisplayName != kc.Name {
+		t.Fatalf("display name = %q, want %q", got.DisplayName, kc.Name)
+	}
+	if len(got.Groups) != 1 || got.Groups[0] != kc.Groups[0] {
+		t.Fatalf("groups = %v, want %v", got.Groups, kc.Groups)
+	}
+	if got.Scope != kc.Scope || got.SessionID != kc.SessionID {
+		t.Fatalf("scope/session = %q/%q, want %q/%q", got.Scope, got.SessionID, kc.Scope, kc.SessionID)
 	}
 }
