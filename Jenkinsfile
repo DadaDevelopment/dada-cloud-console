@@ -30,6 +30,27 @@ def EMBED_GATEWAY_IMAGE   = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console
 // by the boxcatalog entry rather than by the ArgoCD write-back below.
 def BOX_WARM_IMAGE        = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-box-warm"
 
+def PUSH_WITH_RETRY_SH = '''
+                                push_with_retry() {
+                                    ref="$1"
+                                    attempt=1
+                                    delay=30
+                                    while : ; do
+                                        if docker push "$ref"; then
+                                            return 0
+                                        fi
+                                        if [ "$attempt" -ge 5 ]; then
+                                            echo "DADA_PUSH_GAVE_UP ref=$ref attempts=$attempt"
+                                            return 1
+                                        fi
+                                        echo "DADA_PUSH_RETRY ref=$ref attempt=$attempt sleep=${delay}s"
+                                        sleep "$delay"
+                                        attempt=$(( attempt + 1 ))
+                                        delay=$(( delay * 2 ))
+                                    done
+                                }
+'''
+
 // GitOps write-back: after a successful push, pin the just-built tag into the
 // ArgoCD source so prod actually rolls (there is NO image-updater; the tag is
 // the deploy trigger). Argo's prod app tracks the console-migration branch of
@@ -683,13 +704,14 @@ spec:
                             sh """
                                 set -eux
                                 echo "\${GITHUB_TOKEN}" | docker login ${GITHUB_REGISTRY} -u \${GITHUB_USERNAME} --password-stdin
-                                docker push ${BACKEND_IMAGE}:${resolvedTag}
-                                docker push ${FRONTEND_IMAGE}:${resolvedTag}
-                                docker push ${GITOPS_AGENT_IMAGE}:${resolvedTag}
-                                docker push ${PORTAINER_AGENT_IMAGE}:${resolvedTag}
-                                docker push ${BUILD_AGENT_IMAGE}:${resolvedTag}
-                                docker push ${GATEWAY_IMAGE}:${resolvedTag}
-                                docker push ${EMBED_GATEWAY_IMAGE}:${resolvedTag}
+${PUSH_WITH_RETRY_SH}
+                                push_with_retry ${BACKEND_IMAGE}:${resolvedTag}
+                                push_with_retry ${FRONTEND_IMAGE}:${resolvedTag}
+                                push_with_retry ${GITOPS_AGENT_IMAGE}:${resolvedTag}
+                                push_with_retry ${PORTAINER_AGENT_IMAGE}:${resolvedTag}
+                                push_with_retry ${BUILD_AGENT_IMAGE}:${resolvedTag}
+                                push_with_retry ${GATEWAY_IMAGE}:${resolvedTag}
+                                push_with_retry ${EMBED_GATEWAY_IMAGE}:${resolvedTag}
                                 docker tag ${BACKEND_IMAGE}:${resolvedTag} ${BACKEND_IMAGE}:latest
                                 docker tag ${FRONTEND_IMAGE}:${resolvedTag} ${FRONTEND_IMAGE}:latest
                                 docker tag ${GITOPS_AGENT_IMAGE}:${resolvedTag} ${GITOPS_AGENT_IMAGE}:latest
@@ -697,13 +719,13 @@ spec:
                                 docker tag ${BUILD_AGENT_IMAGE}:${resolvedTag} ${BUILD_AGENT_IMAGE}:latest
                                 docker tag ${GATEWAY_IMAGE}:${resolvedTag} ${GATEWAY_IMAGE}:latest
                                 docker tag ${EMBED_GATEWAY_IMAGE}:${resolvedTag} ${EMBED_GATEWAY_IMAGE}:latest
-                                docker push ${BACKEND_IMAGE}:latest
-                                docker push ${FRONTEND_IMAGE}:latest
-                                docker push ${GITOPS_AGENT_IMAGE}:latest
-                                docker push ${PORTAINER_AGENT_IMAGE}:latest
-                                docker push ${BUILD_AGENT_IMAGE}:latest
-                                docker push ${GATEWAY_IMAGE}:latest
-                                docker push ${EMBED_GATEWAY_IMAGE}:latest
+                                push_with_retry ${BACKEND_IMAGE}:latest
+                                push_with_retry ${FRONTEND_IMAGE}:latest
+                                push_with_retry ${GITOPS_AGENT_IMAGE}:latest
+                                push_with_retry ${PORTAINER_AGENT_IMAGE}:latest
+                                push_with_retry ${BUILD_AGENT_IMAGE}:latest
+                                push_with_retry ${GATEWAY_IMAGE}:latest
+                                push_with_retry ${EMBED_GATEWAY_IMAGE}:latest
                                 docker rmi ${BACKEND_IMAGE}:${resolvedTag} ${FRONTEND_IMAGE}:${resolvedTag} ${GITOPS_AGENT_IMAGE}:${resolvedTag} ${PORTAINER_AGENT_IMAGE}:${resolvedTag} ${BUILD_AGENT_IMAGE}:${resolvedTag} ${GATEWAY_IMAGE}:${resolvedTag} ${EMBED_GATEWAY_IMAGE}:${resolvedTag} || true
                             """
                             // The box image carries BOTH the build tag and :v1. The
@@ -715,9 +737,10 @@ spec:
                             if (params.BUILD_BOX_IMAGE) {
                                 sh """
                                     set -eux
-                                    docker push ${BOX_WARM_IMAGE}:${resolvedTag}
+${PUSH_WITH_RETRY_SH}
+                                    push_with_retry ${BOX_WARM_IMAGE}:${resolvedTag}
                                     docker tag ${BOX_WARM_IMAGE}:${resolvedTag} ${BOX_WARM_IMAGE}:v1
-                                    docker push ${BOX_WARM_IMAGE}:v1
+                                    push_with_retry ${BOX_WARM_IMAGE}:v1
                                     docker rmi ${BOX_WARM_IMAGE}:${resolvedTag} || true
                                 """
                             }
@@ -795,6 +818,9 @@ spec:
 
         } catch (err) {
             currentBuild.result = 'FAILURE'
+            currentBuild.description = (currentStageName == 'Docker push' || currentStageName == 'GitOps write-back')
+                    ? "FAILED AT PUBLISH (${currentStageName}) — code and tests passed"
+                    : "FAILED AT ${currentStageName}"
             throw err
         }
 
