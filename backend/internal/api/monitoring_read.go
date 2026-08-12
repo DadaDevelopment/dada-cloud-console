@@ -763,7 +763,7 @@ func (h *Handler) computeMonitoringMetrics(ctx context.Context, sel, tenant, gro
 		"metrics": metrics,
 	}
 	if liveErr != "" {
-		resp["live_error"] = liveErr
+		setLiveError(resp, liveErr)
 	}
 	return resp
 }

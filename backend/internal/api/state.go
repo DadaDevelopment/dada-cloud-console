@@ -86,7 +86,7 @@ func (h *Handler) GetAppServerState(c *gin.Context) {
 	ep, err := h.portainer.GetEndpoint(c.Request.Context(), *endpoint)
 	if err != nil {
 		// Live lookup failed — return DB-derived state, flag the proxy error.
-		resp["live_error"] = err.Error()
+		setLiveError(resp, err.Error())
 		c.JSON(http.StatusOK, resp)
 		return
 	}
@@ -174,7 +174,7 @@ func (h *Handler) GetAppState(c *gin.Context) {
 	// name), not the whole stack's compose project.
 	containers, err := h.portainer.ListContainers(c.Request.Context(), endpoint, "com.docker.compose.service="+appName)
 	if err != nil {
-		resp["live_error"] = err.Error()
+		setLiveError(resp, err.Error())
 	} else {
 		resp["containers"] = containers
 		resp["online"] = len(containers) > 0

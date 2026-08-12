@@ -111,7 +111,7 @@ func (h *Handler) runK8sContainerMetrics(ctx context.Context, namespaces, images
 	}
 	resp := gin.H{"range": end.Sub(start).String(), "step": step.String(), "metrics": metrics}
 	if liveErr != "" {
-		resp["live_error"] = liveErr
+		setLiveError(resp, liveErr)
 	}
 	return resp
 }
@@ -252,7 +252,7 @@ func (h *Handler) runMetricSpecs(ctx context.Context, specs []metricSpec, label,
 		"metrics": metrics,
 	}
 	if liveErr != "" {
-		resp["live_error"] = liveErr
+		setLiveError(resp, liveErr)
 	}
 	return resp
 }
