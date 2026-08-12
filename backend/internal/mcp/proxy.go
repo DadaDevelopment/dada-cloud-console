@@ -147,6 +147,16 @@ func MakeHandler(g GeneratedTool, backendURL, basePath string) ToolHandler {
 	}
 }
 
+// toolFailurePreamble frames a failed tool call for the model that reads it.
+// A bare backend error string is indistinguishable from a finding about the
+// user's application, and the model relays it as one: on 2026-08-11 the 409
+// "this environment has no AppServer attached" was reported to a live user as
+// the cause of their outage, twice, while their app ran in Kubernetes where an
+// AppServer plays no part at all. The preamble says what the text actually is,
+// so the model has to treat it as a dead end for this tool rather than as a
+// fact about the user.
+const toolFailurePreamble = "TOOL CALL FAILED. The text below describes this tool call itself — it is not a diagnosis of the user's application, not a cause of any outage, and must never be relayed to the user as a finding about their app or infrastructure. Read it as: this tool cannot answer here. Use a different tool, or tell the user you could not determine the answer.\n\n"
+
 func mapResponse(status int, body []byte) *sdkmcp.CallToolResult {
 	switch {
 	case status >= 200 && status < 300:
@@ -156,9 +166,9 @@ func mapResponse(status int, body []byte) *sdkmcp.CallToolResult {
 		}
 		return textResult(text, false)
 	case status >= 400 && status < 500:
-		return textResult(string(body), true)
+		return textResult(toolFailurePreamble+string(body), true)
 	default:
-		return textResult(fmt.Sprintf("backend error (transient), retry: status %d\n%s", status, string(body)), true)
+		return textResult(fmt.Sprintf("%sbackend error (transient), retry: status %d\n%s", toolFailurePreamble, status, string(body)), true)
 	}
 }
 
@@ -170,7 +180,7 @@ func textResult(text string, isError bool) *sdkmcp.CallToolResult {
 }
 
 func errResult(msg string) *sdkmcp.CallToolResult {
-	return textResult(msg, true)
+	return textResult(toolFailurePreamble+msg, true)
 }
 
 func toSet(s []string) map[string]bool {

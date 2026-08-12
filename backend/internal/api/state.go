@@ -110,7 +110,7 @@ func (h *Handler) resolveEnvEndpoint(c *gin.Context, projectID, envID uuid.UUID)
 		envID, projectID,
 	).Scan(&endpoint)
 	if err == pgx.ErrNoRows {
-		respondError(c, http.StatusConflict, "this environment has no AppServer attached")
+		respondError(c, http.StatusConflict, "not applicable to this environment: this endpoint serves VM (Docker Compose) environments only, and this environment has no AppServer. Kubernetes apps are served by the Kubernetes endpoints instead; this says nothing about the health of any application")
 		return 0, false
 	}
 	if err != nil {
@@ -118,7 +118,7 @@ func (h *Handler) resolveEnvEndpoint(c *gin.Context, projectID, envID uuid.UUID)
 		return 0, false
 	}
 	if endpoint == nil {
-		respondError(c, http.StatusConflict, "the environment's AppServer has no Portainer endpoint yet")
+		respondError(c, http.StatusConflict, "not applicable yet: this VM environment's AppServer is still being provisioned and has no Portainer endpoint. This says nothing about the health of any application")
 		return 0, false
 	}
 	return *endpoint, true
