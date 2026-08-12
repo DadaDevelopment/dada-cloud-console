@@ -136,6 +136,26 @@ spec:
   # 1 hour is plenty and well under any sane runaway cap.
   activeDeadlineSeconds: 3600
   priorityClassName: critical
+  # Never schedule onto a node that carries a platform postgres replica. The
+  # agent's docker-graph-storage + workspace are emptyDir, i.e. the NODE's disk,
+  # and a build holds ~9.6 GiB of it. Twice this combination ended as a P0: the
+  # node filled up and the platform postgres on it died (once taking a live
+  # user's app down for 5h11m). Build #1083 then died itself on ENOSPC inside
+  # `npm ci` while zh58h — which hosts pg-shard-0-postgresql-0 — sat at 99.8%.
+  # Scoped to the databases namespace so a user pod that happens to be labelled
+  # postgresql does not fence the agent out of a node. Today this leaves two
+  # eligible nodes; if a future postgres replica lands on both, agents go
+  # Pending (visible) instead of silently starving a database (not).
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - topologyKey: kubernetes.io/hostname
+          namespaces: ["databases"]
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: ["postgresql"]
   securityContext:
     fsGroup: 1000
   volumes:
