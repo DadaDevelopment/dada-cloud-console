@@ -46,6 +46,63 @@ type classifiedFailure struct {
 func (c *classifiedFailure) Error() string { return c.err.Error() }
 func (c *classifiedFailure) Unwrap() error { return c.err }
 
+// watchBudgetExpired marks a build whose own observation budget (BuildTimeout,
+// wrapped around the Jenkins job in execute) ran out while the Jenkins job
+// itself was still alive. It is never the user's fault: Jenkins keeps
+// building or already finished, the platform just stopped watching. number is
+// the Jenkins build number when one was already known, or 0 when the queue
+// item never resolved to a number before the budget expired.
+type watchBudgetExpired struct {
+	number int
+	err    error
+}
+
+func (w *watchBudgetExpired) Error() string {
+	if w.number > 0 {
+		return fmt.Sprintf("build-agent watch budget expired for jenkins build #%d: %v", w.number, w.err)
+	}
+	return fmt.Sprintf("build-agent watch budget expired before a jenkins build number resolved: %v", w.err)
+}
+
+func (w *watchBudgetExpired) Unwrap() error { return w.err }
+
+// graceAttachTimeout bounds the single extra look a build takes at Jenkins
+// right after its own watch budget expires, before giving up and marking the
+// build a platform failure. Long enough to read one more build status page
+// and console tail, short enough that a Jenkins job that is genuinely stuck
+// does not extend the outage indefinitely.
+const graceAttachTimeout = 2 * time.Minute
+
+// isWatchBudgetExceeded reports whether err is the platform's own observation
+// budget running out, as opposed to Jenkins or its ingress actually failing.
+// All three conditions have to hold: the error carries context.DeadlineExceeded,
+// the budget context that wraps the Jenkins call is the one that expired, and
+// the parent context (the build's real lifetime, not our internal budget) is
+// still alive. When the parent is also done, the agent itself is shutting
+// down or the build was canceled, and that is a different path entirely
+// (handleBuildError's context.Canceled branch), not a watch-budget expiry.
+func isWatchBudgetExceeded(err error, budget, parent context.Context) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, context.DeadlineExceeded) &&
+		budget.Err() == context.DeadlineExceeded &&
+		parent.Err() == nil
+}
+
+// isJenkinsVerdict reports whether err is Jenkins telling us how the build
+// actually ended, rather than a transport or budget problem on our side.
+//
+// It guards the grace re-attach: if the second look finally reads a real
+// FAILURE or ABORTED, that verdict belongs to the user's build and must reach
+// the console as itself. Wrapping it in watchBudgetExpired would relabel a
+// genuine user-code failure as a platform outage - exactly the confusion the
+// cause_kind work removed everywhere else.
+func isJenkinsVerdict(err error) bool {
+	var cf *classifiedFailure
+	return errors.As(err, &cf) || errors.Is(err, errBuildAborted)
+}
+
 // buildFailNoDockerfile marks a build that failed because the repo has no
 // Dockerfile and the pipeline had no template for the detected framework.
 const buildFailNoDockerfile = "no_dockerfile"
@@ -142,12 +199,17 @@ func needsReconnect(cause error) bool {
 }
 
 // isPlatformFailure reports whether an unclassified build error came from one
-// of the platform's own steps (see platformFailureSignatures) or from a
-// transient transport fault already recognized by isRetryable -- a build can
-// exhaust its retries on a genuinely flaky Jenkins ingress and still need a
-// reason code, even though isRetryable itself no longer applies once the
-// attempt budget is spent.
+// of the platform's own steps (see platformFailureSignatures), from a watch
+// budget expiring (isRetryable excludes it, but it is still squarely a
+// platform cause), or from a transient transport fault already recognized by
+// isRetryable -- a build can exhaust its retries on a genuinely flaky Jenkins
+// ingress and still need a reason code, even though isRetryable itself no
+// longer applies once the attempt budget is spent.
 func isPlatformFailure(cause error) bool {
+	var wb *watchBudgetExpired
+	if errors.As(cause, &wb) {
+		return true
+	}
 	s := cause.Error()
 	for _, sig := range platformFailureSignatures {
 		if strings.Contains(s, sig) {
@@ -593,12 +655,26 @@ const maxBuildAttempts = 3
 // external Jenkins ABORTED (the console never aborts Jenkins itself) or a
 // transient transport error talking to the Jenkins ingress (503/502/504,
 // timeouts, dropped connections). A real build FAILURE is not retryable.
+//
+// A *watchBudgetExpired is deliberately excluded before the string matching
+// below, even though its wrapped cause is almost always a bare
+// context.DeadlineExceeded (which would otherwise match the "context deadline
+// exceeded" signature meant for individual HTTP calls to Jenkins). Retrying it
+// via RequeueForRetry would zero jenkins_queue_id/jenkins_build_number on a
+// build whose Jenkins job is still running or already finished, orphaning
+// that job and starting a duplicate. The watch-budget path re-attaches to the
+// live job instead (see execute's grace attempt and Reconcile on restart), so
+// this failure is never a case for "try the whole build again".
 func isRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
 	if errors.Is(err, errBuildAborted) {
 		return true
+	}
+	var wb *watchBudgetExpired
+	if errors.As(err, &wb) {
+		return false
 	}
 	s := err.Error()
 	for _, m := range []string{
@@ -872,6 +948,7 @@ func (r *Runner) reattach(ctx context.Context, rb db.ReclaimBuild) {
 // building (trigger + resolve number + log bridge) → pushing (confirm Nexus).
 // It returns what the build produced.
 func (r *Runner) execute(ctx context.Context, b *db.Build, repo *db.Repo, llog *zerologLogger) (buildOutcome, error) {
+	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, r.cfg.BuildTimeout)
 	defer cancel()
 
@@ -972,6 +1049,9 @@ func (r *Runner) execute(ctx context.Context, b *db.Build, repo *db.Repo, llog *
 
 	number, err := r.waitForBuildNumber(ctx, queueID)
 	if err != nil {
+		if isWatchBudgetExceeded(err, ctx, parent) {
+			return buildOutcome{}, &watchBudgetExpired{number: 0, err: err}
+		}
 		return buildOutcome{}, err
 	}
 	if err := db.SetJenkinsBuildNumber(ctx, r.pool, b.ID, number); err != nil {
@@ -980,6 +1060,15 @@ func (r *Runner) execute(ctx context.Context, b *db.Build, repo *db.Repo, llog *
 	r.emit(ctx, b.ID, fmt.Sprintf("jenkins build #%d started", number))
 
 	out, err := r.attach(ctx, b, repo, number, llog)
+	if err != nil && isWatchBudgetExceeded(err, ctx, parent) {
+		r.emit(parent, b.ID, fmt.Sprintf("бюджет наблюдения платформы истёк; перепроверяю jenkins-сборку #%d", number))
+		graceCtx, graceCancel := context.WithTimeout(parent, graceAttachTimeout)
+		out, err = r.attach(graceCtx, b, repo, number, llog)
+		graceCancel()
+		if err != nil && !isJenkinsVerdict(err) {
+			return buildOutcome{}, &watchBudgetExpired{number: number, err: err}
+		}
+	}
 	if err == nil {
 		out.framework = detFramework
 		out.port = detPort
