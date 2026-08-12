@@ -630,6 +630,38 @@ spec:
             )
 
             // ── Docker ────────────────────────────────────────────────────
+            //
+            // The image builds write into dind's /var/lib/docker, which is the
+            // docker-graph-storage emptyDir — i.e. the NODE's filesystem, shared
+            // with every other pod on that node. When the node runs out of space
+            // the failure surfaces deep inside a build step as an unrelated-looking
+            // tool error: #1083 (51225f09) died on `npm warn tar TAR_ENTRY_ERROR
+            // ENOSPC` inside `npm ci` in the frontend image, 25 minutes in, and
+            // read as "the commit broke the frontend" while the real cause was a
+            // node at 95% disk. Prod then sat one commit behind main for hours.
+            // Check the graph filesystem BEFORE burning the build, and name the
+            // cause in the failure text so nobody re-diagnoses it from the corpse.
+            container('dind') {
+                runStage('Docker disk preflight') {
+                    sh '''
+                        set -eu
+                        avail_kb=$(df -P /var/lib/docker | awk 'NR==2 {print $4}')
+                        avail_g=$((avail_kb / 1024 / 1024))
+                        df -h /var/lib/docker
+                        if [ "$avail_g" -lt 5 ]; then
+                            echo "CI NODE IS OUT OF DISK: ${avail_g}Gi free where the image builds need ~8Gi."
+                            echo "This is OUR infrastructure, not this commit. Do not chase the build log."
+                            echo "Free space on the node backing this agent pod, then rebuild."
+                            exit 1
+                        fi
+                        if [ "$avail_g" -lt 10 ]; then
+                            echo "WARNING: only ${avail_g}Gi free on the docker graph filesystem (~8Gi needed)."
+                            echo "The node this agent landed on is close to full; the next build may ENOSPC."
+                        fi
+                    '''
+                }
+            }
+
             container('docker') {
                 runStage('Docker build') {
                     sh """
