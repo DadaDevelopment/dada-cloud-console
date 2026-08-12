@@ -2942,6 +2942,41 @@ const docTemplate = `{
                 }
             }
         },
+        "/platform/status": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Read-only, LLM-free platform health signal available to every authenticated user: snapshot reconciler freshness, stuck operations, recent failed builds, database shard state, and database-stats visibility. Never leaks tenant identifiers. Any authenticated role.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "platform"
+                ],
+                "summary": "Get platform-wide health status",
+                "operationId": "getPlatformStatus",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.platformStatusResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects": {
             "get": {
                 "security": [
@@ -20846,6 +20881,40 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "target": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.platformStatusComponent": {
+            "type": "object",
+            "properties": {
+                "detail": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.platformStatusResponse": {
+            "type": "object",
+            "properties": {
+                "checked_at": {
+                    "type": "string"
+                },
+                "components": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.platformStatusComponent"
+                    }
+                },
+                "note": {
+                    "type": "string"
+                },
+                "status": {
                     "type": "string"
                 }
             }

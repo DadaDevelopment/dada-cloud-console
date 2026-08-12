@@ -32,9 +32,18 @@ import (
 // noSignalAppSnapshotPredicate) and does one DB read, so it costs nothing to
 // expose. diagnoseApp still stays out for the LLM-recursion reason above --
 // health facts no longer require it.
+//
+// getPlatformStatus is getAppHealth's platform-wide counterpart: five cheap
+// read-only SQL reads against the console's own state tables, no k8s call,
+// no LLM gateway call, and (unlike every other tool here) no project scope --
+// it exists precisely so the assistant has a platform-health signal that
+// does not require the user's project to already be identified. Its handler
+// never puts a project/app/shard name or an email into a response field, so
+// it is safe for every authenticated user, matching its own route's lack of
+// a project-scoped path.
 var keepTools = []string{
 	"listProjects", "getProject",
-	"listApps", "getAppState", "getAppHealth", "getAppLogs", "getAppMetrics",
+	"listApps", "getAppState", "getAppHealth", "getPlatformStatus", "getAppLogs", "getAppMetrics",
 	"listDeployments", "listBuilds", "getBuild",
 	"listEnvVars", "listHostnames", "listEndpoints", "listDatabases",
 	"listOperations", "getOperation",

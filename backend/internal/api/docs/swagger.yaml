@@ -989,6 +989,28 @@ definitions:
       target:
         type: string
     type: object
+  api.platformStatusComponent:
+    properties:
+      detail:
+        type: string
+      name:
+        type: string
+      status:
+        type: string
+    type: object
+  api.platformStatusResponse:
+    properties:
+      checked_at:
+        type: string
+      components:
+        items:
+          $ref: '#/definitions/api.platformStatusComponent'
+        type: array
+      note:
+        type: string
+      status:
+        type: string
+    type: object
   api.promoTokenRequest:
     properties:
       token:
@@ -3357,6 +3379,31 @@ paths:
       summary: YooKassa payments connect callback
       tags:
       - payments
+  /platform/status:
+    get:
+      description: 'Read-only, LLM-free platform health signal available to every
+        authenticated user: snapshot reconciler freshness, stuck operations, recent
+        failed builds, database shard state, and database-stats visibility. Never
+        leaks tenant identifiers. Any authenticated role.'
+      operationId: getPlatformStatus
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.platformStatusResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get platform-wide health status
+      tags:
+      - platform
   /projects:
     get:
       description: Returns every project the authenticated user is a member of, each
