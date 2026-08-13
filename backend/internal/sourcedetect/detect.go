@@ -184,7 +184,7 @@ func Detect(data []byte) (Result, error) {
 		return result, nil
 	}
 
-	if rootLevelPythonSources(names) {
+	if rootLevelPythonSources(names) || singleDirPythonSources(names) {
 		result.Framework = "python"
 		result.Port = resolvePort(0, platform, compose, hasCompose)
 		return result, nil
@@ -220,6 +220,52 @@ func rootLevelPythonSources(names []string) bool {
 	for _, name := range names {
 		rel := strings.TrimPrefix(name, root)
 		if rel == "" || strings.Contains(rel, "/") {
+			continue
+		}
+		if strings.HasSuffix(rel, ".py") {
+			return true
+		}
+	}
+	return false
+}
+
+// singleDirPythonSources reports whether the archive keeps its Python sources
+// one directory down, beside loose files at the root that are the app's data
+// rather than a second project ("input.txt" next to "genagent/main.py" — the
+// shape a real user uploaded on 2026-08-13).
+//
+// Stripping that directory the way detectRoot does would drop those root files,
+// and the app would start without the data it reads, so the archive root stays
+// the build context and dadaBuildPipeline's python start step looks one
+// directory down for the entrypoint. Change one without the other and the build
+// resolves a different directory than detection promised.
+//
+// Exactly one content directory is the whole rule: two of them describe two
+// projects (a frontend beside a backend), and picking the Python one would be a
+// guess that builds half the repo.
+func singleDirPythonSources(names []string) bool {
+	dirs := map[string]bool{}
+	for _, name := range names {
+		idx := strings.IndexByte(name, '/')
+		if idx < 0 {
+			continue
+		}
+		top := name[:idx+1]
+		if isToolingTopLevel(top) {
+			continue
+		}
+		dirs[top] = true
+	}
+	if len(dirs) != 1 {
+		return false
+	}
+	var only string
+	for top := range dirs {
+		only = top
+	}
+	for _, name := range names {
+		rel := strings.TrimPrefix(name, only)
+		if rel == name || strings.Contains(rel, "/") {
 			continue
 		}
 		if strings.HasSuffix(rel, ".py") {

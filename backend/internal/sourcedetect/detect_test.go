@@ -610,3 +610,57 @@ func TestDetectToolingDirsDoNotInventARoot(t *testing.T) {
 		t.Fatalf("framework = %q, want empty (two real roots must not be stripped)", res.Framework)
 	}
 }
+
+// TestDetectPythonSourcesBesideRootDataFile is the exact shape of the "tree"
+// upload that stayed red for three hours on 2026-08-13: ".claude/" and
+// "genagent/" beside a loose "input.txt" the agent reads at runtime. The loose
+// file forbids stripping a root — that would delete the app's own data — so the
+// archive must still resolve to python, with the whole archive as the context.
+func TestDetectPythonSourcesBesideRootDataFile(t *testing.T) {
+	data := buildTarGz(t, []zipFile{
+		{name: ".claude/scheduled_tasks.lock", body: "lock\n"},
+		{name: "input.txt", body: "data\n"},
+		{name: "genagent/main.py", body: "print('hi')\n"},
+	})
+	res, err := Detect(data)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	if res.Framework != "python" {
+		t.Fatalf("framework = %q, want python", res.Framework)
+	}
+}
+
+// TestDetectTwoContentDirsAreNotAPythonApp pins the limit: a python directory
+// beside another project directory is two projects, and building the python one
+// would ship half the repo.
+func TestDetectTwoContentDirsAreNotAPythonApp(t *testing.T) {
+	data := buildTarGz(t, []zipFile{
+		{name: "README.md", body: "hi\n"},
+		{name: "worker/main.py", body: "print('hi')\n"},
+		{name: "site/index.html", body: "<html>\n"},
+	})
+	res, err := Detect(data)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	if res.Framework != "" {
+		t.Fatalf("framework = %q, want empty (two content dirs are not one python app)", res.Framework)
+	}
+}
+
+// TestDetectNestedPythonDoesNotHijackANodeRepo keeps a helper script from
+// turning a JS project into a python build: package.json still decides.
+func TestDetectNestedPythonDoesNotHijackANodeRepo(t *testing.T) {
+	data := buildTarGz(t, []zipFile{
+		{name: "package.json", body: `{"dependencies":{"vite":"5.0.0"}}`},
+		{name: "scripts/gen.py", body: "print('hi')\n"},
+	})
+	res, err := Detect(data)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	if res.Framework != "vite" {
+		t.Fatalf("framework = %q, want vite", res.Framework)
+	}
+}
