@@ -303,8 +303,8 @@ export const apps: Messages = {
     en: "Build failed — check the log.",
   },
   "apps.builds.fail.reason.platformError": {
-    ru: "Сбой на нашей стороне, не в вашем коде — нажмите «Пересобрать».",
-    en: "This failed on our side, not in your code — hit Rebuild.",
+    ru: "Сбой на нашей стороне, не в вашем коде — пересоберём сами, когда починим. Ждать не обязательно: «Пересобрать» работает всегда.",
+    en: "This failed on our side, not in your code — we rebuild it ourselves once we have fixed it. No need to wait: Rebuild always works.",
   },
   "apps.builds.fail.reason.detailsLink": { ru: "подробнее", en: "details" },
 
