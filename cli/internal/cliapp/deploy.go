@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -78,7 +77,7 @@ func Deploy(ctx context.Context, cfg Config, opts DeployOptions, in io.Reader, o
 	if err != nil {
 		return err
 	}
-	if finalStatus != "succeeded" {
+	if finalStatus != apiclient.StatusSuccess {
 		return fmt.Errorf("build finished with status %q - see the build log in the console for details", finalStatus)
 	}
 
@@ -248,5 +247,3 @@ func pollAppURL(ctx context.Context, client *apiclient.Client, projectID, envID,
 		}
 	}
 }
-
-var _ = os.Stdin

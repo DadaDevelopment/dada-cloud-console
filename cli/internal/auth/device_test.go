@@ -82,7 +82,7 @@ func TestRequiredScopesIncludesDeployWrite(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatal("RequiredScopes must include deploy:write, or archive upload will 403")
+		t.Fatal("RequiredScopes must include deploy:write, or the deployment routes 403")
 	}
 }
 
@@ -104,7 +104,7 @@ func TestStartDeviceAuth(t *testing.T) {
 		if r.Form.Get("client_id") != "ddc-cli" {
 			t.Errorf("unexpected client_id: %s", r.Form.Get("client_id"))
 		}
-		if r.Form.Get("scope") != "read builds:read deploy:write" {
+		if r.Form.Get("scope") != JoinScopes(RequiredScopes) {
 			t.Errorf("unexpected scope: %s", r.Form.Get("scope"))
 		}
 		json.NewEncoder(w).Encode(DeviceCodeResponse{
@@ -178,5 +178,24 @@ func TestPollTokenAccessDenied(t *testing.T) {
 	_, err := PollToken(context.Background(), srv.Client(), Endpoints{TokenURL: srv.URL}, "ddc-cli", dc)
 	if err == nil {
 		t.Fatal("expected access_denied error")
+	}
+}
+
+// TestRequiredScopesCarryBuildsWrite pins the scope the console's
+// source-archive route gates on (auth.RequireScope("builds:write"),
+// backend/internal/api/router.go:593). Dropping it from the request makes
+// every `ddc deploy` fail with 403 only after the archive was built and
+// uploaded, so it is worth a test of its own.
+func TestRequiredScopesCarryBuildsWrite(t *testing.T) {
+	want := map[string]bool{"builds:write": false, "read": false, "offline_access": false}
+	for _, s := range RequiredScopes {
+		if _, ok := want[s]; ok {
+			want[s] = true
+		}
+	}
+	for scope, present := range want {
+		if !present {
+			t.Errorf("RequiredScopes is missing %q", scope)
+		}
 	}
 }

@@ -381,7 +381,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 	// Built once and shared: the monitoring ingest group reuses it as its JWT
 	// fallback, so we don't construct a second Keycloak verifier/JWKS client.
 	authMW := authMiddleware(pool, cfg)
-	api := r.Group("/api/v1", authMW, h.auditSessionMiddleware())
+	api := r.Group("/api/v1", authMW, h.auditSessionMiddleware(), clientClaimMiddleware())
 	{
 		// Auth
 		api.GET("/auth/me", h.Me)

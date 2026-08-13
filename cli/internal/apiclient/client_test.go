@@ -34,7 +34,7 @@ func TestRequestsCarryDadaHeaders(t *testing.T) {
 		t.Errorf("X-Dada-Client = %q, want prefix cli/", gotClient)
 	}
 	if gotMarker != "CLAUDECODE" {
-		t.Errorf("X-Dada-Agent-Marker = %q, want CLAUDECODE", gotMarker)
+		t.Errorf("%s = %q, want CLAUDECODE", AgentMarkerHeaderName, gotMarker)
 	}
 	if gotAuth != "Bearer test-token" {
 		t.Errorf("Authorization = %q", gotAuth)
@@ -121,4 +121,42 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// TestIsTerminalBuildStatusMatchesPlatformVocabulary pins the CLI's view of
+// build states against the platform's own list in
+// build-agent/internal/db/builds.go:14. The first version of this CLI treated
+// "pushing" and "detecting" as terminal and looked for "succeeded", so a
+// perfectly healthy build was reported to the user as a failure.
+func TestIsTerminalBuildStatusMatchesPlatformVocabulary(t *testing.T) {
+	inFlight := []string{"queued", "detecting", "building", "pushing"}
+	for _, s := range inFlight {
+		if IsTerminalBuildStatus(s) {
+			t.Errorf("%q must not be terminal", s)
+		}
+	}
+	for _, s := range []string{"success", "failed", "canceled"} {
+		if !IsTerminalBuildStatus(s) {
+			t.Errorf("%q must be terminal", s)
+		}
+	}
+	if IsTerminalBuildStatus("some-future-status") {
+		t.Error("an unknown status must be treated as in flight, not as a failed build")
+	}
+	if StatusSuccess != "success" {
+		t.Errorf("StatusSuccess = %q, want \"success\"", StatusSuccess)
+	}
+}
+
+// TestAgentMarkerHeaderMatchesServer pins the header name against the one the
+// console classifies in clientClaimMiddleware. They were briefly different
+// (X-Dada-Agent-Marker here, X-Dada-Agent-Session there), which loses the
+// marker without any error anywhere.
+func TestAgentMarkerHeaderMatchesServer(t *testing.T) {
+	if AgentMarkerHeaderName != "X-Dada-Agent-Session" {
+		t.Errorf("AgentMarkerHeaderName = %q, want X-Dada-Agent-Session", AgentMarkerHeaderName)
+	}
+	if ClientHeaderName != "X-Dada-Client" {
+		t.Errorf("ClientHeaderName = %q, want X-Dada-Client", ClientHeaderName)
+	}
 }

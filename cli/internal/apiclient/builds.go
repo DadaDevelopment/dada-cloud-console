@@ -19,21 +19,29 @@ type Build struct {
 	FailReason   *string    `json:"fail_reason,omitempty"`
 }
 
-// nonTerminalBuildStatuses are the statuses the poller keeps waiting through.
-// Everything else - succeeded, failed, error, canceled, or any status this
-// CLI doesn't yet know about - is treated as terminal, since a v0 CLI must
-// stop polling on an unrecognized status rather than hang forever.
-var nonTerminalBuildStatuses = map[string]bool{
-	"queued":   true,
-	"pending":  true,
-	"running":  true,
-	"building": true,
+// StatusSuccess is the one build status that means the image was built and
+// pushed. The full vocabulary is queued | detecting | building | pushing |
+// success | failed | canceled (build-agent/internal/db/builds.go:14) - note
+// "success", not "succeeded".
+const StatusSuccess = "success"
+
+// terminalBuildStatuses are the end states of that vocabulary. Anything else,
+// including a status a later platform version introduces, is treated as still
+// in flight: an unknown status that is actually terminal costs the caller its
+// polling timeout, while an unknown status wrongly called terminal reports a
+// live build as a failed one - which is exactly what an earlier version of
+// this list did to "pushing".
+var terminalBuildStatuses = map[string]bool{
+	StatusSuccess: true,
+	"failed":      true,
+	"canceled":    true,
+	"cancelled":   true,
 }
 
 // IsTerminalBuildStatus reports whether status means the build is done
-// (succeeded or otherwise) and the poller should stop.
+// (successfully or not) and the poller should stop.
 func IsTerminalBuildStatus(status string) bool {
-	return !nonTerminalBuildStatuses[status]
+	return terminalBuildStatuses[status]
 }
 
 type listBuildsResponse struct {

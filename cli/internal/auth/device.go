@@ -60,10 +60,19 @@ func EndpointsFromIssuer(issuer string) Endpoints {
 }
 
 // RequiredScopes are the OAuth2 scopes ddc must request explicitly on the
-// device authorization request. The ddc-cli Keycloak client's default scope
-// is "read builds:read" only; "deploy:write" is optional and must be asked
-// for by name, or the source-archive upload later fails with 403.
-var RequiredScopes = []string{"read", "builds:read", "deploy:write"}
+// device authorization request. The ddc-cli Keycloak client's defaults are
+// "read builds:read" only; everything below that is not a default is an
+// optional client scope Keycloak omits from the token unless it is asked for
+// by name.
+//
+// "builds:write" is the one that decides whether `ddc deploy` works at all:
+// the source-archive route is gated by auth.RequireScope("builds:write")
+// (backend/internal/api/router.go:593), and a token without it gets 403 after
+// the archive has already been built and uploaded. "deploy:write" covers the
+// deployment routes the CLI grows into next. "offline_access" is what lets a
+// second `ddc deploy` run days later reuse the cached refresh token instead
+// of sending the user back to the browser.
+var RequiredScopes = []string{"openid", "read", "builds:read", "builds:write", "deploy:write", "offline_access"}
 
 // JoinScopes renders scopes as the space-separated string the OAuth2 "scope"
 // parameter expects.

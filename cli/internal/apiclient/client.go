@@ -24,8 +24,11 @@ const ClientHeaderName = "X-Dada-Client"
 // AgentMarkerHeaderName is sent only when an agent-session environment
 // variable is detected (see internal/agentmarker). Its value is the name of
 // the environment variable that was found, e.g. "CLAUDECODE" - not a guess at
-// which product it belongs to.
-const AgentMarkerHeaderName = "X-Dada-Agent-Marker"
+// which product it belongs to. The name must stay in step with the header the
+// console reads in clientClaimMiddleware (backend/internal/api/audit.go): a
+// marker sent under any other name is silently dropped, and the "0 agentic
+// calls" half of the CLI kill-criterion would then be unfalsifiable.
+const AgentMarkerHeaderName = "X-Dada-Agent-Session"
 
 // TokenSource returns a valid bearer access token, refreshing it if
 // necessary. It returns ErrNotLoggedIn when no token is available.

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -61,6 +63,168 @@ const (
 	auditOutcomeFailure = "failure"
 	auditOutcomePending = "pending"
 )
+
+// The two request headers a caller may use to self-report what it is. Neither
+// is a fact: a script can send X-Dada-Client: cli/9.9.9 with no CLI anywhere
+// near it. That is exactly why the audit fields they feed are named
+// "*_claimed" (see clientClaim below) instead of something that reads as
+// verified, like "client" or "source".
+const (
+	headerClientClaimed       = "X-Dada-Client"
+	headerAgentSessionClaimed = "X-Dada-Agent-Session"
+)
+
+// The closed set client_claimed can hold. Chosen from what actually calls the
+// authenticated API today, plus the one gap ddc deploy is closing:
+//   - ui: the console web app. No caller sends this header yet, so it is also
+//     the default for a request with none -- every deploy before the CLI
+//     shipped came from the browser, and that history must not turn into a
+//     wall of "unknown".
+//   - cli: the ddc deploy tool this instrumentation exists for.
+//   - api: a bearer-token caller that is not the console and not the CLI --
+//     a hand-rolled script against the documented API, or the embedded MCP
+//     self-proxy on behalf of an assistant tool call.
+//   - webhook: reserved for a self-declared inbound integration built on top
+//     of a user's own bearer token (e.g. a third-party automation platform).
+//     The two actual webhook routes (/api/v1/deploy, /api/v1/webhooks/*) sit
+//     outside the authenticated group this header is read in, so they do not
+//     go through this classifier at all; the value stays here for a caller
+//     that legitimately is one.
+//   - unknown: the header was present but did not parse as one of the above --
+//     garbage, a typo, or a future client class this list has not caught up
+//     with yet. Never store the raw text: an open text field is how an audit
+//     column turns into a dumping ground for whatever any caller feels like
+//     sending.
+const (
+	clientClaimedUI      = "ui"
+	clientClaimedCLI     = "cli"
+	clientClaimedAPI     = "api"
+	clientClaimedWebhook = "webhook"
+	clientClaimedUnknown = "unknown"
+)
+
+// clientClaimedRe is the allowlist a claimed X-Dada-Client value must satisfy:
+// one of the four known classes, optionally followed by "/<version>" where
+// version is a short, plain token. Anything else -- wrong shape, embedded
+// separators, an essay -- classifies as unknown rather than being stored
+// verbatim.
+var clientClaimedRe = regexp.MustCompile(`^(ui|cli|api|webhook)(/[a-zA-Z0-9][a-zA-Z0-9._-]{0,31})?$`)
+
+// classifyClientClaimed turns a raw X-Dada-Client header into one of the
+// closed client_claimed values. Empty (the header was never sent) is
+// deliberately UI, not unknown: see the const block above.
+func classifyClientClaimed(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return clientClaimedUI
+	}
+	if len(raw) > 40 {
+		return clientClaimedUnknown
+	}
+	m := clientClaimedRe.FindStringSubmatch(strings.ToLower(raw))
+	if m == nil {
+		return clientClaimedUnknown
+	}
+	return m[1]
+}
+
+// agentSessionClaimedRe bounds the shape of a claimed agent-session marker:
+// short, plain-token, no free text. It is deliberately generous about content
+// (a UUID, a hash prefix, a short slug are all fine) and strict about shape,
+// because the field only needs to answer "was this call made on behalf of an
+// agent session", not to identify which one.
+var agentSessionClaimedRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,63}$`)
+
+// classifyAgentSessionClaimed turns a raw X-Dada-Agent-Session header into a
+// value safe to store, or "" when the header was not sent at all -- absent
+// and unparseable are kept distinguishable: "" means no marker was claimed,
+// clientClaimedUnknown means one was claimed but did not fit the allowlist.
+func classifyAgentSessionClaimed(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if len(raw) > 64 || !agentSessionClaimedRe.MatchString(raw) {
+		return clientClaimedUnknown
+	}
+	return raw
+}
+
+// auditClientMetaKey/auditAgentSessionMetaKey are the metadata keys
+// writeAuditRow injects. Named "*_claimed", matching the const/header naming
+// above, so a reader of audit_events sees at a glance that these came from
+// the caller's own self-report and were never independently verified.
+const (
+	auditClientMetaKey       = "client_claimed"
+	auditAgentSessionMetaKey = "agent_session_claimed"
+)
+
+// clientClaimContextKey is unexported so no other package can collide with it
+// by accident.
+type clientClaimContextKey struct{}
+
+// clientClaim is the pair of self-reported values extracted once per request
+// by clientClaimMiddleware, and read back by writeAuditRow -- the single
+// place every audit row of every shape passes through -- so instrumenting a
+// new deploy path never again means copy-pasting header parsing into a
+// handler.
+type clientClaim struct {
+	client       string
+	agentSession string
+}
+
+// clientClaimMiddleware reads the two self-report headers once per request
+// and stores the classified result on the request context. It is mounted on
+// the authenticated /api/v1 group only: the two actual webhook routes
+// (deploy-hook consumption, YooKassa, etc.) are public routes outside that
+// group and are not meant to default to "ui".
+func clientClaimMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		claim := clientClaim{
+			client:       classifyClientClaimed(c.GetHeader(headerClientClaimed)),
+			agentSession: classifyAgentSessionClaimed(c.GetHeader(headerAgentSessionClaimed)),
+		}
+		ctx := context.WithValue(c.Request.Context(), clientClaimContextKey{}, claim)
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	}
+}
+
+// clientClaimFromContext reads back what clientClaimMiddleware stored. The ok
+// result is false for any request that never passed through that middleware
+// (background sweepers, the two async audit paths that hand the write a fresh
+// context.Background()) -- writeAuditRow leaves those rows exactly as they
+// were before this instrumentation existed.
+func clientClaimFromContext(ctx context.Context) (clientClaim, bool) {
+	claim, ok := ctx.Value(clientClaimContextKey{}).(clientClaim)
+	return claim, ok
+}
+
+// withClientClaimMetadata folds the classified client_claimed/
+// agent_session_claimed pair into an already-marshalled metadata object,
+// without overwriting a key a caller set explicitly on auditEntry.Metadata.
+// agent_session_claimed is omitted entirely when no marker was claimed, so
+// "field absent" and "field claimed but unparseable (unknown)" stay
+// distinguishable in the stored JSON.
+func withClientClaimMetadata(meta []byte, claim clientClaim) []byte {
+	merged := map[string]any{}
+	if err := json.Unmarshal(meta, &merged); err != nil {
+		merged = map[string]any{}
+	}
+	if _, exists := merged[auditClientMetaKey]; !exists {
+		merged[auditClientMetaKey] = claim.client
+	}
+	if claim.agentSession != "" {
+		if _, exists := merged[auditAgentSessionMetaKey]; !exists {
+			merged[auditAgentSessionMetaKey] = claim.agentSession
+		}
+	}
+	out, err := json.Marshal(merged)
+	if err != nil {
+		return meta
+	}
+	return out
+}
 
 // auditInsertSQL writes the row a handler asked for, except that a claimed
 // success on an operation that has not finished yet is stored as pending.
@@ -272,6 +436,9 @@ func writeAuditRow(ctx context.Context, pool *pgxpool.Pool, actorID uuid.UUID, e
 		if b, err := json.Marshal(e.Metadata); err == nil {
 			meta = b
 		}
+	}
+	if claim, ok := clientClaimFromContext(ctx); ok {
+		meta = withClientClaimMetadata(meta, claim)
 	}
 	projectID, environmentID, operationID := e.ProjectID, e.EnvironmentID, e.OperationID
 	unresolved := map[string]string{}
