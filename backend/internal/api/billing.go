@@ -308,6 +308,16 @@ func (h *Handler) quotaGraceActive(ctx context.Context, orgID string) bool {
 // nothing anywhere, and then hit a wall the day grace ended. recordQuotaBreach
 // gives the console banner and the grace reminder mail something factual to
 // shout about while there is still time to act.
+//
+// Grace stops at a hard zero. A limit of 0 that is not the Enterprise
+// unlimited convention means the plan includes none of the resource at all,
+// so there is no prior legal usage to grandfather -- letting it through would
+// hand a free org a resource it never had rather than protecting one it did.
+// app_servers is the live case: every free org carries grace to 2026-09-25
+// and none of them owns a VM [live 2026-08-13], so grace was about to gift
+// seven free public-IP machines through the exact gate that exists to stop
+// farming. Orgs that really do hold over-limit resources still keep their
+// window, because those resources sit on plans with a non-zero limit.
 func (h *Handler) checkQuota(ctx context.Context, orgID, resource string) error {
 	if !h.cfg.BillingEnabled {
 		return nil
@@ -332,6 +342,9 @@ func (h *Handler) checkQuota(ctx context.Context, orgID, resource string) error 
 	}
 	if limit == 0 && zeroLimitMeansUnlimited(resource, plan.Key) {
 		return nil
+	}
+	if limit == 0 {
+		return &quotaExceededError{Resource: resource, Limit: limit}
 	}
 	count, err := h.countResource(ctx, orgID, resource)
 	if err != nil {

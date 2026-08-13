@@ -205,3 +205,37 @@ func TestCheckQuota_BillingDisabled_AllowsEveryone(t *testing.T) {
 		t.Fatalf("quota enforced while BILLING_ENABLED=false: %v", err)
 	}
 }
+
+// TestCheckQuota_ActiveGrace_StillBlocksHardZero pins the one thing grace must
+// not do: hand out a resource the plan includes none of. Every free org on
+// prod carries grace to 2026-09-25 and none of them owns a VM, so a grace that
+// covered app_servers would open the public-IP farming gate it was built to
+// close, for six weeks, to exactly the accounts a fresh signup lands in.
+func TestCheckQuota_ActiveGrace_StillBlocksHardZero(t *testing.T) {
+	pool := quotaGatePool(t)
+	future := time.Now().UTC().Add(30 * 24 * time.Hour)
+	orgID := seedOverQuotaOrg(t, pool, &future)
+	h := quotaGateHandler(pool, nil)
+
+	err := h.checkQuota(context.Background(), orgID, "app_servers")
+	if err == nil {
+		t.Fatal("grace let a free org create a VM; app_servers is a hard zero, not a grandfathered overage")
+	}
+	qe, ok := err.(*quotaExceededError)
+	if !ok {
+		t.Fatalf("err=%T (%v) want *quotaExceededError", err, err)
+	}
+	if qe.Resource != "app_servers" || qe.Limit != 0 {
+		t.Fatalf("resource=%q limit=%d want app_servers/0", qe.Resource, qe.Limit)
+	}
+
+	var breaches int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT quota_breach_count FROM billing_accounts WHERE org_id = $1`, orgID,
+	).Scan(&breaches); err != nil {
+		t.Fatalf("read breach count: %v", err)
+	}
+	if breaches != 0 {
+		t.Fatalf("quota_breach_count=%d want 0; a refused create is not a breach allowed by grace", breaches)
+	}
+}
