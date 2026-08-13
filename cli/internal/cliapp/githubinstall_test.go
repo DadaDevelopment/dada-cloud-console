@@ -3,6 +3,7 @@ package cliapp
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,6 +19,7 @@ type gitAccessCalls struct {
 	connects   int
 	installs   int
 	authorizes int
+	polls      int
 }
 
 // privateRepoServer answers like the console does for a private repository the
@@ -25,16 +27,26 @@ type gitAccessCalls struct {
 // the attempt numbered successAt, which succeeds. That models both real cases -
 // authorizing was enough (successAt 2), or an install was needed too
 // (successAt 3).
-func privateRepoServer(t *testing.T, calls *gitAccessCalls, successAt int) *httptest.Server {
+func privateRepoServer(t *testing.T, calls *gitAccessCalls, successAt, visibleAfter int) *httptest.Server {
 	t.Helper()
-	real := openBrowser
+	realBrowser, realInteractive := openBrowser, interactive
 	openBrowser = func(string) {}
-	t.Cleanup(func() { openBrowser = real })
+	interactive = func(io.Reader) bool { return true }
+	t.Cleanup(func() { openBrowser, interactive = realBrowser, realInteractive })
 
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/repos"):
 			writeJSON(t, w, http.StatusOK, map[string]any{"repos": []map[string]any{}})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/installations/available"):
+			calls.polls++
+			if calls.polls < visibleAfter {
+				writeJSON(t, w, http.StatusOK, map[string]any{"installations": []map[string]any{}})
+				return
+			}
+			writeJSON(t, w, http.StatusOK, map[string]any{"installations": []map[string]any{
+				{"installation_id": "143550113", "account_login": "KeksMD", "account_type": "User"},
+			}})
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/git/github/authorize"):
 			calls.authorizes++
 			writeJSON(t, w, http.StatusOK, map[string]any{
@@ -79,14 +91,14 @@ func privateRepoServer(t *testing.T, calls *gitAccessCalls, successAt int) *http
 func TestAlreadyInstalledAppIsAuthorizedNotReinstalled(t *testing.T) {
 	dir := githubRepoDir(t)
 	var calls gitAccessCalls
-	srv := privateRepoServer(t, &calls, 2)
+	srv := privateRepoServer(t, &calls, 2, 1)
 	defer srv.Close()
 
 	client := apiclient.New(srv.URL, srv.Client(), nil, "")
 	var out bytes.Buffer
 	prog := ui.New(&out)
 	buildID, fromGit := deployFromGit(context.Background(), client, "proj", "env", "genagent",
-		DeployOptions{Dir: dir}, strings.NewReader("\n\n"), prog)
+		DeployOptions{Dir: dir}, strings.NewReader(""), prog)
 	prog.Stop()
 
 	if !fromGit {
@@ -113,14 +125,14 @@ func TestAlreadyInstalledAppIsAuthorizedNotReinstalled(t *testing.T) {
 func TestRepoWithoutAnyInstallationStillGetsTheInstallURL(t *testing.T) {
 	dir := githubRepoDir(t)
 	var calls gitAccessCalls
-	srv := privateRepoServer(t, &calls, 3)
+	srv := privateRepoServer(t, &calls, 3, 1)
 	defer srv.Close()
 
 	client := apiclient.New(srv.URL, srv.Client(), nil, "")
 	var out bytes.Buffer
 	prog := ui.New(&out)
 	_, fromGit := deployFromGit(context.Background(), client, "proj", "env", "genagent",
-		DeployOptions{Dir: dir}, strings.NewReader("\n\n"), prog)
+		DeployOptions{Dir: dir}, strings.NewReader(""), prog)
 	prog.Stop()
 
 	if !fromGit {
@@ -135,13 +147,14 @@ func TestRepoWithoutAnyInstallationStillGetsTheInstallURL(t *testing.T) {
 }
 
 // TestNonInteractiveDeployDoesNotWaitForAnInstall keeps CI and scripted runs
-// out of the prompt: with nothing behind stdin the detour must end at once and
-// the deploy must continue on the archive path instead of hanging.
+// out of the detour: with nobody behind stdin to click anything, the deploy
+// must not burn accessWaitTimeout waiting and must ship the archive at once.
 func TestNonInteractiveDeployDoesNotWaitForAnInstall(t *testing.T) {
 	dir := githubRepoDir(t)
 	var calls gitAccessCalls
-	srv := privateRepoServer(t, &calls, 2)
+	srv := privateRepoServer(t, &calls, 2, 1)
 	defer srv.Close()
+	interactive = func(io.Reader) bool { return false }
 
 	client := apiclient.New(srv.URL, srv.Client(), nil, "")
 	var out bytes.Buffer
@@ -152,6 +165,9 @@ func TestNonInteractiveDeployDoesNotWaitForAnInstall(t *testing.T) {
 
 	if fromGit {
 		t.Fatal("an unconfirmed authorization must not be treated as connected")
+	}
+	if calls.authorizes != 0 {
+		t.Fatalf("a scripted run must not be sent to authorize (%d times)", calls.authorizes)
 	}
 	if calls.connects != 1 {
 		t.Fatalf("link attempted %d times, want 1", calls.connects)

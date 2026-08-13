@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -38,6 +39,14 @@ const (
 	buildPollTimeout  = 20 * time.Minute
 	urlPollInterval   = 3 * time.Second
 	urlPollTimeout    = 3 * time.Minute
+)
+
+// accessWait* bound the wait for a user's trip to GitHub. Five minutes covers
+// signing in on a phone and picking a repository; past that the deploy stops
+// waiting and ships the folder as an archive rather than hanging.
+const (
+	accessPollInterval = 2 * time.Second
+	accessWaitTimeout  = 5 * time.Minute
 )
 
 // stagePercent maps each step of a deploy to a share of the progress bar.
@@ -229,7 +238,10 @@ func isGithubAccessRequired(err error) bool {
 // A non-interactive run (no terminal behind in) gets EOF from the first prompt
 // and falls straight back to the archive, so scripts and CI never hang here.
 func connectAfterGitHubInstall(ctx context.Context, client *apiclient.Client, projectID, envID, appName string, info gitremote.Info, in io.Reader, prog *ui.Progress) (apiclient.GitRepo, error) {
-	prompts := bufio.NewScanner(in)
+	if !interactive(in) {
+		return apiclient.GitRepo{}, fmt.Errorf("доступ к %s не подтверждён", info.FullName)
+	}
+	owner, _, _ := strings.Cut(info.FullName, "/")
 	connect := func() (apiclient.GitRepo, error) {
 		prog.Stage("Подключаем "+info.FullName, stagePercent["link"])
 		return client.ConnectGitRepo(ctx, projectID, envID, apiclient.ConnectGitRepoRequest{
@@ -245,9 +257,10 @@ func connectAfterGitHubInstall(ctx context.Context, client *apiclient.Client, pr
 	lastErr := fmt.Errorf("доступ к %s не подтверждён", info.FullName)
 	authorizeURL, authErr := client.GitHubAuthorizeURL(ctx, projectID)
 	if authErr == nil {
-		if !visitAndWait(authorizeURL, prompts, prog,
-			fmt.Sprintf("Репозиторий %s закрыт для платформы - подтвердите доступ к своему GitHub:", info.FullName),
-			"Нажмите Authorize, вернитесь сюда и нажмите Enter.") {
+		visit(authorizeURL, prog,
+			fmt.Sprintf("Репозиторий %s закрыт для платформы - откройте и нажмите Authorize:", info.FullName),
+			"Дальше ничего нажимать не надо - деплой продолжится сам.")
+		if !awaitAccess(ctx, client, projectID, owner, prog) {
 			return apiclient.GitRepo{}, lastErr
 		}
 		repo, err := connect()
@@ -261,27 +274,63 @@ func connectAfterGitHubInstall(ctx context.Context, client *apiclient.Client, pr
 	if err != nil {
 		return apiclient.GitRepo{}, fmt.Errorf("ссылку на установку GitHub App получить не вышло (%s)", apiclient.Explain(err))
 	}
-	if !visitAndWait(installURL, prompts, prog,
+	visit(installURL, prog,
 		fmt.Sprintf("Платформа всё ещё не видит %s - установите на него GitHub App:", info.FullName),
-		fmt.Sprintf("Выберите %s, нажмите Install, вернитесь сюда и нажмите Enter.", info.FullName)) {
+		fmt.Sprintf("Выберите %s и нажмите Install - деплой продолжится сам.", owner))
+	if !awaitAccess(ctx, client, projectID, owner, prog) {
 		return apiclient.GitRepo{}, lastErr
 	}
 	return connect()
 }
 
-// visitAndWait prints a URL, opens it, and blocks until the user says they are
-// back. It reports false when there is nobody to answer, which is how a
-// scripted run leaves the detour instead of hanging on a prompt.
-func visitAndWait(url string, prompts *bufio.Scanner, prog *ui.Progress, headline, action string) bool {
+// visit prints a URL and opens it. Printing comes first and is never skipped:
+// the browser may be the wrong one, headless, or on another machine, and the
+// URL is the only thing that still works then.
+func visit(url string, prog *ui.Progress, headline, action string) {
 	prog.Info("%s", headline)
 	prog.Info("  %s", url)
 	prog.Info("%s", action)
 	openBrowser(url)
+}
 
-	prog.Pause()
-	got := prompts.Scan()
-	prog.Resume()
-	return got
+// awaitAccess waits for the trip to GitHub to land, watching the console
+// instead of asking the user to confirm it. Both callbacks (install and
+// authorization) write an installation row for the project's org before they
+// redirect the browser, so the row appearing for this repository's owner IS
+// the completion signal - a keypress would only be the user's guess at it.
+func awaitAccess(ctx context.Context, client *apiclient.Client, projectID, owner string, prog *ui.Progress) bool {
+	prog.Stage("Ждём доступ к github.com/"+owner, stagePercent["link"])
+	deadline := time.Now().Add(accessWaitTimeout)
+	for {
+		installations, err := client.ListAvailableInstallations(ctx, projectID)
+		if err == nil {
+			for _, inst := range installations {
+				if strings.EqualFold(inst.AccountLogin, owner) {
+					return true
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(accessPollInterval):
+		}
+	}
+}
+
+// interactive reports whether there is a person behind in. Without one the
+// GitHub detour is pointless - nobody will click anything - so the deploy must
+// not spend accessWaitTimeout finding that out.
+var interactive = func(in io.Reader) bool {
+	f, ok := in.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 // isUploadPlaceholder reports whether an app's link is the row an archive

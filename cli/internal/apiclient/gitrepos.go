@@ -112,6 +112,32 @@ func (c *Client) GitHubAuthorizeURL(ctx context.Context, projectID string) (stri
 	return out.URL, nil
 }
 
+// Installation is one GitHub App installation the project's org may link,
+// mirroring availableInstallation (backend/internal/api/gitrepos.go).
+type Installation struct {
+	InstallationID string `json:"installation_id"`
+	AccountLogin   string `json:"account_login"`
+	AccountType    string `json:"account_type"`
+	Bound          bool   `json:"bound"`
+}
+
+type availableInstallationsResponse struct {
+	Installations []Installation `json:"installations"`
+}
+
+// ListAvailableInstallations returns the installations visible to a project's
+// org, per GET /projects/:projectId/git/installations/available. The list is
+// how the CLI notices, without asking the user anything, that a trip to GitHub
+// has finished: both the install callback and the authorization callback write
+// the row this reads.
+func (c *Client) ListAvailableInstallations(ctx context.Context, projectID string) ([]Installation, error) {
+	var out availableInstallationsResponse
+	if err := c.doJSON(ctx, "GET", "/projects/"+projectID+"/git/installations/available", nil, "", &out); err != nil {
+		return nil, err
+	}
+	return out.Installations, nil
+}
+
 type triggerBuildResponse struct {
 	Build Build `json:"build"`
 }
