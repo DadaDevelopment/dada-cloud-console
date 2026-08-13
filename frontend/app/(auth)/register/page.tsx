@@ -30,11 +30,12 @@ const REGISTER_COPY = {
     noscript: "Для регистрации нужен включенный JavaScript в браузере.",
     title: "Создать аккаунт",
     subtitle: "Выберите способ регистрации",
+    bridgeNotice: "Войдите через Яндекс ID — GitHub подключите на следующем шаге, уже в консоли.",
     abandonedNotice: "Похоже, прошлая попытка регистрации не завершилась.",
     abandonedRetry: "Попробовать еще раз",
-    yandex: "Продолжить с Яндексом",
+    yandex: "Зарегистрироваться через Яндекс ID",
     email: "Регистрация по e-mail",
-    emailSignupUnavailable: "Сейчас регистрация доступна только через Яндекс ID.",
+    emailSignupUnavailable: "Один клик, без пароля и подтверждения почты.",
     haveAccount: "Уже есть аккаунт?",
     signIn: "Войти",
   },
@@ -42,11 +43,12 @@ const REGISTER_COPY = {
     noscript: "Registration requires JavaScript enabled in your browser.",
     title: "Create account",
     subtitle: "Choose how to sign up",
+    bridgeNotice: "Sign up with Yandex ID — you'll connect GitHub on the next step, inside the console.",
     abandonedNotice: "Looks like your previous sign-up attempt didn't finish.",
     abandonedRetry: "Try again",
-    yandex: "Continue with Yandex",
+    yandex: "Sign up with Yandex ID",
     email: "Sign up with e-mail",
-    emailSignupUnavailable: "Sign-up is currently available through Yandex ID only.",
+    emailSignupUnavailable: "One click, no password, no e-mail confirmation.",
     haveAccount: "Already have an account?",
     signIn: "Sign in",
   },
@@ -156,6 +158,7 @@ function OidcRegisterPage() {
             </div>
             <h1 className="text-2xl font-bold text-gray-900">{copy.title}</h1>
             <p className="mt-1 text-sm text-gray-500">{copy.subtitle}</p>
+            <p className="mt-3 text-sm text-gray-600">{copy.bridgeNotice}</p>
           </div>
 
           {abandoned && (
