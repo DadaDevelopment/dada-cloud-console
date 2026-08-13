@@ -530,3 +530,43 @@ func TestDetectNestedPythonScriptDoesNotHijackNodeRepo(t *testing.T) {
 		t.Errorf("Framework = %q, want \"\" (a nested helper script is not the app)", res.Framework)
 	}
 }
+
+// TestDetectDotSlashPrefixedTarPythonScripts is the shape `tar czf x.tar.gz -C
+// dir .` writes and a live sandbox upload proved on 2026-08-13: every member
+// carries a "./" prefix and macOS adds AppleDouble sidecars ("._foo") beside
+// them. Before normalization the top-level "._." member made root detection
+// answer "", every remaining name then looked nested, and the manifest-less
+// python fallback returned no framework at all.
+func TestDetectDotSlashPrefixedTarPythonScripts(t *testing.T) {
+	data := buildTarGz(t, []zipFile{
+		{name: "._.", body: "appledouble"},
+		{name: "./._agent.py", body: "appledouble"},
+		{name: "./agent.py", body: "print('hi')\n"},
+		{name: "./main.py", body: "print('hi')\n"},
+		{name: "./connectors/base.py", body: "print('hi')\n"},
+	})
+	res, err := Detect(data)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	if res.Framework != "python" {
+		t.Fatalf("framework = %q, want python", res.Framework)
+	}
+}
+
+// TestDetectDotSlashPrefixedTarSingleRoot pins the other half of the same bug:
+// with "./" stripped, a single-root export still has its root detected and its
+// manifest found, instead of every path reading as one level deeper.
+func TestDetectDotSlashPrefixedTarSingleRoot(t *testing.T) {
+	data := buildTarGz(t, []zipFile{
+		{name: "./myapp/package.json", body: `{"dependencies":{"next":"14.0.0"}}`},
+		{name: "./myapp/src/index.js", body: "console.log(1)\n"},
+	})
+	res, err := Detect(data)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	if res.Framework != "nextjs" {
+		t.Fatalf("framework = %q, want nextjs", res.Framework)
+	}
+}

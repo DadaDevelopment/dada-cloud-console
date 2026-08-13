@@ -294,6 +294,33 @@ func detectFormat(data []byte) (Format, error) {
 	return "", fmt.Errorf("unrecognized archive magic bytes (want zip or tar.gz)")
 }
 
+// normalizeMemberName strips the "./" prefix `tar czf ... -C dir .` writes in
+// front of every member, so the same repo has the same shape whether it
+// arrived as a zip or as a tar packed that way. Without it "./main.py" reads
+// as a nested path and "./" reads as a single top-level root, which made
+// detectRootFromNames answer "" and rootLevelPythonSources skip every file.
+//
+// It returns "" for members that carry no repo content — the "." entry itself
+// and macOS AppleDouble sidecars ("._foo"), which Finder and bsdtar add and
+// which otherwise sit at the top level and defeat root detection for real
+// single-root archives.
+func normalizeMemberName(name string) string {
+	for strings.HasPrefix(name, "./") {
+		name = name[2:]
+	}
+	if name == "" || name == "." {
+		return ""
+	}
+	base := name
+	if i := strings.LastIndexByte(base, '/'); i >= 0 {
+		base = base[i+1:]
+	}
+	if strings.HasPrefix(base, "._") || base == ".DS_Store" {
+		return ""
+	}
+	return name
+}
+
 // listEntries returns the buffered manifest candidates and, separately, the
 // name of every regular member it walked. The second list costs nothing to
 // build and is what lets detection reason about repo shape (see
@@ -323,13 +350,17 @@ func listZipEntries(data []byte) ([]entry, []string, error) {
 		if f.FileInfo().IsDir() || strings.Contains(f.Name, "..") {
 			continue
 		}
-		names = append(names, f.Name)
-		if !isCandidate(f.Name) {
+		name := normalizeMemberName(f.Name)
+		if name == "" {
+			continue
+		}
+		names = append(names, name)
+		if !isCandidate(name) {
 			continue
 		}
 		f := f
 		out = append(out, entry{
-			name: f.Name,
+			name: name,
 			size: int64(f.UncompressedSize64),
 			open: func() (io.ReadCloser, error) { return f.Open() },
 		})
@@ -361,17 +392,21 @@ func listTarGzEntries(data []byte) ([]entry, []string, error) {
 		if strings.Contains(hdr.Name, "..") {
 			continue
 		}
+		memberName := normalizeMemberName(hdr.Name)
+		if memberName == "" {
+			continue
+		}
 		if hdr.Typeflag == tar.TypeSymlink || hdr.Typeflag == tar.TypeLink {
-			if isCandidate(hdr.Name) && !strings.Contains(hdr.Linkname, "..") {
-				out = append(out, entry{name: hdr.Name, link: hdr.Linkname})
+			if isCandidate(memberName) && !strings.Contains(hdr.Linkname, "..") {
+				out = append(out, entry{name: memberName, link: hdr.Linkname})
 			}
 			continue
 		}
 		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
-		names = append(names, hdr.Name)
-		if !isCandidate(hdr.Name) {
+		names = append(names, memberName)
+		if !isCandidate(memberName) {
 			continue
 		}
 		limit := hdr.Size
@@ -382,7 +417,7 @@ func listTarGzEntries(data []byte) ([]entry, []string, error) {
 		if _, err := io.ReadFull(tr, buf); err != nil && err != io.ErrUnexpectedEOF {
 			continue
 		}
-		name := hdr.Name
+		name := memberName
 		content := buf
 		out = append(out, entry{
 			name: name,
