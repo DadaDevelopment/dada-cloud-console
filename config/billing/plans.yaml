@@ -16,6 +16,7 @@ plans:
       # Idle minutes are not billed and therefore not counted here at all, so a box
       # left open overnight consumes none of this.
       box_minutes: 300
+      app_servers: 0
     capabilities: []
     support_level: community
     # internal_footprint = expected average actual usage per plan (NOT customer quota ceiling).
@@ -39,6 +40,7 @@ plans:
       backup_retention_days: 7
       # ~50 h/month of active box time: a working week of agent sessions.
       box_minutes: 3000
+      app_servers: 1
     capabilities:
       - email_support
     support_level: email
@@ -61,6 +63,7 @@ plans:
       backup_retention_days: 30
       # ~333 h/month: several engineers each keeping a box busy daily.
       box_minutes: 20000
+      app_servers: 3
     capabilities:
       - email_support
       - priority_support
@@ -83,6 +86,7 @@ plans:
       team_members: 0
       backup_retention_days: 0
       box_minutes: 0
+      app_servers: 0
     capabilities:
       - email_support
       - priority_support

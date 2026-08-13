@@ -1757,6 +1757,7 @@ export interface BillingQuota {
   environments: number | null;
   members: number | null;
   backup_retention_days: number | null;
+  app_servers: number | null;
 }
 
 export interface BillingUsageItem {

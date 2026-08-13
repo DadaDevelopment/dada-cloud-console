@@ -237,6 +237,15 @@ func (h *Handler) countResource(ctx context.Context, orgID, resource string) (in
 		`, orgID).Scan(&n)
 		return n, err
 
+	case "app_servers":
+		var n int
+		err := h.pool.QueryRow(ctx, `
+			SELECT COUNT(*) FROM app_servers a
+			JOIN projects p ON p.id = a.project_id
+			WHERE p.org_id = $1 AND a.status != 'Deleted'
+		`, orgID).Scan(&n)
+		return n, err
+
 	case "box_minutes":
 		// The quota gate on box minutes reads the SAME function the meter writes
 		// usage_records from (countOrgBoxMinutes), so the figure a customer sees on
@@ -318,7 +327,10 @@ func (h *Handler) checkQuota(ctx context.Context, orgID, resource string) error 
 		return err
 	}
 	limit, known := pricing.Quota(plan, resource)
-	if !known || limit == 0 {
+	if !known {
+		return nil
+	}
+	if limit == 0 && zeroLimitMeansUnlimited(resource, plan.Key) {
 		return nil
 	}
 	count, err := h.countResource(ctx, orgID, resource)
@@ -336,6 +348,22 @@ func (h *Handler) checkQuota(ctx context.Context, orgID, resource string) error 
 		return nil
 	}
 	return &quotaExceededError{Resource: resource, Limit: limit}
+}
+
+// zeroLimitMeansUnlimited reports whether a plan's zero-value quota for a
+// resource should be read the traditional way (Enterprise, unlimited) rather
+// than as a real cap. Every resource except app_servers only ever carries
+// zero on the Enterprise plan, so a bare zero has always meant unlimited
+// there. app_servers is the first resource where the Free plan's real,
+// enforced limit is zero -- a VM is a standing box with a public IP handed to
+// any authenticated signup, the exact shape of the farming vector the plan
+// gate exists to close -- so a zero on any plan but Enterprise blocks instead
+// of waving the request through.
+func zeroLimitMeansUnlimited(resource, planKey string) bool {
+	if planKey == "enterprise" {
+		return true
+	}
+	return resource != "app_servers"
 }
 
 // recordQuotaBreach is the loud half of grandfathering: a warning line in the

@@ -15,6 +15,7 @@ import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
 import { useT } from "@/lib/i18n/console/context";
+import { QuotaUpsell } from "@/components/billing/quota-upsell";
 
 type AppServerMode = "terraform" | "manual";
 
@@ -80,6 +81,7 @@ export default function AppServersPage() {
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [quotaBlock, setQuotaBlock] = useState<{ resource: string; limit?: number } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deletingName, setDeletingName] = useState<string | null>(null);
   const [online, setOnline] = useState<Record<string, boolean>>({});
@@ -122,6 +124,7 @@ export default function AppServersPage() {
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSubmitError(null);
+    setQuotaBlock(null);
     setIsSubmitting(true);
     try {
       const payload =
@@ -148,6 +151,11 @@ export default function AppServersPage() {
       void result;
       router.push(`/projects/${projectId}/app-servers`);
     } catch (err) {
+      const quota = err as { status?: number; code?: string; resource?: string; limit?: number } | undefined;
+      if (quota?.code === "quota_exceeded") {
+        setQuotaBlock({ resource: quota.resource ?? "app_servers", limit: quota.limit });
+        return;
+      }
       setSubmitError(err instanceof Error ? err.message : t("appServers.error.create"));
     } finally {
       setIsSubmitting(false);
@@ -291,6 +299,7 @@ export default function AppServersPage() {
         onClose={() => {
           setIsModalOpen(false);
           setSubmitError(null);
+          setQuotaBlock(null);
         }}
         title={t("appServers.modal.title")}
       >
@@ -439,6 +448,10 @@ export default function AppServersPage() {
           </>
           )}
 
+          {quotaBlock && (
+            <QuotaUpsell resource={quotaBlock.resource} limit={quotaBlock.limit} projectId={projectId} />
+          )}
+
           {submitError && (
             <div role="alert" className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm text-red-700 dark:text-red-300">
               {submitError}
@@ -448,7 +461,11 @@ export default function AppServersPage() {
           <div className="flex justify-end gap-3 pt-2">
             <button
               type="button"
-              onClick={() => setIsModalOpen(false)}
+              onClick={() => {
+                setIsModalOpen(false);
+                setSubmitError(null);
+                setQuotaBlock(null);
+              }}
               className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
             >
               {t("common.cancel")}

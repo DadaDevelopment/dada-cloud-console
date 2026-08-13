@@ -231,6 +231,22 @@ func (h *Handler) CreateAppServer(c *gin.Context) {
 		respondError(c, status, msg)
 	}
 
+	if orgID, orgErr := h.projectOrg(c.Request.Context(), projectID); orgErr == nil {
+		if qErr := h.checkQuota(c.Request.Context(), orgID, "app_servers"); qErr != nil {
+			if meta, blocked := billingBlockAudit(qErr); blocked {
+				h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+					ProjectID:    projectID,
+					Action:       "CreateAppServer",
+					ResourceKind: "AppServer",
+					Outcome:      auditOutcomeFailure,
+					Metadata:     meta,
+				})
+				h.respondBillingBlocked(c, orgID, qErr)
+				return
+			}
+		}
+	}
+
 	var req createAppServerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		reject(http.StatusBadRequest, "malformed_body", err.Error())

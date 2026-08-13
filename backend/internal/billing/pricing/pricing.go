@@ -34,6 +34,8 @@ type Quotas struct {
 	// minutes. The gate has to be on the metered flow or it does not bound
 	// anything (see boxMinutesQuotaResource in internal/api/billing.go).
 	BoxMinutes int `yaml:"box_minutes"`
+
+	AppServers int `yaml:"app_servers"`
 }
 
 // Plan represents a billing plan loaded from plans.yaml.
@@ -132,6 +134,8 @@ func Quota(p Plan, resource string) (int, bool) {
 		return p.Quotas.StorageGB, true
 	case "box_minutes":
 		return p.Quotas.BoxMinutes, true
+	case "app_servers":
+		return p.Quotas.AppServers, true
 	}
 	return 0, false
 }

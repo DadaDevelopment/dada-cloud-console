@@ -13,6 +13,7 @@ const QUOTA_FIELD: Record<string, keyof BillingQuota> = {
   databases: "databases",
   domains: "domains",
   team_members: "members",
+  app_servers: "app_servers",
 };
 
 /**
