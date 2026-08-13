@@ -2,7 +2,9 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/dada-tuda/console/portainer-agent/internal/db"
 	"github.com/dada-tuda/console/portainer-agent/internal/portainer"
@@ -27,6 +29,57 @@ type deployStackPayload struct {
 func envComposeGitPath(projectSlug, envSlug string) string {
 	return fmt.Sprintf("clusters/beget-prod/projects/%s/environments/%s/compose.yaml",
 		projectSlug, envSlug)
+}
+
+// redeployConfirmWindow bounds how long we keep asking Portainer whether a
+// redeploy we lost the answer to actually landed.
+const redeployConfirmWindow = 5 * time.Minute
+
+// redeployLanded answers the only question a failed redeploy call leaves open:
+// did the deploy happen anyway? A transport failure is the absence of a verdict,
+// not a verdict of failure — Portainer can finish the work long after our client
+// hangs up. So for transport failures only, re-read the stack and look for the
+// server's own evidence that it redeployed: UpdateDate advancing past what we
+// saw before the call, or the git ConfigHash moving. An HTTP error status is a
+// real verdict and is never second-guessed here.
+//
+// Recorded because it bit us: the fin-core/findata redeploy of 2026-08-12 timed
+// out client-side and was written down as Failed while all four containers were
+// already running the new images from the new commit.
+func (w *VMWatcher) redeployLanded(ctx context.Context, before portainer.Stack, cause error) bool {
+	var transport *portainer.TransportError
+	if !errors.As(cause, &transport) {
+		return false
+	}
+	deadline := time.Now().Add(redeployConfirmWindow)
+	for {
+		after, err := w.portainer.GetStack(ctx, before.ID)
+		if err == nil && stackAdvanced(before, *after) {
+			log.Warn().Int("stack", before.ID).Err(cause).
+				Msg("redeploy call failed but the stack advanced — treating as delivered")
+			return true
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(10 * time.Second):
+		}
+	}
+}
+
+// stackAdvanced reports whether Portainer redeployed the stack since the
+// snapshot taken before the call.
+func stackAdvanced(before, after portainer.Stack) bool {
+	if after.UpdateDate > before.UpdateDate {
+		return true
+	}
+	if before.GitConfig != nil && after.GitConfig != nil {
+		return after.GitConfig.ConfigHash != "" && after.GitConfig.ConfigHash != before.GitConfig.ConfigHash
+	}
+	return false
 }
 
 // doDeployStack deploys (or redeploys) a compose app as a Portainer stack on the
@@ -81,7 +134,9 @@ func (w *VMWatcher) doDeployStack(ctx context.Context, op db.Operation) error {
 				RepositoryUsername:       w.cfg.GitopsUsername,
 				RepositoryPassword:       w.cfg.GitopsToken,
 			}); err != nil {
-				return fmt.Errorf("redeploy stack: %w", err)
+				if !w.redeployLanded(ctx, st, err) {
+					return fmt.Errorf("redeploy stack: %w", err)
+				}
 			}
 			w.syncStackSnapshots(ctx, op, target.EndpointID, p.AppName)
 			return db.MarkReady(ctx, w.pool, op.ID)

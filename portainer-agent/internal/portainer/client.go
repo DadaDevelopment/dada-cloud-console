@@ -14,11 +14,36 @@ import (
 	"time"
 )
 
+// stackMutationTimeout bounds the stack verbs that make the VM do real work —
+// git pull, image pull, container recreate. Those legitimately run for minutes:
+// the fin-core/findata redeploy of 2026-08-12 pulled two application images and
+// recreated four containers, blew past the 30s control-plane timeout, and was
+// recorded as a Failed operation over a deploy that had in fact succeeded.
+const stackMutationTimeout = 15 * time.Minute
+
+// TransportError marks a request that never produced an HTTP response — the
+// connection failed or the client gave up waiting. It is deliberately distinct
+// from an HTTP error status: a status is the server's verdict, a transport
+// failure is the absence of one, and only the latter leaves the outcome unknown
+// and therefore worth confirming out of band.
+type TransportError struct {
+	Method string
+	Path   string
+	Err    error
+}
+
+func (e *TransportError) Error() string {
+	return fmt.Sprintf("http %s %s: %v", e.Method, e.Path, e.Err)
+}
+
+func (e *TransportError) Unwrap() error { return e.Err }
+
 // Client is a typed HTTP client for the Portainer CE REST API.
 type Client struct {
 	baseURL    string
 	apiToken   string
 	httpClient *http.Client
+	slowClient *http.Client
 }
 
 // New creates a Portainer API client.
@@ -29,10 +54,17 @@ func New(baseURL, apiToken string) *Client {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		slowClient: &http.Client{
+			Timeout: stackMutationTimeout,
+		},
 	}
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body io.Reader, contentType string) (*http.Response, error) {
+	return c.doWith(c.httpClient, ctx, method, path, body, contentType)
+}
+
+func (c *Client) doWith(hc *http.Client, ctx context.Context, method, path string, body io.Reader, contentType string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
 	if err != nil {
 		return nil, err
@@ -41,10 +73,20 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader, co
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
-	return c.httpClient.Do(req)
+	return hc.Do(req)
 }
 
 func (c *Client) doJSON(ctx context.Context, method, path string, bodyObj, result any) error {
+	return c.doJSONWith(c.httpClient, ctx, method, path, bodyObj, result)
+}
+
+// doJSONSlow is doJSON on the long-timeout client, for verbs whose work happens
+// on the VM rather than in Portainer's process.
+func (c *Client) doJSONSlow(ctx context.Context, method, path string, bodyObj, result any) error {
+	return c.doJSONWith(c.slowClient, ctx, method, path, bodyObj, result)
+}
+
+func (c *Client) doJSONWith(hc *http.Client, ctx context.Context, method, path string, bodyObj, result any) error {
 	var bodyReader io.Reader
 	if bodyObj != nil {
 		b, err := json.Marshal(bodyObj)
@@ -53,9 +95,9 @@ func (c *Client) doJSON(ctx context.Context, method, path string, bodyObj, resul
 		}
 		bodyReader = bytes.NewReader(b)
 	}
-	resp, err := c.do(ctx, method, path, bodyReader, "application/json")
+	resp, err := c.doWith(hc, ctx, method, path, bodyReader, "application/json")
 	if err != nil {
-		return fmt.Errorf("http %s %s: %w", method, path, err)
+		return &TransportError{Method: method, Path: path, Err: err}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
@@ -180,16 +222,27 @@ func (c *Client) ListStacks(ctx context.Context, endpointID int) ([]Stack, error
 func (c *Client) CreateStackFromGit(ctx context.Context, endpointID int, req CreateStackRequest) (*Stack, error) {
 	path := fmt.Sprintf("/api/stacks/create/standalone/repository?endpointId=%d", endpointID)
 	var stack Stack
-	if err := c.doJSON(ctx, http.MethodPost, path, req, &stack); err != nil {
+	if err := c.doJSONSlow(ctx, http.MethodPost, path, req, &stack); err != nil {
 		return nil, err
 	}
 	return &stack, nil
 }
 
-// RedeployStack triggers a git-pull redeploy on an existing stack.
+// GetStack reads a single stack by id.
+func (c *Client) GetStack(ctx context.Context, stackID int) (*Stack, error) {
+	var stack Stack
+	if err := c.doJSON(ctx, http.MethodGet, fmt.Sprintf("/api/stacks/%d", stackID), nil, &stack); err != nil {
+		return nil, err
+	}
+	return &stack, nil
+}
+
+// RedeployStack triggers a git-pull redeploy on an existing stack. It runs on the
+// long-timeout client: Portainer holds the request open for the whole git pull,
+// image pull and container recreate on the VM.
 func (c *Client) RedeployStack(ctx context.Context, stackID, endpointID int, req RedeployStackRequest) error {
 	path := fmt.Sprintf("/api/stacks/%d/git/redeploy?endpointId=%d", stackID, endpointID)
-	return c.doJSON(ctx, http.MethodPut, path, req, nil)
+	return c.doJSONSlow(ctx, http.MethodPut, path, req, nil)
 }
 
 // DeleteStack removes a stack from an endpoint.

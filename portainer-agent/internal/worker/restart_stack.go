@@ -45,7 +45,9 @@ func (w *VMWatcher) doRestartStack(ctx context.Context, op db.Operation) error {
 				RepositoryUsername:       w.cfg.GitopsUsername,
 				RepositoryPassword:       w.cfg.GitopsToken,
 			}); err != nil {
-				return fmt.Errorf("restart stack: %w", err)
+				if !w.redeployLanded(ctx, st, err) {
+					return fmt.Errorf("restart stack: %w", err)
+				}
 			}
 			w.syncStackSnapshots(ctx, op, target.EndpointID, p.AppName)
 			return db.MarkReady(ctx, w.pool, op.ID)

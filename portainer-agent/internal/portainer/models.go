@@ -15,11 +15,26 @@ type Endpoint struct {
 }
 
 // Stack represents a Portainer stack.
+//
+// UpdateDate and GitConfig.ConfigHash are the only evidence a caller has that a
+// redeploy actually landed: a redeploy that pulls images and recreates
+// containers can outlive our HTTP client, and a client-side timeout says
+// nothing about what the server did. Re-reading the stack and seeing the
+// timestamp advance turns "unknown" into "delivered".
 type Stack struct {
-	ID         int    `json:"Id"`
-	Name       string `json:"Name"`
-	EndpointID int    `json:"EndpointId"`
-	Status     int    `json:"Status"`
+	ID         int             `json:"Id"`
+	Name       string          `json:"Name"`
+	EndpointID int             `json:"EndpointId"`
+	Status     int             `json:"Status"`
+	UpdateDate int64           `json:"UpdateDate"`
+	GitConfig  *StackGitConfig `json:"GitConfig"`
+}
+
+// StackGitConfig is the git source a stack was last deployed from.
+type StackGitConfig struct {
+	URL           string `json:"URL"`
+	ReferenceName string `json:"ReferenceName"`
+	ConfigHash    string `json:"ConfigHash"`
 }
 
 // CreateStackRequest is the body for POST /api/stacks/create/standalone/repository.
