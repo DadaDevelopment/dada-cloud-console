@@ -16,6 +16,9 @@ spec:
         app.kubernetes.io/component: migrate
     spec:
       restartPolicy: OnFailure
+      {{- with .Values.global.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
       containers:
         - name: migrate
           image: "{{ .Values.global.imageRegistry }}/{{ .Values.migrationJob.image.repository }}:{{ .Values.migrationJob.image.tag }}"

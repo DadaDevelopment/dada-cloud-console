@@ -24,6 +24,9 @@ spec:
         app.kubernetes.io/component: backend
     spec:
       serviceAccountName: {{ include "dada-cloud-console.fullname" . }}
+      {{- with .Values.global.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}

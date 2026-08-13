@@ -7,6 +7,7 @@ global:
   # Default storage class for persistent volumes (can be overridden per-component)
   # Use "local-path" for local development or set to your cluster's default
   storageClassName: "local-path"
+  priorityClassName: "platform"
 
   # Shared credentials/config consumed by more than one service. Defined ONCE
   # here; each service's Secret/ConfigMap template maps these to its own env var

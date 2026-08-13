@@ -24,6 +24,9 @@ spec:
         app.kubernetes.io/component: frontend
     spec:
       serviceAccountName: {{ include "dada-cloud-console.fullname" . }}
+      {{- with .Values.global.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
       {{- if gt (int .Values.frontend.replicaCount) 1 }}
       affinity:
         podAntiAffinity:
