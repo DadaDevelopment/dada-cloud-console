@@ -57,9 +57,26 @@ func git(dir string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
+// BranchOnOrigin reports whether origin already carries this branch, which is
+// what the platform will clone. It answers the only question that matters for
+// a git build: is there something on the remote to build at all.
+func BranchOnOrigin(dir, branch string) bool {
+	if branch == "" {
+		return false
+	}
+	if _, err := git(dir, "rev-parse", "--verify", "origin/"+branch); err == nil {
+		return true
+	}
+	out, err := git(dir, "ls-remote", "--heads", "origin", branch)
+	return err == nil && out != ""
+}
+
 // Detect reads the repository state of dir. Every failure degrades to "not a
 // usable repo" rather than an error, because falling back to the archive path
-// is always a valid answer.
+// is always a valid answer. The branch is read with `branch --show-current`
+// rather than `rev-parse HEAD`, because a repo whose first commit does not
+// exist yet still has a branch checked out and is still deployable once that
+// commit is made.
 func Detect(dir string) Info {
 	info := Info{}
 	root, err := git(dir, "rev-parse", "--show-toplevel")
@@ -86,7 +103,7 @@ func Detect(dir string) Info {
 		return info
 	}
 
-	branch, err := git(dir, "rev-parse", "--abbrev-ref", "HEAD")
+	branch, err := git(dir, "branch", "--show-current")
 	if err != nil || branch == "" || branch == "HEAD" {
 		info.Unsupported = "this repo has no branch checked out"
 		return info

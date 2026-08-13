@@ -24,6 +24,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "flags for deploy:")
 	fmt.Fprintln(os.Stderr, "  --name <name>       app name (default: derived from the directory name)")
 	fmt.Fprintln(os.Stderr, "  --project <name>    deploy into an existing project instead of this folder's own")
+	fmt.Fprintln(os.Stderr, "  --upload            skip git and upload the folder as an archive")
 }
 
 func main() {
@@ -79,6 +80,9 @@ func parseDeployArgs(args []string) (cliapp.DeployOptions, error) {
 			}
 			opts.Project = args[i+1]
 			i += 2
+		case "--upload":
+			opts.Upload = true
+			i++
 		default:
 			if len(args[i]) > 0 && args[i][0] == '-' {
 				return opts, fmt.Errorf("unknown flag %q", args[i])

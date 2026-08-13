@@ -22,11 +22,13 @@ import (
 	"github.com/dada-tuda/console/cli/internal/ui"
 )
 
-// DeployOptions are the resolved inputs to a single `ddc deploy` run.
+// DeployOptions are the resolved inputs to a single `ddc deploy` run. Upload
+// skips git entirely and ships the folder as an archive.
 type DeployOptions struct {
 	Dir     string
 	AppName string
 	Project string
+	Upload  bool
 }
 
 // buildPoll* control how often ddc asks the console for build status while
@@ -89,7 +91,10 @@ func Deploy(ctx context.Context, cfg Config, opts DeployOptions, in io.Reader, o
 	projectID, envID := target.ProjectID, target.EnvID
 	prog.Info("Приложение %s → %s / %s", appName, target.ProjectName, target.EnvName)
 
-	buildID, fromGit := deployFromGit(ctx, client, projectID, envID, appName, opts.Dir, prog)
+	buildID, fromGit := "", false
+	if !opts.Upload {
+		buildID, fromGit = deployFromGit(ctx, client, projectID, envID, appName, opts, prog)
+	}
 	if !fromGit {
 		buildID, err = deployFromArchive(ctx, client, projectID, envID, appName, opts.Dir, prog)
 		if err != nil {
@@ -119,12 +124,14 @@ func Deploy(ctx context.Context, cfg Config, opts DeployOptions, in io.Reader, o
 	return nil
 }
 
-// deployFromGit builds straight from the folder's GitHub remote when that is
-// possible, which is both faster and gives the console a real commit instead
-// of an opaque archive. Every reason it cannot is announced in one line and
-// answered by returning ok=false, so the caller falls back to the upload path
-// rather than failing the deploy.
-func deployFromGit(ctx context.Context, client *apiclient.Client, projectID, envID, appName, dir string, prog *ui.Progress) (string, bool) {
+// deployFromGit builds straight from the folder's GitHub remote, which is the
+// main road: the console gets a real repository, a real commit and an
+// auto-deploy hook for every later push. A dirty working tree is not a reason
+// to leave that road - the platform simply builds what origin already has, and
+// the CLI says so. The archive upload stays as the answer for folders that are
+// not a usable GitHub repo at all, and every drop to it is announced.
+func deployFromGit(ctx context.Context, client *apiclient.Client, projectID, envID, appName string, opts DeployOptions, prog *ui.Progress) (string, bool) {
+	dir := opts.Dir
 	info := gitremote.Detect(dir)
 	if !info.IsRepo {
 		return "", false
@@ -136,11 +143,8 @@ func deployFromGit(ctx context.Context, client *apiclient.Client, projectID, env
 	if info.Unsupported != "" {
 		return fallback(info.Unsupported)
 	}
-	if info.Dirty {
-		return fallback("есть незакоммиченные изменения")
-	}
-	if !info.HeadPushed {
-		return fallback("этот коммит не запушен в origin/" + info.Branch)
+	if !gitremote.BranchOnOrigin(dir, info.Branch) {
+		return fallback("ветки " + info.Branch + " ещё нет в origin - запушьте её, и деплой пойдёт из git")
 	}
 
 	prog.Stage("Проверяем репозиторий", stagePercent["link"])
@@ -154,7 +158,7 @@ func deployFromGit(ctx context.Context, client *apiclient.Client, projectID, env
 		return fallback(fmt.Sprintf("приложение %q уже связано с %s", appName, linked.RepoFullName))
 	case !found:
 		prog.Stage("Подключаем "+info.FullName, stagePercent["link"])
-		_, err := client.ConnectGitRepo(ctx, projectID, envID, apiclient.ConnectGitRepoRequest{
+		created, err := client.ConnectGitRepo(ctx, projectID, envID, apiclient.ConnectGitRepoRequest{
 			RepoFullName:     info.FullName,
 			AppName:          appName,
 			ProductionBranch: info.Branch,
@@ -162,6 +166,7 @@ func deployFromGit(ctx context.Context, client *apiclient.Client, projectID, env
 			AutoDeploy:       true,
 			Provider:         "github",
 		})
+		linked = created
 		if err != nil && !isAlreadyConnected(err) {
 			var apiErr *apiclient.APIError
 			if errors.As(err, &apiErr) && apiErr.Code == "github_access_required" {
@@ -176,8 +181,27 @@ func deployFromGit(ctx context.Context, client *apiclient.Client, projectID, env
 		return fallback("запустить сборку из git не вышло (" + apiclient.Explain(err) + ")")
 	}
 	prog.Info("Источник: github.com/%s @ %s", info.FullName, info.Branch)
+	prog.Info("%s", autoDeployNote(linked, info.Branch))
+	if info.Dirty || !info.HeadPushed {
+		prog.Info("Собираем то, что лежит в origin/%s - локальные правки уедут следующим push.", info.Branch)
+	}
 	prog.Stage("Сборка в очереди", stagePercent["queued"])
 	return build.ID, true
+}
+
+// autoDeployNote says whether later pushes will deploy by themselves. The
+// build-agent only enqueues a webhook build when auto_deploy is on and the
+// push matches the production branch (build-agent/internal/server/server.go),
+// and those deliveries come from the GitHub App -- an anonymously linked
+// repository never sends them, so it is told the truth instead of a promise.
+func autoDeployNote(repo apiclient.GitRepo, branch string) string {
+	if !repo.AutoDeploy {
+		return "Авто-деплой выключен: следующий push собирать вручную (ddc deploy)."
+	}
+	if repo.PlatformAccess == "anonymous" {
+		return "Авто-деплой включён, но хук придёт только после установки GitHub App на репозиторий - пока запускайте ddc deploy."
+	}
+	return fmt.Sprintf("Авто-деплой включён: следующий push в %s соберётся сам.", branch)
 }
 
 func rootDirOrDot(sub string) string {
