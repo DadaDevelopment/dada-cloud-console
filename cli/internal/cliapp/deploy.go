@@ -155,6 +155,10 @@ func deployFromGit(ctx context.Context, client *apiclient.Client, projectID, env
 	if !gitremote.BranchOnOrigin(dir, info.Branch) {
 		return fallback("ветки " + info.Branch + " ещё нет в origin - запушьте её, и деплой пойдёт из git")
 	}
+	if !gitremote.OriginHasSource(dir, info.Branch, info.SubdirOfRoot) {
+		return fallback("в origin/" + info.Branch + " лежит только документация - код ещё не закоммичен, " +
+			"платформа собирала бы пустой репозиторий; сделайте git add/commit/push, и деплой пойдёт из git")
+	}
 
 	prog.Stage("Проверяем репозиторий", stagePercent["link"])
 	repos, err := client.ListGitRepos(ctx, projectID, envID)

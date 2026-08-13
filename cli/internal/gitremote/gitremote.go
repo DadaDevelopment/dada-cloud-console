@@ -71,6 +71,67 @@ func BranchOnOrigin(dir, branch string) bool {
 	return err == nil && out != ""
 }
 
+// docsOnlyExt are the file types a repository can be made entirely of and
+// still have nothing to build.
+var docsOnlyExt = map[string]bool{".md": true, ".txt": true, ".rst": true, ".adoc": true}
+
+// docsOnlyName are the root files that describe a project rather than being
+// one. LICENSE and friends carry no extension, so they need naming.
+var docsOnlyName = map[string]bool{
+	"license": true, "licence": true, "copying": true, "notice": true,
+	"authors": true, "contributors": true, "changelog": true,
+	".gitignore": true, ".gitattributes": true, ".editorconfig": true,
+	".gitkeep": true,
+}
+
+// OriginHasSource reports whether the branch on origin holds anything the
+// platform could build, as opposed to documentation only.
+//
+// The platform builds what origin has, never the working directory. A repo
+// whose code was written but never committed - the shape of a first deploy,
+// where `git init` and the GitHub repo happen before the first `git add` -
+// pushes a README and nothing else. Every check up to here passes (a remote, a
+// branch, that branch on origin), the build is queued, and it dies minutes
+// later inside Jenkins with "framework <empty> has no template and repo ships no
+// Dockerfile", which reads as a platform failure rather than "your code is not
+// on GitHub yet". Answering false here turns that into one honest line before
+// anything is queued.
+func OriginHasSource(dir, branch, subdir string) bool {
+	if branch == "" {
+		return false
+	}
+	args := []string{"ls-tree", "-r", "--name-only", "origin/" + branch}
+	if subdir != "" {
+		args = append(args, "--", subdir)
+	}
+	out, err := git(dir, args...)
+	if err != nil {
+		return true
+	}
+	for _, path := range strings.Split(out, "\n") {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		if strings.HasPrefix(path, "docs/") || strings.HasPrefix(path, ".github/") {
+			continue
+		}
+		name := path
+		if i := strings.LastIndex(name, "/"); i >= 0 {
+			name = name[i+1:]
+		}
+		name = strings.ToLower(name)
+		if docsOnlyName[name] {
+			continue
+		}
+		if dot := strings.LastIndex(name, "."); dot > 0 && docsOnlyExt[name[dot:]] {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 // Detect reads the repository state of dir. Every failure degrades to "not a
 // usable repo" rather than an error, because falling back to the archive path
 // is always a valid answer. The branch is read with `branch --show-current`
