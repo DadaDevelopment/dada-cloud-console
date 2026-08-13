@@ -1929,6 +1929,19 @@ func (w *DBWatcher) doImportComposeStack(ctx context.Context, op db.Operation) e
 // This is the handler behind POST /api/v1/deploy (and PATCH .../image) for a
 // runtime=vm environment, so it is the seam a CI pipeline releases through.
 func (w *DBWatcher) updateComposeAppImage(ctx context.Context, op db.Operation, appName, image string) error {
+	superseded, err := w.supersededByLandedRelease(ctx, op, appName)
+	if err != nil {
+		return err
+	}
+	if superseded != "" {
+		log.Warn().Str("op", op.ID.String()).Str("app", appName).
+			Str("image", image).Str("landed", superseded).
+			Msg("refusing stale release: a newer image is already rendered")
+		return db.MarkFailed(ctx, w.pool, op.ID, "SUPERSEDED_BY_NEWER_DEPLOY", fmt.Sprintf(
+			"release of %s not applied: a newer deploy of %s already landed for %s; re-run this build to deploy it",
+			image, superseded, appName))
+	}
+
 	var summaryRaw []byte
 	if err := w.pool.QueryRow(ctx, `
 		SELECT summary_json FROM resource_snapshots
@@ -1950,6 +1963,47 @@ func (w *DBWatcher) updateComposeAppImage(ctx context.Context, op db.Operation, 
 		return err
 	}
 	return w.renderEnvAggregate(ctx, op, op.ProjectID, op.EnvironmentID)
+}
+
+// supersededByLandedRelease reports the image of a LATER DeployImageVersion for
+// the same app that has already been rendered, or "" when this operation is the
+// newest one to have got this far.
+//
+// The compose render takes the image from the operation payload at the moment
+// the operation is processed, and the queue is not ordered by anything the
+// renderer sees. An operation that sits in the queue (a stuck worker, a
+// re-claim after the 30-minute Processing timeout) therefore lands AFTER newer
+// ones and quietly rolls production back to its own, older tag. Live on findata
+// on 2026-08-13: operation a1e5a377 (build 529, created 02:36) committed at
+// 03:06:50, five minutes after build 530 had committed at 03:01:46, so the VM
+// went back to 529 with both operations reporting success and both Jenkins
+// builds green.
+//
+// Only already-landed releases count. A newer operation still sitting in
+// Created is not evidence of anything -- processing this one first is the
+// correct order, and the newer one overwrites it afterwards as intended.
+func (w *DBWatcher) supersededByLandedRelease(ctx context.Context, op db.Operation, appName string) (string, error) {
+	var image string
+	err := w.pool.QueryRow(ctx, `
+		SELECT COALESCE(payload->>'image', '')
+		FROM   operations
+		WHERE  project_id = $1
+		  AND  environment_id IS NOT DISTINCT FROM $2
+		  AND  action = 'DeployImageVersion'
+		  AND  resource_kind = 'App'
+		  AND  resource_name = $3
+		  AND  status IN ('Committed', 'Ready')
+		  AND  created_at > $4
+		ORDER BY created_at DESC
+		LIMIT  1
+	`, op.ProjectID, op.EnvironmentID, appName, op.CreatedAt).Scan(&image)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("stale release check: %w", err)
+	}
+	return image, nil
 }
 
 // doUpdateComposeConfig patches a compose (VM) app's desired service spec (image
