@@ -296,3 +296,127 @@ func TestGetDeployOperation_CrossAppOperation_404(t *testing.T) {
 		t.Fatal("freshly created operation reported terminal=true")
 	}
 }
+
+// TestGetDeployOperation_VMEnvironment_FollowsStackDeploy pins the difference
+// between "compose.yaml is in git" and "the VM took the image". A committed
+// parent used to answer terminal+ok, so a CI build went green while the stack
+// redeploy was still queued -- and stayed green when that redeploy then failed
+// to pull.
+func TestGetDeployOperation_VMEnvironment_FollowsStackDeploy(t *testing.T) {
+	pool := testDeployHooksPool(t)
+	ctx := context.Background()
+
+	projectID, envID, appName := seedDeployApp(t, pool)
+	if _, err := pool.Exec(ctx, `UPDATE environments SET runtime = 'vm' WHERE id = $1`, envID); err != nil {
+		t.Fatalf("mark environment as vm: %v", err)
+	}
+	_, token := insertDeployHook(t, pool, projectID, envID, appName, nil)
+
+	h := &Handler{pool: pool}
+
+	triggerCtx, triggerRec := newDeployTokenCtx(http.MethodPost, "/api/v1/deploy", token, `{"image":"nginx:1.25"}`)
+	h.DeployTrigger(triggerCtx)
+	if triggerRec.Code != http.StatusAccepted {
+		t.Fatalf("trigger failed: code=%d body=%s", triggerRec.Code, triggerRec.Body.String())
+	}
+	var triggerResp deployTriggerResponse
+	if err := json.Unmarshal(triggerRec.Body.Bytes(), &triggerResp); err != nil {
+		t.Fatalf("decode trigger response: %v", err)
+	}
+	opID := triggerResp.OperationID
+
+	if _, err := pool.Exec(ctx,
+		`UPDATE operations SET status = 'Committed' WHERE id = $1`, opID,
+	); err != nil {
+		t.Fatalf("mark parent committed: %v", err)
+	}
+
+	poll := func() deployOperationStatusResponse {
+		t.Helper()
+		c, rec := newDeployTokenCtx(http.MethodGet, "/api/v1/deploy/operations/"+opID.String(), token, "")
+		c.Params = gin.Params{{Key: "operationId", Value: opID.String()}}
+		h.GetDeployOperation(c)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("poll: code=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var resp deployOperationStatusResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode status response: %v", err)
+		}
+		return resp
+	}
+
+	if resp := poll(); resp.Terminal {
+		t.Fatalf("committed parent with no stack deploy yet reported terminal=true (%+v)", resp)
+	}
+
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name,
+		                         status, payload, error_code, error_message)
+		 SELECT actor_id, project_id, environment_id, 'DeployStack', 'App', $2::text, 'Created',
+		        jsonb_build_object('app_name', $2::text, 'parent_operation_id', $1::text), NULL, NULL
+		 FROM operations WHERE id = $1::uuid`,
+		opID, appName,
+	); err != nil {
+		t.Fatalf("seed child stack deploy: %v", err)
+	}
+
+	if resp := poll(); resp.Terminal || resp.Status != string(models.OperationStatusCreated) {
+		t.Fatalf("queued stack deploy reported %+v, want non-terminal Created", resp)
+	}
+
+	if _, err := pool.Exec(ctx,
+		`UPDATE operations SET status = 'Failed', error_code = 'PROCESSING_ERROR', error_message = 'pull access denied'
+		 WHERE action = 'DeployStack' AND payload->>'parent_operation_id' = $1::text`,
+		opID,
+	); err != nil {
+		t.Fatalf("fail child stack deploy: %v", err)
+	}
+
+	resp := poll()
+	if !resp.Terminal || resp.OK {
+		t.Fatalf("failed stack deploy reported %+v, want terminal and not ok", resp)
+	}
+	if resp.Status != string(models.OperationStatusFailed) || resp.ErrorMessage != "pull access denied" {
+		t.Fatalf("failed stack deploy reported %+v, want the child's own verdict", resp)
+	}
+}
+
+// TestGetDeployOperation_K8sEnvironment_CommittedIsTerminal guards the other
+// side: a Kubernetes deploy never gets a DeployStack child, so "Committed"
+// stays the terminal-success state and the poll must not hang on it.
+func TestGetDeployOperation_K8sEnvironment_CommittedIsTerminal(t *testing.T) {
+	pool := testDeployHooksPool(t)
+	ctx := context.Background()
+
+	projectID, envID, appName := seedDeployApp(t, pool)
+	_, token := insertDeployHook(t, pool, projectID, envID, appName, nil)
+
+	h := &Handler{pool: pool}
+
+	triggerCtx, triggerRec := newDeployTokenCtx(http.MethodPost, "/api/v1/deploy", token, `{"image":"nginx:1.25"}`)
+	h.DeployTrigger(triggerCtx)
+	if triggerRec.Code != http.StatusAccepted {
+		t.Fatalf("trigger failed: code=%d body=%s", triggerRec.Code, triggerRec.Body.String())
+	}
+	var triggerResp deployTriggerResponse
+	if err := json.Unmarshal(triggerRec.Body.Bytes(), &triggerResp); err != nil {
+		t.Fatalf("decode trigger response: %v", err)
+	}
+	opID := triggerResp.OperationID
+
+	if _, err := pool.Exec(ctx, `UPDATE operations SET status = 'Committed' WHERE id = $1`, opID); err != nil {
+		t.Fatalf("mark parent committed: %v", err)
+	}
+
+	c, rec := newDeployTokenCtx(http.MethodGet, "/api/v1/deploy/operations/"+opID.String(), token, "")
+	c.Params = gin.Params{{Key: "operationId", Value: opID.String()}}
+	h.GetDeployOperation(c)
+	var resp deployOperationStatusResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode status response: %v", err)
+	}
+	if !resp.Terminal || !resp.OK {
+		t.Fatalf("committed k8s deploy reported %+v, want terminal and ok", resp)
+	}
+}

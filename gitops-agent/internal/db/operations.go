@@ -247,6 +247,13 @@ func recordFailureAudit(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, c
 // EnqueueDeployStack creates a follow-up DeployStack operation for a compose
 // app, copying actor/project/environment from the parent (render) operation.
 // The portainer-agent claims and executes it (CreateStackFromGit / RedeployStack).
+//
+// The parent id is carried in the payload because the parent terminates at
+// "Committed" the moment compose.yaml is in git, long before the VM has pulled
+// anything. Without the link a caller polling the parent reads a green deploy
+// while the stack redeploy is still running -- or has already failed, which is
+// how a build went SUCCESS while fin-core/findata kept serving the previous
+// image.
 func EnqueueDeployStack(ctx context.Context, pool *pgxpool.Pool, parentOpID uuid.UUID, appName string, volumes []string) (uuid.UUID, error) {
 	if volumes == nil {
 		volumes = []string{}
@@ -255,8 +262,9 @@ func EnqueueDeployStack(ctx context.Context, pool *pgxpool.Pool, parentOpID uuid
 	err := pool.QueryRow(ctx, `
 		INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
 		SELECT actor_id, project_id, environment_id, 'DeployStack', 'App', $2::text, 'Created',
-		       jsonb_build_object('app_name', $2::text, 'volumes', $3::jsonb)
-		FROM operations WHERE id = $1
+		       jsonb_build_object('app_name', $2::text, 'volumes', $3::jsonb,
+		                          'parent_operation_id', $1::text)
+		FROM operations WHERE id = $1::uuid
 		RETURNING id`,
 		parentOpID, appName, volumes,
 	).Scan(&id)

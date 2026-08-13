@@ -640,6 +640,34 @@ func (h *Handler) GetDeployOperation(c *gin.Context) {
 	}
 
 	terminal, success := classifyOperationStatus(op.Status)
+	if terminal && success {
+		vm, err := h.environmentIsVM(c, hook.EnvironmentID)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to resolve environment runtime")
+			return
+		}
+		if vm {
+			child, found, err := h.composeDeployStackFor(c, operationID, hook.EnvironmentID)
+			if err != nil {
+				respondError(c, http.StatusInternalServerError, "failed to fetch stack deploy")
+				return
+			}
+			if !found {
+				c.JSON(http.StatusOK, deployOperationStatusResponse{Status: string(op.Status)})
+				return
+			}
+			terminal, success = classifyOperationStatus(child.Status)
+			c.JSON(http.StatusOK, deployOperationStatusResponse{
+				Status:       string(child.Status),
+				Terminal:     terminal,
+				OK:           success,
+				ErrorCode:    child.ErrorCode,
+				ErrorMessage: child.ErrorMessage,
+			})
+			return
+		}
+	}
+
 	c.JSON(http.StatusOK, deployOperationStatusResponse{
 		Status:       string(op.Status),
 		Terminal:     terminal,
@@ -647,4 +675,54 @@ func (h *Handler) GetDeployOperation(c *gin.Context) {
 		ErrorCode:    op.ErrorCode,
 		ErrorMessage: op.ErrorMessage,
 	})
+}
+
+// composeDeployStackFor returns the DeployStack operation gitops-agent enqueued
+// as the follow-up to a compose (VM) DeployImageVersion, if there is one.
+//
+// On a VM the parent operation says nothing about delivery: it reaches
+// "Committed" as soon as compose.yaml is pushed, and the actual Portainer stack
+// redeploy -- the step that pulls the image and recreates the containers -- runs
+// afterwards as its own row. Reporting the parent alone let a CI build go green
+// while the VM still served the previous image, so the poll answers with the
+// child once it exists.
+//
+// found=false means the parent has committed but gitops-agent has not inserted
+// the child row yet -- a sub-second window, since the enqueue follows the commit
+// in the same handler. The caller is told the deploy is not terminal rather than
+// being handed the parent's premature green.
+// environmentIsVM reports whether an environment runs the compose/VM track,
+// which is what decides whether a committed DeployImageVersion still owes the
+// caller a stack redeploy.
+func (h *Handler) environmentIsVM(c *gin.Context, environmentID uuid.UUID) (bool, error) {
+	var runtime string
+	err := h.pool.QueryRow(c.Request.Context(),
+		`SELECT COALESCE(runtime, 'k8s') FROM environments WHERE id = $1`,
+		environmentID,
+	).Scan(&runtime)
+	if err == pgx.ErrNoRows {
+		return false, nil
+	}
+	return runtime == "vm", err
+}
+
+func (h *Handler) composeDeployStackFor(c *gin.Context, parentID, environmentID uuid.UUID) (models.Operation, bool, error) {
+	var child models.Operation
+	row := h.pool.QueryRow(c.Request.Context(),
+		`SELECT id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
+		        status, payload, validation_result, git_commit, git_path, argo_application,
+		        error_code, error_message, created_at, updated_at
+		 FROM operations
+		 WHERE action = 'DeployStack' AND environment_id = $2
+		       AND payload->>'parent_operation_id' = $1::text
+		 ORDER BY created_at DESC
+		 LIMIT 1`,
+		parentID, environmentID,
+	)
+	if err := scanOperation(row, &child); err == pgx.ErrNoRows {
+		return models.Operation{}, false, nil
+	} else if err != nil {
+		return models.Operation{}, false, err
+	}
+	return child, true, nil
 }
