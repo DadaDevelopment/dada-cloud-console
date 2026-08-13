@@ -92,6 +92,7 @@ export function DeployChooser({
                   key={c.key}
                   type="button"
                   onClick={() => setKind(c.key)}
+                  data-ux={`apps_deploy_chooser:pick_${c.key}`}
                   className={`flex flex-col gap-2 rounded-xl border p-4 text-left transition-colors ${
                     active
                       ? "border-blue-500 bg-blue-50 dark:bg-blue-950/40 ring-2 ring-blue-500/30"
@@ -113,10 +114,10 @@ export function DeployChooser({
           <UploadDeployCard projectId={projectId} envId={envId || null} compact />
         ) : (
           <div className="flex justify-end gap-3 pt-1">
-            <Button variant="ghost" onClick={onClose}>
+            <Button variant="ghost" onClick={onClose} data-ux="apps_deploy_chooser:cancel">
               {t("common.cancel")}
             </Button>
-            <Button onClick={proceed} disabled={kind !== "compose" && !envId}>
+            <Button onClick={proceed} disabled={kind !== "compose" && !envId} data-ux={`apps_deploy_chooser:continue_${kind}`}>
               {t("apps.deploy.continue")}
             </Button>
           </div>

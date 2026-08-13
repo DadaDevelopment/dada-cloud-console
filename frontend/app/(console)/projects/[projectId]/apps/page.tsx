@@ -476,6 +476,7 @@ export default function AppsPage() {
             <button
               type="submit"
               disabled={isSubmitting || !formValid}
+              data-ux="apps_create_modal:submit"
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
             >
               {isSubmitting ? (
@@ -527,6 +528,7 @@ function GroupBlock({ title, primaryEnv, projectId, entries, infra, canCreate, o
         {canCreate && (
           <button
             onClick={() => onCreate(primaryEnv.id)}
+            data-ux="apps_deploy_cta:open_chooser"
             className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 active:bg-blue-800 transition-colors"
           >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
