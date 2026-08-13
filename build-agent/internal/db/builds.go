@@ -469,6 +469,98 @@ func ReapStuckBuilds(ctx context.Context, pool *pgxpool.Pool, olderThan time.Dur
 	return ids, rows.Err()
 }
 
+// buildAutoRetryAuditAction names the audit row written when the platform
+// re-queues a build that its own failure killed. The retry is an action the
+// platform takes on the user's behalf, so it leaves the same kind of trace a
+// console click would: without it the user's path reads as "failed, then a
+// build appears out of nowhere".
+const buildAutoRetryAuditAction = "BuildAutoRetried"
+
+// RetryPlatformFailedBuilds re-queues builds that failed on the platform's own
+// side (fail_reason='platform_error') once the platform is healthy again.
+//
+// Classification alone only labels such a failure; it never repairs it. On
+// 2026-08-13 an unreachable Jenkins library host failed every build on the
+// platform for ~2.5 hours. The host was fixed, and the users' builds stayed
+// red: the console offered them a Retry button for a breakage that was never
+// theirs, and a user who did not happen to look again simply stayed broken.
+//
+// The predicate is deliberately narrow:
+//   - minAge keeps a still-unfolding outage from being retried into itself; by
+//     the time a build is that old the outage has either passed or will fail
+//     the retry the same way, bounded by maxAttempts.
+//   - maxAge stops the pass from replaying ancient history when it first ships
+//     (or after a long agent outage) — a week-old failure is archaeology, not
+//     a user waiting.
+//   - only the newest build of its repo+app+branch is retried, so a failure
+//     the user already superseded with a newer commit is left alone.
+//
+// fail_reason is cleared with the requeue: the row is in flight again, and a
+// stale reason would make a live build read as a failed one. Returns the
+// re-queued ids for logging.
+func RetryPlatformFailedBuilds(ctx context.Context, pool *pgxpool.Pool, minAge, maxAge time.Duration, maxAttempts int) ([]uuid.UUID, error) {
+	rows, err := pool.Query(ctx, `
+		WITH candidates AS (
+			SELECT b.id
+			FROM   builds b
+			WHERE  b.status = 'failed'
+			  AND  b.fail_reason = 'platform_error'
+			  AND  b.attempt < $3
+			  AND  b.finished_at < NOW() - make_interval(secs => $1)
+			  AND  b.finished_at > NOW() - make_interval(secs => $2)
+			  AND  NOT EXISTS (
+			           SELECT 1 FROM builds n
+			           WHERE  n.git_repo_id = b.git_repo_id
+			             AND  n.app_name    = b.app_name
+			             AND  n.branch      = b.branch
+			             AND  n.created_at  > b.created_at
+			       )
+		),
+		updated AS (
+			UPDATE builds
+			SET    status = 'queued',
+			       attempt = attempt + 1,
+			       fail_reason = NULL,
+			       error_message = 'platform failure; re-queued automatically after the platform recovered',
+			       started_at = NULL, finished_at = NULL,
+			       jenkins_queue_id = NULL, jenkins_build_number = NULL,
+			       updated_at = NOW()
+			WHERE  id IN (SELECT id FROM candidates)
+			RETURNING id, git_repo_id, environment_id, app_name, branch, commit_sha, triggered_by, attempt
+		),
+		actor AS (
+			SELECT u.*, g.project_id, `+buildFinishedActorExpr(4)+` AS actor_id
+			FROM   updated u
+			JOIN   git_repos g ON g.id = u.git_repo_id
+		),
+		audit_ins AS (
+			INSERT INTO audit_events (actor_id, project_id, environment_id, action, resource_kind, resource_name, outcome, metadata)
+			SELECT actor_id, project_id, environment_id, '`+buildAutoRetryAuditAction+`', '`+buildFinishedAuditKind+`', app_name, 'success',
+			       jsonb_strip_nulls(jsonb_build_object(
+			           'build_id', id, 'status', 'queued', 'previous_fail_reason', 'platform_error',
+			           'attempt', attempt, 'branch', branch, 'commit_sha', commit_sha
+			       ))
+			FROM   actor
+			RETURNING 1
+		)
+		SELECT id FROM updated
+	`, minAge.Seconds(), maxAge.Seconds(), maxAttempts, SystemUserID)
+	if err != nil {
+		return nil, fmt.Errorf("retry platform-failed builds: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan retried build: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // FinishSuccess pins the immutable image URI and stamps finished_at as part of
 // the pushing→success transition, writing the BuildFinished/success audit row
 // in the same statement (see MarkFailedWithReason for why it must be the same

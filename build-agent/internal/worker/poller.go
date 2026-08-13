@@ -36,6 +36,7 @@ func (p *Poller) Start(ctx context.Context) {
 			return
 		case <-ticker.C:
 			p.runner.ReapStuck(ctx)
+			p.runner.RetryPlatformFailures(ctx)
 			p.runner.DrainQueue(ctx)
 			p.runner.ReconcileDeploys(ctx)
 		}

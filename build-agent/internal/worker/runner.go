@@ -545,6 +545,32 @@ func (r *Runner) ReapStuck(ctx context.Context) {
 	}
 }
 
+// platformRetryMinAge and platformRetryMaxAge bound which platform-caused
+// failures the recovery pass picks up: old enough that a still-running outage
+// is not retried into itself, young enough that the user is plausibly still
+// waiting rather than reading history. See db.RetryPlatformFailedBuilds.
+const (
+	platformRetryMinAge = 10 * time.Minute
+	platformRetryMaxAge = 24 * time.Hour
+)
+
+// RetryPlatformFailures re-queues builds killed by the platform's own breakage
+// once it is healthy again, so a fixed outage stops leaving every affected
+// user with a red build only they can restart. Bounded by maxBuildAttempts, so
+// an outage that is still going resolves to a failed build, not a loop.
+func (r *Runner) RetryPlatformFailures(ctx context.Context) {
+	ids, err := db.RetryPlatformFailedBuilds(ctx, r.pool, platformRetryMinAge, platformRetryMaxAge, maxBuildAttempts)
+	if err != nil {
+		log.Error().Err(err).Msg("retry platform-failed builds")
+		return
+	}
+	for _, id := range ids {
+		log.Info().Str("build", id.String()).Msg("platform-failed build re-queued automatically")
+		r.emit(ctx, id, "platform failure on our side; rebuilding automatically")
+		metrics.BuildTotal.WithLabelValues("retried").Inc()
+	}
+}
+
 // DrainQueue claims and dispatches queued builds until the queue is empty or
 // concurrency is saturated.
 func (r *Runner) DrainQueue(ctx context.Context) {
