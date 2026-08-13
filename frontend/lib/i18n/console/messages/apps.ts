@@ -36,7 +36,7 @@ export const apps: Messages = {
   "apps.deploy.fromCompose.title": { ru: "Из Compose (VM)", en: "From Compose (VM)" },
   "apps.deploy.fromCompose.desc": { ru: "Для docker-compose приложений на вашей VM (App Server). Облачным приложениям не нужно — деплойте из GitHub или образа.", en: "For docker-compose apps on your own VM (App Server). Not needed for cloud apps — use GitHub or image instead." },
   "apps.deploy.fromUpload.title": { ru: "Загрузить архив", en: "Upload archive" },
-  "apps.deploy.fromUpload.desc": { ru: "Загрузить архив - задеплой zip без git.", en: "Upload an archive — deploy a zip without git." },
+  "apps.deploy.fromUpload.desc": { ru: "Без git и Dockerfile - стек определится сам.", en: "No git, no Dockerfile - we detect your stack automatically." },
   "apps.deploy.fromUpload.dropzone.label": { ru: "Перетащите архив сюда или нажмите для выбора файла", en: "Drop an archive here or click to choose a file" },
   "apps.deploy.fromUpload.dropzone.hint": { ru: "Поддерживаются .zip, .tar.gz, .tgz, до 100 МБ", en: "Supports .zip, .tar.gz, .tgz, up to 100MB" },
   "apps.deploy.fromUpload.name.placeholder": { ru: "имя приложения", en: "app name" },

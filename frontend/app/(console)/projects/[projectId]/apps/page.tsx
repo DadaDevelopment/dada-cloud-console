@@ -223,6 +223,19 @@ export default function AppsPage() {
   const modalEnv = environments.find((e) => e.id === modalEnvId);
   const modalIsVM = modalEnv?.runtime === "vm";
 
+  /**
+   * Whether this project already has an app connected to a git repo. The
+   * signal is `summary_json.source`, which the backend derives from the
+   * git_repos provider ("git" for github/gitlab, "archive" for uploads —
+   * see sourceForProvider in backend/internal/api/apps.go). repo_full_name
+   * cannot be used: an uploaded archive carries "upload/<app>" there, which
+   * would misread an upload-only project as a git one. No extra fetch — this
+   * reads the apps already loaded for the list above.
+   */
+  const hasGitDeployedApp = Object.values(appsByEnv)
+    .flat()
+    .some((app) => (app.summary_json as { source?: string }).source === "git");
+
   const existingNames = new Set((appsByEnv[modalEnvId] ?? []).map((a) => a.name.toLowerCase()));
   const trimmedName = form.name.trim();
   const nameError =
@@ -498,6 +511,7 @@ export default function AppsPage() {
         projectId={projectId}
         environments={environments}
         defaultEnvId={chooserEnvId}
+        hasGitSourceApp={hasGitDeployedApp}
         onPickImage={(envId) => openCreate(envId)}
       />
     </div>

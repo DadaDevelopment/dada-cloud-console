@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { GitBranch, Package, Boxes, UploadCloud } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { UploadDeployCard } from "@/components/deploy/upload-deploy";
 import type { Environment } from "@/lib/types";
 import { useT } from "@/lib/i18n/console/context";
+import { trackUxEvent } from "@/lib/ux-telemetry";
 
 type DeployKind = "git" | "image" | "compose" | "upload";
 
@@ -23,6 +24,7 @@ export function DeployChooser({
   projectId,
   environments,
   defaultEnvId,
+  hasGitSourceApp,
   onPickImage,
 }: {
   open: boolean;
@@ -30,19 +32,40 @@ export function DeployChooser({
   projectId: string;
   environments: Environment[];
   defaultEnvId: string;
+  /** True once the project has at least one app deployed from a connected git repo. */
+  hasGitSourceApp: boolean;
   onPickImage: (envId: string) => void;
 }) {
   const { t } = useT();
   const router = useRouter();
+  const defaultKind: DeployKind = hasGitSourceApp ? "git" : "upload";
   const [envId, setEnvId] = useState(defaultEnvId);
-  const [kind, setKind] = useState<DeployKind>("git");
+  const [kind, setKind] = useState<DeployKind>(defaultKind);
 
-  // Re-sync the selected env whenever the wizard is reopened from a different block.
+  /**
+   * Re-sync the selected env and the default source card whenever the wizard
+   * is reopened for a different block, or the project's git-source signal
+   * changed since the last time it was open (e.g. the first app just landed).
+   */
   const [seenDefault, setSeenDefault] = useState(defaultEnvId);
-  if (open && defaultEnvId !== seenDefault) {
+  const [seenHasGitSourceApp, setSeenHasGitSourceApp] = useState(hasGitSourceApp);
+  if (open && (defaultEnvId !== seenDefault || hasGitSourceApp !== seenHasGitSourceApp)) {
     setSeenDefault(defaultEnvId);
+    setSeenHasGitSourceApp(hasGitSourceApp);
     setEnvId(defaultEnvId);
+    setKind(defaultKind);
   }
+
+  const openedDefaultRef = useRef<DeployKind | null>(null);
+  useEffect(() => {
+    if (!open) {
+      openedDefaultRef.current = null;
+      return;
+    }
+    if (openedDefaultRef.current === defaultKind) return;
+    openedDefaultRef.current = defaultKind;
+    trackUxEvent("view", `apps_deploy_chooser:opened_default_${defaultKind}`);
+  }, [open, defaultKind]);
 
   function proceed() {
     onClose();
@@ -55,12 +78,14 @@ export function DeployChooser({
     }
   }
 
-  const cards: { key: DeployKind; icon: React.ReactNode; title: string; desc: string }[] = [
-    { key: "git", icon: <GitBranch className="h-5 w-5" />, title: t("apps.deploy.fromGit.title"), desc: t("apps.deploy.fromGit.desc") },
-    { key: "image", icon: <Package className="h-5 w-5" />, title: t("apps.deploy.fromImage.title"), desc: t("apps.deploy.fromImage.desc") },
-    { key: "upload", icon: <UploadCloud className="h-5 w-5" />, title: t("apps.deploy.fromUpload.title"), desc: t("apps.deploy.fromUpload.desc") },
-    { key: "compose", icon: <Boxes className="h-5 w-5" />, title: t("apps.deploy.fromCompose.title"), desc: t("apps.deploy.fromCompose.desc") },
-  ];
+  const gitCard = { key: "git" as const, icon: <GitBranch className="h-5 w-5" />, title: t("apps.deploy.fromGit.title"), desc: t("apps.deploy.fromGit.desc") };
+  const imageCard = { key: "image" as const, icon: <Package className="h-5 w-5" />, title: t("apps.deploy.fromImage.title"), desc: t("apps.deploy.fromImage.desc") };
+  const uploadCard = { key: "upload" as const, icon: <UploadCloud className="h-5 w-5" />, title: t("apps.deploy.fromUpload.title"), desc: t("apps.deploy.fromUpload.desc") };
+  const composeCard = { key: "compose" as const, icon: <Boxes className="h-5 w-5" />, title: t("apps.deploy.fromCompose.title"), desc: t("apps.deploy.fromCompose.desc") };
+
+  const cards: { key: DeployKind; icon: React.ReactNode; title: string; desc: string }[] = hasGitSourceApp
+    ? [gitCard, imageCard, uploadCard, composeCard]
+    : [uploadCard, gitCard, imageCard, composeCard];
 
   return (
     <Modal isOpen={open} onClose={onClose} title={t("apps.deploy.title")}>
