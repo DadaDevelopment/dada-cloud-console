@@ -38,11 +38,20 @@ valid one.
 
 ## Install
 
+One line, no Go and no clone needed:
+
 ```bash
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/DadaDevelopment/dada-cloud-console/main/cli/install.sh | sh
 ```
 
-Builds the binary into `~/.local/bin/ddc`. Requires Go 1.25+.
+Downloads the right `ddc` binary for your OS/arch from the [latest `cli-v*`
+release](https://github.com/DadaDevelopment/dada-cloud-console/releases),
+verifies it against the published `checksums.txt`, and installs it to
+`~/.local/bin/ddc` (override with `DDC_INSTALL_DIR`).
+
+If you already have a clone and Go 1.25+ installed, running `./install.sh`
+locally builds from source instead — the release download is tried first and
+falls back to `go build` automatically when no release binary is reachable.
 
 ## Environment overrides
 
@@ -51,6 +60,8 @@ Builds the binary into `~/.local/bin/ddc`. Requires Go 1.25+.
 | `DDC_API_BASE` | `https://console.dada-tuda.ru/api/v1` |
 | `DDC_ISSUER` | `https://id.dada-tuda.ru/realms/master` |
 | `DDC_CLIENT_ID` | `ddc-cli` |
+| `DDC_INSTALL_DIR` | `~/.local/bin` |
+| `DDC_RELEASE_TAG` | latest `cli-v*` release |
 
 ## Attribution
 
