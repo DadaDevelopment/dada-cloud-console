@@ -106,6 +106,16 @@ export const apps: Messages = {
   },
   "apps.url.reason.unknown": { ru: "Причина: {reason}", en: "Reason: {reason}" },
 
+  "apps.liveBanner.title": { ru: "Приложение развёрнуто", en: "App is live" },
+  "apps.liveBanner.desc": {
+    ru: "Адрес уже работает и открыт всем в интернете.",
+    en: "The address is live and reachable from the internet.",
+  },
+  "apps.liveBanner.open": { ru: "Открыть", en: "Open" },
+  "apps.liveBanner.copy": { ru: "Скопировать", en: "Copy" },
+  "apps.liveBanner.copied": { ru: "Скопировано", en: "Copied" },
+  "apps.liveBanner.dismiss": { ru: "Скрыть", en: "Dismiss" },
+
   "apps.modal.create.title": { ru: "Создать приложение", en: "Create Application" },
   "apps.modal.create.name.label": { ru: "Имя приложения", en: "App name" },
   "apps.modal.create.name.title": {

@@ -22,6 +22,7 @@ import { AppAlertsBanner } from "@/components/deploy/app-alerts-banner";
 import { getAppAlerts } from "@/lib/app-alerts";
 import { normalizeAppUrlStatus, appUrlReasonMessageKey } from "@/lib/app-url-status";
 import { AppNextStepCard } from "@/components/deploy/app-next-step-card";
+import { AppLiveBanner } from "@/components/deploy/app-live-banner";
 import { AppLatestBuildCard } from "@/components/deploy/app-latest-build-card";
 import { getAppNextSteps } from "@/lib/app-next-step";
 import { useT } from "@/lib/i18n/console/context";
@@ -458,6 +459,17 @@ export default function AppDetailPage() {
         envId={envId}
         appName={appName}
       />
+
+      {!isResource && (
+        <AppLiveBanner
+          projectId={projectId}
+          appName={appName}
+          url={summary.url}
+          phase={app.phase}
+          urlStatus={urlStatus}
+          urlReason={summary.url_reason}
+        />
+      )}
 
       {!isResource && (
         <AppLatestBuildCard
