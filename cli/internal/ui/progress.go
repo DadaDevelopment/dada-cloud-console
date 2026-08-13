@@ -24,6 +24,7 @@ var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 // goroutine driving the deploy; the animation runs on its own ticker.
 type Progress struct {
 	w     io.Writer
+	tty   *os.File
 	color bool
 	live  bool
 	start time.Time
@@ -44,12 +45,53 @@ type Progress struct {
 func New(w io.Writer) *Progress {
 	tty := isTerminal(w)
 	p := &Progress{w: w, color: tty, live: tty, start: time.Now()}
+	if f, ok := w.(*os.File); ok && tty {
+		p.tty = f
+	}
 	if p.live {
 		p.stop = make(chan struct{})
 		p.done = make(chan struct{})
+		fmt.Fprint(p.w, hideCursor)
 		go p.animate()
 	}
 	return p
+}
+
+// hideCursor/showCursor keep the block cursor from riding at the end of the
+// live line, where it blinks over the elapsed time on every repaint.
+const (
+	hideCursor = "\x1b[?25l"
+	showCursor = "\x1b[?25h"
+)
+
+// width returns how many columns the live line may occupy, re-read every frame
+// so a terminal resized mid-deploy keeps redrawing in place.
+func (p *Progress) width() int {
+	if p.tty == nil {
+		return fallbackWidth
+	}
+	w := terminalWidth(p.tty)
+	if w < minWidth {
+		return minWidth
+	}
+	return w
+}
+
+// truncate shortens s to at most n runes, marking the cut with an ellipsis.
+// It is only ever applied to plain text (the stage label), never to a string
+// carrying escape codes, so counting runes is counting columns.
+func truncate(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	if n == 1 {
+		return "…"
+	}
+	return string(runes[:n-1]) + "…"
 }
 
 func isTerminal(w io.Writer) bool {
@@ -130,6 +172,7 @@ func (p *Progress) Resume() {
 	p.live = true
 	p.stop = make(chan struct{})
 	p.done = make(chan struct{})
+	fmt.Fprint(p.w, hideCursor)
 	go p.animate()
 }
 
@@ -147,6 +190,7 @@ func (p *Progress) halt() {
 		close(p.stop)
 		<-p.done
 		p.live = false
+		fmt.Fprint(p.w, showCursor)
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -182,16 +226,63 @@ func (p *Progress) redraw() {
 	if !p.live || p.label == "" {
 		return
 	}
-	spin := spinnerFrames[p.frame%len(spinnerFrames)]
-	line := fmt.Sprintf("\r\x1b[2K%s %s  %s %s  %s",
-		p.paint("35;1", spin),
-		p.label,
-		bar(p.percent, p.color),
-		p.paint("90", fmt.Sprintf("%3d%%", p.percent)),
-		p.paint("90", elapsed(time.Since(p.start))),
-	)
-	fmt.Fprint(p.w, line)
+	fmt.Fprint(p.w, p.renderLine(p.width()))
 	p.drawn = true
+}
+
+// renderLine builds the live line for a terminal of the given width, escape
+// codes included and the leading carriage-return-and-clear included, so a
+// caller only has to write it.
+func (p *Progress) renderLine(width int) string {
+	spin := spinnerFrames[p.frame%len(spinnerFrames)]
+	pct := fmt.Sprintf("%3d%%", p.percent)
+	el := elapsed(time.Since(p.start))
+
+	full := "  " + bar(p.percent, p.color) + " " + p.paint("90", pct) + "  " + p.paint("90", el)
+	noBar := "  " + p.paint("90", pct) + "  " + p.paint("90", el)
+	bare := "  " + p.paint("90", pct)
+
+	available := width - 1 - spinnerCost
+	tail := bare
+	switch {
+	case available-visibleWidth(full) >= minLabel:
+		tail = full
+	case available-visibleWidth(noBar) >= minLabel:
+		tail = noBar
+	}
+
+	label := truncate(p.label, available-visibleWidth(tail))
+	return "\r\x1b[2K" + p.paint("35;1", spin) + " " + label + tail
+}
+
+// spinnerCost is the columns the spinner and the space after it always take.
+const spinnerCost = 2
+
+// minLabel is how much of the stage label must survive for a decoration to be
+// worth its columns. Below it the line drops the bar, then the elapsed time:
+// the words say what is happening, the bar only says it prettily.
+const minLabel = 8
+
+// visibleWidth counts the columns a rendered line occupies, ignoring the ANSI
+// escape sequences inside it. It exists for the tests: staying under the
+// terminal width is the whole point of labelBudget.
+func visibleWidth(s string) int {
+	n := 0
+	inEscape := false
+	for _, r := range s {
+		switch {
+		case inEscape:
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+		case r == '\x1b':
+			inEscape = true
+		case r == '\r':
+		default:
+			n++
+		}
+	}
+	return n
 }
 
 func bar(percent int, color bool) string {
