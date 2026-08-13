@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"time"
@@ -81,6 +82,16 @@ func (h *Handler) StartGitHubUserAuth(c *gin.Context) {
 	if h.cfg.GithubOAuthRedirectURI != "" {
 		u += "&redirect_uri=" + url.QueryEscape(h.cfg.GithubOAuthRedirectURI)
 	}
+
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:    projectID,
+		Action:       auditActionStartGitAppInstall,
+		ResourceKind: "git_installation",
+		ResourceName: "github",
+		Outcome:      auditOutcomePending,
+		Metadata:     map[string]any{"install_nonce": state, "provider": "github", "flow": "user_authorize"},
+	})
+
 	c.JSON(http.StatusOK, gin.H{"url": u})
 }
 
@@ -115,12 +126,12 @@ func (h *Handler) GitHubOAuthCallback(c *gin.Context) {
 		return
 	}
 
-	var projectID uuid.UUID
+	var projectID, userID uuid.UUID
 	var createdAt time.Time
 	err := h.pool.QueryRow(c.Request.Context(),
-		`DELETE FROM github_oauth_states WHERE state = $1 RETURNING project_id, created_at`,
+		`DELETE FROM github_oauth_states WHERE state = $1 RETURNING project_id, user_id, created_at`,
 		state,
-	).Scan(&projectID, &createdAt)
+	).Scan(&projectID, &userID, &createdAt)
 	if err == pgx.ErrNoRows {
 		respondError(c, http.StatusBadRequest, "invalid or expired state")
 		return
@@ -130,12 +141,16 @@ func (h *Handler) GitHubOAuthCallback(c *gin.Context) {
 		return
 	}
 	if time.Since(createdAt) > oauthStateTTL {
+		h.recordOAuthVerdict(c.Request.Context(), userID, projectID, state, auditOutcomeFailure,
+			map[string]any{"reason": "state_expired"})
 		respondError(c, http.StatusBadRequest, "invalid or expired state")
 		return
 	}
 
 	res, err := h.buildagent.ExchangeUserCode(c.Request.Context(), code)
 	if err != nil {
+		h.recordOAuthVerdict(c.Request.Context(), userID, projectID, state, auditOutcomeFailure,
+			map[string]any{"reason": "exchange_code_failed"})
 		respondError(c, http.StatusBadGateway, "failed to resolve github authorization")
 		return
 	}
@@ -151,11 +166,46 @@ func (h *Handler) GitHubOAuthCallback(c *gin.Context) {
 			               updated_at    = NOW()`,
 			projectID, inst.InstallationID, inst.AccountLogin, inst.AccountType,
 		); err != nil {
+			h.recordOAuthVerdict(c.Request.Context(), userID, projectID, state, auditOutcomeFailure,
+				map[string]any{"reason": "save_installation_failed"})
 			respondError(c, http.StatusInternalServerError, "failed to save installation")
 			return
 		}
 	}
 
+	h.recordOAuthVerdict(c.Request.Context(), userID, projectID, state, auditOutcomeSuccess,
+		map[string]any{"installations": len(res.Installations)})
+
 	c.Redirect(http.StatusFound,
 		"/projects/"+projectID.String()+"/git/import?connected=1")
+}
+
+// recordOAuthVerdict closes the flight opened by StartGitHubUserAuth.
+//
+// It is the twin of recordInstallVerdict for the user-authorization path. The
+// actor does not need recovering here: the one-time state row already carries
+// user_id, and consuming it hands the actor back in the same statement that
+// proves the state was genuine.
+//
+// A returning user whose state is unknown (never issued, or already consumed)
+// gets no verdict row, because there is no one to attribute it to. Those land
+// as an unresolved intent instead, which is the honest reading: we know a
+// flight left and cannot prove it came back.
+func (h *Handler) recordOAuthVerdict(ctx context.Context, actorID, projectID uuid.UUID, state, outcome string, meta map[string]any) {
+	if state == "" {
+		return
+	}
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	meta["install_nonce"] = state
+	meta["flow"] = "user_authorize"
+	h.recordAudit(ctx, actorID, auditEntry{
+		ProjectID:    projectID,
+		Action:       auditActionFinishGitAppInstall,
+		ResourceKind: "git_installation",
+		ResourceName: "github",
+		Outcome:      outcome,
+		Metadata:     meta,
+	})
 }

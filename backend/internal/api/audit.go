@@ -40,6 +40,22 @@ const (
 	auditActionSetAIRouting   = "SetAIRoutingMode"
 )
 
+// The two halves of the GitHub App install flight. The user leaves our origin
+// for github.com between them, so this is the one step of the connect path we
+// cannot observe from a single request: the intent row is written when the
+// install URL is handed out, the verdict row when GitHub redirects back.
+//
+// They exist because the step was previously silent in both directions. A user
+// who clicked "Connect GitHub" and never returned produced no row at all, which
+// made "left for GitHub and did not come back" indistinguishable from "never
+// got that far" -- and the drop is the largest measured leak on the path from
+// signup to a live app. Start-minus-Finish over a window IS the mortality of
+// the flight; the verdict's metadata.reason says which way it died.
+const (
+	auditActionStartGitAppInstall  = "StartGitAppInstall"
+	auditActionFinishGitAppInstall = "FinishGitAppInstall"
+)
+
 const (
 	auditOutcomeSuccess = "success"
 	auditOutcomeFailure = "failure"

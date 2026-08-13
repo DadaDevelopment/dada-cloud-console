@@ -242,9 +242,19 @@ func (h *Handler) GetGitInstallURL(c *gin.Context) {
 	// App's Setup URL (our /api/v1/git/install/callback) with installation_id +
 	// this state. The state is HMAC-signed so the callback can trust the project
 	// binding without a server-side nonce table.
-	state := signInstallState(secret, projectID)
+	state, nonce := signInstallState(secret, projectID)
 	u := "https://github.com/apps/" + url.PathEscape(h.cfg.GitAppSlug) +
 		"/installations/new?state=" + url.QueryEscape(state)
+
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:    projectID,
+		Action:       auditActionStartGitAppInstall,
+		ResourceKind: "git_installation",
+		ResourceName: provider,
+		Outcome:      auditOutcomePending,
+		Metadata:     map[string]any{"install_nonce": nonce, "provider": provider},
+	})
+
 	c.JSON(http.StatusOK, gin.H{"url": u})
 }
 
@@ -259,33 +269,41 @@ func (h *Handler) stateSecret() string {
 }
 
 // signInstallState returns "<projectID>.<nonce>.<hmacHex>" binding the install
-// callback to a project. The nonce defeats replay/guessing; the HMAC defeats
-// forgery (only the server can mint a state for an arbitrary project).
-func signInstallState(secret string, projectID uuid.UUID) string {
-	payload := projectID.String() + "." + randomHex(16)
+// callback to a project, plus the nonce on its own. The nonce defeats
+// replay/guessing; the HMAC defeats forgery (only the server can mint a state
+// for an arbitrary project).
+//
+// The nonce is returned because it is also the correlation key between the two
+// halves of the OAuth flight: the intent row written here and the verdict row
+// written by the callback. Without it the flight is unobservable -- "went to
+// GitHub and never came back" and "never reached GitHub" look identical.
+func signInstallState(secret string, projectID uuid.UUID) (string, string) {
+	nonce := randomHex(16)
+	payload := projectID.String() + "." + nonce
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(payload))
-	return payload + "." + hex.EncodeToString(mac.Sum(nil))
+	return payload + "." + hex.EncodeToString(mac.Sum(nil)), nonce
 }
 
-// verifyInstallState validates a signed state and returns the bound project id.
-func verifyInstallState(secret, state string) (uuid.UUID, bool) {
+// verifyInstallState validates a signed state and returns the bound project id
+// together with the nonce that correlates the callback back to its intent row.
+func verifyInstallState(secret, state string) (uuid.UUID, string, bool) {
 	parts := strings.Split(state, ".")
 	if len(parts) != 3 {
-		return uuid.Nil, false
+		return uuid.Nil, "", false
 	}
 	payload := parts[0] + "." + parts[1]
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(payload))
 	want := hex.EncodeToString(mac.Sum(nil))
 	if !hmac.Equal([]byte(want), []byte(parts[2])) {
-		return uuid.Nil, false
+		return uuid.Nil, "", false
 	}
 	pid, err := uuid.Parse(parts[0])
 	if err != nil {
-		return uuid.Nil, false
+		return uuid.Nil, "", false
 	}
-	return pid, true
+	return pid, parts[1], true
 }
 
 // GitInstallCallback is the public GitHub App Setup URL. After a user installs
@@ -317,7 +335,7 @@ func (h *Handler) GitInstallCallback(c *gin.Context) {
 	}
 
 	state := c.Query("state")
-	projectID, ok := verifyInstallState(secret, state)
+	projectID, nonce, ok := verifyInstallState(secret, state)
 	if !ok {
 		respondError(c, http.StatusBadRequest, "invalid install state")
 		return
@@ -326,6 +344,8 @@ func (h *Handler) GitInstallCallback(c *gin.Context) {
 	installIDStr := c.Query("installation_id")
 	installID, err := strconv.ParseInt(installIDStr, 10, 64)
 	if err != nil {
+		h.recordInstallVerdict(c.Request.Context(), projectID, nonce, auditOutcomeFailure,
+			map[string]any{"reason": "missing_installation_id"})
 		respondError(c, http.StatusBadRequest, "missing installation_id")
 		return
 	}
@@ -333,6 +353,8 @@ func (h *Handler) GitInstallCallback(c *gin.Context) {
 	// Resolve the org/user behind the installation (build-agent has the App key).
 	acct, err := h.buildagent.GetInstallationAccount(c.Request.Context(), installID)
 	if err != nil {
+		h.recordInstallVerdict(c.Request.Context(), projectID, nonce, auditOutcomeFailure,
+			map[string]any{"reason": "resolve_installation_failed", "installation_id": installIDStr})
 		respondError(c, http.StatusBadGateway, "failed to resolve installation")
 		return
 	}
@@ -350,14 +372,57 @@ func (h *Handler) GitInstallCallback(c *gin.Context) {
 		projectID, installID, acct.AccountLogin, acct.AccountType,
 	)
 	if err != nil {
+		h.recordInstallVerdict(c.Request.Context(), projectID, nonce, auditOutcomeFailure,
+			map[string]any{"reason": "save_installation_failed", "installation_id": installIDStr})
 		respondError(c, http.StatusInternalServerError, "failed to save installation")
 		return
 	}
+
+	h.recordInstallVerdict(c.Request.Context(), projectID, nonce, auditOutcomeSuccess,
+		map[string]any{"installation_id": installIDStr, "account_login": acct.AccountLogin})
 
 	// Relative redirect → same host as the console (backend is served behind the
 	// console domain), no extra config needed.
 	c.Redirect(http.StatusFound,
 		"/projects/"+projectID.String()+"/git/import?connected=1")
+}
+
+// recordInstallVerdict closes the OAuth flight opened by GetGitInstallURL.
+//
+// The callback is an anonymous browser redirect: GitHub sends no bearer, so the
+// actor is unknown at this point and recordAudit would drop the row for having
+// no one to name. The actor is recovered from the intent row through the nonce
+// carried in the signed state, which is why the nonce exists as a correlation
+// key at all. No intent row (an install started before this instrumentation
+// shipped, or a forged-but-valid replay) means no verdict row: a verdict that
+// cannot name who acted is worse than none.
+func (h *Handler) recordInstallVerdict(ctx context.Context, projectID uuid.UUID, nonce, outcome string, meta map[string]any) {
+	if h.pool == nil || nonce == "" {
+		return
+	}
+	var actorID uuid.UUID
+	err := h.pool.QueryRow(ctx,
+		`SELECT actor_id FROM audit_events
+		  WHERE action = $1 AND metadata->>'install_nonce' = $2
+		  ORDER BY created_at DESC LIMIT 1`,
+		auditActionStartGitAppInstall, nonce,
+	).Scan(&actorID)
+	if err != nil {
+		log.Warn().Err(err).Str("nonce", nonce).Msg("git install verdict: no intent row to attribute")
+		return
+	}
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	meta["install_nonce"] = nonce
+	h.recordAudit(ctx, actorID, auditEntry{
+		ProjectID:    projectID,
+		Action:       auditActionFinishGitAppInstall,
+		ResourceKind: "git_installation",
+		ResourceName: "github",
+		Outcome:      outcome,
+		Metadata:     meta,
+	})
 }
 
 // availableInstallation is one App installation the wizard can bind to a project.
