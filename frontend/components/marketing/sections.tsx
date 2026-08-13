@@ -227,6 +227,34 @@ export function RelatedLinks({ links }: { links: { label: string; href: string }
   );
 }
 
+export function PayNote({
+  title,
+  body,
+  linkLabel,
+  linkHref,
+}: {
+  title: string;
+  body: string;
+  linkLabel: string;
+  linkHref: string;
+}) {
+  const { locale } = useLang();
+  return (
+    <section className="border-t border-slate-200 bg-slate-50 py-12">
+      <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
+        <h2 className="text-xl font-bold tracking-tight text-slate-900">{title}</h2>
+        <p className="mt-3 text-base leading-relaxed text-slate-600">{body}</p>
+        <Link
+          href={localeHref(linkHref, locale)}
+          className="mt-4 inline-block text-sm font-semibold text-blue-600 transition-colors hover:text-blue-700"
+        >
+          {linkLabel} &rarr;
+        </Link>
+      </div>
+    </section>
+  );
+}
+
 export function PillList({ items }: { items: string[] }) {
   return (
     <div className="flex flex-wrap justify-center gap-3">

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useLang } from "@/lib/i18n/context";
-import { ProductHero, FeatureGrid, FaqList, CtaBand } from "@/components/marketing/sections";
+import { ProductHero, FeatureGrid, FaqList, CtaBand, PayNote } from "@/components/marketing/sections";
 import { FaqJsonLd } from "@/components/marketing/faq-jsonld";
 import { HowToJsonLd } from "@/components/marketing/howto-jsonld";
 
@@ -24,6 +24,14 @@ export default function VercelAlternativePage() {
         />
       )}
       <ProductHero title={g.heroTitle} subtitle={g.heroSubtitle} />
+      {g.payNote && (
+        <PayNote
+          title={g.payNote.title}
+          body={g.payNote.body}
+          linkLabel={g.payNote.linkLabel}
+          linkHref={g.payNote.linkHref}
+        />
+      )}
       <FeatureGrid title={g.featuresTitle} features={g.features} />
 
       {g.howtoSteps && g.howtoSteps.length > 0 && (

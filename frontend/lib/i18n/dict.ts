@@ -26,6 +26,7 @@ type AltPage = {
   notPortableTitle?: string;
   notPortableSubtitle?: string;
   notPortable?: Feature[];
+  payNote?: { title: string; body: string; linkLabel: string; linkHref: string };
 };
 type Plan = {
   key: string;
@@ -439,6 +440,12 @@ const ru: Dict = {
     heroTitle: "Аналог Vercel, который работает в России",
     heroSubtitle:
       "Vercel удобен, но у части российских провайдеров сайты на его адресах перестают открываться без VPN, оплатить тариф российской картой нельзя, а данные лежат за рубежом. Dada Cloud закрывает ровно этот сценарий: подключаете GitHub-репозиторий, пуш — и через минуты живой HTTPS-адрес, который открывается в России напрямую. Без VPN, оплата рублями, серверы в РФ.",
+    payNote: {
+      title: "Пришли за «как оплатить Vercel из России»?",
+      body: "Российская карта у Vercel не проходит, «Мир» не поддерживается, а виртуальные карты и посредники ломаются в момент автосписания. Полный разбор всех оставшихся способов оплаты, их рисков и порядка действий, если платёж не проходит прямо сейчас, — на отдельной странице.",
+      linkLabel: "Как оплатить Vercel из России — разбор способов",
+      linkHref: "/oplatit-vercel-iz-rossii",
+    },
     featuresTitle: "Почему на Dada Cloud переходят с Vercel и Railway",
     features: [
       { title: "Сайт открывается в России без VPN", desc: "Часть российских провайдеров режет диапазоны адресов Vercel — сайт на своём домене периодически недоступен без VPN. На Dada Cloud приложение отдаётся с серверов в РФ и открывается напрямую, вам и вашим пользователям VPN не нужен." },
@@ -796,6 +803,12 @@ const ru: Dict = {
     heroTitle: "Аналог Railway, который работает в России",
     heroSubtitle:
       "Railway удобен, но для оплаты нужна зарубежная карта, а данные лежат за границей. Dada Cloud повторяет тот же опыт: подключаете GitHub-репозиторий, пуш — и через минуты живой HTTPS-адрес с базой рядом. Оплата рублями, серверы в России, без VPN.",
+    payNote: {
+      title: "Пришли за «как оплатить Railway из России»?",
+      body: "Railway списывает usage-billing с карты зарубежного банка: российская карта и «Мир» отклоняются на стороне платёжного провайдера, а виртуальная карта посредника перестаёт проходить в момент очередного автосписания — то есть тогда, когда проект уже в проде. Закрывающих документов для российского юрлица в этой схеме нет. Ниже — что переносится один в один и во что обойдётся тот же деплой в рублях.",
+      linkLabel: "Тарифы в рублях",
+      linkHref: "/pricing",
+    },
     featuresTitle: "Почему переходят с Railway на Dada Cloud",
     features: [
       { title: "Оплата рублёвой картой", desc: "Российская карта, счёт и закрывающие документы. Не нужны зарубежная карта, посредники и обходные схемы оплаты по usage-billing." },
@@ -814,6 +827,7 @@ const ru: Dict = {
       { q: "Есть ли база данных, как плагин Postgres в Railway?", a: "Да. Управляемый PostgreSQL создаётся рядом с приложением, DATABASE_URL прокидывается в сервис автоматически — отдельный внешний провайдер не нужен." },
       { q: "Чем цена отличается от usage-billing Railway?", a: "Тарифы фиксированы в рублях, а не считаются по usage в долларах — расходы предсказуемы и не зависят от курса валют." },
       { q: "Есть ли аналог кнопки Deploy on Railway для README?", a: "Да, кнопка «Deploy on Dada». Вставляете бейдж в README публичного репозитория, и любой читатель по клику разворачивает проект в своём аккаунте — без терминала, форка и установки GitHub-приложения. Снимок кода берётся на момент клика, автодеплой при этом не включается." },
+      { q: "Как оплатить Railway из России?", a: "Официально — никак: Railway списывает usage-billing картой зарубежного банка, российские карты отклоняет платёжный провайдер по BIN-коду, а «Мир» не поддерживается вовсе. Остаются два обходных пути. Карта банка Казахстана, Армении, Грузии или Киргизии обычно проходит, но платёж уходит с российского IP, и расхождение страны карты и подключения — типовой повод для проверки аккаунта. Виртуальные карты посредников берут 5-15% сверху и умирают непредсказуемо: отказ приходит в момент автосписания, когда проект уже в проде. Закрывающих документов для российского юрлица не даёт ни один из способов — расход по подписке Railway бухгалтерия не проведёт. Если нужен результат, а не именно Railway, российский аналог снимает вопрос: рублёвая карта напрямую, счёт и закрывающие документы." },
     ],
     howtoTitle: "Как переехать с Railway на Dada Cloud",
     howtoSubtitle: "Код переписывать не нужно — переносится конфигурация деплоя, шесть шагов.",
@@ -2078,6 +2092,12 @@ const en: Dict = {
     heroTitle: "A Vercel alternative that works in Russia",
     heroSubtitle:
       "Vercel and Railway are convenient, but you can't pay for them with a Russian card or keep data inside Russia. Dada Cloud covers exactly that: connect a GitHub repo, push, and get a live HTTPS URL in minutes. No VPN, ruble payments, servers in Russia.",
+    payNote: {
+      title: "Here for \"how to pay for Vercel from Russia\"?",
+      body: "A Russian card is declined by Vercel, Mir is not supported at all, and virtual cards or intermediaries break exactly when the automatic charge lands. The full breakdown of every payment route still open, the risks of each, and what to do if the charge is failing right now lives on a separate page.",
+      linkLabel: "Paying for Vercel from Russia — every route reviewed",
+      linkHref: "/oplatit-vercel-iz-rossii",
+    },
     featuresTitle: "Why teams move from Vercel and Railway",
     features: [
       { title: "Pay with a Russian card", desc: "A Russian card, an invoice and closing documents. No foreign card, intermediaries or workarounds to pay for the subscription." },
@@ -2383,6 +2403,12 @@ const en: Dict = {
     heroTitle: "A Railway alternative that works in Russia",
     heroSubtitle:
       "Railway is convenient, but paying for it needs a foreign card and data sits abroad. Dada Cloud reproduces the same experience: connect a GitHub repo, push, and get a live HTTPS URL with a database alongside in minutes. Ruble payments, servers in Russia, no VPN.",
+    payNote: {
+      title: "Looking for how to pay for Railway from Russia?",
+      body: "Railway charges usage-billing to a foreign bank card: Russian cards and Mir are declined by the payment provider, and an intermediary's virtual card stops working exactly when the next automatic charge lands — with the project already in production. Neither route produces closing documents for a Russian legal entity. Below is what ports over one to one, and what the same deploy costs in rubles.",
+      linkLabel: "Pricing in rubles",
+      linkHref: "/pricing",
+    },
     featuresTitle: "Why teams move from Railway to Dada Cloud",
     features: [
       { title: "Pay with a Russian card", desc: "A Russian card, an invoice and closing documents. No foreign card, intermediaries or usage-billing workarounds." },
@@ -2401,6 +2427,7 @@ const en: Dict = {
       { q: "Is there a database, like the Railway Postgres plugin?", a: "Yes. Managed PostgreSQL is created next to the app and DATABASE_URL is injected automatically — no separate external provider needed." },
       { q: "How is pricing different from Railway's usage-billing?", a: "Plans are fixed in rubles rather than metered in dollars — costs are predictable and independent of the exchange rate." },
       { q: "Is there an equivalent of the Deploy on Railway button?", a: "Yes, the \"Deploy on Dada\" button. Drop the badge into a public repo's README and any reader can deploy the project into their own account in one click — no terminal, no fork, no GitHub App install. The deploy is a snapshot of the code at click time; auto-deploy stays off." },
+      { q: "How do you pay for Railway from Russia?", a: "Officially you can't: Railway charges usage-billing to a foreign bank card, the payment provider declines Russian cards by their BIN, and Mir is not supported at all. Two workarounds remain. A card from a bank in Kazakhstan, Armenia, Georgia or Kyrgyzstan usually goes through, but the payment still leaves from a Russian IP, and a mismatch between card country and connection country is a standard trigger for an account review. Intermediaries' virtual cards add 5-15% and die unpredictably: the decline arrives at the moment of an automatic charge, with the project already in production. Neither route yields closing documents for a Russian legal entity — accounting cannot book a Railway subscription. If the result matters more than Railway specifically, a Russian alternative removes the question: a Russian card directly, plus an invoice and closing documents." },
     ],
     howtoTitle: "How to move from Railway to Dada Cloud",
     howtoSubtitle: "No need to rewrite code — you're moving deploy configuration, six steps.",
