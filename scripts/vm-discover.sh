@@ -61,13 +61,17 @@ rsh 'docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"'
   | tee "$OUT/containers.txt"
 
 # names of running containers
-mapfile -t NAMES < <(rsh 'docker ps --format "{{.Names}}"')
+NAMES=()
+while IFS= read -r _name; do
+  [ -n "$_name" ] && NAMES+=("$_name")
+done < <(rsh 'docker ps --format "{{.Names}}"')
 if [ "${#NAMES[@]}" -eq 0 ]; then
   echo "[discover] no running containers found" >&2
 fi
 
 # ── per-container inspect (the record) ───────────────────────────────────────
-declare -A VOL_SEEN
+VOLFILE="$OUT/.volumes.tsv"
+: > "$VOLFILE"
 : > "$OUT/REPORT.md"
 {
   echo "# VM discovery report — $TARGET"
@@ -100,7 +104,7 @@ for n in "${NAMES[@]}"; do
     [ -z "$mtype" ] && continue
     if [ "$mtype" = "volume" ]; then
       echo "  - volume **$mname** → \`$mdst\` (rw=$mrw)" >> "$OUT/REPORT.md"
-      VOL_SEEN["$mname"]="$mdst"
+      printf '%s\t%s\n' "$mname" "$mdst" >> "$VOLFILE"
     else
       echo "  - bind \`$msrc\` → \`$mdst\` (rw=$mrw)" >> "$OUT/REPORT.md"
     fi
@@ -109,9 +113,11 @@ for n in "${NAMES[@]}"; do
 done
 
 # ── volumes.json for every referenced named volume ───────────────────────────
-if [ "${#VOL_SEEN[@]}" -gt 0 ]; then
+awk -F'\t' '!seen[$1]++' "$VOLFILE" > "$VOLFILE.uniq" && mv "$VOLFILE.uniq" "$VOLFILE"
+VOL_NAMES="$(cut -f1 "$VOLFILE" | tr '\n' ' ')"
+if [ -n "${VOL_NAMES// /}" ]; then
   # shellcheck disable=SC2086
-  rsh "docker volume inspect ${!VOL_SEEN[*]}" > "$OUT/volumes.json" || true
+  rsh "docker volume inspect $VOL_NAMES" > "$OUT/volumes.json" || true
 fi
 
 # ── networks ─────────────────────────────────────────────────────────────────
@@ -127,18 +133,20 @@ rsh 'docker network ls' > "$OUT/networks.txt"
   echo "# Paste under the gitops compose.yaml top-level 'volumes:' key. Each"
   echo "# named volume is pinned external so 'docker compose up' attaches the"
   echo "# EXISTING prod data instead of creating an empty one. DO NOT rename."
-  if [ "${#VOL_SEEN[@]}" -eq 0 ]; then
+  if [ ! -s "$VOLFILE" ]; then
     echo "# (no named volumes found — check for bind mounts in REPORT.md and"
     echo "#  mirror their host paths verbatim in the service instead.)"
   else
     echo "volumes:"
-    for v in "${!VOL_SEEN[@]}"; do
+    while IFS="$(printf '\t')" read -r v dst; do
+      [ -z "$v" ] && continue
       echo "  ${v}:"
       echo "    external: true"
-      echo "    name: ${v}          # mounted at ${VOL_SEEN[$v]} in prod"
-    done
+      echo "    name: ${v}          # mounted at ${dst} in prod"
+    done < "$VOLFILE"
   fi
 } > "$OUT/volumes.compose.yaml"
+rm -f "$VOLFILE"
 
 echo
 echo "[discover] done. Artifacts in $OUT/"
