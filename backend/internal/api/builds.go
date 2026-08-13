@@ -15,9 +15,14 @@ import (
 // collapsed via sourceForProvider ("git" or "archive"); it is populated by
 // the list/get/trigger/upload endpoints, which know the owning git_repos
 // row, and omitted elsewhere.
+//
+// GitRepoID is nullable: migration 116 detaches a build from its source row
+// instead of deleting the build when the repo connection goes away, so a
+// build that outlived its source keeps everything the user needs to read it
+// (app, branch, commit, status, failure reason) and reports no source.
 type build struct {
 	ID            uuid.UUID  `json:"id"`
-	GitRepoID     uuid.UUID  `json:"git_repo_id"`
+	GitRepoID     *uuid.UUID `json:"git_repo_id"`
 	EnvironmentID uuid.UUID  `json:"environment_id"`
 	AppName       string     `json:"app_name"`
 	Status        string     `json:"status"`
@@ -63,13 +68,15 @@ func scanBuild(s interface {
 func scanBuildWithSource(s interface {
 	Scan(dest ...any) error
 }, b *build) error {
-	var provider string
+	var provider *string
 	if err := s.Scan(&b.ID, &b.GitRepoID, &b.EnvironmentID, &b.AppName, &b.Status, &b.Trigger,
 		&b.CommitSHA, &b.CommitMessage, &b.HeadSHA, &b.Branch, &b.ImageURI, &b.LogsRef, &b.PRNumber,
 		&b.StartedAt, &b.FinishedAt, &b.CreatedAt, &b.UpdatedAt, &b.ErrorMessage, &b.FailReason, &provider); err != nil {
 		return err
 	}
-	b.Source = sourceForProvider(provider)
+	if provider != nil {
+		b.Source = sourceForProvider(*provider)
+	}
 	return nil
 }
 
@@ -127,7 +134,7 @@ func (h *Handler) ListBuilds(c *gin.Context) {
 	rows, err := h.pool.Query(c.Request.Context(),
 		`SELECT `+buildSelectColsWithSource+`
 		 FROM builds b
-		 JOIN git_repos gr ON gr.id = b.git_repo_id
+		 LEFT JOIN git_repos gr ON gr.id = b.git_repo_id
 		 WHERE b.environment_id = $1 AND b.app_name = $2
 		 ORDER BY b.created_at DESC`,
 		envID, appName,
@@ -161,9 +168,9 @@ func (h *Handler) loadProjectBuild(c *gin.Context, projectID, buildID uuid.UUID,
 	row := h.pool.QueryRow(c.Request.Context(),
 		`SELECT `+buildSelectColsWithSource+`
 		 FROM builds b
-		 JOIN git_repos gr ON gr.id = b.git_repo_id
-		 WHERE b.id = $1
-		   AND b.git_repo_id IN (SELECT id FROM git_repos WHERE project_id = $2)`,
+		 LEFT JOIN git_repos gr ON gr.id = b.git_repo_id
+		 JOIN environments e ON e.id = b.environment_id
+		 WHERE b.id = $1 AND e.project_id = $2`,
 		buildID, projectID,
 	)
 	return scanBuildWithSource(row, b)

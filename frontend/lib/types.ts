@@ -1468,7 +1468,8 @@ export interface FrameworkDetection {
 
 export interface Build {
   id: string;
-  git_repo_id: string;
+  /** Null once the source row is gone: a build outlives the repo connection it came from (backend migration 116), and its own fields still describe it. */
+  git_repo_id: string | null;
   environment_id: string;
   app_name: string;
   status: BuildStatus;
