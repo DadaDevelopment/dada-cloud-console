@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -26,6 +27,64 @@ type querier interface {
 }
 
 var _ querier = (*pgxpool.Pool)(nil)
+
+// SignupAttribution carries the first-touch acquisition channel a visitor
+// arrived through, read from the four dada_src/dada_med/dada_cmp/dada_ref
+// cookies the marketing site sets on first page load. It rides the same
+// INSERT statement as the users row it describes (see upsertBySub below),
+// following the same house rule that produced the SignUp audit row: a
+// caller-side follow-up write can silently miss a caller, so the value must
+// be born with the row instead. The ON CONFLICT branch of upsertBySub never
+// touches these columns, so a returning identity keeps whichever channel
+// brought it in the first time, never whatever it is carrying on a later
+// visit.
+type SignupAttribution struct {
+	Source   string
+	Medium   string
+	Campaign string
+	Referrer string
+}
+
+// sanitizeSignupAttribution trims whitespace, drops non-printable runes, and
+// caps each field to the width of the column it will be written into (64
+// runes for source/medium/campaign, 255 for the raw referrer URL). It never
+// fails: a malformed or oversized attribution cookie is cleaned up rather
+// than rejected, because a bad cookie value must never block a signup.
+func sanitizeSignupAttribution(a SignupAttribution) SignupAttribution {
+	return SignupAttribution{
+		Source:   cleanAttributionField(a.Source, 64),
+		Medium:   cleanAttributionField(a.Medium, 64),
+		Campaign: cleanAttributionField(a.Campaign, 64),
+		Referrer: cleanAttributionField(a.Referrer, 255),
+	}
+}
+
+// cleanAttributionField strips non-printable runes, trims surrounding
+// whitespace, and truncates the result to maxLen runes.
+func cleanAttributionField(s string, maxLen int) string {
+	cleaned := strings.Map(func(r rune) rune {
+		if unicode.IsPrint(r) {
+			return r
+		}
+		return -1
+	}, s)
+	cleaned = strings.TrimSpace(cleaned)
+	runes := []rune(cleaned)
+	if len(runes) > maxLen {
+		runes = runes[:maxLen]
+	}
+	return string(runes)
+}
+
+// nullableAttr turns an empty attribution field into a SQL NULL instead of an
+// empty string, so `signup_medium IS NULL` means "nothing was ever observed"
+// rather than "an empty value was recorded".
+func nullableAttr(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
 
 // ResolveUser maps a verified Keycloak identity to a local users.id, creating or
 // updating the backing row as needed. It returns the local user id that all the
@@ -57,7 +116,12 @@ var _ querier = (*pgxpool.Pool)(nil)
 // undo. An identity that already has a row — either path — keeps resolving
 // and refreshing normally regardless of this flag; the gate only blocks birth,
 // never blocks a return visit.
-func ResolveUser(ctx context.Context, db querier, kc *KeycloakClaims, allowSignup bool) (id uuid.UUID, created bool, err error) {
+//
+// attr is the first-touch attribution for a fresh signup (see
+// SignupAttribution). It is only ever consulted on the INSERT branch of
+// upsertBySub — a returning identity ignores whatever attr the caller passes,
+// because its channel was already decided the first time it showed up.
+func ResolveUser(ctx context.Context, db querier, kc *KeycloakClaims, allowSignup bool, attr SignupAttribution) (id uuid.UUID, created bool, err error) {
 	if kc == nil || kc.Subject == "" {
 		return uuid.Nil, false, fmt.Errorf("keycloak claims missing subject")
 	}
@@ -96,8 +160,9 @@ func ResolveUser(ctx context.Context, db querier, kc *KeycloakClaims, allowSignu
 	// satisfied because foreign keys are checked after the statement completes.
 	const upsertBySub = `
 		WITH upserted AS (
-		    INSERT INTO users (keycloak_sub, username, email, display_name, password_hash)
-		    VALUES ($1, $2, $3, $4, '')
+		    INSERT INTO users (keycloak_sub, username, email, display_name, password_hash,
+		        signup_source, signup_medium, signup_campaign, signup_referrer)
+		    VALUES ($1, $2, $3, $4, '', $5, $6, $7, $8)
 		    ON CONFLICT (keycloak_sub) DO UPDATE
 		        SET email = EXCLUDED.email,
 		            display_name = EXCLUDED.display_name,
@@ -105,13 +170,23 @@ func ResolveUser(ctx context.Context, db querier, kc *KeycloakClaims, allowSignu
 		    RETURNING id, (xmax = 0) AS inserted, email
 		), signup_event AS (
 		    INSERT INTO audit_events (actor_id, action, resource_kind, resource_name, outcome, metadata)
-		    SELECT id, 'SignUp', 'User', email, 'success', jsonb_build_object('source', 'provision')
+		    SELECT id, 'SignUp', 'User', email, 'success', jsonb_build_object(
+		        'source', 'provision',
+		        'signup_source', $5::text,
+		        'signup_medium', $6::text,
+		        'signup_campaign', $7::text,
+		        'signup_referrer', $8::text
+		    )
 		    FROM upserted
 		    WHERE inserted
 		)
 		SELECT id, inserted FROM upserted`
 
-	err = db.QueryRow(ctx, upsertBySub, kc.Subject, username, email, displayName).Scan(&id, &created)
+	cleanAttr := sanitizeSignupAttribution(attr)
+	err = db.QueryRow(ctx, upsertBySub, kc.Subject, username, email, displayName,
+		nullableAttr(cleanAttr.Source), nullableAttr(cleanAttr.Medium),
+		nullableAttr(cleanAttr.Campaign), nullableAttr(cleanAttr.Referrer),
+	).Scan(&id, &created)
 	if err == nil {
 		return id, created, nil
 	}

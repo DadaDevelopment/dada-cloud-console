@@ -26,7 +26,7 @@ func TestResolveUser_ClosedSignup_UnknownIdentityLeavesNoRows(t *testing.T) {
 		Name:              "Signup Gate Unknown",
 	}
 
-	id, created, err := ResolveUser(ctx, pool, kc, false)
+	id, created, err := ResolveUser(ctx, pool, kc, false, SignupAttribution{})
 	if !errors.Is(err, ErrSignupClosed) {
 		t.Fatalf("err = %v, want ErrSignupClosed", err)
 	}
@@ -62,7 +62,7 @@ func TestResolveUser_ClosedSignup_ExistingUserStillResolves(t *testing.T) {
 	kc := throwawayClaims(t, pool)
 	ctx := context.Background()
 
-	id, created, err := ResolveUser(ctx, pool, kc, true)
+	id, created, err := ResolveUser(ctx, pool, kc, true, SignupAttribution{})
 	if err != nil || !created {
 		t.Fatalf("seed ResolveUser: id=%v created=%v err=%v", id, created, err)
 	}
@@ -70,7 +70,7 @@ func TestResolveUser_ClosedSignup_ExistingUserStillResolves(t *testing.T) {
 	kc.Email = "updated-" + kc.Email
 	kc.Name = "Updated Display Name"
 
-	gotID, createdAgain, err := ResolveUser(ctx, pool, kc, false)
+	gotID, createdAgain, err := ResolveUser(ctx, pool, kc, false, SignupAttribution{})
 	if err != nil {
 		t.Fatalf("ResolveUser under closed signup: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestResolveUser_ClosedSignup_LegacyRowLinks(t *testing.T) {
 		Name:              "Legacy Row Linked",
 	}
 
-	id, created, err := ResolveUser(ctx, pool, kc, false)
+	id, created, err := ResolveUser(ctx, pool, kc, false, SignupAttribution{})
 	if err != nil {
 		t.Fatalf("ResolveUser linking legacy row: %v", err)
 	}

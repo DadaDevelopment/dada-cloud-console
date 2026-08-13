@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -17,6 +18,31 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// signupAttributionFromCookies reads the four first-party marketing cookies
+// (dada_src, dada_med, dada_cmp, dada_ref) the frontend sets on first touch
+// and decodes them into an auth.SignupAttribution. A missing cookie is not an
+// error — Keycloak-only or cookie-less clients (API tokens, old sessions)
+// simply degrade to an empty attribution, which ResolveUser's sanitizer turns
+// into SQL NULLs. It must never block a signup on a malformed value.
+func signupAttributionFromCookies(c *gin.Context) auth.SignupAttribution {
+	read := func(name string) string {
+		raw, err := c.Cookie(name)
+		if err != nil || raw == "" {
+			return ""
+		}
+		if decoded, derr := url.QueryUnescape(raw); derr == nil {
+			return decoded
+		}
+		return raw
+	}
+	return auth.SignupAttribution{
+		Source:   read("dada_src"),
+		Medium:   read("dada_med"),
+		Campaign: read("dada_cmp"),
+		Referrer: read("dada_ref"),
+	}
+}
 
 // authMiddleware selects the request-auth middleware by cfg.AuthMode. Default
 // ("local" or unset) returns the existing HS256 GinMiddleware so behavior is
@@ -45,7 +71,7 @@ func authMiddleware(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 	signupNotifier := notify.New(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPFrom)
 
 	resolver := func(c *gin.Context, kc *auth.KeycloakClaims) (*auth.Claims, error) {
-		id, created, err := auth.ResolveUser(c.Request.Context(), pool, kc, cfg.SignupEnabled)
+		id, created, err := auth.ResolveUser(c.Request.Context(), pool, kc, cfg.SignupEnabled, signupAttributionFromCookies(c))
 		if err != nil {
 			return nil, err
 		}
@@ -125,7 +151,7 @@ func optionalAuthResolver(pool *pgxpool.Pool, cfg *config.Config) func(c *gin.Co
 		if verr != nil {
 			return nil, false
 		}
-		id, _, rerr := auth.ResolveUser(c.Request.Context(), pool, kc, cfg.SignupEnabled)
+		id, _, rerr := auth.ResolveUser(c.Request.Context(), pool, kc, cfg.SignupEnabled, signupAttributionFromCookies(c))
 		if rerr != nil {
 			return nil, false
 		}
