@@ -135,7 +135,7 @@ spec:
   # (tests + frontend build + 4 image builds + push), so it never finished.
   # 1 hour is plenty and well under any sane runaway cap.
   activeDeadlineSeconds: 3600
-  priorityClassName: critical
+  priorityClassName: ci-agent
   # Never schedule onto a node that carries a platform postgres replica. The
   # agent's docker-graph-storage + workspace are emptyDir, i.e. the NODE's disk,
   # and a build holds ~9.6 GiB of it. Twice this combination ended as a P0: the
