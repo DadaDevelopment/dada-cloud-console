@@ -426,6 +426,50 @@ func TestReattachOrphanedHostnamesRespectsCooldown(t *testing.T) {
 	}
 }
 
+// TestReattachOrphanedHostnamesSkipsCooldownForAppDeletedReason is the
+// self-heal half of the first-deploy hostname-reap fix: a row demoted to
+// status_reason=app_deleted (whether by a genuine DeleteApp or by
+// ReapOrphanedAppHostnames's own env-freshness race before it gained
+// hostnameReapCreationGrace) sits under a live App snapshot here -- this
+// query's own JOIN proves it -- so there is nothing left to protect by
+// waiting out hostnameReattachCooldown. Seeded with updatedAgo of one minute,
+// far inside the 6-hour cooldown, to prove the bypass is specific to
+// status_reason and not just a lucky cooldown expiry.
+func TestReattachOrphanedHostnamesSkipsCooldownForAppDeletedReason(t *testing.T) {
+	if os.Getenv("TEST_DATABASE_URL") == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping reattach DB integration test")
+	}
+	pool := testAdvisoryPool(t)
+	ctx := context.Background()
+
+	projectID, envID := seedReattachProjectEnv(t, pool)
+	appName := "falsely-demoted-" + uuid.NewString()[:8]
+	hostname := appName + "-ab12.dada-tuda.ru"
+	seedReattachApp(t, pool, projectID, envID, appName, `{"port":8080}`)
+	hostnameID := seedFailedHostname(t, pool, envID, appName, hostname, true, nil, 0, time.Minute)
+	if _, err := pool.Exec(ctx,
+		`UPDATE domain_hostnames SET status_reason = $2 WHERE id = $1`,
+		hostnameID, hostnameReasonAppDeleted,
+	); err != nil {
+		t.Fatalf("stamp status_reason: %v", err)
+	}
+
+	if err := ReattachOrphanedHostnames(ctx, pool, reattachTestConfig()); err != nil {
+		t.Fatalf("reattach: %v", err)
+	}
+
+	status, reattachCount, _, opID := readHostnameRow(t, pool, hostnameID)
+	if status != "pending" {
+		t.Fatalf("status = %q, want pending (app_deleted reason under a live app must bypass the cooldown)", status)
+	}
+	if reattachCount != 1 {
+		t.Fatalf("reattach_count = %d, want 1", reattachCount)
+	}
+	if opID == nil {
+		t.Fatalf("operation_id is nil, want a new AttachDefaultDomain operation")
+	}
+}
+
 // TestReattachOrphanedHostnamesUnblocksReconcileWindow is the anti-storm
 // guarantee this whole fix depends on: after a reattach resets
 // attach_started_at, ReconcilePendingHostnames must NOT immediately fail the

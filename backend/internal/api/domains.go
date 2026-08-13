@@ -1818,6 +1818,20 @@ func enqueueDefaultDomainBackfill(ctx context.Context, pool *pgxpool.Pool, proje
 // authorization or a non-verified one must not be silently re-attached, since
 // that would (re-)issue a certificate for a domain nobody has proven
 // ownership of at this moment.
+//
+// hostnameReattachCooldown is skipped entirely for a row whose
+// status_reason is hostnameReasonAppDeleted. The query's own JOIN to a live
+// App snapshot already proves the app exists right now, so such a row can
+// only be one of two things: exactly the DeleteApp-then-CreateApp-under-the-
+// same-name shape this function exists to fix, or a row ReapOrphanedAppHostnames
+// demoted on a stale read before it gained its own creation-age guard. Either
+// way the row is known-wrong the moment this query returns it, and there is
+// nothing to protect by waiting out a cooldown meant to space out repeated
+// certificate-order attempts against a row that might still be broken --
+// this one is not still broken, it never should have failed. Once re-driven
+// the row leaves 'failed' (goes to 'pending') or, on a later real failure,
+// comes back with a different status_reason, so this bypass cannot compound
+// into a retry storm against the same row.
 func ReattachOrphanedHostnames(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config) error {
 	if cfg == nil {
 		return nil
@@ -1834,9 +1848,13 @@ func ReattachOrphanedHostnames(ctx context.Context, pool *pgxpool.Pool, cfg *con
 		    AND e.runtime = $1
 		    AND rs.first_seen_at < NOW() - ($2 * INTERVAL '1 second')
 		    AND dh.reattach_count < $3
-		    AND dh.updated_at < NOW() - ($4 * INTERVAL '1 second')`,
+		    AND (
+		        dh.status_reason = $5
+		        OR dh.updated_at < NOW() - ($4 * INTERVAL '1 second')
+		    )`,
 		models.EnvironmentRuntimeK8s, defaultDomainBackfillGrace.Seconds(),
 		hostnameReattachMaxAttempts, hostnameReattachCooldown.Seconds(),
+		hostnameReasonAppDeleted,
 	)
 	if err != nil {
 		return err
@@ -1903,6 +1921,34 @@ const hostnameReapEnvFreshnessWindow = 15 * time.Minute
 // compounding a bad call.
 const hostnameReapMaxRowsPerTick = 20
 
+// hostnameReapCreationGrace bounds how young a domain_hostnames row's own
+// created_at may be for ReapOrphanedAppHostnames's env-freshness arm (the
+// heuristic one, not the committed-DeleteApp one) to treat a missing App
+// resource_snapshot as proof the app is gone. CreateApp inserts the App
+// snapshot and the domain_hostnames row from the same request handler
+// (see defaultDomainBackfillGrace), but the two writes are not atomic with
+// each other, and neither is atomic with the periodic snapshot sync that
+// refreshes OTHER apps' last_synced_at in the same environment. A row
+// created seconds ago, whose own app's snapshot has simply not landed yet,
+// was indistinguishable from a deleted app's orphaned row as long as some
+// other app in the environment was recently synced -- which, per
+// hostnameReapEnvFreshnessWindow's own reasoning, is true of most live
+// environments most of the time. Two brand-new agent-sandbox apps were
+// demoted to status_reason=app_deleted about 20 seconds after creation this
+// way, with no DeleteApp operation or audit_events row for either.
+//
+// Reuses defaultDomainBackfillGrace's window under its own name rather than
+// referencing that constant directly: this one gates a domain_hostnames
+// row's age, that one gates an App snapshot's age, and the two should stay
+// independently tunable even though they start at the same value for the
+// same underlying reason (worst-case CreateApp request latency).
+//
+// This grace does NOT gate the committed-DeleteApp arm below: that arm has
+// direct evidence of intentional deletion from the operations table,
+// unrelated to how old the domain_hostnames row is, so a genuine deletion
+// must still demote its hostname immediately.
+const hostnameReapCreationGrace = defaultDomainBackfillGrace
+
 // ReapOrphanedAppHostnames finds domain_hostnames rows bound to an
 // (environment_id, app_name) pair that no longer has a live App
 // resource_snapshot behind it, and drives those rows into the same terminal
@@ -1967,6 +2013,15 @@ const hostnameReapMaxRowsPerTick = 20
 // any CreateApp operation for the same (environment_id, resource_name) newer
 // than the DeleteApp -- a recreated app leaves that row behind and this pass
 // falls back to needing the snapshot proof.
+//
+// The env-freshness arm additionally requires the domain_hostnames row
+// itself to be older than hostnameReapCreationGrace. Without that, a row
+// CreateApp inserted seconds ago -- whose own App snapshot has simply not
+// synced yet -- reads identically to a deleted app's orphaned row as soon as
+// any OTHER app in the same environment was recently synced, which is the
+// common case, not the rare one. See hostnameReapCreationGrace for the
+// concrete incident this closes. The committed-DeleteApp arm needs no such
+// gate: it already has direct, independent evidence of deletion.
 func ReapOrphanedAppHostnames(ctx context.Context, pool *pgxpool.Pool) error {
 	_, err := pool.Exec(ctx,
 		`UPDATE domain_hostnames dh
@@ -1985,11 +2040,14 @@ func ReapOrphanedAppHostnames(ctx context.Context, pool *pgxpool.Pool) error {
 		                AND `+notOrphanedSnapshot+`
 		         )
 		         AND (
-		             EXISTS (
-		                 SELECT 1 FROM resource_snapshots rs
-		                  WHERE rs.environment_id = dh2.environment_id
-		                    AND rs.kind = 'App' AND `+notOrphanedSnapshot+`
-		                    AND rs.last_synced_at > now() - ($3 * interval '1 second')
+		             (
+		                 dh2.created_at < now() - ($6 * interval '1 second')
+		                 AND EXISTS (
+		                     SELECT 1 FROM resource_snapshots rs
+		                      WHERE rs.environment_id = dh2.environment_id
+		                        AND rs.kind = 'App' AND `+notOrphanedSnapshot+`
+		                        AND rs.last_synced_at > now() - ($3 * interval '1 second')
+		                 )
 		             )
 		             OR EXISTS (
 		                 SELECT 1 FROM operations o
@@ -2011,7 +2069,7 @@ func ReapOrphanedAppHostnames(ctx context.Context, pool *pgxpool.Pool) error {
 		  )`,
 		hostnameReasonAppDeleted, models.EnvironmentRuntimeK8s,
 		hostnameReapEnvFreshnessWindow.Seconds(), hostnameReapMaxRowsPerTick,
-		models.OperationStatusCommitted,
+		models.OperationStatusCommitted, hostnameReapCreationGrace.Seconds(),
 	)
 	return err
 }

@@ -16,8 +16,13 @@ import (
 // any resource_snapshots row -- that mismatch is exactly what the tests below
 // are probing. reattach_count starts at 2 and operation_id points at a real
 // operation row (FK-enforced) so the tests can prove ReapOrphanedAppHostnames
-// actually resets both, not merely that they started zero/nil.
-func seedOrphanHostname(t *testing.T, pool *pgxpool.Pool, projectID, envID uuid.UUID, appName, hostname, status, certStatus string, statusReason *string) uuid.UUID {
+// actually resets both, not merely that they started zero/nil. createdAgo
+// backdates created_at, which hostnameReapCreationGrace gates the
+// env-freshness arm on: pass 0 for a row meant to look just-inserted (the
+// mid-flight CreateApp race this grace exists to protect), and something past
+// hostnameReapCreationGrace for a row meant to look like a genuinely old,
+// abandoned app.
+func seedOrphanHostname(t *testing.T, pool *pgxpool.Pool, projectID, envID uuid.UUID, appName, hostname, status, certStatus string, statusReason *string, createdAgo time.Duration) uuid.UUID {
 	t.Helper()
 	ctx := context.Background()
 	userID := seedUser(t, pool)
@@ -33,10 +38,10 @@ func seedOrphanHostname(t *testing.T, pool *pgxpool.Pool, projectID, envID uuid.
 
 	var id uuid.UUID
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO domain_hostnames (environment_id, app_name, hostname, record_type, status, cert_status, status_reason, managed, reattach_count, operation_id)
-		 VALUES ($1, $2, $3, 'CNAME', $4, $5, $6, true, 2, $7)
+		`INSERT INTO domain_hostnames (environment_id, app_name, hostname, record_type, status, cert_status, status_reason, managed, reattach_count, operation_id, created_at)
+		 VALUES ($1, $2, $3, 'CNAME', $4, $5, $6, true, 2, $7, now() - $8::interval)
 		 RETURNING id`,
-		envID, appName, hostname, status, certStatus, statusReason, opID,
+		envID, appName, hostname, status, certStatus, statusReason, opID, createdAgo.String(),
 	).Scan(&id); err != nil {
 		t.Fatalf("seed orphan hostname: %v", err)
 	}
@@ -64,7 +69,7 @@ func TestReapOrphanedAppHostnamesLeavesLiveAppAlone(t *testing.T) {
 	appName := "live-" + uuid.NewString()[:8]
 	seedReattachApp(t, pool, projectID, envID, appName, `{"port":8080}`)
 
-	hostnameID := seedOrphanHostname(t, pool, projectID, envID, appName, appName+".dada-tuda.ru", "active", "active", nil)
+	hostnameID := seedOrphanHostname(t, pool, projectID, envID, appName, appName+".dada-tuda.ru", "active", "active", nil, 24*time.Hour)
 
 	if err := ReapOrphanedAppHostnames(ctx, pool); err != nil {
 		t.Fatalf("ReapOrphanedAppHostnames: %v", err)
@@ -93,7 +98,7 @@ func TestReapOrphanedAppHostnamesDemotesDeletedApp(t *testing.T) {
 	seedReattachApp(t, pool, projectID, envID, liveApp, `{"port":8080}`)
 
 	deletedApp := "gone-" + uuid.NewString()[:8]
-	hostnameID := seedOrphanHostname(t, pool, projectID, envID, deletedApp, deletedApp+".dada-tuda.ru", "active", "active", nil)
+	hostnameID := seedOrphanHostname(t, pool, projectID, envID, deletedApp, deletedApp+".dada-tuda.ru", "active", "active", nil, 24*time.Hour)
 
 	if err := ReapOrphanedAppHostnames(ctx, pool); err != nil {
 		t.Fatalf("ReapOrphanedAppHostnames: %v", err)
@@ -117,6 +122,69 @@ func TestReapOrphanedAppHostnamesDemotesDeletedApp(t *testing.T) {
 	}
 }
 
+// TestReapOrphanedAppHostnamesSkipsFreshlyCreatedRowInBusyEnvironment is the
+// red-then-green regression for the first-deploy incident: two agent-sandbox
+// apps were demoted to app_deleted about 20 seconds after CreateApp, with no
+// DeleteApp operation for either. The reap pass's env-freshness arm only ever
+// checked that SOME OTHER app in the environment had a fresh snapshot; it
+// never checked the domain_hostnames row's own age, so a brand-new row whose
+// own App snapshot had simply not synced yet was indistinguishable from a
+// truly orphaned one the instant a busy environment's other apps looked
+// healthy. Before hostnameReapCreationGrace this test demoted the row
+// (red); it must now stay untouched inside the grace window (green).
+func TestReapOrphanedAppHostnamesSkipsFreshlyCreatedRowInBusyEnvironment(t *testing.T) {
+	pool := testAdvisoryPool(t)
+	ctx := context.Background()
+
+	projectID, envID := seedReattachProjectEnv(t, pool)
+	busyApp := "busy-" + uuid.NewString()[:8]
+	seedReattachApp(t, pool, projectID, envID, busyApp, `{"port":8080}`)
+
+	newApp := "newborn-" + uuid.NewString()[:8]
+	hostnameID := seedOrphanHostname(t, pool, projectID, envID, newApp, newApp+".dada-tuda.ru", "pending", "pending", nil, 0)
+
+	if err := ReapOrphanedAppHostnames(ctx, pool); err != nil {
+		t.Fatalf("ReapOrphanedAppHostnames: %v", err)
+	}
+
+	status, _, reason, _, _, _ := readReapedHostnameRow(t, pool, hostnameID)
+	if status != "pending" {
+		t.Fatalf("status = %q, want unchanged pending (fresh row is mid-flight, not orphaned)", status)
+	}
+	if reason != nil {
+		t.Fatalf("status_reason = %v, want nil (untouched)", *reason)
+	}
+}
+
+// TestReapOrphanedAppHostnamesDemotesOldRowInBusyEnvironmentAfterGrace pins
+// that hostnameReapCreationGrace is a grace window, not a permanent
+// exemption: once the same shape of row (no App snapshot of its own, a
+// sibling app fresh in the environment) ages past the grace window, it is
+// exactly the pre-existing orphaned-row case and must still be demoted.
+func TestReapOrphanedAppHostnamesDemotesOldRowInBusyEnvironmentAfterGrace(t *testing.T) {
+	pool := testAdvisoryPool(t)
+	ctx := context.Background()
+
+	projectID, envID := seedReattachProjectEnv(t, pool)
+	busyApp := "busy-" + uuid.NewString()[:8]
+	seedReattachApp(t, pool, projectID, envID, busyApp, `{"port":8080}`)
+
+	oldOrphan := "aged-gone-" + uuid.NewString()[:8]
+	hostnameID := seedOrphanHostname(t, pool, projectID, envID, oldOrphan, oldOrphan+".dada-tuda.ru", "active", "active", nil, hostnameReapCreationGrace+time.Minute)
+
+	if err := ReapOrphanedAppHostnames(ctx, pool); err != nil {
+		t.Fatalf("ReapOrphanedAppHostnames: %v", err)
+	}
+
+	status, _, reason, _, _, _ := readReapedHostnameRow(t, pool, hostnameID)
+	if status != "failed" {
+		t.Fatalf("status = %q, want failed (row aged past the grace window is a genuine orphan)", status)
+	}
+	if reason == nil || *reason != hostnameReasonAppDeleted {
+		t.Fatalf("status_reason = %v, want %q", reason, hostnameReasonAppDeleted)
+	}
+}
+
 // TestReapOrphanedAppHostnamesIsIdempotent runs the pass twice over the same
 // already-demoted row and requires the second run to change nothing --
 // specifically that updated_at does not advance again, which is what proves
@@ -131,7 +199,7 @@ func TestReapOrphanedAppHostnamesIsIdempotent(t *testing.T) {
 	seedReattachApp(t, pool, projectID, envID, liveApp, `{"port":8080}`)
 
 	deletedApp := "gone-" + uuid.NewString()[:8]
-	hostnameID := seedOrphanHostname(t, pool, projectID, envID, deletedApp, deletedApp+".dada-tuda.ru", "pending", "pending", nil)
+	hostnameID := seedOrphanHostname(t, pool, projectID, envID, deletedApp, deletedApp+".dada-tuda.ru", "pending", "pending", nil, 24*time.Hour)
 
 	if err := ReapOrphanedAppHostnames(ctx, pool); err != nil {
 		t.Fatalf("ReapOrphanedAppHostnames (first run): %v", err)
@@ -169,7 +237,7 @@ func TestReapOrphanedAppHostnamesSkipsBlindEnvironment(t *testing.T) {
 
 	projectID, envID := seedReattachProjectEnv(t, pool)
 	deletedApp := "gone-" + uuid.NewString()[:8]
-	hostnameID := seedOrphanHostname(t, pool, projectID, envID, deletedApp, deletedApp+".dada-tuda.ru", "active", "active", nil)
+	hostnameID := seedOrphanHostname(t, pool, projectID, envID, deletedApp, deletedApp+".dada-tuda.ru", "active", "active", nil, 24*time.Hour)
 
 	if err := ReapOrphanedAppHostnames(ctx, pool); err != nil {
 		t.Fatalf("ReapOrphanedAppHostnames: %v", err)
@@ -205,7 +273,7 @@ func TestReapOrphanedAppHostnamesSkipsStaleEnvironment(t *testing.T) {
 	}
 
 	deletedApp := "gone-" + uuid.NewString()[:8]
-	hostnameID := seedOrphanHostname(t, pool, projectID, envID, deletedApp, deletedApp+".dada-tuda.ru", "failed", "failed", nil)
+	hostnameID := seedOrphanHostname(t, pool, projectID, envID, deletedApp, deletedApp+".dada-tuda.ru", "failed", "failed", nil, 24*time.Hour)
 
 	if err := ReapOrphanedAppHostnames(ctx, pool); err != nil {
 		t.Fatalf("ReapOrphanedAppHostnames: %v", err)
@@ -247,7 +315,7 @@ func TestReapOrphanedAppHostnamesDemotesOnDeleteOperationWhenBlind(t *testing.T)
 
 	projectID, envID := seedReattachProjectEnv(t, pool)
 	deletedApp := "gone-" + uuid.NewString()[:8]
-	hostnameID := seedOrphanHostname(t, pool, projectID, envID, deletedApp, deletedApp+".dada-tuda.ru", "active", "active", nil)
+	hostnameID := seedOrphanHostname(t, pool, projectID, envID, deletedApp, deletedApp+".dada-tuda.ru", "active", "active", nil, 24*time.Hour)
 	seedAppOperation(t, pool, projectID, envID, deletedApp, "DeleteApp", string(models.OperationStatusCommitted), time.Hour)
 
 	if err := ReapOrphanedAppHostnames(ctx, pool); err != nil {
@@ -278,7 +346,7 @@ func TestReapOrphanedAppHostnamesSkipsRecreatedAppName(t *testing.T) {
 
 	projectID, envID := seedReattachProjectEnv(t, pool)
 	appName := "reused-" + uuid.NewString()[:8]
-	hostnameID := seedOrphanHostname(t, pool, projectID, envID, appName, appName+".dada-tuda.ru", "active", "active", nil)
+	hostnameID := seedOrphanHostname(t, pool, projectID, envID, appName, appName+".dada-tuda.ru", "active", "active", nil, 24*time.Hour)
 	seedAppOperation(t, pool, projectID, envID, appName, "DeleteApp", string(models.OperationStatusCommitted), 2*time.Hour)
 	seedAppOperation(t, pool, projectID, envID, appName, "CreateApp", string(models.OperationStatusCommitted), time.Hour)
 
@@ -305,7 +373,7 @@ func TestReapOrphanedAppHostnamesSkipsUncommittedDeleteOperation(t *testing.T) {
 
 	projectID, envID := seedReattachProjectEnv(t, pool)
 	appName := "inflight-" + uuid.NewString()[:8]
-	hostnameID := seedOrphanHostname(t, pool, projectID, envID, appName, appName+".dada-tuda.ru", "active", "active", nil)
+	hostnameID := seedOrphanHostname(t, pool, projectID, envID, appName, appName+".dada-tuda.ru", "active", "active", nil, 24*time.Hour)
 	seedAppOperation(t, pool, projectID, envID, appName, "DeleteApp", string(models.OperationStatusCreated), time.Minute)
 
 	if err := ReapOrphanedAppHostnames(ctx, pool); err != nil {
@@ -333,7 +401,7 @@ func TestReapOrphanedAppHostnamesIgnoresDeleteOperationInOtherEnvironment(t *tes
 	projectID, envID := seedReattachProjectEnv(t, pool)
 	otherProjectID, otherEnvID := seedReattachProjectEnv(t, pool)
 	appName := "shared-" + uuid.NewString()[:8]
-	hostnameID := seedOrphanHostname(t, pool, projectID, envID, appName, appName+".dada-tuda.ru", "active", "active", nil)
+	hostnameID := seedOrphanHostname(t, pool, projectID, envID, appName, appName+".dada-tuda.ru", "active", "active", nil, 24*time.Hour)
 	seedAppOperation(t, pool, otherProjectID, otherEnvID, appName, "DeleteApp", string(models.OperationStatusCommitted), time.Hour)
 
 	if err := ReapOrphanedAppHostnames(ctx, pool); err != nil {
