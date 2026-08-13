@@ -16,6 +16,7 @@ import {
   ABANDONED_REGISTRATION_GRACE_MS,
   isEmailSignupEnabled,
   readAbandonedRegistration,
+  readCompletedRegistration,
   registerQueryParams,
 } from "./register-redirect.ts";
 
@@ -73,4 +74,21 @@ test("readAbandonedRegistration: legacy bare-timestamp value still parses, defau
   const raw = `${startedAt}`;
   const result = readAbandonedRegistration(raw, now);
   assert.deepEqual(result, { method: "email", ageMs: ABANDONED_REGISTRATION_GRACE_MS + 1_000 });
+});
+
+test("readCompletedRegistration: the real '<timestamp>:<method>' marker counts as a completed signup", () => {
+  const now = 1_770_000_000_000;
+  const windowMs = 30 * 60 * 1000;
+  assert.equal(readCompletedRegistration(`${now - 5_000}:yandex`, now, windowMs), "yandex");
+  assert.equal(readCompletedRegistration(`${now - 5_000}`, now, windowMs), "email");
+});
+
+test("readCompletedRegistration: nothing outside the window, the future, or garbage", () => {
+  const now = 1_770_000_000_000;
+  const windowMs = 30 * 60 * 1000;
+  assert.equal(readCompletedRegistration(null, now, windowMs), null);
+  assert.equal(readCompletedRegistration("", now, windowMs), null);
+  assert.equal(readCompletedRegistration("nope:yandex", now, windowMs), null);
+  assert.equal(readCompletedRegistration(`${now - windowMs - 1}:yandex`, now, windowMs), null);
+  assert.equal(readCompletedRegistration(`${now + 60_000}:yandex`, now, windowMs), null);
 });

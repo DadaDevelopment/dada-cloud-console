@@ -14,7 +14,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { Spinner } from "@/components/ui/spinner";
 import { AuthErrorScreen } from "@/components/shell/auth-error-screen";
-import { PENDING_REGISTRATION_KEY } from "@/lib/register-redirect";
+import { PENDING_REGISTRATION_KEY, readCompletedRegistration } from "@/lib/register-redirect";
 import { capturePasskeyActionStatus, markFreshAuthentication } from "@/lib/passkey";
 import { GOAL_AUTH_CALLBACK_FAILED, GOAL_REGISTRATION_COMPLETE, reachGoal } from "@/lib/metrika";
 import { callbackDiagnostics, callbackVerdict } from "@/lib/callback-outcome";
@@ -93,10 +93,9 @@ export default function CallbackPage() {
     try {
       const pending = window.localStorage.getItem(PENDING_REGISTRATION_KEY);
       window.localStorage.removeItem(PENDING_REGISTRATION_KEY);
-      if (!pending) return;
-      const startedAt = Number(pending);
-      if (!Number.isFinite(startedAt) || Date.now() - startedAt > REGISTRATION_WINDOW_MS) return;
-      reachGoal(GOAL_REGISTRATION_COMPLETE);
+      const method = readCompletedRegistration(pending, Date.now(), REGISTRATION_WINDOW_MS);
+      if (!method) return;
+      reachGoal(GOAL_REGISTRATION_COMPLETE, { method });
     } catch {}
   }, [isLoading, token]);
 

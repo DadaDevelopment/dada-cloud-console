@@ -141,6 +141,30 @@ export function readAbandonedRegistration(
   return { method: parsed.method, ageMs };
 }
 
+/**
+ * Mirror of {@link readAbandonedRegistration} for the opposite outcome: the
+ * visitor came back from Keycloak WITH a session, so the marker means a
+ * completed sign-up rather than an abandoned one.
+ *
+ * Lives here, next to {@link serializePendingRegistration}, because the marker
+ * format is `"<timestamp>:<method>"` and any reader that parses it by hand
+ * (`Number(raw)`) silently yields NaN and drops every real registration on the
+ * floor. Returns the method used, or null when there is no marker, it fails to
+ * parse, it is older than `windowMs`, or its timestamp is in the future.
+ */
+export function readCompletedRegistration(
+  raw: string | null,
+  now: number,
+  windowMs: number,
+): RegisterMethod | null {
+  if (!raw) return null;
+  const parsed = parsePendingRegistration(raw);
+  if (!parsed) return null;
+  const ageMs = now - parsed.startedAt;
+  if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > windowMs) return null;
+  return parsed.method;
+}
+
 export function startRegister(returnTo = "/projects", method: RegisterMethod = "email"): Promise<void> {
   const authority = process.env.NEXT_PUBLIC_KEYCLOAK_ISSUER ?? "";
   const clientId = process.env.NEXT_PUBLIC_OIDC_CLIENT_ID ?? "dada-console";
