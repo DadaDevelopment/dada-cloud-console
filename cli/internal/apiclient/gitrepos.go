@@ -96,6 +96,22 @@ func (c *Client) GitInstallURL(ctx context.Context, projectID string) (string, e
 	return out.URL, nil
 }
 
+// GitHubAuthorizeURL returns the GitHub user-authorization URL for a project,
+// per GET /projects/:projectId/git/github/authorize. It is the counterpart of
+// GitInstallURL for the common case: the App is already installed on the
+// user's account but recorded under a different org, so a fresh install is
+// both wrong and impossible (GitHub sends an already-installed account to a
+// configure page and never calls our setup URL back). Authorizing proves the
+// caller owns that GitHub account, and the callback imports the installations
+// it can already see into this project's org.
+func (c *Client) GitHubAuthorizeURL(ctx context.Context, projectID string) (string, error) {
+	var out installURLResponse
+	if err := c.doJSON(ctx, "GET", "/projects/"+projectID+"/git/github/authorize", nil, "", &out); err != nil {
+		return "", err
+	}
+	return out.URL, nil
+}
+
 type triggerBuildResponse struct {
 	Build Build `json:"build"`
 }

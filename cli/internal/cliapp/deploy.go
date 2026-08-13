@@ -208,43 +208,80 @@ func isGithubAccessRequired(err error) bool {
 }
 
 // connectAfterGitHubInstall turns the dead end of a private repository into a
-// two-minute detour: it fetches the project-bound install URL, sends the user
-// to it, waits for them to come back, and links again. The install URL cannot
-// be guessed - it carries an HMAC-signed state that binds the installation to
-// this project - so without this the CLI's only honest answer was "connect
-// GitHub in the console", which meant abandoning the deploy and losing the git
-// path (and with it auto-deploy) to an archive upload.
+// two-minute detour instead of "connect GitHub in the console", which meant
+// abandoning the deploy and losing the git path (and with it auto-deploy) to an
+// archive upload.
 //
-// A non-interactive run (no terminal behind in) gets EOF from the prompt and
-// falls straight back to the archive, so scripts and CI never hang here.
+// It tries the two doors in the order that actually opens them.
+//
+// First authorization. Installations are recorded per org
+// (backend/migrations/026), so a user who already installed the App from
+// another org - the common case, and the one a user reads as "но оно же уже
+// стоит" - has a live installation the platform refuses to reuse. Authorizing
+// proves they own that GitHub account and imports those installations into this
+// project's org (backend/internal/api/git_oauth.go). Sending them to install
+// instead is a dead end twice over: GitHub shows an already-installed account a
+// configure page and never calls the setup URL back, so nothing is recorded.
+//
+// Then installation, for the user who genuinely has no installation yet: there
+// authorization returns an empty list and only the install URL helps.
+//
+// A non-interactive run (no terminal behind in) gets EOF from the first prompt
+// and falls straight back to the archive, so scripts and CI never hang here.
 func connectAfterGitHubInstall(ctx context.Context, client *apiclient.Client, projectID, envID, appName string, info gitremote.Info, in io.Reader, prog *ui.Progress) (apiclient.GitRepo, error) {
-	url, err := client.GitInstallURL(ctx, projectID)
+	prompts := bufio.NewScanner(in)
+	connect := func() (apiclient.GitRepo, error) {
+		prog.Stage("Подключаем "+info.FullName, stagePercent["link"])
+		return client.ConnectGitRepo(ctx, projectID, envID, apiclient.ConnectGitRepoRequest{
+			RepoFullName:     info.FullName,
+			AppName:          appName,
+			ProductionBranch: info.Branch,
+			RootDir:          rootDirOrDot(info.SubdirOfRoot),
+			AutoDeploy:       true,
+			Provider:         "github",
+		})
+	}
+
+	lastErr := fmt.Errorf("доступ к %s не подтверждён", info.FullName)
+	authorizeURL, authErr := client.GitHubAuthorizeURL(ctx, projectID)
+	if authErr == nil {
+		if !visitAndWait(authorizeURL, prompts, prog,
+			fmt.Sprintf("Репозиторий %s закрыт для платформы - подтвердите доступ к своему GitHub:", info.FullName),
+			"Нажмите Authorize, вернитесь сюда и нажмите Enter.") {
+			return apiclient.GitRepo{}, lastErr
+		}
+		repo, err := connect()
+		if !isGithubAccessRequired(err) {
+			return repo, err
+		}
+		lastErr = err
+	}
+
+	installURL, err := client.GitInstallURL(ctx, projectID)
 	if err != nil {
 		return apiclient.GitRepo{}, fmt.Errorf("ссылку на установку GitHub App получить не вышло (%s)", apiclient.Explain(err))
 	}
+	if !visitAndWait(installURL, prompts, prog,
+		fmt.Sprintf("Платформа всё ещё не видит %s - установите на него GitHub App:", info.FullName),
+		fmt.Sprintf("Выберите %s, нажмите Install, вернитесь сюда и нажмите Enter.", info.FullName)) {
+		return apiclient.GitRepo{}, lastErr
+	}
+	return connect()
+}
 
-	prog.Info("Репозиторий %s закрыт для платформы - дайте ей доступ:", info.FullName)
+// visitAndWait prints a URL, opens it, and blocks until the user says they are
+// back. It reports false when there is nobody to answer, which is how a
+// scripted run leaves the detour instead of hanging on a prompt.
+func visitAndWait(url string, prompts *bufio.Scanner, prog *ui.Progress, headline, action string) bool {
+	prog.Info("%s", headline)
 	prog.Info("  %s", url)
-	prog.Info("Выберите %s, нажмите Install, вернитесь сюда и нажмите Enter.", info.FullName)
+	prog.Info("%s", action)
 	openBrowser(url)
 
 	prog.Pause()
-	scanner := bufio.NewScanner(in)
-	got := scanner.Scan()
+	got := prompts.Scan()
 	prog.Resume()
-	if !got {
-		return apiclient.GitRepo{}, fmt.Errorf("установка GitHub App не подтверждена")
-	}
-
-	prog.Stage("Подключаем "+info.FullName, stagePercent["link"])
-	return client.ConnectGitRepo(ctx, projectID, envID, apiclient.ConnectGitRepoRequest{
-		RepoFullName:     info.FullName,
-		AppName:          appName,
-		ProductionBranch: info.Branch,
-		RootDir:          rootDirOrDot(info.SubdirOfRoot),
-		AutoDeploy:       true,
-		Provider:         "github",
-	})
+	return got
 }
 
 // isUploadPlaceholder reports whether an app's link is the row an archive
