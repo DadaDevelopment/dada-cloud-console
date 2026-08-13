@@ -1312,7 +1312,7 @@ definitions:
         type: integer
       members:
         type: integer
-      storageGB:
+      storage_gb:
         type: integer
     type: object
 info:

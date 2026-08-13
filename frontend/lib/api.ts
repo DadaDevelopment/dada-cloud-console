@@ -1749,13 +1749,18 @@ export const cloudTasksApi = {
 
 export type BillingPlanKey = "free" | "startup" | "business" | "enterprise";
 
+/**
+ * Plan limits as the backend spells them (pricing.Quotas json tags). The member
+ * limit is `team_members` on every billing surface -- quotas, usage, the 403
+ * payload and the consumption summary -- so it is spelled that way here too.
+ */
 export interface BillingQuota {
   apps: number | null;
   databases: number | null;
   storage_gb: number | null;
   domains: number | null;
   environments: number | null;
-  members: number | null;
+  team_members: number | null;
   backup_retention_days: number | null;
   app_servers: number | null;
 }
@@ -1771,7 +1776,7 @@ export interface BillingUsage {
   storage_gb: BillingUsageItem;
   domains: BillingUsageItem;
   environments: BillingUsageItem;
-  members: BillingUsageItem;
+  team_members: BillingUsageItem;
 }
 
 export interface InvoicePreview {

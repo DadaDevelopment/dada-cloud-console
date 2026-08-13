@@ -126,7 +126,7 @@ func TestRecommendPlan_HappyPath(t *testing.T) {
 	h := &Handler{billingPlans: testPlans()}
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	body := `{"Apps":0,"Databases":0,"Domains":0,"Members":0,"StorageGB":0}`
+	body := `{"apps":0,"databases":0,"domains":0,"members":0,"storage_gb":0}`
 	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	c.Request = req

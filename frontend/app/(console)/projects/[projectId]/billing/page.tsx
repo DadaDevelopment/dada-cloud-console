@@ -22,7 +22,7 @@ function statusTone(status: PaymentStatus): string {
 
 type UsageKey = keyof BillingUsage;
 
-const USAGE_KEYS: UsageKey[] = ["apps", "databases", "storage_gb", "domains", "environments", "members"];
+const USAGE_KEYS: UsageKey[] = ["apps", "databases", "storage_gb", "domains", "environments", "team_members"];
 
 /**
  * Resources the backend actually refuses growth on (overQuotaLines in
@@ -31,7 +31,7 @@ const USAGE_KEYS: UsageKey[] = ["apps", "databases", "storage_gb", "domains", "e
  * that an org is "at its storage limit" would announce a wall that does not
  * exist. It is shown as a number, not as a threat.
  */
-const ENFORCED_USAGE_KEYS: UsageKey[] = ["apps", "databases", "domains", "members"];
+const ENFORCED_USAGE_KEYS: UsageKey[] = ["apps", "databases", "domains", "team_members"];
 
 function UsageBar({ used, limit, label }: { used: number; limit: number | null; label: string }) {
   const unlimited = limit === null || limit === 0;
@@ -252,8 +252,7 @@ export default function BillingPage() {
   const quotaLabel = (k: UsageKey): string => t(`billing.quota.${k}`);
 
   const overLimitLabel = (resource: string): string => {
-    const key = resource === "team_members" ? "members" : resource;
-    const i18nKey = `billing.quota.${key}`;
+    const i18nKey = `billing.quota.${resource}`;
     const label = t(i18nKey);
     return label === i18nKey ? resource : label;
   };

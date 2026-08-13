@@ -15,14 +15,23 @@ const markupDefault = MarkupDefault
 
 // Quotas holds the per-plan resource limits.
 // A value of 0 means unlimited (used for Enterprise).
+//
+// The json tags are load-bearing, not decoration: this struct is serialized
+// straight to the console by GET /billing/plans and by the "quotas" block of
+// GET /projects/{id}/billing/account. Without them Go emits Go field names and
+// every consumer that reads price_rub / quotas.apps sees undefined -- which is
+// exactly how the quota upsell lost its ability to name a plan. Key names match
+// the resource vocabulary used everywhere else in billing (pricing.Quota, the
+// usage map, the 403 payload), so "team_members" is spelled the same on every
+// surface.
 type Quotas struct {
-	Apps                int `yaml:"apps"`
-	Databases           int `yaml:"databases"`
-	StorageGB           int `yaml:"storage_gb"`
-	Domains             int `yaml:"domains"`
-	Environments        int `yaml:"environments"`
-	TeamMembers         int `yaml:"team_members"`
-	BackupRetentionDays int `yaml:"backup_retention_days"`
+	Apps                int `yaml:"apps" json:"apps"`
+	Databases           int `yaml:"databases" json:"databases"`
+	StorageGB           int `yaml:"storage_gb" json:"storage_gb"`
+	Domains             int `yaml:"domains" json:"domains"`
+	Environments        int `yaml:"environments" json:"environments"`
+	TeamMembers         int `yaml:"team_members" json:"team_members"`
+	BackupRetentionDays int `yaml:"backup_retention_days" json:"backup_retention_days"`
 	// BoxMinutes is the per-CALENDAR-MONTH allowance of billed active box
 	// minutes. Unlike every other quota in this struct it is a flow, not a
 	// stock: apps/databases/domains count what exists right now, box minutes
@@ -33,29 +42,38 @@ type Quotas struct {
 	// box awake for 30 days would pass such a gate while consuming 43200
 	// minutes. The gate has to be on the metered flow or it does not bound
 	// anything (see boxMinutesQuotaResource in internal/api/billing.go).
-	BoxMinutes int `yaml:"box_minutes"`
+	BoxMinutes int `yaml:"box_minutes" json:"box_minutes"`
 
-	AppServers int `yaml:"app_servers"`
+	AppServers int `yaml:"app_servers" json:"app_servers"`
 }
 
 // Plan represents a billing plan loaded from plans.yaml.
+//
+// InternalFootprint is dropped from JSON on purpose. It is the input to
+// PriceFloor, an internal number that must never reach a customer-facing
+// surface, and it was being handed out with every plan listing.
 type Plan struct {
-	Key               string               `yaml:"key"`
-	Name              string               `yaml:"name"`
-	PriceRUB          float64              `yaml:"price_rub"`
-	Quotas            Quotas               `yaml:"quotas"`
-	Capabilities      []string             `yaml:"capabilities"`
-	SupportLevel      string               `yaml:"support_level"`
-	InternalFootprint costengine.Footprint `yaml:"internal_footprint"`
+	Key               string               `yaml:"key" json:"key"`
+	Name              string               `yaml:"name" json:"name"`
+	PriceRUB          float64              `yaml:"price_rub" json:"price_rub"`
+	Quotas            Quotas               `yaml:"quotas" json:"quotas"`
+	Capabilities      []string             `yaml:"capabilities" json:"capabilities"`
+	SupportLevel      string               `yaml:"support_level" json:"support_level"`
+	InternalFootprint costengine.Footprint `yaml:"internal_footprint" json:"-"`
 }
 
 // Need describes what a user requires to find a recommended plan.
+//
+// The json tags carry the same weight as those on Quotas: this struct is the
+// bound body of POST /billing/recommend-plan, which the pricing page posts in
+// snake_case. Untagged, every field bound to zero and the recommender answered
+// "free" to a customer who had just described a business-sized need.
 type Need struct {
-	Apps      int
-	Databases int
-	Domains   int
-	Members   int
-	StorageGB int
+	Apps      int `json:"apps"`
+	Databases int `json:"databases"`
+	Domains   int `json:"domains"`
+	Members   int `json:"members"`
+	StorageGB int `json:"storage_gb"`
 }
 
 // PriceFloor returns the minimum published price for a plan based on its

@@ -28,7 +28,7 @@ export const billing: Messages = {
   "billing.quota.storage_gb": { ru: "Хранилище", en: "Storage" },
   "billing.quota.domains": { ru: "Домены", en: "Domains" },
   "billing.quota.environments": { ru: "Среды", en: "Environments" },
-  "billing.quota.members": { ru: "Участники", en: "Members" },
+  "billing.quota.team_members": { ru: "Участники", en: "Members" },
   "billing.error.load": { ru: "Не удалось загрузить данные биллинга", en: "Failed to load billing data" },
   "billing.noLimit": { ru: "Без ограничений", en: "Unlimited" },
   "billing.currency.rub": { ru: "₽", en: "₽" },

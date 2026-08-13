@@ -21411,7 +21411,7 @@ const docTemplate = `{
                 "members": {
                     "type": "integer"
                 },
-                "storageGB": {
+                "storage_gb": {
                     "type": "integer"
                 }
             }
