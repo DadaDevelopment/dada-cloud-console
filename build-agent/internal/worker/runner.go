@@ -219,6 +219,27 @@ func isPlatformFailure(cause error) bool {
 	return isRetryable(cause)
 }
 
+// checkoutExhaustedSignatures are Jenkins giving up on a git checkout after
+// exhausting its own retries. The checkout that fails this way is the
+// pipeline's shared library or the SCM step itself, which runs before any of
+// the user's code is read - on 2026-08-13 an unreachable library host failed
+// every build on the platform this way, and each one was recorded as
+// build_failed, i.e. as the user's broken code. A checkout that never
+// completed is our side, so it carries the platform code.
+var checkoutExhaustedSignatures = []string{
+	"Maximum checkout retry attempts reached",
+	"Failed to connect to repository",
+}
+
+func isCheckoutExhausted(line string) bool {
+	for _, sig := range checkoutExhaustedSignatures {
+		if strings.Contains(line, sig) {
+			return true
+		}
+	}
+	return false
+}
+
 // classifyFailure scans a completed Jenkins build's full console text for
 // known failure signatures and returns a stable code plus a one-line detail
 // pulled from the matching console line. Returns an empty code when nothing
@@ -243,6 +264,11 @@ func classifyFailure(console string) (code string, detail string) {
 				return buildFailDockerfileBuild, cause
 			}
 			return buildFailDockerfileBuild, line
+		}
+	}
+	for _, line := range lines {
+		if isCheckoutExhausted(line) {
+			return buildFailPlatformError, line
 		}
 	}
 	lastError := ""

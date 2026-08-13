@@ -97,12 +97,13 @@ func Deploy(ctx context.Context, cfg Config, opts DeployOptions, in io.Reader, o
 		}
 	}
 
-	finalStatus, err := streamBuildStatus(ctx, client, projectID, envID, appName, buildID, prog)
+	final, err := streamBuildStatus(ctx, client, projectID, envID, appName, buildID, prog)
 	if err != nil {
 		return err
 	}
-	if finalStatus != apiclient.StatusSuccess {
-		return fmt.Errorf("сборка завершилась статусом %q - лог сборки в консоли", finalStatus)
+	if final.Status != apiclient.StatusSuccess {
+		prog.Stop()
+		return fmt.Errorf("%s\n%s", explainBuildFailure(final), buildConsoleURL(cfg, projectID, appName, final.ID))
 	}
 
 	prog.Stage("Ждём адрес приложения", stagePercent["url"])
@@ -228,9 +229,24 @@ func deployFromArchive(ctx context.Context, client *apiclient.Client, projectID,
 	if err != nil {
 		return "", fmt.Errorf("загрузка не прошла: %s", apiclient.Explain(err))
 	}
-	prog.Info("Фреймворк: %s (порт %d)", nonEmpty(uploadResp.Detected.Framework, "не определён"), uploadResp.Detected.Port)
+	prog.Info("%s", describeDetection(uploadResp.Detected.Framework, uploadResp.Detected.Port))
 	prog.Stage("Сборка в очереди", stagePercent["queued"])
 	return uploadResp.Build.ID, nil
+}
+
+// describeDetection says what the upload-time scan found without overstating
+// it. An empty framework is not a dead end: the console passes "auto" and the
+// pipeline detects again on the unpacked archive
+// (build-agent/internal/detect/detect.go), so the honest line is "the builder
+// will decide", not "not detected (port 0)", which reads like a failure.
+func describeDetection(framework string, port int) string {
+	if framework == "" {
+		return "Манифест не найден - фреймворк определит сборщик"
+	}
+	if port <= 0 {
+		return fmt.Sprintf("Фреймворк: %s (порт назначит платформа)", framework)
+	}
+	return fmt.Sprintf("Фреймворк: %s (порт %d)", framework, port)
 }
 
 func nonEmpty(s, def string) string {
@@ -435,21 +451,21 @@ func resolveAppName(opts DeployOptions) (string, error) {
 // streamBuildStatus polls the build's status until it reaches a terminal
 // state, moving the progress bar on every change, and returns the terminal
 // status.
-func streamBuildStatus(ctx context.Context, client *apiclient.Client, projectID, envID, appName, buildID string, prog *ui.Progress) (string, error) {
+func streamBuildStatus(ctx context.Context, client *apiclient.Client, projectID, envID, appName, buildID string, prog *ui.Progress) (apiclient.Build, error) {
 	deadline := time.Now().Add(buildPollTimeout)
 
 	for {
 		if time.Now().After(deadline) {
-			return "", fmt.Errorf("сборка не завершилась за %s", buildPollTimeout)
+			return apiclient.Build{}, fmt.Errorf("сборка не завершилась за %s", buildPollTimeout)
 		}
 
 		build, ok, err := client.LatestBuild(ctx, projectID, envID, appName)
 		if err != nil {
-			return "", fmt.Errorf("статус сборки: %s", apiclient.Explain(err))
+			return apiclient.Build{}, fmt.Errorf("статус сборки: %s", apiclient.Explain(err))
 		}
 		if ok && build.ID == buildID {
 			if apiclient.IsTerminalBuildStatus(build.Status) {
-				return build.Status, nil
+				return build, nil
 			}
 			label, known := buildStageLabel[build.Status]
 			if !known {
@@ -460,10 +476,53 @@ func streamBuildStatus(ctx context.Context, client *apiclient.Client, projectID,
 
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return apiclient.Build{}, ctx.Err()
 		case <-time.After(buildPollInterval):
 		}
 	}
+}
+
+// failReasonText translates the build agent's fail_reason vocabulary
+// (build-agent/internal/worker/runner.go) into the next step a user can take.
+// The platform's own failures say so out loud: a build that died before the
+// pipeline read any code must never read as "your code is broken".
+var failReasonText = map[string]string{
+	"no_dockerfile":           "сборщик не понял, как собрать проект - добавьте Dockerfile или манифест зависимостей",
+	"dockerfile_build_failed": "образ не собрался - ошибка внутри сборки",
+	"git_auth_failed":         "платформа не смогла прочитать репозиторий - переподключите его",
+	"platform_error":          "упало на нашей стороне, не в вашем коде - можно просто повторить",
+	"build_failed":            "сборка упала",
+}
+
+// explainBuildFailure turns a terminal build into one line the user can act
+// on: the classified reason, then the console line that caused it, with the
+// machine code stripped from the front of the detail (the agent stores
+// "<fail_reason>: <detail>", and printing both shows the same fact twice).
+func explainBuildFailure(b apiclient.Build) string {
+	reason := ""
+	if b.FailReason != nil {
+		reason = *b.FailReason
+	}
+	headline, known := failReasonText[reason]
+	if !known {
+		headline = fmt.Sprintf("сборка завершилась статусом %q", b.Status)
+	}
+
+	detail := ""
+	if b.ErrorMessage != nil {
+		detail = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(*b.ErrorMessage), reason+": "))
+	}
+	if detail == "" {
+		return headline
+	}
+	return headline + "\n" + detail
+}
+
+// buildConsoleURL points at the build's page in the web console, derived from
+// the API base the CLI is already configured with.
+func buildConsoleURL(cfg Config, projectID, appName, buildID string) string {
+	base := strings.TrimSuffix(cfg.APIBase, "/api/v1")
+	return fmt.Sprintf("%s/projects/%s/apps/%s/builds/%s", base, projectID, appName, buildID)
 }
 
 // pollAppURL waits briefly for the platform to assign the app a live URL

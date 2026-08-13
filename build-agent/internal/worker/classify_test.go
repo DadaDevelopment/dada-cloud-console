@@ -38,6 +38,15 @@ func TestClassifyFailure(t *testing.T) {
 			wantDetail: "script returned exit code 128",
 		},
 		{
+			name: "library checkout that ran out of retries is ours, not the user's code",
+			console: "[2026-08-13T10:39:29.467Z] ERROR: Maximum checkout retry attempts reached, aborting\n" +
+				"[2026-08-13T10:39:29.467Z] org.codehaus.groovy.control.MultipleCompilationErrorsException: startup failed:\n" +
+				"[2026-08-13T10:39:29.467Z] WorkflowScript: Loading libraries failed\n" +
+				"[2026-08-13T10:39:29.525Z] Finished: FAILURE\n",
+			wantCode:   buildFailPlatformError,
+			wantDetail: "ERROR: Maximum checkout retry attempts reached, aborting",
+		},
+		{
 			name: "private repo without a stored credential",
 			console: "[2026-08-02T12:51:22.520Z] + git clone --depth 1 --branch master https://github.com/DadaDevelopment/dada-development-site.git src\n" +
 				"[2026-08-02T12:51:22.520Z] Cloning into 'src'...\n" +
