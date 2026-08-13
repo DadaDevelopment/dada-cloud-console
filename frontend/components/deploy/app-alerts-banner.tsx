@@ -45,6 +45,8 @@ function crashCauseKey(kind?: string): string | null {
       return "apps.alerts.crash.cause.platformNetwork";
     case "platform_storage":
       return "apps.alerts.crash.cause.platformStorage";
+    case "platform_registry":
+      return "apps.alerts.crash.cause.platformRegistry";
     case "resource_limit":
       return "apps.alerts.crash.cause.resourceLimit";
     default:
@@ -151,6 +153,7 @@ export function AppAlertsBanner({ alerts, logsHref, storageHref, projectId, envI
                     crashCauseKey(alert.cause_kind) &&
                     (alert.cause_kind === "platform_network" ||
                     alert.cause_kind === "platform_storage" ||
+                    alert.cause_kind === "platform_registry" ||
                     alert.cause_kind === "resource_limit" ? (
                       <p className="text-xs font-semibold text-red-800 dark:text-red-200">
                         {t(crashCauseKey(alert.cause_kind)!)}

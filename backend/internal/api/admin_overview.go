@@ -424,6 +424,7 @@ type overviewNotReadyApp struct {
 	Name        string `json:"name"`
 	ProjectName string `json:"project_name"`
 	Phase       string `json:"phase"`
+	Reason      string `json:"reason,omitempty"`
 	OwnerEmail  string `json:"owner_email"`
 }
 
@@ -449,9 +450,21 @@ type overviewNotReadyApp struct {
 // re-stamps its last_synced_at every 30s — freshness can never hide a real
 // outage, only surface a stale ghost. Capped so a platform-wide incident cannot
 // balloon the payload.
+//
+// Phase alone cannot tell an operator WHOSE problem this is: the gitops-agent
+// status reconciler (livePhase, gitops-agent/internal/worker/statusreconciler.go)
+// folds OOMKilled/CrashLoopBackOff/ImagePullBackOff/ErrImagePull into the
+// single phase string "CrashLoop" so the console's phase badge has one
+// red state to render. That collapse is fine for a badge but was silently
+// read by the operator as "this app's own code is broken" -- an
+// ImagePullBackOff means our registry never delivered the image, the
+// opposite conclusion. Reason surfaces the specific kube waiting reason the
+// reconciler also stamps into summary_json (same patch, never collapsed) so
+// this list can tell the two apart without changing what phase itself means
+// anywhere else it is read.
 func (h *Handler) overviewNotReadyApps(ctx context.Context) ([]overviewNotReadyApp, error) {
 	rows, err := h.pool.Query(ctx, `
-		SELECT rs.name, p.display_name, rs.phase, COALESCE(u.email, '')
+		SELECT rs.name, p.display_name, rs.phase, COALESCE(rs.summary_json->>'reason', ''), COALESCE(u.email, '')
 		FROM resource_snapshots rs
 		JOIN projects p     ON p.id = rs.project_id
 		LEFT JOIN users u   ON u.id = p.owner_id
@@ -467,7 +480,7 @@ func (h *Handler) overviewNotReadyApps(ctx context.Context) ([]overviewNotReadyA
 	out := []overviewNotReadyApp{}
 	for rows.Next() {
 		var a overviewNotReadyApp
-		if err := rows.Scan(&a.Name, &a.ProjectName, &a.Phase, &a.OwnerEmail); err != nil {
+		if err := rows.Scan(&a.Name, &a.ProjectName, &a.Phase, &a.Reason, &a.OwnerEmail); err != nil {
 			return nil, err
 		}
 		out = append(out, a)

@@ -59,6 +59,7 @@ export const adminOverview: Messages = {
   "adminOverview.notReady.col.name": { ru: "Приложение", en: "App" },
   "adminOverview.notReady.col.project": { ru: "Проект", en: "Project" },
   "adminOverview.notReady.col.phase": { ru: "Статус", en: "Phase" },
+  "adminOverview.notReady.col.reason": { ru: "Причина", en: "Reason" },
   "adminOverview.notReady.col.owner": { ru: "Владелец", en: "Owner" },
 
   "adminOverview.linkAudit": { ru: "Журнал аудита", en: "Audit log" },

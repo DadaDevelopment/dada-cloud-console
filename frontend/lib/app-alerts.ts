@@ -13,15 +13,21 @@ export type AppAlertType = "crash" | "volume" | "url";
  * owner. Both are absent whenever the log read failed or nothing matched.
  *
  * `cause_kind` tells the console WHO is at fault: `"app_code"` means the
- * app's own code, `"platform_network"` / `"platform_storage"` mean the
- * platform side broke (network route or disk/volume) and the user's code is
+ * app's own code, `"platform_network"` / `"platform_storage"` /
+ * `"platform_registry"` mean the platform side broke (network route,
+ * disk/volume, or image delivery to the registry) and the user's code is
  * not to blame, `"resource_limit"` means the container was stopped for
  * exceeding its plan's memory ceiling — neither a platform bug nor a code
  * bug, just a capacity fact, so it must render as neutral as the platform
  * kinds and never as an accusation. Missing or empty means the backend could
  * not classify it — the console must not guess "your code" in that case.
  */
-export type AppAlertCauseKind = "app_code" | "platform_network" | "platform_storage" | "resource_limit";
+export type AppAlertCauseKind =
+  | "app_code"
+  | "platform_network"
+  | "platform_storage"
+  | "platform_registry"
+  | "resource_limit";
 
 export interface AppAlert {
   type: AppAlertType;

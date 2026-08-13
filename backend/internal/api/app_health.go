@@ -258,7 +258,7 @@ func appHealthNote(verdict appHealthVerdict, stale bool) string {
 
 // latestHealthAlertReasonWithTime is latestHealthAlertReason plus the
 // timestamp the assistant needs to say how fresh the platform's own read is,
-// and the cause_kind (app_code/platform_network/platform_storage) so both the
+// and the cause_kind (app_code/platform_network/platform_storage/platform_registry) so both the
 // console banner and the chat assistant can say whose fault a crash actually
 // is instead of guessing from a language-runtime traceback alone. Returns
 // three empty strings when there is no fresh row (including for a VM/compose

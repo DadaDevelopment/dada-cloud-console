@@ -159,6 +159,16 @@ export default function AdminOverviewPage() {
     { key: "name", header: t("adminOverview.notReady.col.name"), render: (r) => <span className="font-mono text-xs text-gray-900 dark:text-gray-100">{r.name}</span> },
     { key: "project", header: t("adminOverview.notReady.col.project"), render: (r) => <span className="text-gray-700 dark:text-gray-200">{r.project_name}</span> },
     { key: "phase", header: t("adminOverview.notReady.col.phase"), render: (r) => <StateChip tone={phaseTone(r.phase)}>{r.phase}</StateChip> },
+    {
+      key: "reason",
+      header: t("adminOverview.notReady.col.reason"),
+      render: (r) =>
+        r.reason === "ImagePullBackOff" || r.reason === "ErrImagePull" ? (
+          <span className="font-medium text-amber-600 dark:text-amber-400">{r.reason}</span>
+        ) : (
+          <span className="text-gray-500 dark:text-gray-400">{r.reason || "—"}</span>
+        ),
+    },
     { key: "owner", header: t("adminOverview.notReady.col.owner"), render: (r) => <span className="text-gray-500 dark:text-gray-400">{r.owner_email || "—"}</span> },
   ];
 

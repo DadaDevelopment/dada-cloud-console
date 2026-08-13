@@ -318,10 +318,11 @@ func ComposeReactivationFixHTML(planName, expires string, promoLink, pixelURL, h
 // and app_health_alerts.cause_kind). Empty/absent means unknown -- an app_code
 // signature carries no ambiguity so ClassifyCrashCause never returns "".
 const (
-	CauseKindAppCode         = "app_code"
-	CauseKindPlatformNetwork = "platform_network"
-	CauseKindPlatformStorage = "platform_storage"
-	CauseKindResourceLimit   = "resource_limit"
+	CauseKindAppCode          = "app_code"
+	CauseKindPlatformNetwork  = "platform_network"
+	CauseKindPlatformStorage  = "platform_storage"
+	CauseKindPlatformRegistry = "platform_registry"
+	CauseKindResourceLimit    = "resource_limit"
 )
 
 // resourceLimitCrashText is the cause_kind=CauseKindResourceLimit verdict
@@ -330,6 +331,16 @@ const (
 // process for exceeding the memory ceiling attached to the app's plan, which
 // is a capacity fact, not a bug on either side.
 const resourceLimitCrashText = "Контейнер был остановлен нашей платформой: приложение превысило лимит памяти, выделенный по тарифу. Это не ошибка в коде — нужен профиль с большим лимитом или меньше потребление памяти."
+
+// registryCrashText is the cause_kind=CauseKindPlatformRegistry verdict shown
+// when the container never started at all because its image could not be
+// pulled (ImagePullBackOff/ErrImagePull). This is a registry/delivery problem
+// on our side, not a bug in the app's own code -- unlike a CrashLoopBackOff,
+// where the container DID start and then failed. Worded to make that
+// distinction explicit, mirroring resourceLimitCrashText's "neither side is
+// broken by accident" precision for the case where the fault genuinely is
+// ours.
+const registryCrashText = "Контейнер не запускался вообще: платформа не смогла скачать образ приложения из реестра. Это не ошибка в вашем коде — сбой на нашей стороне, повторный деплой обычно чинит его."
 
 // crashLogSignature is one entry in the ordered pattern table ClassifyCrashLog
 // walks: pattern is matched with strings.Contains against the log excerpt,
@@ -449,9 +460,21 @@ func ClassifyCrashLog(excerpt string) string {
 // string mirrors the kube API's own TerminationReason value (see
 // api.reasonOOMKilled); notify does not import the api package to avoid a
 // cycle, so the string is duplicated deliberately rather than shared.
+//
+// ImagePullBackOff/ErrImagePull get the same authoritative-kube-fact
+// treatment as OOMKilled, for a different reason: the log excerpt is always
+// empty for these two (the container never started, so nothing was ever
+// written to its stdout/stderr), so ClassifyCrashCause would fall through to
+// its "" default and the owner would be told nothing beyond the bare kube
+// reason string. Without this branch a registry-side failure (ours) reads
+// exactly like an unclassified crash, which is indistinguishable in the
+// email from the owner's own code failing to start.
 func ClassifyCrashCauseWithReason(reason, excerpt string) (kind, text string) {
-	if reason == "OOMKilled" {
+	switch reason {
+	case "OOMKilled":
 		return CauseKindResourceLimit, resourceLimitCrashText
+	case "ImagePullBackOff", "ErrImagePull":
+		return CauseKindPlatformRegistry, registryCrashText
 	}
 	return ClassifyCrashCause(excerpt)
 }
@@ -602,10 +625,21 @@ func ExtractCauseLine(excerpt string) string {
 // read); consoleLink deep-links straight to the app in the console. codeHint
 // is the optional ClassifyCrashLog result (may be ""); agentURL deep-links to
 // the console's AI agent panel for this app.
+//
+// The opening sentence is reason-aware: for ImagePullBackOff/ErrImagePull the
+// container never started at all, so "перезапускается" (keeps restarting)
+// would be a false claim -- that exact wording was previously used
+// unconditionally and made a registry failure on our side read as the
+// owner's own app crashing.
 func ComposeAppAlert(appName, reason, podName, logExcerpt, consoleLink, codeHint, agentURL string) (subject, body string) {
 	subject = fmt.Sprintf("Dada Cloud: %s не работает (%s)", appName, reason)
 	var b strings.Builder
-	fmt.Fprintf(&b, "Приложение %s перезапускается и, похоже, не поднимается.\n\n", appName)
+	switch reason {
+	case "ImagePullBackOff", "ErrImagePull":
+		fmt.Fprintf(&b, "Приложение %s не может запуститься: платформа не смогла скачать его образ из реестра.\n\n", appName)
+	default:
+		fmt.Fprintf(&b, "Приложение %s перезапускается и, похоже, не поднимается.\n\n", appName)
+	}
 	fmt.Fprintf(&b, "Причина: %s\n", reason)
 	fmt.Fprintf(&b, "Под: %s\n\n", podName)
 	if codeHint != "" {

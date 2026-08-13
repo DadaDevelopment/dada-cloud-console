@@ -1118,6 +1118,7 @@ export interface AdminOverviewNotReadyApp {
   name: string;
   project_name: string;
   phase: string;
+  reason?: string;
   owner_email: string;
 }
 

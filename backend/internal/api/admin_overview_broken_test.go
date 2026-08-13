@@ -197,6 +197,76 @@ func TestOverviewNotReadyOtherResources(t *testing.T) {
 	}
 }
 
+// TestOverviewNotReadyAppsExposesReason reproduces the smart-tender-ai-site
+// incident (2026-08-13): the gitops-agent status reconciler's livePhase
+// folds CrashLoopBackOff, ImagePullBackOff, ErrImagePull and OOMKilled into
+// the single phase string "CrashLoop" so the console's phase badge has one
+// red state to render (see livePhase in
+// gitops-agent/internal/worker/statusreconciler.go). That collapse is
+// correct for the badge but, before this fix, was the only signal the admin
+// overview panel exposed -- an operator opening the not-ready list could not
+// tell an image the registry never delivered (our fault) from an app that
+// genuinely crashes on every start (the owner's fault). The reconciler
+// already stamps the specific kube waiting reason into summary_json's
+// "reason" key on the same patch that sets phase, so this only requires
+// reading it back.
+func TestOverviewNotReadyAppsExposesReason(t *testing.T) {
+	pool := overviewBrokenTestPool(t)
+	h := &Handler{pool: pool}
+	suffix := uuid.NewString()[:8]
+
+	projectID := overviewBrokenSeedProject(t, pool, "reason-"+suffix)
+	envID := overviewBrokenSeedEnv(t, pool, projectID, "prod")
+
+	seed := func(name, reason string) {
+		_, err := pool.Exec(context.Background(),
+			`INSERT INTO resource_snapshots (project_id, environment_id, kind, name, phase, summary_json, last_synced_at)
+			 VALUES ($1, $2, 'App', $3, 'CrashLoop', jsonb_build_object('live_source', 'k8s', 'reason', $4::text), now())`,
+			projectID, envID, name, reason,
+		)
+		if err != nil {
+			t.Fatalf("seed app snapshot %s: %v", name, err)
+		}
+	}
+
+	imagePullApp := "imagepull-" + suffix
+	crashLoopApp := "crashloop-" + suffix
+	seed(imagePullApp, "ImagePullBackOff")
+	seed(crashLoopApp, "CrashLoopBackOff")
+
+	out, err := h.overviewNotReadyApps(context.Background())
+	if err != nil {
+		t.Fatalf("overviewNotReadyApps: %v", err)
+	}
+
+	byName := map[string]overviewNotReadyApp{}
+	for _, a := range out {
+		byName[a.Name] = a
+	}
+
+	imagePull, ok := byName[imagePullApp]
+	if !ok {
+		t.Fatalf("expected %s in the not-ready list", imagePullApp)
+	}
+	if imagePull.Phase != "CrashLoop" {
+		t.Fatalf("Phase = %q, want %q (the reconciler collapses all bad waiting reasons into this one phase)", imagePull.Phase, "CrashLoop")
+	}
+	if imagePull.Reason != "ImagePullBackOff" {
+		t.Fatalf("Reason = %q, want %q -- the panel must be able to tell a registry failure apart from a real crash loop even though Phase reads the same for both", imagePull.Reason, "ImagePullBackOff")
+	}
+
+	crashLoop, ok := byName[crashLoopApp]
+	if !ok {
+		t.Fatalf("expected %s in the not-ready list", crashLoopApp)
+	}
+	if crashLoop.Reason != "CrashLoopBackOff" {
+		t.Fatalf("Reason = %q, want %q", crashLoop.Reason, "CrashLoopBackOff")
+	}
+	if imagePull.Reason == crashLoop.Reason {
+		t.Fatal("an image-pull failure and a genuine crash loop must not report the same Reason")
+	}
+}
+
 // TestOverviewDomainIssues checks both stages: a failed hostname and a
 // stale (>1 day) pending authorization must both surface, while a healthy
 // active hostname must not.

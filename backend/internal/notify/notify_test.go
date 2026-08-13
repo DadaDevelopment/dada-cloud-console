@@ -126,6 +126,49 @@ func TestClassifyCrashCauseWithReasonNonOOMDelegatesUnchanged(t *testing.T) {
 	}
 }
 
+// TestClassifyCrashCauseWithReasonImagePullBackOffIsPlatformRegistry
+// reproduces the smart-tender-ai-site incident (2026-08-13): an app stuck in
+// ImagePullBackOff has no container that ever ran, so its log excerpt is
+// always empty. Before this fix ClassifyCrashCauseWithReason only special-
+// cased "OOMKilled" and delegated everything else, including
+// ImagePullBackOff, to ClassifyCrashCause(""), which returns ("", "") --
+// the owner alert would then carry no cause_kind at all, reading exactly
+// like an unclassified app-code crash instead of naming the registry as the
+// point of failure.
+func TestClassifyCrashCauseWithReasonImagePullBackOffIsPlatformRegistry(t *testing.T) {
+	for _, reason := range []string{"ImagePullBackOff", "ErrImagePull"} {
+		t.Run(reason, func(t *testing.T) {
+			kind, text := ClassifyCrashCauseWithReason(reason, "")
+			if kind != CauseKindPlatformRegistry {
+				t.Fatalf("ClassifyCrashCauseWithReason(%q, \"\") kind = %q, want %q -- an image-pull failure must never be classified as the app's own code", reason, kind, CauseKindPlatformRegistry)
+			}
+			if strings.Contains(text, "код приложения") {
+				t.Fatalf("platform_registry text must not blame the app's own code, got %q", text)
+			}
+			if !strings.Contains(text, "не ошибка в вашем коде") {
+				t.Fatalf("expected platform_registry text to explicitly clear the app's own code, got %q", text)
+			}
+			if !strings.Contains(text, "реестр") {
+				t.Fatalf("expected platform_registry text to name the registry as the point of failure, got %q", text)
+			}
+		})
+	}
+}
+
+func TestComposeAppAlertImagePullBackOffDoesNotClaimTheAppIsRestarting(t *testing.T) {
+	for _, reason := range []string{"ImagePullBackOff", "ErrImagePull"} {
+		t.Run(reason, func(t *testing.T) {
+			_, body := ComposeAppAlert("web", reason, "web-abc12", "", "https://console.dada-tuda.ru/projects/p1/apps/web", "", "https://console.dada-tuda.ru/projects/p1/apps/web#agent")
+			if strings.Contains(body, "перезапускается") {
+				t.Fatalf("a container stuck in %s never started, so the alert must not claim it is restarting; got: %s", reason, body)
+			}
+			if !strings.Contains(body, "реестра") {
+				t.Fatalf("expected the %s alert to name the registry as the mechanism, got: %s", reason, body)
+			}
+		})
+	}
+}
+
 func TestExtractCauseLine(t *testing.T) {
 	tests := []struct {
 		name    string

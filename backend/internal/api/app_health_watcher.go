@@ -654,14 +654,18 @@ func currentAlertCauseState(ctx context.Context, pool *pgxpool.Pool, namespace, 
 // change. When refreshed is false the other four return values are always
 // "".
 //
-// A CauseKindResourceLimit verdict deliberately carries NO cause_line. That
-// verdict rests on the kube-reported OOMKilled state, not on anything in the
-// log, and ExtractCauseLine would happily surface whatever runtime error the
-// process half-printed while being killed — the console would then state
-// "exceeded its memory limit" and show "Error: Cannot find module ..." as the
-// evidence directly underneath it, which reads as a self-contradiction and
-// re-plants exactly the blame this classification removes. Better no evidence
-// line than evidence for the wrong failure.
+// A CauseKindResourceLimit or CauseKindPlatformRegistry verdict deliberately
+// carries NO cause_line. The resource-limit verdict rests on the
+// kube-reported OOMKilled state, not on anything in the log, and
+// ExtractCauseLine would happily surface whatever runtime error the process
+// half-printed while being killed — the console would then state "exceeded
+// its memory limit" and show "Error: Cannot find module ..." as the evidence
+// directly underneath it, which reads as a self-contradiction and re-plants
+// exactly the blame this classification removes. The registry verdict has no
+// log at all to read from (the container never started), so logExcerpt is
+// always empty and ExtractCauseLine would return "" anyway; skipping the call
+// here just documents that instead of relying on the empty-string coincidence.
+// Better no evidence line than evidence for the wrong failure.
 func (w *appHealthWatcher) maybeCauseRefresh(ctx context.Context, alert appHealthAlert) (logExcerpt, cause, causeLine, causeKind string, refreshed bool) {
 	prevReason, hasCause, err := currentAlertCauseState(ctx, w.h.pool, alert.Namespace, alert.AppName)
 	if err == nil && hasCause && prevReason == alert.Reason {
@@ -669,7 +673,7 @@ func (w *appHealthWatcher) maybeCauseRefresh(ctx context.Context, alert appHealt
 	}
 	logExcerpt = w.tailLog(ctx, alert)
 	causeKind, cause = notify.ClassifyCrashCauseWithReason(alert.Reason, logExcerpt)
-	if causeKind != notify.CauseKindResourceLimit {
+	if causeKind != notify.CauseKindResourceLimit && causeKind != notify.CauseKindPlatformRegistry {
 		causeLine = notify.ExtractCauseLine(logExcerpt)
 	}
 	return logExcerpt, cause, causeLine, causeKind, true

@@ -678,6 +678,10 @@ export const apps: Messages = {
     ru: "Контейнер был остановлен: приложение превысило лимит памяти, выделенный по тарифу. Это не ошибка в коде — нужен профиль с большим лимитом или меньше потребление памяти.",
     en: "The container was stopped: the app exceeded the memory limit included in its plan. This is not a bug in your code — it needs a bigger profile or lower memory usage.",
   },
+  "apps.alerts.crash.cause.platformRegistry": {
+    ru: "Контейнер не запускался вообще: платформа не смогла скачать образ приложения из реестра. Это не ошибка в вашем коде — сбой на нашей стороне.",
+    en: "The container never started at all: the platform could not pull the app's image from the registry. This is not a bug in your code — the failure is on our side.",
+  },
   "apps.alerts.crash.cause.line": { ru: "Из логов:", en: "From the logs:" },
   "apps.alerts.crash.cta": { ru: "Смотреть логи", en: "View logs" },
   "apps.alerts.crash.diagnose": { ru: "Разобраться", en: "Diagnose" },
