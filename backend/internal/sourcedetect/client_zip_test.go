@@ -40,7 +40,7 @@ func TestDetectClientPackedZip(t *testing.T) {
 		t.Errorf("Port = %d, want 5173", res.Port)
 	}
 
-	entries, err := listZipEntries(data)
+	entries, _, err := listZipEntries(data)
 	if err != nil {
 		t.Fatalf("listZipEntries: %v", err)
 	}

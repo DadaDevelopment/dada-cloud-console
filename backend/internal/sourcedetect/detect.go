@@ -118,7 +118,7 @@ func Detect(data []byte) (Result, error) {
 		return Result{}, err
 	}
 
-	entries, err := listEntries(data, format)
+	entries, names, err := listEntries(data, format)
 	if err != nil {
 		return Result{}, fmt.Errorf("read %s table of contents: %w", format, err)
 	}
@@ -184,7 +184,49 @@ func Detect(data []byte) (Result, error) {
 		return result, nil
 	}
 
+	if rootLevelPythonSources(names) {
+		result.Framework = "python"
+		result.Port = resolvePort(0, platform, compose, hasCompose)
+		return result, nil
+	}
+
 	return result, nil
+}
+
+// rootLevelPythonSources reports whether the archive ships .py files directly
+// at its root, which is the shape of a script-style Python project: a handful
+// of modules, an entrypoint, no packaging metadata at all.
+//
+// Detection used to require requirements.txt or pyproject.toml, so such an
+// upload resolved to no framework and the pipeline aborted with "framework ”
+// has no template and repo ships no Dockerfile — add a Dockerfile". That
+// message is wrong twice over: dadaBuildPipeline's python branch already
+// handles a manifest-less repo (its install step ends in "no python manifest -
+// skipping install" and its start step falls back to main.py, bot.py, app.py,
+// then any *.py), and the whole promise of the upload path is that a folder
+// deploys without the user authoring build config. On 2026-08-13 a real user
+// re-uploaded the same archive three times against that error.
+//
+// Root level is the whole rule. A stray helper script inside a Node or Go
+// repo must not turn that repo into a Python build, and by the time this runs
+// every manifest-backed framework — Dockerfile, package.json, the Python
+// manifests, the compiled ones — has already failed to match.
+//
+// It reads the full member list rather than entries, because entries holds
+// only buffered manifest candidates: an archive of this exact shape carries no
+// candidate at all, so both entries and the root derived from it are empty.
+func rootLevelPythonSources(names []string) bool {
+	root := detectRootFromNames(names)
+	for _, name := range names {
+		rel := strings.TrimPrefix(name, root)
+		if rel == "" || strings.Contains(rel, "/") {
+			continue
+		}
+		if strings.HasSuffix(rel, ".py") {
+			return true
+		}
+	}
+	return false
 }
 
 // compiledManifests maps a build manifest to the framework name and default
@@ -252,28 +294,37 @@ func detectFormat(data []byte) (Format, error) {
 	return "", fmt.Errorf("unrecognized archive magic bytes (want zip or tar.gz)")
 }
 
-func listEntries(data []byte, format Format) ([]entry, error) {
+// listEntries returns the buffered manifest candidates and, separately, the
+// name of every regular member it walked. The second list costs nothing to
+// build and is what lets detection reason about repo shape (see
+// rootLevelPythonSources) rather than only about manifests.
+func listEntries(data []byte, format Format) ([]entry, []string, error) {
 	switch format {
 	case FormatZip:
 		return listZipEntries(data)
 	case FormatTarGz:
 		return listTarGzEntries(data)
 	default:
-		return nil, fmt.Errorf("unsupported format %q", format)
+		return nil, nil, fmt.Errorf("unsupported format %q", format)
 	}
 }
 
-func listZipEntries(data []byte) ([]entry, error) {
+func listZipEntries(data []byte) ([]entry, []string, error) {
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var out []entry
+	var names []string
 	for i, f := range zr.File {
 		if i >= maxEntries {
 			break
 		}
-		if f.FileInfo().IsDir() || strings.Contains(f.Name, "..") || !isCandidate(f.Name) {
+		if f.FileInfo().IsDir() || strings.Contains(f.Name, "..") {
+			continue
+		}
+		names = append(names, f.Name)
+		if !isCandidate(f.Name) {
 			continue
 		}
 		f := f
@@ -283,28 +334,29 @@ func listZipEntries(data []byte) ([]entry, error) {
 			open: func() (io.ReadCloser, error) { return f.Open() },
 		})
 	}
-	return out, nil
+	return out, names, nil
 }
 
 // listTarGzEntries buffers each member's bytes eagerly (rather than keeping a
 // lazy handle into the tar stream), since a tar.Reader can only be walked
 // forward once and Detect may need to open more than one candidate entry.
-func listTarGzEntries(data []byte) ([]entry, error) {
+func listTarGzEntries(data []byte) ([]entry, []string, error) {
 	gz, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer gz.Close()
 
 	tr := tar.NewReader(gz)
 	var out []entry
+	var names []string
 	for i := 0; i < maxEntries; i++ {
 		hdr, err := tr.Next()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if strings.Contains(hdr.Name, "..") {
 			continue
@@ -315,7 +367,11 @@ func listTarGzEntries(data []byte) ([]entry, error) {
 			}
 			continue
 		}
-		if hdr.Typeflag != tar.TypeReg || !isCandidate(hdr.Name) {
+		if hdr.Typeflag != tar.TypeReg {
+			continue
+		}
+		names = append(names, hdr.Name)
+		if !isCandidate(hdr.Name) {
 			continue
 		}
 		limit := hdr.Size
@@ -334,7 +390,7 @@ func listTarGzEntries(data []byte) ([]entry, error) {
 			open: func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(content)), nil },
 		})
 	}
-	return out, nil
+	return out, names, nil
 }
 
 // detectRoot returns the single top-level directory shared by every entry
@@ -342,13 +398,22 @@ func listTarGzEntries(data []byte) ([]entry, error) {
 // Jenkins applies on extract. Lovable/Bolt/v0 exports are single-root zips;
 // an archive with mixed top-level entries (or none) has no root to strip.
 func detectRoot(entries []entry) string {
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.name)
+	}
+	return detectRootFromNames(names)
+}
+
+// detectRootFromNames is detectRoot over a plain member list.
+func detectRootFromNames(names []string) string {
 	var root string
-	for i, e := range entries {
-		idx := strings.IndexByte(e.name, '/')
+	for i, name := range names {
+		idx := strings.IndexByte(name, '/')
 		if idx < 0 {
 			return ""
 		}
-		top := e.name[:idx+1]
+		top := name[:idx+1]
 		if i == 0 {
 			root = top
 			continue

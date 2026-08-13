@@ -486,3 +486,47 @@ func TestDetectRailwayConfigLeavesPortToPlatform(t *testing.T) {
 		t.Errorf("got %s:%d, want django:0", res.Framework, res.Port)
 	}
 }
+
+// TestDetectManifestlessPythonScripts pins the shape that failed a real
+// upload three times on 2026-08-13: a script-style python project — modules
+// and an entrypoint at the root, no requirements.txt, no pyproject.toml, no
+// Dockerfile. It must resolve to "python", because dadaBuildPipeline's python
+// branch builds exactly this (install step skips when no manifest is present,
+// start step falls back to any *.py) while an empty framework aborts the
+// build with no_dockerfile.
+func TestDetectManifestlessPythonScripts(t *testing.T) {
+	data := buildTarGz(t, []zipFile{
+		{"agent.py", "import sys"},
+		{"serve.py", "import http.server"},
+		{"connectors/base.py", "class Base: pass"},
+		{"README.md", "# genagent"},
+		{"ui/index.html", "<html></html>"},
+	})
+	res, err := Detect(data)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	if res.Framework != "python" {
+		t.Errorf("Framework = %q, want python (script-style project ships no manifest)", res.Framework)
+	}
+	if res.Port != 0 {
+		t.Errorf("Port = %d, want 0 (nothing declares a listen port)", res.Port)
+	}
+}
+
+// TestDetectNestedPythonScriptDoesNotHijackNodeRepo guards the other side of
+// the fallback: a helper script buried in a JS repo must not turn that repo
+// into a python build.
+func TestDetectNestedPythonScriptDoesNotHijackNodeRepo(t *testing.T) {
+	data := buildZip(t, []zipFile{
+		{"app/index.js", "console.log(1)"},
+		{"app/scripts/gen.py", "print(1)"},
+	})
+	res, err := Detect(data)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	if res.Framework != "" {
+		t.Errorf("Framework = %q, want \"\" (a nested helper script is not the app)", res.Framework)
+	}
+}
