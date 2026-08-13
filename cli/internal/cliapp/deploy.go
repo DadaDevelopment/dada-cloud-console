@@ -93,7 +93,7 @@ func Deploy(ctx context.Context, cfg Config, opts DeployOptions, in io.Reader, o
 
 	buildID, fromGit := "", false
 	if !opts.Upload {
-		buildID, fromGit = deployFromGit(ctx, client, projectID, envID, appName, opts, prog)
+		buildID, fromGit = deployFromGit(ctx, client, projectID, envID, appName, opts, in, prog)
 	}
 	if !fromGit {
 		buildID, err = deployFromArchive(ctx, client, projectID, envID, appName, opts.Dir, prog)
@@ -130,7 +130,7 @@ func Deploy(ctx context.Context, cfg Config, opts DeployOptions, in io.Reader, o
 // to leave that road - the platform simply builds what origin already has, and
 // the CLI says so. The archive upload stays as the answer for folders that are
 // not a usable GitHub repo at all, and every drop to it is announced.
-func deployFromGit(ctx context.Context, client *apiclient.Client, projectID, envID, appName string, opts DeployOptions, prog *ui.Progress) (string, bool) {
+func deployFromGit(ctx context.Context, client *apiclient.Client, projectID, envID, appName string, opts DeployOptions, in io.Reader, prog *ui.Progress) (string, bool) {
 	dir := opts.Dir
 	info := gitremote.Detect(dir)
 	if !info.IsRepo {
@@ -173,14 +173,16 @@ func deployFromGit(ctx context.Context, client *apiclient.Client, projectID, env
 			AutoDeploy:       true,
 			Provider:         "github",
 		})
-		linked = created
+		if isGithubAccessRequired(err) {
+			created, err = connectAfterGitHubInstall(ctx, client, projectID, envID, appName, info, in, prog)
+		}
 		if err != nil && !isAlreadyConnected(err) {
-			var apiErr *apiclient.APIError
-			if errors.As(err, &apiErr) && apiErr.Code == "github_access_required" {
-				return fallback("платформа не может склонировать репозиторий - подключите GitHub к проекту")
+			if isGithubAccessRequired(err) {
+				return fallback("платформа не может склонировать репозиторий - установите GitHub App на " + info.FullName)
 			}
 			return fallback("подключить репозиторий не вышло (" + apiclient.Explain(err) + ")")
 		}
+		linked = created
 	}
 
 	build, err := client.TriggerBuild(ctx, projectID, envID, appName)
@@ -194,6 +196,55 @@ func deployFromGit(ctx context.Context, client *apiclient.Client, projectID, env
 	}
 	prog.Stage("Сборка в очереди", stagePercent["queued"])
 	return build.ID, true
+}
+
+// isGithubAccessRequired reports the one connect failure the user can still
+// fix without leaving the deploy: the repository is private (or otherwise not
+// clonable anonymously) and the project has no GitHub App installation bound
+// to it (backend/internal/api/gitrepos.go linkGitRepo).
+func isGithubAccessRequired(err error) bool {
+	var apiErr *apiclient.APIError
+	return errors.As(err, &apiErr) && apiErr.Code == "github_access_required"
+}
+
+// connectAfterGitHubInstall turns the dead end of a private repository into a
+// two-minute detour: it fetches the project-bound install URL, sends the user
+// to it, waits for them to come back, and links again. The install URL cannot
+// be guessed - it carries an HMAC-signed state that binds the installation to
+// this project - so without this the CLI's only honest answer was "connect
+// GitHub in the console", which meant abandoning the deploy and losing the git
+// path (and with it auto-deploy) to an archive upload.
+//
+// A non-interactive run (no terminal behind in) gets EOF from the prompt and
+// falls straight back to the archive, so scripts and CI never hang here.
+func connectAfterGitHubInstall(ctx context.Context, client *apiclient.Client, projectID, envID, appName string, info gitremote.Info, in io.Reader, prog *ui.Progress) (apiclient.GitRepo, error) {
+	url, err := client.GitInstallURL(ctx, projectID)
+	if err != nil {
+		return apiclient.GitRepo{}, fmt.Errorf("ссылку на установку GitHub App получить не вышло (%s)", apiclient.Explain(err))
+	}
+
+	prog.Info("Репозиторий %s закрыт для платформы - дайте ей доступ:", info.FullName)
+	prog.Info("  %s", url)
+	prog.Info("Выберите %s, нажмите Install, вернитесь сюда и нажмите Enter.", info.FullName)
+	openBrowser(url)
+
+	prog.Pause()
+	scanner := bufio.NewScanner(in)
+	got := scanner.Scan()
+	prog.Resume()
+	if !got {
+		return apiclient.GitRepo{}, fmt.Errorf("установка GitHub App не подтверждена")
+	}
+
+	prog.Stage("Подключаем "+info.FullName, stagePercent["link"])
+	return client.ConnectGitRepo(ctx, projectID, envID, apiclient.ConnectGitRepoRequest{
+		RepoFullName:     info.FullName,
+		AppName:          appName,
+		ProductionBranch: info.Branch,
+		RootDir:          rootDirOrDot(info.SubdirOfRoot),
+		AutoDeploy:       true,
+		Provider:         "github",
+	})
 }
 
 // isUploadPlaceholder reports whether an app's link is the row an archive

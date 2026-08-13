@@ -89,7 +89,7 @@ func TestUploadPlaceholderDoesNotLockTheAppOntoArchives(t *testing.T) {
 	var out bytes.Buffer
 	prog := ui.New(&out)
 	buildID, fromGit := deployFromGit(context.Background(), client, "proj", "env", "genagent",
-		DeployOptions{Dir: dir}, prog)
+		DeployOptions{Dir: dir}, strings.NewReader(""), prog)
 	prog.Stop()
 
 	if !fromGit {
@@ -129,7 +129,7 @@ func TestRealForeignLinkStillStopsTheGitPath(t *testing.T) {
 	var out bytes.Buffer
 	prog := ui.New(&out)
 	_, fromGit := deployFromGit(context.Background(), client, "proj", "env", "genagent",
-		DeployOptions{Dir: dir}, prog)
+		DeployOptions{Dir: dir}, strings.NewReader(""), prog)
 	prog.Stop()
 
 	if fromGit {

@@ -78,6 +78,24 @@ func (c *Client) DisconnectGitRepo(ctx context.Context, projectID, envID, repoID
 	return c.doJSON(ctx, "DELETE", path, nil, "", nil)
 }
 
+type installURLResponse struct {
+	URL string `json:"url"`
+}
+
+// GitInstallURL returns the GitHub App install URL for a project, per
+// GET /projects/:projectId/git/install-url. The URL carries an HMAC-signed
+// state binding the installation to this project, so it is the only way to
+// give the platform read access to a private repository - visiting the App's
+// page by hand installs it without binding it to anything.
+func (c *Client) GitInstallURL(ctx context.Context, projectID string) (string, error) {
+	var out installURLResponse
+	path := "/projects/" + projectID + "/git/install-url?provider=github"
+	if err := c.doJSON(ctx, "GET", path, nil, "", &out); err != nil {
+		return "", err
+	}
+	return out.URL, nil
+}
+
 type triggerBuildResponse struct {
 	Build Build `json:"build"`
 }

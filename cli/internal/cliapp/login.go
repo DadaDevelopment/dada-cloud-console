@@ -13,7 +13,9 @@ import (
 
 // openBrowser best-effort opens url in the user's default browser. Failure
 // is not fatal - the printed verification URL is always the fallback.
-func openBrowser(url string) {
+// It is a var so tests can neutralise it: a test that exercises a flow which
+// sends the user to a URL must not open that URL on the machine running it.
+var openBrowser = func(url string) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
