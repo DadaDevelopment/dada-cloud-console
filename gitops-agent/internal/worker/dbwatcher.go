@@ -1922,9 +1922,12 @@ func (w *DBWatcher) doImportComposeStack(ctx context.Context, op db.Operation) e
 }
 
 // updateComposeAppImage points a VM (compose) Application at a new image by
-// patching its desired.image in the snapshot and re-assembling the environment's
+// patching its desired image in the snapshot and re-assembling the environment's
 // aggregate stack. Mirrors the k8s image-update path but for the compose runtime,
 // where the workload lives as one service in the shared per-VM stack.
+//
+// This is the handler behind POST /api/v1/deploy (and PATCH .../image) for a
+// runtime=vm environment, so it is the seam a CI pipeline releases through.
 func (w *DBWatcher) updateComposeAppImage(ctx context.Context, op db.Operation, appName, image string) error {
 	var summaryRaw []byte
 	if err := w.pool.QueryRow(ctx, `
@@ -1935,11 +1938,8 @@ func (w *DBWatcher) updateComposeAppImage(ctx context.Context, op db.Operation, 
 	}
 	cur := map[string]any{}
 	_ = json.Unmarshal(summaryRaw, &cur)
-	desired, _ := cur["desired"].(map[string]any)
-	if desired == nil {
-		desired = map[string]any{}
-	}
-	desired["image"] = image
+	desired := composeDesiredMap(cur)
+	setComposeDesiredImage(desired, image)
 	cur["desired"] = desired
 	cur["runtime"] = "compose"
 	cur["status"] = "Pending"
@@ -1971,13 +1971,10 @@ func (w *DBWatcher) doUpdateComposeConfig(ctx context.Context, op db.Operation) 
 	}
 	desired := composeDesiredMap(cur)
 	if p.Image != "" {
-		desired["image"] = p.Image
+		setComposeDesiredImage(desired, p.Image)
 	}
 	desired["ports"] = p.Ports
 	if compose, ok := desired["compose"].(map[string]any); ok && compose != nil {
-		if p.Image != "" {
-			compose["image"] = p.Image
-		}
 		compose["ports"] = p.Ports
 		desired["compose"] = compose
 	}
@@ -2020,6 +2017,25 @@ func (w *DBWatcher) loadComposeSnapshot(ctx context.Context, op db.Operation, ap
 	cur := map[string]any{}
 	_ = json.Unmarshal(summaryRaw, &cur)
 	return cur, nil
+}
+
+// setComposeDesiredImage points a compose app's desired state at a new image.
+//
+// The flat desired.image alone is NOT enough for an ADOPTED app. Adoption stores
+// the service's VERBATIM compose block under desired.compose, and
+// AppServiceSpec.serviceBlock returns that block whole when it is present —
+// Image/Ports/Volumes are then never consulted. A release that only wrote
+// desired.image would re-render the aggregate with the OLD image, enqueue a
+// deploy of an unchanged stack, and report success: the console would show the
+// new tag while the VM kept serving the previous build, with nothing anywhere
+// saying the two disagree. Both fields are the same fact, so they are written
+// together in one place rather than remembered separately at each call site.
+func setComposeDesiredImage(desired map[string]any, image string) {
+	desired["image"] = image
+	if compose, ok := desired["compose"].(map[string]any); ok && compose != nil {
+		compose["image"] = image
+		desired["compose"] = compose
+	}
 }
 
 // composeDesiredMap returns the mutable desired.* block of a snapshot map,
