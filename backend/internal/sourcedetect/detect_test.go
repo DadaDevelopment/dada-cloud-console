@@ -570,3 +570,43 @@ func TestDetectDotSlashPrefixedTarSingleRoot(t *testing.T) {
 		t.Fatalf("framework = %q, want nextjs", res.Framework)
 	}
 }
+
+// TestDetectSingleRootBesideToolingDirs is the "tree" upload of 2026-08-13: a
+// user zipped the folder their editor works in, so ".claude/" sat beside the
+// project directory. Counting that sidecar as content made the archive look
+// multi-rooted, nothing was stripped, and the answer was "no framework" for a
+// project whose python sources sat one directory down.
+func TestDetectSingleRootBesideToolingDirs(t *testing.T) {
+	data := buildTarGz(t, []zipFile{
+		{name: ".claude/scheduled_tasks.lock", body: "lock\n"},
+		{name: "genagent/README.md", body: "hi\n"},
+		{name: "genagent/agent.py", body: "print('hi')\n"},
+		{name: "genagent/connectors/base.py", body: "print('hi')\n"},
+	})
+	res, err := Detect(data)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	if res.Framework != "python" {
+		t.Fatalf("framework = %q, want python", res.Framework)
+	}
+}
+
+// TestDetectToolingDirsDoNotInventARoot pins the other side: two real project
+// directories are still no single root, so nothing is stripped and a manifest
+// buried in one of them does not decide the whole archive.
+func TestDetectToolingDirsDoNotInventARoot(t *testing.T) {
+	data := buildTarGz(t, []zipFile{
+		{name: ".git/config", body: "\n"},
+		{name: "frontend/package.json", body: `{"dependencies":{"next":"14.0.0"}}`},
+		{name: "backend/pyproject.toml", body: "[project]\nname = \"x\"\n"},
+		{name: "backend/main.py", body: "print('hi')\n"},
+	})
+	res, err := Detect(data)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	if res.Framework != "" {
+		t.Fatalf("framework = %q, want empty (two real roots must not be stripped)", res.Framework)
+	}
+}

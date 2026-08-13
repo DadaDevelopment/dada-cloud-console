@@ -440,16 +440,38 @@ func detectRoot(entries []entry) string {
 	return detectRootFromNames(names)
 }
 
+// isToolingTopLevel reports whether a top-level entry is tooling residue
+// rather than repo content: dot-directories (".claude", ".git", ".idea",
+// ".vscode") and the "__MACOSX" sidecar tree Finder's zip adds.
+//
+// A user who uploads the folder their editor works in ships those beside the
+// project directory. Counting them as content made the archive look
+// multi-rooted, so nothing was stripped and detection looked one level above
+// the actual project — which is how a live upload on 2026-08-13 ("tree":
+// ".claude/" beside "genagent/") answered "no framework" for a project whose
+// sources sat one directory down. dadaBuildPipeline's extract step applies the
+// same rule, so the root detection here and the strip there stay in step.
+func isToolingTopLevel(top string) bool {
+	name := strings.TrimSuffix(top, "/")
+	return strings.HasPrefix(name, ".") || name == "__MACOSX"
+}
+
 // detectRootFromNames is detectRoot over a plain member list.
 func detectRootFromNames(names []string) string {
 	var root string
-	for i, name := range names {
+	for _, name := range names {
 		idx := strings.IndexByte(name, '/')
 		if idx < 0 {
+			if isToolingTopLevel(name) {
+				continue
+			}
 			return ""
 		}
 		top := name[:idx+1]
-		if i == 0 {
+		if isToolingTopLevel(top) {
+			continue
+		}
+		if root == "" {
 			root = top
 			continue
 		}
