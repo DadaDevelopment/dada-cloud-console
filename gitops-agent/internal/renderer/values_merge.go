@@ -27,6 +27,7 @@ var ownedCommonKeys = []string{
 	"extraEnv",
 	"pvc",
 	"workloadType",
+	"startCommand",
 	"podSecurityContext",
 }
 

@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -148,42 +149,70 @@ func TestMergeAppValuesRefusesUnparseableExisting(t *testing.T) {
 	}
 }
 
+// TestMergeAppValuesCoversEveryRenderedCommonKey reads the ownership contract
+// off the commonValues struct rather than off a rendered fixture.
+//
+// The fixture form of this test could not see a field it did not populate, and
+// every field on commonValues is omitempty. startCommand shipped that way: the
+// struct emitted it, ownedCommonKeys did not list it, and the merge therefore
+// dropped it from every app that already had a values.yaml in git -- the lever
+// answered 200 and changed nothing on the pod.
 func TestMergeAppValuesCoversEveryRenderedCommonKey(t *testing.T) {
-	rendered, err := RenderAppValues(AppSpec{
-		Name:               "app",
-		Image:              "nexus/app:1",
-		Port:               8080,
-		Replicas:           2,
-		WorkloadType:       "worker",
-		VolumePath:         "/data",
-		VolumeSize:         "10Gi",
-		VolumeStorageClass: "longhorn",
-		VolumeFSGroup:      1000,
-		Env:                map[string]string{"A": "1"},
-		Resources: &AppResources{
-			CPURequest: "10m", MemoryRequest: "128Mi",
-			CPULimit: "250m", MemoryLimit: "256Mi",
-		},
-	})
-	if err != nil {
-		t.Fatalf("RenderAppValues: %v", err)
-	}
-	var doc map[string]any
-	if err := yaml.Unmarshal([]byte(rendered), &doc); err != nil {
-		t.Fatalf("rendered values do not parse: %v", err)
-	}
 	owned := map[string]bool{}
 	for _, k := range ownedCommonKeys {
 		owned[k] = true
 	}
+	typ := reflect.TypeOf(commonValues{})
 	var missing []string
-	for k := range common(t, doc) {
-		if !owned[k] {
-			missing = append(missing, k)
+	for i := 0; i < typ.NumField(); i++ {
+		key, _, _ := strings.Cut(typ.Field(i).Tag.Get("yaml"), ",")
+		if key == "" || key == "-" {
+			continue
+		}
+		if !owned[key] {
+			missing = append(missing, key)
 		}
 	}
 	if len(missing) > 0 {
-		t.Fatalf("RenderAppValues emits keys ownedCommonKeys does not list, so they could never be removed: %s",
+		t.Fatalf("commonValues emits keys ownedCommonKeys does not list, so a merge would never write or remove them: %s",
 			strings.Join(missing, ", "))
+	}
+}
+
+func TestMergeAppValuesWritesStartCommandIntoExistingFile(t *testing.T) {
+	rendered, err := RenderAppValues(AppSpec{
+		Name:         "app",
+		Image:        "nexus/app:1",
+		Replicas:     1,
+		StartCommand: "python main.py --surname Ivanov",
+	})
+	if err != nil {
+		t.Fatalf("RenderAppValues: %v", err)
+	}
+	merged, err := MergeAppValues(mergeFixtureValues, rendered)
+	if err != nil {
+		t.Fatalf("MergeAppValues: %v", err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(merged), &doc); err != nil {
+		t.Fatalf("merged values do not parse: %v", err)
+	}
+	if got := common(t, doc)["startCommand"]; got != "python main.py --surname Ivanov" {
+		t.Fatalf("startCommand = %v, want the rendered command; the merge dropped the key", got)
+	}
+
+	cleared, err := RenderAppValues(AppSpec{Name: "app", Image: "nexus/app:1", Replicas: 1})
+	if err != nil {
+		t.Fatalf("RenderAppValues: %v", err)
+	}
+	back, err := MergeAppValues(merged, cleared)
+	if err != nil {
+		t.Fatalf("MergeAppValues: %v", err)
+	}
+	if err := yaml.Unmarshal([]byte(back), &doc); err != nil {
+		t.Fatalf("merged values do not parse: %v", err)
+	}
+	if _, ok := common(t, doc)["startCommand"]; ok {
+		t.Fatal("clearing the start command must delete the key, not leave the old one in git")
 	}
 }
