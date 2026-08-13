@@ -1741,6 +1741,18 @@ func (w *DBWatcher) renderEnvAggregate(ctx context.Context, op db.Operation, pro
 // The external volume survives the stack swap, so prod data is preserved even
 // though the containers are recreated (a brief, acceptable cutover outage).
 // This is the reusable "adopt an existing compose" path; findata is its first use.
+//
+// The clone is synced hard before the source is read, not merely ensured to
+// exist. The compose and .env read here BECOME the deployed stack, so they must
+// come from the branch as it is now; EnsureCloned only clones when the path is
+// missing, so on a warm agent it is a no-op and ReadFile serves whatever the
+// long-lived clone last happened to hold. Incident 2026-08-13: adopting
+// fin-core/findata rendered the aggregate from a July-8 scaffold that had been
+// superseded in git minutes earlier, rolling prod back 104 backend builds and
+// overwriting the environment .env with a version missing the SMTP, Sber,
+// OpenAI, multitenancy and RBAC keys; fin-data.pro answered 401 until the
+// revert. The commit path already reset to the remote head — only the read did
+// not, which is exactly the half that decides what gets deployed.
 func (w *DBWatcher) doAdoptComposeStack(ctx context.Context, op db.Operation) error {
 	var p struct {
 		SourceApp string `json:"source_app"`
@@ -1762,6 +1774,9 @@ func (w *DBWatcher) doAdoptComposeStack(ctx context.Context, op db.Operation) er
 	}
 	if err := mgr.EnsureCloned(); err != nil {
 		return err
+	}
+	if err := mgr.SyncHard(); err != nil {
+		return fmt.Errorf("sync clone before reading adopt source: %w", err)
 	}
 
 	composeRaw, err := mgr.ReadFile(renderer.AppComposeGitPath(projectName, envName, p.SourceApp))

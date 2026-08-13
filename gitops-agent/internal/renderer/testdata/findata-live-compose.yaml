@@ -1,0 +1,53 @@
+services:
+    backend:
+        depends_on:
+            - postgres
+        env_file:
+            - .env
+        environment:
+            DB_URL: postgresql+asyncpg://postgres:pswd@postgres:5432/feedback
+        expose:
+            - "8001"
+        image: nexus.dada-tuda.ru/dada/profi-backend:master-1.0.0-522
+        restart: unless-stopped
+    frontend:
+        environment:
+            VITE_API_BASE: https://fin-data.pro
+        expose:
+            - "5173"
+        image: nexus.dada-tuda.ru/dada/profi:master-1.0.0-535
+        restart: unless-stopped
+    nginx:
+        depends_on:
+            - backend
+            - frontend
+        entrypoint:
+            - /bin/sh
+            - -c
+            - "echo \"$$NGINX_CONF_B64\" | base64 -d > /etc/nginx/conf.d/default.conf && exec nginx -g 'daemon off;'"
+        environment:
+            NGINX_CONF_B64: c2VydmVyIHsKICAgIGxpc3RlbiA4MDsKICAgIHNlcnZlcl9uYW1lIHd3dy5maW4tZGF0YS5wcm87CiAgICBsb2NhdGlvbiAvLndlbGwta25vd24vYWNtZS1jaGFsbGVuZ2UvIHsKICAgICAgICByb290IC92YXIvd3d3L2NlcnRib3Q7CiAgICB9CiAgICBsb2NhdGlvbiAvIHsKICAgICAgICByZXR1cm4gMzAxIGh0dHBzOi8vZmluLWRhdGEucHJvJHJlcXVlc3RfdXJpOwogICAgfQp9CgpzZXJ2ZXIgewogICAgbGlzdGVuIDQ0MyBzc2wgaHR0cDI7CiAgICBzZXJ2ZXJfbmFtZSB3d3cuZmluLWRhdGEucHJvOwogICAgc3NsX2NlcnRpZmljYXRlIC9ldGMvbmdpbngvY2VydHMvbGl2ZS9maW4tZGF0YS5wcm8vZnVsbGNoYWluLnBlbTsKICAgIHNzbF9jZXJ0aWZpY2F0ZV9rZXkgL2V0Yy9uZ2lueC9jZXJ0cy9saXZlL2Zpbi1kYXRhLnByby9wcml2a2V5LnBlbTsKICAgIHNzbF9wcm90b2NvbHMgVExTdjEuMjsKICAgIHNzbF9jaXBoZXJzIEhJR0g6IWFOVUxMOiFNRDU7CiAgICByZXR1cm4gMzAxIGh0dHBzOi8vZmluLWRhdGEucHJvJHJlcXVlc3RfdXJpOwp9CgpzZXJ2ZXIgewogICAgbGlzdGVuIDgwOwogICAgc2VydmVyX25hbWUgZmluLWNvcmUucHJvIHd3dy5maW4tY29yZS5wcm87CiAgICBsb2NhdGlvbiAvLndlbGwta25vd24vYWNtZS1jaGFsbGVuZ2UvIHsKICAgICAgICByb290IC92YXIvd3d3L2NlcnRib3Q7CiAgICB9CiAgICBsb2NhdGlvbiAvIHsKICAgICAgICByZXR1cm4gMzAxIGh0dHBzOi8vZmluLWRhdGEucHJvJHJlcXVlc3RfdXJpOwogICAgfQp9CgpzZXJ2ZXIgewogICAgbGlzdGVuIDQ0MyBzc2wgaHR0cDI7CiAgICBzZXJ2ZXJfbmFtZSBmaW4tY29yZS5wcm8gd3d3LmZpbi1jb3JlLnBybzsKICAgIHNzbF9jZXJ0aWZpY2F0ZSAvZXRjL25naW54L2NlcnRzL2xpdmUvZmluLWRhdGEucHJvL2Z1bGxjaGFpbi5wZW07CiAgICBzc2xfY2VydGlmaWNhdGVfa2V5IC9ldGMvbmdpbngvY2VydHMvbGl2ZS9maW4tZGF0YS5wcm8vcHJpdmtleS5wZW07CiAgICBzc2xfcHJvdG9jb2xzIFRMU3YxLjI7CiAgICBzc2xfY2lwaGVycyBISUdIOiFhTlVMTDohTUQ1OwogICAgcmV0dXJuIDMwMSBodHRwczovL2Zpbi1kYXRhLnBybyRyZXF1ZXN0X3VyaTsKfQoKc2VydmVyIHsKICAgIGxpc3RlbiA4MDsKICAgIHNlcnZlcl9uYW1lIGZpbi1kYXRhLnBybzsKICAgIGxvY2F0aW9uIC8ud2VsbC1rbm93bi9hY21lLWNoYWxsZW5nZS8gewogICAgICAgIHJvb3QgL3Zhci93d3cvY2VydGJvdDsKICAgIH0KICAgIGxvY2F0aW9uIC8gewogICAgICAgIHJldHVybiAzMDEgaHR0cHM6Ly9maW4tZGF0YS5wcm8kcmVxdWVzdF91cmk7CiAgICB9Cn0KCnNlcnZlciB7CiAgICBsaXN0ZW4gNDQzIHNzbCBodHRwMjsKICAgIHNlcnZlcl9uYW1lIGZpbi1kYXRhLnBybzsKCiAgICBzc2xfY2VydGlmaWNhdGUgL2V0Yy9uZ2lueC9jZXJ0cy9saXZlL2Zpbi1kYXRhLnByby9mdWxsY2hhaW4ucGVtOwogICAgc3NsX2NlcnRpZmljYXRlX2tleSAvZXRjL25naW54L2NlcnRzL2xpdmUvZmluLWRhdGEucHJvL3ByaXZrZXkucGVtOwogICAgc3NsX3Byb3RvY29scyBUTFN2MS4yOwogICAgc3NsX2NpcGhlcnMgSElHSDohYU5VTEw6IU1ENTsKCiAgICBhY2Nlc3NfbG9nIC92YXIvbG9nL25naW54L2FjY2Vzcy5sb2c7CiAgICBlcnJvcl9sb2cgL3Zhci9sb2cvbmdpbngvZXJyb3IubG9nIHdhcm47CgogICAgbG9jYXRpb24gL2FwaS8gewogICAgICAgIHByb3h5X3Bhc3MgaHR0cDovL2JhY2tlbmQ6ODAwMTsKICAgICAgICBwcm94eV9odHRwX3ZlcnNpb24gMS4xOwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgSG9zdCAkaG9zdDsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIFgtRm9yd2FyZGVkLVByb3RvICRzY2hlbWU7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBYLUZvcndhcmRlZC1Gb3IgJHByb3h5X2FkZF94X2ZvcndhcmRlZF9mb3I7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBYLVJlYWwtSVAgJHJlbW90ZV9hZGRyOwogICAgfQoKICAgIGxvY2F0aW9uIC9hdXRoLyB7CiAgICAgICAgcHJveHlfcGFzcyBodHRwOi8vYmFja2VuZDo4MDAxOwogICAgICAgIHByb3h5X2h0dHBfdmVyc2lvbiAxLjE7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBIb3N0ICRob3N0OwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgWC1Gb3J3YXJkZWQtUHJvdG8gJHNjaGVtZTsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIFgtRm9yd2FyZGVkLUZvciAkcHJveHlfYWRkX3hfZm9yd2FyZGVkX2ZvcjsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIFgtUmVhbC1JUCAkcmVtb3RlX2FkZHI7CiAgICB9CgogICAgbG9jYXRpb24gLyB7CiAgICAgICAgcHJveHlfcGFzcyBodHRwOi8vZnJvbnRlbmQ6NTE3MzsKICAgICAgICBwcm94eV9odHRwX3ZlcnNpb24gMS4xOwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgSG9zdCAkaG9zdDsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIFgtRm9yd2FyZGVkLVByb3RvICRzY2hlbWU7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBYLUZvcndhcmRlZC1Gb3IgJHByb3h5X2FkZF94X2ZvcndhcmRlZF9mb3I7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBYLVJlYWwtSVAgJHJlbW90ZV9hZGRyOwogICAgfQoKfQo=
+        image: mirror.gcr.io/library/nginx:1.27-alpine
+        ports:
+            - "80:80"
+            - "443:443"
+        restart: unless-stopped
+        volumes:
+            - /home/ubuntuuser/compose/nginx/.htpasswd:/etc/nginx/.htpasswd:ro
+            - /etc/letsencrypt:/etc/nginx/certs:ro
+            - /var/www/certbot:/var/www/certbot:ro
+    postgres:
+        environment:
+            POSTGRES_DB: feedback
+            POSTGRES_PASSWORD: pswd
+            POSTGRES_USER: postgres
+        image: mirror.gcr.io/library/postgres:16-alpine
+        ports:
+            - 65433:5432
+        restart: unless-stopped
+        volumes:
+            - profi_pg_data:/var/lib/postgresql/data
+volumes:
+    profi_pg_data:
+        external: true
+        name: compose_profi_pg_data
