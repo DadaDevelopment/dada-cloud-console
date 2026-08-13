@@ -689,6 +689,10 @@ export const apps: Messages = {
     ru: "Контейнер не запускался вообще: платформа не смогла скачать образ приложения из реестра. Это не ошибка в вашем коде — сбой на нашей стороне.",
     en: "The container never started at all: the platform could not pull the app's image from the registry. This is not a bug in your code — the failure is on our side.",
   },
+  "apps.alerts.crash.cause.needsArgs": {
+    ru: "Программа завершилась сразу после старта: она ждёт аргументы командной строки (CLI-скрипт), а платформа запускает приложение без аргументов. Это не сбой платформы и не ошибка в коде — нужен запуск, который работает без аргументов: значения по умолчанию, переменные окружения или веб-сервер.",
+    en: "The program exited right after start: it expects command-line arguments (a CLI script), and the platform starts an app without any. Neither a platform failure nor a bug in your code — it needs an entrypoint that runs with no arguments: defaults, environment variables, or a web server.",
+  },
   "apps.alerts.crash.cause.line": { ru: "Из логов:", en: "From the logs:" },
   "apps.alerts.crash.cta": { ru: "Смотреть логи", en: "View logs" },
   "apps.alerts.crash.diagnose": { ru: "Разобраться", en: "Diagnose" },

@@ -19,7 +19,10 @@ export type AppAlertType = "crash" | "volume" | "url";
  * not to blame, `"resource_limit"` means the container was stopped for
  * exceeding its plan's memory ceiling — neither a platform bug nor a code
  * bug, just a capacity fact, so it must render as neutral as the platform
- * kinds and never as an accusation. Missing or empty means the backend could
+ * kinds and never as an accusation. `"app_needs_args"` means the program
+ * refused an empty command line (a CLI tool started as a service) — also
+ * neutral: nothing is broken, the app's shape and the way we start it simply
+ * do not match. Missing or empty means the backend could
  * not classify it — the console must not guess "your code" in that case.
  */
 export type AppAlertCauseKind =
@@ -27,7 +30,8 @@ export type AppAlertCauseKind =
   | "platform_network"
   | "platform_storage"
   | "platform_registry"
-  | "resource_limit";
+  | "resource_limit"
+  | "app_needs_args";
 
 export interface AppAlert {
   type: AppAlertType;

@@ -415,3 +415,50 @@ func TestRenderAlternativeKeepsLinesWithinSMTPLimit(t *testing.T) {
 		}
 	}
 }
+
+// TestClassifyCrashCauseArgparseUsageIsNeedsArgs is the live shape of
+// 2026-08-13: an uploaded archive whose entrypoint is an argparse CLI. The
+// container starts, the program refuses an empty command line, kube reports
+// the bare reason "Error", and before this classification the console showed
+// the owner a permanent crashloop with no verdict at all.
+func TestClassifyCrashCauseArgparseUsageIsNeedsArgs(t *testing.T) {
+	excerpt := "usage: agent.py [-h] --surname SURNAME --place PLACE\n" +
+		"agent.py: error: the following arguments are required: --surname, --place"
+	kind, text := ClassifyCrashCause(excerpt)
+	if kind != CauseKindNeedsArgs {
+		t.Fatalf("expected cause_kind %q, got %q", CauseKindNeedsArgs, kind)
+	}
+	if strings.Contains(text, "ошибка в коде приложения") {
+		t.Fatalf("needs-args text must not blame the app's code, got %q", text)
+	}
+	if line := ExtractCauseLine(excerpt); !strings.Contains(line, "the following arguments are required") {
+		t.Fatalf("expected the parser's own line as evidence, got %q", line)
+	}
+}
+
+// TestClassifyCrashCauseClickMissingOptionBeatsTraceback pins the ordering:
+// click prints a traceback-free usage error, but typer and some wrappers print
+// the missing-option line after a traceback header. The parser's verdict is
+// the specific one and must win over the generic "python died".
+func TestClassifyCrashCauseClickMissingOptionBeatsTraceback(t *testing.T) {
+	excerpt := "Traceback (most recent call last):\n" +
+		"  File \"/app/cli.py\", line 9, in <module>\n" +
+		"Error: Missing option '--token'."
+	if kind, _ := ClassifyCrashCause(excerpt); kind != CauseKindNeedsArgs {
+		t.Fatalf("expected cause_kind %q, got %q", CauseKindNeedsArgs, kind)
+	}
+}
+
+// TestClassifyCrashCauseOrdinaryAppOutputIsNotNeedsArgs keeps the signature
+// table honest: a false "your app is a CLI" sends the owner to change the one
+// thing that was never wrong.
+func TestClassifyCrashCauseOrdinaryAppOutputIsNotNeedsArgs(t *testing.T) {
+	for _, excerpt := range []string{
+		"INFO: parsed the following arguments from config: retries=3",
+		"Traceback (most recent call last):\nValueError: bad payload",
+	} {
+		if kind, _ := ClassifyCrashCause(excerpt); kind == CauseKindNeedsArgs {
+			t.Fatalf("excerpt %q must not classify as needs-args", excerpt)
+		}
+	}
+}

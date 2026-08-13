@@ -323,7 +323,39 @@ const (
 	CauseKindPlatformStorage  = "platform_storage"
 	CauseKindPlatformRegistry = "platform_registry"
 	CauseKindResourceLimit    = "resource_limit"
+	CauseKindNeedsArgs        = "app_needs_args"
 )
+
+// needsArgsCrashText is the cause_kind=CauseKindNeedsArgs verdict: the
+// container did start, ran the program, and the program refused to run because
+// its command line was empty. Nothing is broken -- the archive holds a CLI
+// tool, and the platform starts an app the only way it can start one, with no
+// arguments. Worded like resourceLimitCrashText: neither "your code is broken"
+// nor "we are broken", because neither is true, and the way out is a change of
+// shape (an entrypoint that runs without arguments), not a bug fix.
+//
+// Live case 2026-08-13: an uploaded archive whose entrypoint was
+// argparse-based exited with "the following arguments are required" on every
+// restart. The console showed the bare kube reason "Error" and no verdict at
+// all, so the owner saw an app that crashloops forever for no stated reason.
+const needsArgsCrashText = "Программа завершилась сразу после старта: она ждёт аргументы командной строки (CLI-скрипт), а платформа запускает приложение без аргументов. Это не сбой платформы и не ошибка в коде — нужен запуск, который работает без аргументов: задайте значения по умолчанию, читайте их из переменных окружения или поднимите сервер."
+
+// needsArgsCrashSignatures are lines that only an argument parser prints when
+// it refuses an empty command line. Every pattern here must be impossible to
+// produce by accident in normal application output, same bar as
+// platformCrashSignatures: a false "your app is a CLI" is as bad as a false
+// "the platform broke". Covers argparse (Python), click/typer (Python),
+// commander (Node) and cobra (Go).
+var needsArgsCrashSignatures = []string{
+	"the following arguments are required",
+	"error: unrecognized arguments",
+	"Error: Missing argument",
+	"Error: Missing option",
+	"error: required option",
+	"error: missing required argument",
+	`Error: required flag(s)`,
+	"error: accepts 1 arg(s), received 0",
+}
 
 // resourceLimitCrashText is the cause_kind=CauseKindResourceLimit verdict
 // shown for an OOMKilled container. This is deliberately worded as neither
@@ -423,6 +455,11 @@ func ClassifyCrashCause(excerpt string) (kind, text string) {
 			return sig.kind, sig.text
 		}
 	}
+	for _, pattern := range needsArgsCrashSignatures {
+		if strings.Contains(excerpt, pattern) {
+			return CauseKindNeedsArgs, needsArgsCrashText
+		}
+	}
 	for _, sig := range pythonCrashSignatures {
 		if strings.Contains(excerpt, sig.pattern) {
 			return CauseKindAppCode, fmt.Sprintf("Судя по логам, это ошибка в коде приложения (%s).", sig.label)
@@ -495,10 +532,11 @@ const causeLineMaxRunes = 300
 // correctly but still show no cause_line -- the console banner would state a
 // cause with no evidence line under it.
 func crashLineSignaturePatterns() []string {
-	patterns := make([]string, 0, len(platformCrashSignatures)+len(pythonCrashSignatures)+len(nodeCrashSignatures)+1)
+	patterns := make([]string, 0, len(platformCrashSignatures)+len(needsArgsCrashSignatures)+len(pythonCrashSignatures)+len(nodeCrashSignatures)+1)
 	for _, sig := range platformCrashSignatures {
 		patterns = append(patterns, sig.pattern)
 	}
+	patterns = append(patterns, needsArgsCrashSignatures...)
 	for _, sig := range pythonCrashSignatures {
 		patterns = append(patterns, sig.pattern)
 	}
