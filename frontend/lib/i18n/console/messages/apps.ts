@@ -283,8 +283,8 @@ export const apps: Messages = {
     en: "Step-by-step bot deploy guide",
   },
   "apps.builds.fail.reason.noDockerfile": {
-    ru: "В репозитории нет Dockerfile.",
-    en: "No Dockerfile in the repository.",
+    ru: "Не поняли, что собирать: язык проекта не распознан, а Dockerfile нет. Загрузите папку самого проекта (без папки-обёртки) или добавьте Dockerfile.",
+    en: "We could not tell what to build: the project's language was not recognised and there is no Dockerfile. Upload the project folder itself (not a wrapper folder), or add a Dockerfile.",
   },
   "apps.builds.fail.reason.dockerfileBuildFailed": {
     ru: "Сборка образа упала внутри Dockerfile — смотрите лог.",
