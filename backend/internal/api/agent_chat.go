@@ -17,6 +17,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/agentchat"
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/llmchat"
+	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -915,6 +916,29 @@ var agentChatConsoleRoutes = []string{
 	"/projects/{projectId}/storage/{name}",
 }
 
+// agentChatRestrictRuntime scopes view to what the turn's target environment
+// actually runs: a Kubernetes (or box) environment has the VM-only tools
+// excluded, because their handlers resolve a Portainer AppServer that a
+// Kubernetes environment does not have and answer every call with a 409
+// (state.go:113) -- the failure mode that made the assistant retry a dead
+// endpoint ten times on a real user before giving up. Left unrestricted
+// whenever the runtime cannot be resolved (no project/env in this turn's
+// context yet, or the lookup errors): that is the pre-existing behaviour, and
+// guessing wrong here would take away a capability the incident never
+// implicated.
+func (h *Handler) agentChatRestrictRuntime(ctx context.Context, view *agentchat.ToolView, projectID, envID *uuid.UUID) {
+	if projectID == nil || envID == nil {
+		return
+	}
+	rt, err := h.envRuntime(ctx, *projectID, *envID)
+	if err != nil {
+		return
+	}
+	if rt != models.EnvironmentRuntimeVM {
+		view.ExcludeVMOnlyTools()
+	}
+}
+
 // agentChatNavigator emits the navigate SSE event that moves the caller's own
 // browser tab, and reports back whether the move happened. A path that is not a
 // real console route is refused here rather than sent, so the model learns it
@@ -1349,6 +1373,7 @@ func (h *Handler) AgentChat(c *gin.Context) {
 
 	view := h.agentChatTools.NewView(agentchat.ParseMode(req.Mode))
 	view.SetNavigator(h.agentChatNavigator(c, flusher))
+	h.agentChatRestrictRuntime(ctx, view, projectID, envID)
 	turnCtx := agentchat.TurnContext{ProjectID: req.ProjectID, EnvID: req.EnvID, AppName: req.AppName}
 	systemPrompt := agentChatSystemPrompt(view.CatalogNames())
 
@@ -1704,6 +1729,7 @@ func (h *Handler) AgentChatConfirm(c *gin.Context) {
 	mode := agentchat.ParseMode(row.mode)
 	view := h.agentChatTools.NewView(mode)
 	view.SetNavigator(h.agentChatNavigator(c, flusher))
+	h.agentChatRestrictRuntime(ctx, view, row.projectID, row.envID)
 
 	if decision == "approve" {
 		started := time.Now()

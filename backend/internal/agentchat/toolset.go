@@ -126,6 +126,27 @@ var denyTools = map[string]bool{
 	"revealModelApiKey":      true,
 }
 
+// vmOnlyTools are catalog tools whose backend handler only understands the
+// compose (VM) substrate: getAppState and getAppLogs resolve a Portainer
+// AppServer for the environment (state.go:113/206) and getAppServerState /
+// getAppServerMetrics talk to a named AppServer directly. Every one of them
+// answers a Kubernetes environment with a flat 409/"not applicable to this
+// environment", no matter how the arguments are shaped. A view scoped to a
+// Kubernetes environment excludes these so the model is never handed a
+// capability that cannot succeed there -- this is exactly what turned one real
+// user's "show me my app's state and logs" into ten straight failed tool calls
+// before the assistant gave up and told the user to read the logs himself.
+//
+// getAppHealth (DB-backed, runtime-agnostic) and searchLogs (works for both vm
+// and k8s) remain in the catalog for every runtime, so a Kubernetes turn still
+// has a real state and logs answer once these are excluded.
+var vmOnlyTools = map[string]bool{
+	"getAppState":         true,
+	"getAppLogs":          true,
+	"getAppServerState":   true,
+	"getAppServerMetrics": true,
+}
+
 // riskyWriteTools are the writes that always cost the user a confirmation card,
 // whatever the mode. A write lands here when undoing it is impossible, slow or
 // expensive: it destroys or overwrites data, spends money, exposes something
@@ -411,13 +432,24 @@ func (ts *Toolset) Execute(ctx context.Context, bearer, name, argsJSON string) (
 // AllowWrite is the mode gate. With it false the view dispatches read tools
 // only, and the catalog the model is shown lists nothing else.
 type ToolView struct {
-	ts          *Toolset
-	AllowWrite  bool
-	Mode        Mode
-	loaded      map[string]bool
-	loadedOrder []string
-	navigate    func(path string) bool
-	navigated   bool
+	ts              *Toolset
+	AllowWrite      bool
+	Mode            Mode
+	loaded          map[string]bool
+	loadedOrder     []string
+	navigate        func(path string) bool
+	navigated       bool
+	vmToolsExcluded bool
+}
+
+// ExcludeVMOnlyTools scopes this view to what a non-VM environment's runtime
+// actually serves: vmOnlyTools drop out of the catalog, the base tools, and
+// dispatch, the same way a caller with no write scope never sees write tools.
+// The caller decides when to call this -- it is a runtime fact resolved
+// per-turn from the environment the turn is grounded in, not something the
+// toolset can know on its own.
+func (v *ToolView) ExcludeVMOnlyTools() {
+	v.vmToolsExcluded = true
 }
 
 // SetNavigator hands the view the client's own navigation, used by
@@ -470,6 +502,9 @@ func (v *ToolView) NeedsConfirmation(name string) bool {
 func (v *ToolView) Defs() []llmchat.ToolDef {
 	out := make([]llmchat.ToolDef, 0, len(baseTools)+len(v.loadedOrder)+1)
 	for _, name := range baseTools {
+		if v.vmToolsExcluded && vmOnlyTools[name] {
+			continue
+		}
 		if def, ok := v.ts.defByName[name]; ok {
 			out = append(out, def)
 		}
@@ -494,6 +529,9 @@ func (v *ToolView) Load(names ...string) {
 
 func (v *ToolView) load(name string) bool {
 	if v.loaded[name] || !v.ts.Has(name) {
+		return false
+	}
+	if v.vmToolsExcluded && vmOnlyTools[name] {
 		return false
 	}
 	if v.ts.IsWrite(name) && !v.AllowWrite {
@@ -522,7 +560,18 @@ func (v *ToolView) IsWrite(name string) bool {
 
 // CatalogNames is the name-only catalog for this view's permissions.
 func (v *ToolView) CatalogNames() []string {
-	return v.ts.CatalogNames(v.AllowWrite)
+	names := v.ts.CatalogNames(v.AllowWrite)
+	if !v.vmToolsExcluded {
+		return names
+	}
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if vmOnlyTools[name] {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
 }
 
 // Execute is the single tool entry point for a turn. It serves load_tool
@@ -574,6 +623,9 @@ func (v *ToolView) dispatch(ctx context.Context, bearer, name, argsJSON string) 
 	if !v.ts.Has(name) {
 		return fmt.Sprintf("unknown tool %q. Use only names from the catalog, and make one callable with %s first.", name, LoadToolTool), true
 	}
+	if v.vmToolsExcluded && vmOnlyTools[name] {
+		return fmt.Sprintf("%s is not available for this environment: it only serves VM (Docker Compose) apps, and this environment does not run on that substrate. Use getAppHealth for state and searchLogs for logs instead.", name), true
+	}
 	if v.ts.IsWrite(name) && !v.AllowWrite {
 		return fmt.Sprintf("%s changes state and this session has read-only access; tell the user what would need to change and let them do it.", name), true
 	}
@@ -612,6 +664,10 @@ func (v *ToolView) loadTools(argsJSON string) (string, bool) {
 		def, ok := v.ts.defByName[n]
 		if !ok {
 			fmt.Fprintf(&sb, "%s: not in the catalog. Use a name exactly as listed there.\n", n)
+			continue
+		}
+		if v.vmToolsExcluded && vmOnlyTools[n] {
+			fmt.Fprintf(&sb, "%s: not available for this environment, it only serves VM (Docker Compose) apps. Use getAppHealth for state and searchLogs for logs instead.\n", n)
 			continue
 		}
 		if v.ts.IsWrite(n) && !v.AllowWrite {

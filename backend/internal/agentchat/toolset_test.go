@@ -441,3 +441,89 @@ func TestOpenPage_IsFreeOfTheToolBudget(t *testing.T) {
 		t.Errorf("%s must be a meta-tool; it calls nothing on the backend", OpenPageTool)
 	}
 }
+
+// TestExcludeVMOnlyTools_K8sCatalogDropsVMToolsButKeepsALogsAndStateAnswer pins
+// the fix for the incident where a Kubernetes environment's assistant made ten
+// straight failed calls into getAppState/getAppServerState/getAppLogs (all
+// Portainer-only, state.go:113) before giving up. Once a view is scoped away
+// from the VM runtime, those names must not appear in the catalog, the base
+// tool defs, or dispatch -- and searchLogs (works for both runtimes) plus
+// getAppHealth (DB-backed, runtime-agnostic) must still be reachable, so the
+// model always has a real state-and-logs answer for a Kubernetes app.
+func TestExcludeVMOnlyTools_K8sCatalogDropsVMToolsButKeepsALogsAndStateAnswer(t *testing.T) {
+	view := loadTestToolsetAt(t, "http://127.0.0.1:1").NewView(ModeManual)
+	view.ExcludeVMOnlyTools()
+
+	catalog := map[string]bool{}
+	for _, name := range view.CatalogNames() {
+		catalog[name] = true
+	}
+	for name := range vmOnlyTools {
+		if catalog[name] {
+			t.Errorf("VM-only tool %q must not be listed in a runtime-excluded catalog", name)
+		}
+	}
+	if !catalog["getAppHealth"] {
+		t.Error("getAppHealth (the runtime-agnostic state answer) must remain in the catalog")
+	}
+
+	for _, def := range view.Defs() {
+		if vmOnlyTools[def.Function.Name] {
+			t.Errorf("VM-only tool %q must not be one of the base tool definitions sent to the model", def.Function.Name)
+		}
+	}
+	sawSearchLogs := false
+	for _, def := range view.Defs() {
+		if def.Function.Name == "searchLogs" {
+			sawSearchLogs = true
+		}
+	}
+	if !sawSearchLogs {
+		t.Error("searchLogs must remain a base tool so a Kubernetes turn always has a logs answer available with no load_tool round trip")
+	}
+
+	for name := range vmOnlyTools {
+		out, isErr := view.Execute(context.Background(), "", name, `{}`)
+		if !isErr {
+			t.Errorf("dispatching excluded tool %q must fail even if the model calls it directly by name, got: %s", name, out)
+		}
+	}
+
+	loaded, isErr := view.Execute(context.Background(), "", LoadToolTool, `{"names":["getAppState"]}`)
+	if isErr {
+		t.Fatalf("load_tool itself must not error even when every requested name is excluded: %s", loaded)
+	}
+	if !strings.Contains(loaded, "not available for this environment") {
+		t.Errorf("load_tool must explain why getAppState was not loaded, got: %s", loaded)
+	}
+}
+
+// TestExcludeVMOnlyTools_VMCatalogKeepsThem is the control case: a view that is
+// never told to exclude VM-only tools (the pre-existing, VM-runtime behaviour)
+// still offers all of them.
+func TestExcludeVMOnlyTools_VMCatalogKeepsThem(t *testing.T) {
+	view := loadTestToolsetAt(t, "http://127.0.0.1:1").NewView(ModeManual)
+
+	catalog := map[string]bool{}
+	for _, name := range view.CatalogNames() {
+		catalog[name] = true
+	}
+	for name := range vmOnlyTools {
+		if name == "getAppState" {
+			continue
+		}
+		if !catalog[name] {
+			t.Errorf("VM-only tool %q must be listed in the catalog when the view is not runtime-restricted", name)
+		}
+	}
+
+	sawGetAppState := false
+	for _, def := range view.Defs() {
+		if def.Function.Name == "getAppState" {
+			sawGetAppState = true
+		}
+	}
+	if !sawGetAppState {
+		t.Error("getAppState is a base tool and must be sent to the model when the view is not runtime-restricted")
+	}
+}
