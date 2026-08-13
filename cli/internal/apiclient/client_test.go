@@ -83,11 +83,11 @@ func TestAPIErrorMapping(t *testing.T) {
 		status int
 		want   string
 	}{
-		{http.StatusUnauthorized, "not logged in"},
-		{http.StatusForbidden, "write access"},
-		{http.StatusNotFound, "not found"},
-		{http.StatusRequestEntityTooLarge, "100MB"},
-		{http.StatusServiceUnavailable, "not enabled"},
+		{http.StatusUnauthorized, "ddc login"},
+		{http.StatusForbidden, "прав на запись"},
+		{http.StatusNotFound, "не найдены"},
+		{http.StatusRequestEntityTooLarge, "100МБ"},
+		{http.StatusServiceUnavailable, "выключена"},
 	}
 	for _, tc := range cases {
 		c, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {

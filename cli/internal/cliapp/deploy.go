@@ -19,6 +19,7 @@ import (
 	"github.com/dada-tuda/console/cli/internal/appname"
 	"github.com/dada-tuda/console/cli/internal/archive"
 	"github.com/dada-tuda/console/cli/internal/gitremote"
+	"github.com/dada-tuda/console/cli/internal/ui"
 )
 
 // DeployOptions are the resolved inputs to a single `ddc deploy` run.
@@ -37,51 +38,82 @@ const (
 	urlPollTimeout    = 3 * time.Minute
 )
 
-// Deploy runs the full v0 flow: resolve project/environment/app name,
-// package the directory, upload it, stream build status, then print the
-// live URL once the platform has assigned one.
+// stagePercent maps each step of a deploy to a share of the progress bar.
+// The numbers are ordered milestones, not a time estimate: the bar only moves
+// when the platform actually reports the next state, so it never advertises
+// progress that has not happened.
+var stagePercent = map[string]int{
+	"login":     4,
+	"target":    8,
+	"link":      12,
+	"packaging": 16,
+	"uploading": 26,
+	"queued":    34,
+	"detecting": 46,
+	"building":  66,
+	"pushing":   86,
+	"url":       94,
+}
+
+// buildStageLabel names the console's build statuses in the words a user
+// recognises. An unknown status keeps its own name rather than being hidden.
+var buildStageLabel = map[string]string{
+	"queued":    "Сборка в очереди",
+	"detecting": "Определяем фреймворк",
+	"building":  "Собираем образ",
+	"pushing":   "Публикуем образ",
+}
+
+// Deploy runs the full v0 flow: resolve project/environment/app name, build
+// the app from its git remote or from an uploaded archive, follow the build,
+// then print the live URL once the platform has assigned one.
 func Deploy(ctx context.Context, cfg Config, opts DeployOptions, in io.Reader, out io.Writer) error {
 	if err := EnsureLoggedIn(ctx, cfg, out); err != nil {
 		return err
 	}
+	prog := ui.New(out)
+	defer prog.Stop()
+
 	client := apiclient.New(cfg.APIBase, &http.Client{}, TokenSource(cfg), agentmarker.DetectFromEnv())
 
 	appName, err := resolveAppName(opts)
 	if err != nil {
 		return err
 	}
+	prog.Stage("Ищем проект", stagePercent["target"])
 
-	target, err := resolveTarget(ctx, client, opts, appName, in, out)
+	target, err := resolveTarget(ctx, client, opts, appName, in, prog, out)
 	if err != nil {
 		return err
 	}
 	projectID, envID := target.ProjectID, target.EnvID
-	fmt.Fprintf(out, "App: %s -> %s / %s\n", appName, target.ProjectName, target.EnvName)
+	prog.Info("Приложение %s → %s / %s", appName, target.ProjectName, target.EnvName)
 
-	buildID, fromGit := deployFromGit(ctx, client, projectID, envID, appName, opts.Dir, out)
+	buildID, fromGit := deployFromGit(ctx, client, projectID, envID, appName, opts.Dir, prog)
 	if !fromGit {
-		buildID, err = deployFromArchive(ctx, client, projectID, envID, appName, opts.Dir, out)
+		buildID, err = deployFromArchive(ctx, client, projectID, envID, appName, opts.Dir, prog)
 		if err != nil {
 			return err
 		}
 	}
 
-	finalStatus, err := streamBuildStatus(ctx, client, projectID, envID, appName, buildID, out)
+	finalStatus, err := streamBuildStatus(ctx, client, projectID, envID, appName, buildID, prog)
 	if err != nil {
 		return err
 	}
 	if finalStatus != apiclient.StatusSuccess {
-		return fmt.Errorf("build finished with status %q - see the build log in the console for details", finalStatus)
+		return fmt.Errorf("сборка завершилась статусом %q - лог сборки в консоли", finalStatus)
 	}
 
-	url, ok, err := pollAppURL(ctx, client, projectID, envID, appName, out)
+	prog.Stage("Ждём адрес приложения", stagePercent["url"])
+	url, ok, err := pollAppURL(ctx, client, projectID, envID, appName)
 	if err != nil {
 		return err
 	}
 	if ok {
-		fmt.Fprintf(out, "\nLive: %s\n", url)
+		prog.Success("Готово: %s", url)
 	} else {
-		fmt.Fprintln(out, "\nBuild succeeded. The app's URL was not assigned yet - check it in the console.")
+		prog.Success("Сборка прошла. Адрес ещё не назначен - он появится в консоли.")
 	}
 	return nil
 }
@@ -91,35 +123,36 @@ func Deploy(ctx context.Context, cfg Config, opts DeployOptions, in io.Reader, o
 // of an opaque archive. Every reason it cannot is announced in one line and
 // answered by returning ok=false, so the caller falls back to the upload path
 // rather than failing the deploy.
-func deployFromGit(ctx context.Context, client *apiclient.Client, projectID, envID, appName, dir string, out io.Writer) (string, bool) {
+func deployFromGit(ctx context.Context, client *apiclient.Client, projectID, envID, appName, dir string, prog *ui.Progress) (string, bool) {
 	info := gitremote.Detect(dir)
 	if !info.IsRepo {
 		return "", false
 	}
 	fallback := func(reason string) (string, bool) {
-		fmt.Fprintf(out, "Uploading the folder instead of building from git: %s.\n", reason)
+		prog.Info("Заливаем папку вместо сборки из git: %s.", reason)
 		return "", false
 	}
 	if info.Unsupported != "" {
 		return fallback(info.Unsupported)
 	}
 	if info.Dirty {
-		return fallback("you have uncommitted changes")
+		return fallback("есть незакоммиченные изменения")
 	}
 	if !info.HeadPushed {
-		return fallback("this commit is not pushed to origin/" + info.Branch)
+		return fallback("этот коммит не запушен в origin/" + info.Branch)
 	}
 
+	prog.Stage("Проверяем репозиторий", stagePercent["link"])
 	repos, err := client.ListGitRepos(ctx, projectID, envID)
 	if err != nil {
-		return fallback("could not read this environment's repositories")
+		return fallback("не удалось прочитать репозитории окружения")
 	}
 	linked, found := findGitRepo(repos, appName)
 	switch {
 	case found && linked.RepoFullName != info.FullName:
-		return fallback(fmt.Sprintf("app %q is already linked to %s", appName, linked.RepoFullName))
+		return fallback(fmt.Sprintf("приложение %q уже связано с %s", appName, linked.RepoFullName))
 	case !found:
-		fmt.Fprintf(out, "Linking %s (%s)...\n", info.FullName, info.Branch)
+		prog.Stage("Подключаем "+info.FullName, stagePercent["link"])
 		_, err := client.ConnectGitRepo(ctx, projectID, envID, apiclient.ConnectGitRepoRequest{
 			RepoFullName:     info.FullName,
 			AppName:          appName,
@@ -131,18 +164,18 @@ func deployFromGit(ctx context.Context, client *apiclient.Client, projectID, env
 		if err != nil && !isAlreadyConnected(err) {
 			var apiErr *apiclient.APIError
 			if errors.As(err, &apiErr) && apiErr.Code == "github_access_required" {
-				return fallback("the platform cannot clone this repository - connect GitHub to the project to build from it")
+				return fallback("платформа не может склонировать репозиторий - подключите GitHub к проекту")
 			}
-			return fallback("linking the repository failed (" + apiclient.Explain(err) + ")")
+			return fallback("подключить репозиторий не вышло (" + apiclient.Explain(err) + ")")
 		}
 	}
 
 	build, err := client.TriggerBuild(ctx, projectID, envID, appName)
 	if err != nil {
-		return fallback("starting the build from git failed (" + apiclient.Explain(err) + ")")
+		return fallback("запустить сборку из git не вышло (" + apiclient.Explain(err) + ")")
 	}
-	fmt.Fprintf(out, "Source: github.com/%s @ %s\n", info.FullName, info.Branch)
-	fmt.Fprintf(out, "Build queued: %s\n", build.ID)
+	prog.Info("Источник: github.com/%s @ %s", info.FullName, info.Branch)
+	prog.Stage("Сборка в очереди", stagePercent["queued"])
 	return build.ID, true
 }
 
@@ -172,30 +205,31 @@ func isAlreadyConnected(err error) bool {
 
 // deployFromArchive is the no-git path: package the directory, upload it, and
 // return the id of the build the upload queued.
-func deployFromArchive(ctx context.Context, client *apiclient.Client, projectID, envID, appName, dir string, out io.Writer) (string, error) {
+func deployFromArchive(ctx context.Context, client *apiclient.Client, projectID, envID, appName, dir string, prog *ui.Progress) (string, error) {
+	prog.Stage("Собираем архив", stagePercent["packaging"])
 	entries, total, err := archive.Plan(dir)
 	if err != nil {
-		return "", fmt.Errorf("scanning %s: %w", dir, err)
+		return "", fmt.Errorf("чтение %s: %w", dir, err)
 	}
 	if total > archive.MaxBytes {
-		return "", fmt.Errorf("this project is %.1fMB, over the console's %dMB upload limit - "+
-			"trim large files or add them to .gitignore and try again",
+		return "", fmt.Errorf("проект весит %.1fМБ, лимит загрузки консоли %dМБ - "+
+			"уберите крупные файлы или добавьте их в .gitignore",
 			float64(total)/1024/1024, archive.MaxBytes/1024/1024)
 	}
-	fmt.Fprintf(out, "Packaging %d files (%.1fMB)...\n", len(entries), float64(total)/1024/1024)
+	prog.Stage(fmt.Sprintf("Собираем архив: %d файлов, %.1fМБ", len(entries), float64(total)/1024/1024), stagePercent["packaging"])
 
 	data, err := archive.Build(dir, entries)
 	if err != nil {
-		return "", fmt.Errorf("building archive: %w", err)
+		return "", fmt.Errorf("сборка архива: %w", err)
 	}
 
-	fmt.Fprintln(out, "Uploading...")
+	prog.Stage("Загружаем архив", stagePercent["uploading"])
 	uploadResp, err := client.UploadSourceArchive(ctx, projectID, envID, appName, appName+".tar.gz", data)
 	if err != nil {
-		return "", fmt.Errorf("upload failed: %s", apiclient.Explain(err))
+		return "", fmt.Errorf("загрузка не прошла: %s", apiclient.Explain(err))
 	}
-	fmt.Fprintf(out, "Detected: %s (port %d)\n", nonEmpty(uploadResp.Detected.Framework, "unknown"), uploadResp.Detected.Port)
-	fmt.Fprintf(out, "Build queued: %s\n", uploadResp.Build.ID)
+	prog.Info("Фреймворк: %s (порт %d)", nonEmpty(uploadResp.Detected.Framework, "не определён"), uploadResp.Detected.Port)
+	prog.Stage("Сборка в очереди", stagePercent["queued"])
 	return uploadResp.Build.ID, nil
 }
 
@@ -210,7 +244,7 @@ func nonEmpty(s, def string) string {
 // folder never shows a menu: it reuses the project named after the folder, or
 // creates it. Later runs reuse what was remembered for that folder. The menu
 // survives only as the fallback for --project naming something ambiguous.
-func resolveTarget(ctx context.Context, client *apiclient.Client, opts DeployOptions, appName string, in io.Reader, out io.Writer) (Target, error) {
+func resolveTarget(ctx context.Context, client *apiclient.Client, opts DeployOptions, appName string, in io.Reader, prog *ui.Progress, out io.Writer) (Target, error) {
 	if opts.Project == "" {
 		if remembered, ok, err := LookupTarget(opts.Dir); err == nil && ok {
 			return remembered, nil
@@ -219,7 +253,7 @@ func resolveTarget(ctx context.Context, client *apiclient.Client, opts DeployOpt
 
 	projects, err := client.ListProjects(ctx)
 	if err != nil {
-		return Target{}, fmt.Errorf("listing projects: %s", apiclient.Explain(err))
+		return Target{}, fmt.Errorf("список проектов: %s", apiclient.Explain(err))
 	}
 
 	wanted := opts.Project
@@ -230,15 +264,15 @@ func resolveTarget(ctx context.Context, client *apiclient.Client, opts DeployOpt
 	project, found := findProject(projects, wanted)
 	if !found {
 		if opts.Project != "" {
-			return Target{}, fmt.Errorf("no project named %q - run it without --project to create one", opts.Project)
+			return Target{}, fmt.Errorf("проекта %q нет - запустите без --project, чтобы создать новый", opts.Project)
 		}
-		project, err = createProjectForFolder(ctx, client, wanted, out)
+		project, err = createProjectForFolder(ctx, client, wanted, prog)
 		if err != nil {
 			return Target{}, err
 		}
 	}
 
-	env, err := resolveEnvironment(ctx, client, project, in, out)
+	env, err := resolveEnvironment(ctx, client, project, in, prog, out)
 	if err != nil {
 		return Target{}, err
 	}
@@ -251,7 +285,7 @@ func resolveTarget(ctx context.Context, client *apiclient.Client, opts DeployOpt
 		AppName:     appName,
 	}
 	if err := RememberTarget(opts.Dir, target); err != nil {
-		fmt.Fprintf(out, "note: could not remember this folder's target (%v)\n", err)
+		prog.Info("не удалось запомнить цель для этой папки (%v)", err)
 	}
 	return target, nil
 }
@@ -260,21 +294,22 @@ func resolveTarget(ctx context.Context, client *apiclient.Client, opts DeployOpt
 // are unique platform-wide (backend/internal/api/projects.go:218), so a name
 // another tenant already took comes back 409 and is retried with a short
 // suffix rather than dumping the user back into a menu.
-func createProjectForFolder(ctx context.Context, client *apiclient.Client, wanted string, out io.Writer) (apiclient.Project, error) {
+func createProjectForFolder(ctx context.Context, client *apiclient.Client, wanted string, prog *ui.Progress) (apiclient.Project, error) {
 	slug := appname.NormalizeProject(wanted)
 	if !appname.ValidProject(slug) {
-		return apiclient.Project{}, fmt.Errorf("could not derive a project name from %q - pass an existing one with --project", wanted)
+		return apiclient.Project{}, fmt.Errorf("не вышло вывести имя проекта из %q - передайте существующий через --project", wanted)
 	}
 
-	fmt.Fprintf(out, "First deploy from this folder - creating project %q...\n", slug)
+	prog.Stage("Создаём проект "+slug, stagePercent["target"])
 	project, err := client.CreateProject(ctx, slug)
 	if err == nil {
+		prog.Info("Первый деплой из этой папки - создан проект %s", slug)
 		return project, nil
 	}
 
 	var apiErr *apiclient.APIError
 	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusConflict {
-		return apiclient.Project{}, fmt.Errorf("creating project %q: %s", slug, apiclient.Explain(err))
+		return apiclient.Project{}, fmt.Errorf("создание проекта %q: %s", slug, apiclient.Explain(err))
 	}
 
 	taken := slug
@@ -282,11 +317,11 @@ func createProjectForFolder(ctx context.Context, client *apiclient.Client, wante
 	if sufErr != nil {
 		return apiclient.Project{}, sufErr
 	}
-	fmt.Fprintf(out, "Name %q is taken platform-wide - using %q instead.\n", taken, suffixed)
 	project, err = client.CreateProject(ctx, suffixed)
 	if err != nil {
-		return apiclient.Project{}, fmt.Errorf("creating project %q: %s", suffixed, apiclient.Explain(err))
+		return apiclient.Project{}, fmt.Errorf("создание проекта %q: %s", suffixed, apiclient.Explain(err))
 	}
+	prog.Info("Имя %s занято на платформе - создан проект %s", taken, suffixed)
 	return project, nil
 }
 
@@ -321,16 +356,16 @@ func findProject(projects []apiclient.Project, wanted string) (apiclient.Project
 	return apiclient.Project{}, false
 }
 
-// resolveEnvironment picks the environment to deploy into: the production one
-// when the project has it, the only one when there is only one, and a prompt
-// only when neither rule decides.
-func resolveEnvironment(ctx context.Context, client *apiclient.Client, project apiclient.Project, in io.Reader, out io.Writer) (apiclient.Environment, error) {
+// resolveEnvironment picks the environment to deploy into: the one actually
+// named prod when the project has it, the only one when there is only one, a
+// prod-typed one after that, and a prompt only when nothing decides.
+func resolveEnvironment(ctx context.Context, client *apiclient.Client, project apiclient.Project, in io.Reader, prog *ui.Progress, out io.Writer) (apiclient.Environment, error) {
 	envs, err := client.GetProjectEnvironments(ctx, project.ID)
 	if err != nil {
-		return apiclient.Environment{}, fmt.Errorf("listing environments: %s", apiclient.Explain(err))
+		return apiclient.Environment{}, fmt.Errorf("список окружений: %s", apiclient.Explain(err))
 	}
 	if len(envs) == 0 {
-		return apiclient.Environment{}, fmt.Errorf("project %q has no environments", project.Name)
+		return apiclient.Environment{}, fmt.Errorf("в проекте %q нет окружений", project.Name)
 	}
 	if len(envs) == 1 {
 		return envs[0], nil
@@ -345,7 +380,9 @@ func resolveEnvironment(ctx context.Context, client *apiclient.Client, project a
 			return e, nil
 		}
 	}
-	return choose(in, out, "Select an environment", envs, func(e apiclient.Environment) string {
+	prog.Pause()
+	defer prog.Resume()
+	return choose(in, out, "Выберите окружение", envs, func(e apiclient.Environment) string {
 		return fmt.Sprintf("%s (%s)", e.Name, e.Type)
 	})
 }
@@ -363,12 +400,12 @@ func choose[T any](in io.Reader, out io.Writer, prompt string, items []T, label 
 
 	scanner := bufio.NewScanner(in)
 	if !scanner.Scan() {
-		return zero, fmt.Errorf("no input received")
+		return zero, fmt.Errorf("ввод не получен")
 	}
 	choice := strings.TrimSpace(scanner.Text())
 	n, err := strconv.Atoi(choice)
 	if err != nil || n < 1 || n > len(items) {
-		return zero, fmt.Errorf("invalid selection %q", choice)
+		return zero, fmt.Errorf("непонятный выбор %q", choice)
 	}
 	return items[n-1], nil
 }
@@ -390,34 +427,35 @@ func resolveAppName(opts DeployOptions) (string, error) {
 	base := filepath.Base(abs)
 	normalized := appname.Normalize(base)
 	if err := appname.Validate(normalized); err != nil {
-		return "", fmt.Errorf("could not derive a valid app name from directory %q - pass one explicitly with --name", base)
+		return "", fmt.Errorf("не вышло вывести имя приложения из папки %q - передайте его через --name", base)
 	}
 	return normalized, nil
 }
 
 // streamBuildStatus polls the build's status until it reaches a terminal
-// state, printing each change, and returns the terminal status.
-func streamBuildStatus(ctx context.Context, client *apiclient.Client, projectID, envID, appName, buildID string, out io.Writer) (string, error) {
+// state, moving the progress bar on every change, and returns the terminal
+// status.
+func streamBuildStatus(ctx context.Context, client *apiclient.Client, projectID, envID, appName, buildID string, prog *ui.Progress) (string, error) {
 	deadline := time.Now().Add(buildPollTimeout)
-	last := ""
 
 	for {
 		if time.Now().After(deadline) {
-			return "", fmt.Errorf("timed out waiting for the build after %s", buildPollTimeout)
+			return "", fmt.Errorf("сборка не завершилась за %s", buildPollTimeout)
 		}
 
 		build, ok, err := client.LatestBuild(ctx, projectID, envID, appName)
 		if err != nil {
-			return "", fmt.Errorf("checking build status: %s", apiclient.Explain(err))
+			return "", fmt.Errorf("статус сборки: %s", apiclient.Explain(err))
 		}
 		if ok && build.ID == buildID {
-			if build.Status != last {
-				fmt.Fprintf(out, "Build: %s\n", build.Status)
-				last = build.Status
-			}
 			if apiclient.IsTerminalBuildStatus(build.Status) {
 				return build.Status, nil
 			}
+			label, known := buildStageLabel[build.Status]
+			if !known {
+				label = build.Status
+			}
+			prog.Stage(label, stagePercent[build.Status])
 		}
 
 		select {
@@ -431,12 +469,12 @@ func streamBuildStatus(ctx context.Context, client *apiclient.Client, projectID,
 // pollAppURL waits briefly for the platform to assign the app a live URL
 // after a successful build - it is created by the same handoff, but not
 // necessarily synced into the snapshot the instant the build finishes.
-func pollAppURL(ctx context.Context, client *apiclient.Client, projectID, envID, appName string, out io.Writer) (string, bool, error) {
+func pollAppURL(ctx context.Context, client *apiclient.Client, projectID, envID, appName string) (string, bool, error) {
 	deadline := time.Now().Add(urlPollTimeout)
 	for {
 		url, ok, err := client.FindAppURL(ctx, projectID, envID, appName)
 		if err != nil {
-			return "", false, fmt.Errorf("checking app URL: %s", apiclient.Explain(err))
+			return "", false, fmt.Errorf("адрес приложения: %s", apiclient.Explain(err))
 		}
 		if ok {
 			return url, true, nil

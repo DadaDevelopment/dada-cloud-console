@@ -41,9 +41,9 @@ func EnsureLoggedIn(ctx context.Context, cfg Config, out io.Writer) error {
 	}
 
 	if ok {
-		fmt.Fprintln(out, "Your session expired - signing you in again.")
+		fmt.Fprintln(out, "Сессия истекла - входим заново.")
 	} else {
-		fmt.Fprintln(out, "You are not signed in yet - opening sign-in first.")
+		fmt.Fprintln(out, "Вы ещё не вошли - сначала откроем вход.")
 	}
 	return Login(ctx, cfg, out)
 }

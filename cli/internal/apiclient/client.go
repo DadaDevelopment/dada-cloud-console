@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
+	"time"
 
 	"github.com/dada-tuda/console/cli/internal/version"
 )
@@ -97,11 +99,16 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body io.Re
 // doJSON performs a request and decodes a JSON response into out (skipped
 // when out is nil), returning *APIError for any non-2xx status.
 func (c *Client) doJSON(ctx context.Context, method, path string, body io.Reader, contentType string, out any) error {
-	req, err := c.newRequest(ctx, method, path, body, contentType)
-	if err != nil {
-		return err
+	var payload []byte
+	if body != nil {
+		var err error
+		payload, err = io.ReadAll(body)
+		if err != nil {
+			return err
+		}
 	}
-	resp, err := c.HTTP.Do(req)
+
+	resp, err := c.send(ctx, method, path, payload, contentType)
 	if err != nil {
 		return fmt.Errorf("contacting console: %w", err)
 	}
@@ -127,6 +134,51 @@ func (c *Client) doJSON(ctx context.Context, method, path string, body io.Reader
 	return nil
 }
 
+// transportRetries is how many extra attempts send makes after a connection
+// that died before the request was on the wire. Three attempts with the
+// backoff below cover the seconds-long TLS handshake stalls users hit on flaky
+// networks without making a broken console feel like a hang.
+const transportRetries = 2
+
+var retryBackoff = []time.Duration{400 * time.Millisecond, 1200 * time.Millisecond}
+
+// send performs the request, retrying transport failures that happened before
+// the request was written. That distinction is what makes retrying a POST
+// safe: if the bytes never left the client, the console cannot have acted on
+// them, so a second attempt cannot duplicate a deploy or a build.
+func (c *Client) send(ctx context.Context, method, path string, payload []byte, contentType string) (*http.Response, error) {
+	var lastErr error
+	for attempt := 0; ; attempt++ {
+		var body io.Reader
+		if payload != nil {
+			body = bytes.NewReader(payload)
+		}
+		req, err := c.newRequest(ctx, method, path, body, contentType)
+		if err != nil {
+			return nil, err
+		}
+
+		var wrote bool
+		req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
+			WroteRequest: func(httptrace.WroteRequestInfo) { wrote = true },
+		}))
+
+		resp, err := c.HTTP.Do(req)
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+		if wrote || attempt >= transportRetries || ctx.Err() != nil {
+			return nil, lastErr
+		}
+		select {
+		case <-ctx.Done():
+			return nil, lastErr
+		case <-time.After(retryBackoff[attempt]):
+		}
+	}
+}
+
 func jsonBody(v any) (*bytes.Buffer, error) {
 	buf := &bytes.Buffer{}
 	if err := json.NewEncoder(buf).Encode(v); err != nil {
@@ -146,20 +198,20 @@ func Explain(err error) string {
 	}
 	switch ae.Status {
 	case http.StatusUnauthorized:
-		return "not logged in (or your session expired) - run 'ddc login'"
+		return "вы не вошли (или сессия истекла) - выполните 'ddc login'"
 	case http.StatusForbidden:
-		return "you don't have write access to this project/environment"
+		return "нет прав на запись в этот проект/окружение"
 	case http.StatusNotFound:
-		return "project, environment or app not found"
+		return "проект, окружение или приложение не найдены"
 	case http.StatusRequestEntityTooLarge:
-		return "the archive is larger than the console's 100MB upload limit"
+		return "архив больше лимита загрузки консоли в 100МБ"
 	case http.StatusServiceUnavailable:
-		return "source upload is not enabled on this console right now"
+		return "загрузка исходников сейчас выключена на этой консоли"
 	default:
 		if ae.Message != "" {
 			return ae.Message
 		}
-		return fmt.Sprintf("console returned status %d", ae.Status)
+		return fmt.Sprintf("консоль вернула статус %d", ae.Status)
 	}
 }
 
