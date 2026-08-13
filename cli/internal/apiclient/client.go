@@ -142,10 +142,29 @@ const transportRetries = 2
 
 var retryBackoff = []time.Duration{400 * time.Millisecond, 1200 * time.Millisecond}
 
+// retryableReadStatus reports whether a read-only request that came back with
+// this status is worth repeating. A console being rolled out answers from a
+// pod that is starting (502/503/504 from the ingress) or from one that is up
+// with its database not yet reachable (500), and both last seconds. Treating
+// that as a verdict cost a user the whole git path once: a single 500 on
+// GET .../repos during a backend rollout dropped his deploy to an archive
+// upload, which then became the app's recorded source.
+func retryableReadStatus(status int) bool {
+	switch status {
+	case http.StatusInternalServerError, http.StatusBadGateway,
+		http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return false
+}
+
 // send performs the request, retrying transport failures that happened before
 // the request was written. That distinction is what makes retrying a POST
 // safe: if the bytes never left the client, the console cannot have acted on
 // them, so a second attempt cannot duplicate a deploy or a build.
+//
+// A server-side failure is retried only for GET, where repeating the request
+// cannot change anything on the platform.
 func (c *Client) send(ctx context.Context, method, path string, payload []byte, contentType string) (*http.Response, error) {
 	var lastErr error
 	for attempt := 0; ; attempt++ {
@@ -164,11 +183,22 @@ func (c *Client) send(ctx context.Context, method, path string, payload []byte, 
 		}))
 
 		resp, err := c.HTTP.Do(req)
-		if err == nil {
+		switch {
+		case err == nil && (method != "GET" || !retryableReadStatus(resp.StatusCode) || attempt >= transportRetries):
 			return resp, nil
+		case err == nil:
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		default:
+			lastErr = err
+			if wrote || attempt >= transportRetries {
+				return nil, lastErr
+			}
 		}
-		lastErr = err
-		if wrote || attempt >= transportRetries || ctx.Err() != nil {
+		if ctx.Err() != nil {
+			if lastErr == nil {
+				lastErr = ctx.Err()
+			}
 			return nil, lastErr
 		}
 		select {

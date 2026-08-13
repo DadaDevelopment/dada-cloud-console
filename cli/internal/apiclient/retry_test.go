@@ -42,6 +42,75 @@ func TestRetriesConnectionsThatDiedBeforeTheRequest(t *testing.T) {
 	}
 }
 
+// TestRetriesAReadThatHitAConsoleBeingRolledOut locks the failure of
+// 2026-08-13 13:42 UTC: a backend pod was restarting (it died with "no route
+// to host" to postgres), one GET .../repos came back 500, and ddc read that
+// single answer as "this environment has no git" - it uploaded an archive and
+// pinned the app's source to it. A read that costs nothing to repeat must be
+// repeated before it is believed.
+func TestRetriesAReadThatHitAConsoleBeingRolledOut(t *testing.T) {
+	var hits int32
+	c, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&hits, 1) == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]any{"error": "failed to query repos"})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"projects": []Project{{ID: "p1", Name: "demo"}}})
+	})
+	defer srv.Close()
+
+	projects, err := c.ListProjects(context.Background())
+	if err != nil {
+		t.Fatalf("expected the retry to succeed, got %v", err)
+	}
+	if len(projects) != 1 {
+		t.Fatalf("got %+v", projects)
+	}
+	if got := atomic.LoadInt32(&hits); got != 2 {
+		t.Fatalf("console was asked %d times, want 2", got)
+	}
+}
+
+// TestDoesNotRetryAWriteTheConsoleAnsweredWith500 keeps the retry one-sided: a
+// POST the console already received may have queued a build before it failed,
+// so repeating it could deploy twice.
+func TestDoesNotRetryAWriteTheConsoleAnsweredWith500(t *testing.T) {
+	var hits int32
+	c, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	defer srv.Close()
+
+	if _, err := c.TriggerBuild(context.Background(), "p", "e", "app"); err == nil {
+		t.Fatal("expected an error")
+	}
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Fatalf("console was asked %d times, want exactly 1", got)
+	}
+}
+
+// TestGivesUpOnAConsoleThatIsDown proves the retry is bounded: a console that
+// answers 503 forever must surface that status, not loop.
+func TestGivesUpOnAConsoleThatIsDown(t *testing.T) {
+	var hits int32
+	c, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+	defer srv.Close()
+
+	_, err := c.ListProjects(context.Background())
+	var ae *APIError
+	if !asAPIError(err, &ae) || ae.Status != http.StatusServiceUnavailable {
+		t.Fatalf("got %v, want a 503 APIError", err)
+	}
+	if got := atomic.LoadInt32(&hits); got != transportRetries+1 {
+		t.Fatalf("console was asked %d times, want %d", got, transportRetries+1)
+	}
+}
+
 type errHandshakeTimeout struct{}
 
 func (errHandshakeTimeout) Error() string { return "net/http: TLS handshake timeout" }

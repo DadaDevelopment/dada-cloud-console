@@ -159,7 +159,7 @@ func deployFromGit(ctx context.Context, client *apiclient.Client, projectID, env
 	prog.Stage("Проверяем репозиторий", stagePercent["link"])
 	repos, err := client.ListGitRepos(ctx, projectID, envID)
 	if err != nil {
-		return fallback("не удалось прочитать репозитории окружения")
+		return fallback("не удалось прочитать репозитории окружения (" + apiclient.Explain(err) + ")")
 	}
 	linked, found := findGitRepo(repos, appName)
 	if found && isUploadPlaceholder(linked, appName) {
