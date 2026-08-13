@@ -90,6 +90,12 @@ export const databases: Messages = {
     en: "Credential reveal is not configured for this environment.",
   },
   "databases.detail.access.error": { ru: "Не удалось показать учётные данные", en: "Failed to reveal credentials" },
+  "databases.detail.access.dsn": { ru: "Строка подключения", en: "Connection string" },
+  "databases.detail.access.dsnHint": {
+    ru: "Скопируйте целиком и положите в переменную окружения приложения (обычно DATABASE_URL). Одного хоста недостаточно — приложение не найдёт базу.",
+    en: "Copy the whole string into your app's environment variable (usually DATABASE_URL). The host alone is not enough — your app will fail to resolve the database.",
+  },
+  "databases.detail.access.externalDsn": { ru: "Строка подключения (внешняя)", en: "Connection string (external)" },
   "databases.detail.access.externalHost": { ru: "Внешний хост (публичный)", en: "External host (public)" },
   "databases.detail.access.externalWarning": {
     ru: "Публичная точка доступа. Ограничьте доступ и используйте только TLS.",

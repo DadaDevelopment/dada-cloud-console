@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
@@ -640,7 +642,7 @@ func serviceDatabaseAppRef(summaryRaw []byte) string {
 // @Param       envId     path     string true "Environment UUID"
 // @Param       name      path     string true "Database resource name"
 // @Param       reveal    query    bool   true "Must be true to reveal the credentials"
-// @Success     200       {object} map[string]interface{} "object with host, port, database, username, password"
+// @Success     200       {object} map[string]interface{} "object with host, port, database, username, password and a ready-to-paste dsn"
 // @Failure     400       {object} map[string]string
 // @Failure     401       {object} map[string]string
 // @Failure     403       {object} map[string]string
@@ -744,6 +746,7 @@ func (h *Handler) GetDatabaseCredentials(c *gin.Context) {
 		"database": database,
 		"username": creds.Username,
 		"password": creds.Password,
+		"dsn":      postgresDSN(creds.Username, creds.Password, host, port, database),
 	}
 	extHost, extPort := creds.ExternalHost, creds.ExternalPort
 	if extHost != "" {
@@ -752,8 +755,31 @@ func (h *Handler) GetDatabaseCredentials(c *gin.Context) {
 			extPort = port
 		}
 		resp["external_port"] = extPort
+		resp["external_dsn"] = postgresDSN(creds.Username, creds.Password, extHost, extPort, database)
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// postgresDSN assembles a ready-to-paste libpq connection string. Users who are
+// handed only host/port/user/password assemble it by hand and get it wrong (a
+// live user pasted the bare host into DATABASE_URL and his app crash-looped on
+// getaddrinfo), so the endpoint hands the whole string over instead.
+// url.UserPassword percent-encodes credentials, which matters because generated
+// passwords may carry characters that are structural in a URL.
+func postgresDSN(username, password, host, port, database string) string {
+	if host == "" || database == "" {
+		return ""
+	}
+	if port == "" {
+		port = "5432"
+	}
+	u := url.URL{
+		Scheme: "postgresql",
+		User:   url.UserPassword(username, password),
+		Host:   net.JoinHostPort(host, port),
+		Path:   "/" + database,
+	}
+	return u.String()
 }
 
 // serviceDatabaseNamespace pulls the app namespace from a ServiceDatabaseV2

@@ -12,6 +12,7 @@ import { PhaseBadge } from "@/components/ui/phase-badge";
 import { StateChip } from "@/components/ui/state-chip";
 import type { ChipTone } from "@/components/ui/state-chip";
 import { canMutate } from "@/lib/rbac";
+import { maskDsnPassword } from "@/lib/dsn";
 import { timeAgo } from "@/lib/format";
 import { useT } from "@/lib/i18n/console/context";
 import { DbInsights } from "@/components/databases/db-insights";
@@ -374,6 +375,18 @@ export default function DatabaseDetailPage() {
           )}
           {creds ? (
             <div className="space-y-3 border-t border-gray-100 dark:border-gray-800 pt-4">
+              {creds.dsn && (
+                <div>
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{t("databases.detail.access.dsn")}</p>
+                  <div className="mt-1 flex items-center gap-2">
+                    <code className="flex-1 break-all rounded-md border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/30 px-3 py-2 font-mono text-xs text-blue-900 dark:text-blue-200">
+                      {revealPw ? creds.dsn : maskDsnPassword(creds.dsn)}
+                    </code>
+                    <CopyButton value={creds.dsn} />
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("databases.detail.access.dsnHint")}</p>
+                </div>
+              )}
               <div>
                 <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{t("databases.detail.access.username")}</p>
                 <div className="mt-1 flex items-center gap-2">
@@ -401,6 +414,17 @@ export default function DatabaseDetailPage() {
                   <CopyButton value={creds.password} />
                 </div>
               </div>
+              {creds.external_dsn && (
+                <div>
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{t("databases.detail.access.externalDsn")}</p>
+                  <div className="mt-1 flex items-center gap-2">
+                    <code className="flex-1 break-all rounded-md border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 font-mono text-xs text-amber-800 dark:text-amber-300">
+                      {revealPw ? creds.external_dsn : maskDsnPassword(creds.external_dsn)}
+                    </code>
+                    <CopyButton value={creds.external_dsn} />
+                  </div>
+                </div>
+              )}
               {creds.external_host && (
                 <div>
                   <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{t("databases.detail.access.externalHost")}</p>

@@ -343,8 +343,10 @@ export interface DatabaseCredentialsResponse {
   database: string;
   username: string;
   password: string;
+  dsn?: string;
   external_host?: string;
   external_port?: string;
+  external_dsn?: string;
 }
 
 export interface DatabaseInsights {
