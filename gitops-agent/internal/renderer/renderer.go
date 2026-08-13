@@ -182,7 +182,7 @@ func ScopedArgoName(app, env, projectID string) string {
 }
 
 const (
-	WorkloadRepoURL = "https://bitbucket.dada-tuda.ru/scm/dada/dada-argo.git"
+	WorkloadRepoURL = "https://github.com/DadaDevelopment/dada-argo.git"
 	WorkloadBranch  = "develop"
 )
 
