@@ -34,7 +34,7 @@ type DeployOptions struct {
 
 // buildPoll* control how often ddc asks the console for build status while
 // streaming progress. 2s balances "feels live" against hammering the API.
-const (
+var (
 	buildPollInterval = 2 * time.Second
 	buildPollTimeout  = 20 * time.Minute
 	urlPollInterval   = 3 * time.Second
@@ -121,13 +121,19 @@ func Deploy(ctx context.Context, cfg Config, opts DeployOptions, in io.Reader, o
 	}
 
 	prog.Stage("Ждём адрес приложения", stagePercent["url"])
-	url, ok, err := pollAppURL(ctx, client, projectID, envID, appName)
+	if host, ok, err := client.FindAppHostname(ctx, projectID, envID, appName); err == nil && ok {
+		prog.Stage("Поднимаем https://"+host, stagePercent["url"])
+	}
+	addr, err := pollAppAddress(ctx, client, projectID, envID, appName)
 	if err != nil {
 		return err
 	}
-	if ok {
-		prog.Success("Готово: %s", url)
-	} else {
+	switch {
+	case addr.live:
+		prog.Success("Готово: %s", addr.url)
+	case addr.url != "":
+		prog.Success("Сборка прошла. Адрес: %s - приложение поднимается, откроется через минуту.", addr.url)
+	default:
 		prog.Success("Сборка прошла. Адрес ещё не назначен - он появится в консоли.")
 	}
 	return nil
@@ -709,25 +715,44 @@ func buildConsoleURL(cfg Config, projectID, appName, buildID string) string {
 	return fmt.Sprintf("%s/projects/%s/apps/%s/builds/%s", base, projectID, appName, buildID)
 }
 
-// pollAppURL waits briefly for the platform to assign the app a live URL
-// after a successful build - it is created by the same handoff, but not
-// necessarily synced into the snapshot the instant the build finishes.
-func pollAppURL(ctx context.Context, client *apiclient.Client, projectID, envID, appName string) (string, bool, error) {
+// appAddress is what the deploy ends on: the address the app answers at, and
+// whether the platform has confirmed it is serving there yet.
+type appAddress struct {
+	url  string
+	live bool
+}
+
+// pollAppAddress waits for the platform to report the app's live URL, and
+// falls back to the hostname the platform already minted for it.
+//
+// Two clocks run at different speeds here. The surrogate *.dada-tuda.ru name
+// is written alongside the CreateApp operation, so it is knowable seconds
+// after the build; the snapshot "url" is written by the status reconciler and
+// needs the git commit, the Argo sync and a running Deployment first, which
+// routinely outlives this poll. Ending on "адрес ещё не назначен" while the
+// address sat in the database the whole time is the difference between a
+// one-button deploy and homework, so the known name is printed either way -
+// flagged as still coming up, never as ready.
+func pollAppAddress(ctx context.Context, client *apiclient.Client, projectID, envID, appName string) (appAddress, error) {
 	deadline := time.Now().Add(urlPollTimeout)
 	for {
 		url, ok, err := client.FindAppURL(ctx, projectID, envID, appName)
 		if err != nil {
-			return "", false, fmt.Errorf("адрес приложения: %s", apiclient.Explain(err))
+			return appAddress{}, fmt.Errorf("адрес приложения: %s", apiclient.Explain(err))
 		}
 		if ok {
-			return url, true, nil
+			return appAddress{url: url, live: true}, nil
 		}
 		if time.Now().After(deadline) {
-			return "", false, nil
+			host, ok, err := client.FindAppHostname(ctx, projectID, envID, appName)
+			if err != nil || !ok {
+				return appAddress{}, nil
+			}
+			return appAddress{url: "https://" + host}, nil
 		}
 		select {
 		case <-ctx.Done():
-			return "", false, ctx.Err()
+			return appAddress{}, ctx.Err()
 		case <-time.After(urlPollInterval):
 		}
 	}

@@ -100,6 +100,45 @@ type listAppsResponse struct {
 	Apps []resourceSnapshot `json:"apps"`
 }
 
+// appHostname is the subset of models.DomainHostname the CLI reads. The
+// managed one is the surrogate *.dada-tuda.ru name the platform mints for the
+// app itself; anything else is a domain the user attached.
+type appHostname struct {
+	Hostname string `json:"hostname"`
+	Managed  bool   `json:"managed"`
+	Status   string `json:"status"`
+}
+
+type listHostnamesResponse struct {
+	Hostnames []appHostname `json:"hostnames"`
+}
+
+// FindAppHostname returns the address the app will answer on, which the
+// platform knows from the moment the app is created - the domain_hostnames row
+// is written in the same statement as the CreateApp operation, long before any
+// pod exists. An attached custom domain wins over the surrogate one, because
+// that is the address the user thinks of as theirs.
+func (c *Client) FindAppHostname(ctx context.Context, projectID, envID, appName string) (host string, ok bool, err error) {
+	var out listHostnamesResponse
+	path := "/projects/" + projectID + "/environments/" + envID + "/apps/" + appName + "/hostnames"
+	if err := c.doJSON(ctx, "GET", path, nil, "", &out); err != nil {
+		return "", false, err
+	}
+	surrogate := ""
+	for _, h := range out.Hostnames {
+		if h.Hostname == "" {
+			continue
+		}
+		if !h.Managed {
+			return h.Hostname, true, nil
+		}
+		if surrogate == "" {
+			surrogate = h.Hostname
+		}
+	}
+	return surrogate, surrogate != "", nil
+}
+
 // FindAppURL looks up appName in the environment's app list and returns its
 // live URL from the resource snapshot summary, if the platform has assigned
 // one yet. ok is false when the app or its URL isn't visible yet - normal
