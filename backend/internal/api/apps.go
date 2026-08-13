@@ -233,6 +233,54 @@ func RestateUnreachablePhase(apps []models.ResourceSnapshot) {
 	}
 }
 
+// viewAppsSourceUnknown buckets an app whose SummaryJSON carries no "source"
+// key (or an empty one) in the ViewApps audit breakdown -- older snapshots
+// predate the field, and a placeholder app synthesized from a git_repos row
+// with no matching build can legitimately have none.
+const viewAppsSourceUnknown = "unknown"
+
+// viewAppsAuditMetadata builds the ViewApps audit-row metadata entirely from
+// data the ListApps handler already computed for the response body -- no
+// extra query, no extra latency. It exists apart from the handler so the
+// screen-state breakdown (empty vs populated, healthy vs not, source mix) is
+// unit-testable without a database: the ViewApps audit row previously carried
+// only "apps": a count, with no way to tell "empty list, no CTA taken" apart
+// from "has apps, just looking" apart from "sees a CTA and ignores it", which
+// is why the ViewApps -> CreateApp conversion funnel could not be diagnosed
+// past a flat 2.6%.
+//
+// "healthy" counts Phase == "Ready" with no live alerts; everything else
+// (Building, Failed, NotDeployed, Unreachable, CrashLoop, or Ready-with-an-
+// alert) counts as "unhealthy" -- the same distinction RestateUnreachablePhase
+// and applyAppAlerts already draw for the app list itself.
+func viewAppsAuditMetadata(apps []models.ResourceSnapshot, gitRepoCount int) map[string]any {
+	healthy := 0
+	sources := map[string]int{}
+	for _, a := range apps {
+		if a.Phase == "Ready" && len(a.Alerts) == 0 {
+			healthy++
+		}
+		source := viewAppsSourceUnknown
+		if len(a.SummaryJSON) > 0 {
+			var m map[string]any
+			if err := json.Unmarshal(a.SummaryJSON, &m); err == nil {
+				if s, ok := m["source"].(string); ok && s != "" {
+					source = s
+				}
+			}
+		}
+		sources[source]++
+	}
+	return map[string]any{
+		"apps":      len(apps),
+		"git_repos": gitRepoCount,
+		"empty":     len(apps) == 0,
+		"healthy":   healthy,
+		"unhealthy": len(apps) - healthy,
+		"sources":   sources,
+	}
+}
+
 // GitRepoRow is one git_repos row plus its latest build status — the inputs
 // SynthesizeGitRepoApps needs to decide whether to surface a NotDeployed
 // placeholder app for a repo that has no live snapshot yet.
@@ -451,7 +499,7 @@ func (h *Handler) ListApps(c *gin.Context) {
 		EnvironmentID: envID,
 		ResourceKind:  "AppList",
 		ResourceName:  envID.String(),
-		Metadata:      map[string]any{"apps": len(apps)},
+		Metadata:      viewAppsAuditMetadata(apps, len(gitRows)),
 	})
 
 	c.JSON(http.StatusOK, gin.H{"apps": apps})

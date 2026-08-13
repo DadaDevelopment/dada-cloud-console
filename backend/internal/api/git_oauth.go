@@ -89,7 +89,7 @@ func (h *Handler) StartGitHubUserAuth(c *gin.Context) {
 		ResourceKind: "git_installation",
 		ResourceName: "github",
 		Outcome:      auditOutcomePending,
-		Metadata:     map[string]any{"install_nonce": state, "provider": "github", "flow": "user_authorize"},
+		Metadata:     map[string]any{"install_nonce": state, "provider": "github", "flow": installFlowUserAuthorize},
 	})
 
 	c.JSON(http.StatusOK, gin.H{"url": u})
@@ -199,7 +199,7 @@ func (h *Handler) recordOAuthVerdict(ctx context.Context, actorID, projectID uui
 		meta = map[string]any{}
 	}
 	meta["install_nonce"] = state
-	meta["flow"] = "user_authorize"
+	meta["flow"] = installFlowUserAuthorize
 	h.recordAudit(ctx, actorID, auditEntry{
 		ProjectID:    projectID,
 		Action:       auditActionFinishGitAppInstall,

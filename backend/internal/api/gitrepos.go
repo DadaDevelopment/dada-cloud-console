@@ -26,6 +26,15 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// Values of the `flow` key carried by the StartGitAppInstall/FinishGitAppInstall
+// audit pair. The two GitHub connect mechanisms are measured separately, so every
+// row of the pair must name its mechanism: a row without `flow` is invisible to
+// the mortality queries in state/git-oauth-flight.sql, which group by it.
+const (
+	installFlowAppInstall    = "app_install"
+	installFlowUserAuthorize = "user_authorize"
+)
+
 // isUniqueViolation reports whether err is a Postgres unique-constraint error (23505).
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
@@ -252,7 +261,7 @@ func (h *Handler) GetGitInstallURL(c *gin.Context) {
 		ResourceKind: "git_installation",
 		ResourceName: provider,
 		Outcome:      auditOutcomePending,
-		Metadata:     map[string]any{"install_nonce": nonce, "provider": provider},
+		Metadata:     map[string]any{"install_nonce": nonce, "provider": provider, "flow": installFlowAppInstall},
 	})
 
 	c.JSON(http.StatusOK, gin.H{"url": u})
@@ -415,6 +424,7 @@ func (h *Handler) recordInstallVerdict(ctx context.Context, projectID uuid.UUID,
 		meta = map[string]any{}
 	}
 	meta["install_nonce"] = nonce
+	meta["flow"] = installFlowAppInstall
 	h.recordAudit(ctx, actorID, auditEntry{
 		ProjectID:    projectID,
 		Action:       auditActionFinishGitAppInstall,
