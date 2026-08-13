@@ -67,6 +67,17 @@ func (c *Client) ConnectGitRepo(ctx context.Context, projectID, envID string, re
 	return out.Repos[0], nil
 }
 
+// DisconnectGitRepo unlinks a repository from its app, per
+// DELETE /projects/:projectId/environments/:envId/repos/:repoId. It only
+// removes the git_repos row and the build history hanging off it; the deployed
+// app, its domains and its volumes are untouched. There is no PATCH route, so
+// this plus ConnectGitRepo is the only way to re-point an app at a different
+// source.
+func (c *Client) DisconnectGitRepo(ctx context.Context, projectID, envID, repoID string) error {
+	path := "/projects/" + projectID + "/environments/" + envID + "/repos/" + repoID
+	return c.doJSON(ctx, "DELETE", path, nil, "", nil)
+}
+
 type triggerBuildResponse struct {
 	Build Build `json:"build"`
 }

@@ -153,6 +153,13 @@ func deployFromGit(ctx context.Context, client *apiclient.Client, projectID, env
 		return fallback("не удалось прочитать репозитории окружения")
 	}
 	linked, found := findGitRepo(repos, appName)
+	if found && isUploadPlaceholder(linked, appName) {
+		prog.Stage("Переключаем на "+info.FullName, stagePercent["link"])
+		if err := client.DisconnectGitRepo(ctx, projectID, envID, linked.ID); err != nil {
+			return fallback("не удалось отвязать прошлую загрузку архива (" + apiclient.Explain(err) + ")")
+		}
+		found = false
+	}
 	switch {
 	case found && linked.RepoFullName != info.FullName:
 		return fallback(fmt.Sprintf("приложение %q уже связано с %s", appName, linked.RepoFullName))
@@ -187,6 +194,18 @@ func deployFromGit(ctx context.Context, client *apiclient.Client, projectID, env
 	}
 	prog.Stage("Сборка в очереди", stagePercent["queued"])
 	return build.ID, true
+}
+
+// isUploadPlaceholder reports whether an app's link is the row an archive
+// upload leaves behind: provider "archive" with the synthetic name
+// "upload/<app>" (backend/internal/api/uploadsource.go). Such a row is not a
+// user's deliberate choice of source, it is the residue of one earlier
+// `ddc deploy` that fell back to the archive path. Treating it like a real
+// link locked the app onto uploads forever: every later deploy read
+// "приложение уже связано с upload/<app>" and fell back again, so a repo that
+// was on GitHub the whole time could never reach the git path.
+func isUploadPlaceholder(repo apiclient.GitRepo, appName string) bool {
+	return repo.Provider == "archive" || repo.RepoFullName == "upload/"+appName
 }
 
 // autoDeployNote says whether later pushes will deploy by themselves. The

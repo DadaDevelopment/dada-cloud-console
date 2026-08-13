@@ -1241,6 +1241,14 @@ func detectCandidatesInDir(ctx context.Context, token, owner, repo, dir string, 
 			path:      entry.Path,
 		})
 	}
+	if entry, ok := barePythonSource(entries); ok {
+		cands = append(cands, frameworkCandidate{
+			detection: detectionWithStrings("python", "", "", ""),
+			score:     2,
+			depth:     depth,
+			path:      entry.Path,
+		})
+	}
 	if entry, ok := findFile(byName, "index.html"); ok {
 		cands = append(cands, frameworkCandidate{
 			detection: detectionWithStrings("static", "", "", "."),
@@ -1250,6 +1258,34 @@ func detectCandidatesInDir(ctx context.Context, token, owner, repo, dir string, 
 		})
 	}
 	return cands
+}
+
+// barePythonSource reports a .py file sitting directly in this directory,
+// which is the shape of a script-style Python project: a few modules, an
+// entrypoint, no packaging metadata at all.
+//
+// Without this rule such a repo detects nothing, the build-agent hands Jenkins
+// an empty detected_framework, and dadaBuildPipeline aborts with
+// "framework <empty> has no template and repo ships no Dockerfile" — even
+// though its python
+// branch already builds a manifest-less repo (its install step ends in "no
+// python manifest - skipping install" and its start step falls back to
+// main.py, bot.py, app.py, then any *.py). The archive path learned the same
+// rule in sourcedetect.rootLevelPythonSources; this is its git-side twin.
+//
+// The score is deliberately the lowest of any python rule, so a real manifest
+// anywhere in the tree always wins and a stray helper script never turns a
+// Node or Go repo into a Python build.
+func barePythonSource(entries []githubContent) (githubContent, bool) {
+	for _, entry := range entries {
+		if entry.Type != "file" {
+			continue
+		}
+		if strings.HasSuffix(strings.ToLower(entry.Name), ".py") {
+			return entry, true
+		}
+	}
+	return githubContent{}, false
 }
 
 func bestFrameworkCandidate(cands []frameworkCandidate) (frameworkCandidate, bool) {
