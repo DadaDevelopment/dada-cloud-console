@@ -538,6 +538,13 @@ export interface AppSummary {
   url_status?: string;
   url_reason?: string;
   preview_url?: string;
+  /**
+   * Free-text override for the shell-style arguments the app's container
+   * starts with. Empty or absent means the platform default baked into the
+   * image's Docker CMD. See dadaBuildPipeline.groovy and the shared Helm
+   * chart's `args` value (gitops-agent renderer.AppSpec.Args).
+   */
+  start_command?: string;
 }
 
 export interface AppsResponse {

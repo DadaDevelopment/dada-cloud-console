@@ -8279,6 +8279,24 @@
                             }
                         }
                     },
+                    "409": {
+                        "description": "an autofix run is already in flight for this app",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "the refusal is a proven platform capacity limit, not app code -- no PR was opened",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
@@ -11711,6 +11729,95 @@
                     },
                     "503": {
                         "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/environments/{envId}/apps/{appName}/start-command": {
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Sets or clears the shell command the app is started with, replacing the image CMD (rendered as command: [\"sh\",\"-c\"] plus this string). Fixes an app that crashloops because its image has no usable start command. Synchronous; takes effect on the app's next deploy rather than forcing one immediately. Empty string clears the value.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "app"
+                ],
+                "summary": "Set an app's start command",
+                "operationId": "updateAppStartCommand",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "App name",
+                        "name": "appName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Start command",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.updateAppStartCommandRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -21181,6 +21288,14 @@
             "type": "object",
             "properties": {
                 "profile": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.updateAppStartCommandRequest": {
+            "type": "object",
+            "properties": {
+                "start_command": {
                     "type": "string"
                 }
             }

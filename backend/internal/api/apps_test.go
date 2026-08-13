@@ -181,6 +181,30 @@ func countName(apps []models.ResourceSnapshot, name string) int {
 	return n
 }
 
+// TestApplyStartCommandUpdate covers the set/read/clear round trip of the
+// start-command-arguments lever without needing a database: set writes the
+// start_command key, read sees it verbatim (the same summary_json map ListApps
+// hands back to the console), and clearing (empty string) deletes the key
+// rather than leaving an empty string behind -- the shape a snapshot that
+// never touched the field has, which is what keeps the gitops-agent renderer
+// byte-identical for every app that never sets this.
+func TestApplyStartCommandUpdate(t *testing.T) {
+	cur := api.ApplyStartCommandUpdate(nil, "--config /etc/app.yaml --workers 4")
+	if got := cur["start_command"]; got != "--config /etc/app.yaml --workers 4" {
+		t.Fatalf("after set: start_command = %v, want the configured string", got)
+	}
+
+	cur = api.ApplyStartCommandUpdate(cur, "--config /etc/app.yaml --workers 8")
+	if got := cur["start_command"]; got != "--config /etc/app.yaml --workers 8" {
+		t.Fatalf("after re-set: start_command = %v, want the updated string", got)
+	}
+
+	cur = api.ApplyStartCommandUpdate(cur, "")
+	if _, ok := cur["start_command"]; ok {
+		t.Fatalf("after clear: start_command key still present, want deleted entirely")
+	}
+}
+
 func TestSuppressNonHTTPURL(t *testing.T) {
 	apps := []models.ResourceSnapshot{
 		{Name: "top-decker-redis", SummaryJSON: json.RawMessage(`{"port":6379,"url":"https://myredis-c1e9e9.dada-tuda.ru","status":"Ready"}`)},

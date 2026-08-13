@@ -1166,6 +1166,11 @@ definitions:
       profile:
         type: string
     type: object
+  api.updateAppStartCommandRequest:
+    properties:
+      start_command:
+        type: string
+    type: object
   api.updateComposeConfigRequest:
     properties:
       image:
@@ -7076,6 +7081,19 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "409":
+          description: an autofix run is already in flight for this app
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "422":
+          description: the refusal is a proven platform capacity limit, not app code
+            -- no PR was opened
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "502":
           description: Bad Gateway
           schema:
@@ -9447,6 +9465,69 @@ paths:
       summary: Download the uploaded source archive for an app
       tags:
       - build
+  /projects/{projectId}/environments/{envId}/apps/{appName}/start-command:
+    patch:
+      consumes:
+      - application/json
+      description: 'Sets or clears the shell command the app is started with, replacing
+        the image CMD (rendered as command: ["sh","-c"] plus this string). Fixes an
+        app that crashloops because its image has no usable start command. Synchronous;
+        takes effect on the app''s next deploy rather than forcing one immediately.
+        Empty string clears the value.'
+      operationId: updateAppStartCommand
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: Start command
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.updateAppStartCommandRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Set an app's start command
+      tags:
+      - app
   /projects/{projectId}/environments/{envId}/apps/{appName}/state:
     get:
       description: Returns the live Docker Compose stack + container state for a VM

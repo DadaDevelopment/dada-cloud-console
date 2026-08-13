@@ -1338,6 +1338,179 @@ func (h *Handler) UpdateAppProfile(c *gin.Context) {
 	})
 }
 
+type updateAppStartCommandRequest struct {
+	StartCommand string `json:"start_command"`
+}
+
+// ApplyStartCommandUpdate sets or clears the start_command key on an app's
+// resource_snapshots.summary_json map, returning the updated map. An empty
+// startCommand deletes the key entirely rather than writing an empty string, so a
+// clear round-trips to exactly the same shape a snapshot that never set the
+// field has -- the property the gitops-agent renderer depends on to omit the
+// values.yaml startCommand key (commonValues.StartCommand has yaml tag
+// "startCommand,omitempty").
+func ApplyStartCommandUpdate(cur map[string]any, startCommand string) map[string]any {
+	if cur == nil {
+		cur = map[string]any{}
+	}
+	if startCommand == "" {
+		delete(cur, "start_command")
+	} else {
+		cur["start_command"] = startCommand
+	}
+	return cur
+}
+
+// UpdateAppStartCommand sets or clears the command an app is started with, so
+// a program that crashloops because the image CMD is wrong or incomplete
+// (cause_kind=app_needs_args) can be fixed from the console instead of a code
+// change. It REPLACES the image CMD rather than appending to it: the chart
+// renders command: ["sh","-c"] with this string as the single argument. The value is written to git_repos.start_command (the
+// same durable-config column pattern as profile/worker, read at the app's
+// next CreateApp) and to resource_snapshots.summary_json under "start_command",
+// which is what the console reads back immediately and what gitops-agent's
+// doDeployImageVersion carries into renderer.AppSpec.StartCommand on the app's
+// next deploy.
+//
+// This endpoint deliberately does not enqueue a redeploy of its own.
+// UpdateAppProfile used to enqueue one on every profile change and it took
+// internal/telemost-bot's hand-maintained values.yaml apart in production on
+// 2026-08-02 (see the comment on UpdateAppProfile): a bare config edit must
+// never force a re-render out from under an app the console does not fully
+// own. The new value takes effect on the app's next organic deploy.
+//
+// @ID          updateAppStartCommand
+// @Summary     Set an app's start command
+// @Description Sets or clears the shell command the app is started with, replacing the image CMD (rendered as command: ["sh","-c"] plus this string). Fixes an app that crashloops because its image has no usable start command. Synchronous; takes effect on the app's next deploy rather than forcing one immediately. Empty string clears the value.
+// @Tags        app
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string                  true "Project UUID"
+// @Param       envId     path     string                  true "Environment UUID"
+// @Param       appName   path     string                  true "App name"
+// @Param       body      body     updateAppStartCommandRequest true "Start command"
+// @Success     200       {object} map[string]interface{}
+// @Failure     400       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/apps/{appName}/start-command [patch]
+func (h *Handler) UpdateAppStartCommand(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	envID, err := uuid.Parse(c.Param("envId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	appName := c.Param("appName")
+
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		return
+	}
+	if !canWrite(role) {
+		respondForbidden(c)
+		return
+	}
+	if !h.requireK8sRuntime(c, projectID, envID) {
+		return
+	}
+
+	var req updateAppStartCommandRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	ctx := c.Request.Context()
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to update app")
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var summaryRaw []byte
+	err = tx.QueryRow(ctx,
+		`SELECT summary_json FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3
+		 FOR UPDATE`,
+		projectID, envID, appName,
+	).Scan(&summaryRaw)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to load app")
+		return
+	}
+
+	var cur map[string]any
+	_ = json.Unmarshal(summaryRaw, &cur)
+	cur = ApplyStartCommandUpdate(cur, req.StartCommand)
+	updatedJSON, err := json.Marshal(cur)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to marshal snapshot")
+		return
+	}
+	if _, err = tx.Exec(ctx,
+		`UPDATE resource_snapshots SET summary_json = $1
+		 WHERE project_id = $2 AND environment_id = $3 AND kind = 'App' AND name = $4`,
+		updatedJSON, projectID, envID, appName,
+	); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to update app")
+		return
+	}
+
+	var startCommandCol *string
+	if req.StartCommand != "" {
+		startCommandCol = &req.StartCommand
+	}
+	if _, err = tx.Exec(ctx,
+		`UPDATE git_repos SET start_command = $1
+		 WHERE project_id = $2 AND environment_id = $3 AND app_name = $4`,
+		startCommandCol, projectID, envID, appName,
+	); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to update app")
+		return
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to update app")
+		return
+	}
+
+	h.recordAudit(ctx, claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		Action:        "UpdateAppStartCommand",
+		ResourceKind:  "App",
+		ResourceName:  appName,
+		Outcome:       auditOutcomeSuccess,
+		Metadata:      map[string]string{"start_command": req.StartCommand},
+	})
+
+	c.JSON(http.StatusOK, gin.H{
+		"start_command": req.StartCommand,
+		"message":       "Start-command arguments updated; takes effect on the app's next deploy",
+	})
+}
+
 // quantityBytes converts a restricted k8s quantity (Mi/Gi/Ti, validated by
 // volumeSizeRe) to a byte count for grow-only comparisons. It returns 0 for any
 // value that does not match the expected shape.

@@ -595,6 +595,18 @@ export const appsApi = {
       { method: "PATCH", body: { image } }
     ),
 
+  /**
+   * Overrides the shell-style arguments the app's container starts with.
+   * Empty string clears the override and returns the app to the platform
+   * default baked into the image. Does not enqueue a redeploy of its own —
+   * takes effect on the app's next organic deploy.
+   */
+  updateStartCommand: (projectId: string, envId: string, appName: string, startCommand: string) =>
+    apiFetch<{ start_command: string; message: string }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/start-command`,
+      { method: "PATCH", body: { start_command: startCommand } }
+    ),
+
   // Roll a compose (VM) app back to its previous committed compose.yaml + redeploy.
   rollback: (projectId: string, envId: string, appName: string) =>
     apiFetch<{ operation: Operation; message: string }>(

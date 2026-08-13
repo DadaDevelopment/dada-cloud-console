@@ -2222,6 +2222,7 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 	}
 	appSpec.ArgoName, _ = cur["argo_name"].(string)
 	appSpec.WorkloadType, _ = cur["workload_type"].(string)
+	appSpec.StartCommand, _ = cur["start_command"].(string)
 	if env.hasSecret() {
 		appSpec.SecretEnvName = renderer.AppEnvSecretName(p.AppName)
 		for k := range env.Secret {

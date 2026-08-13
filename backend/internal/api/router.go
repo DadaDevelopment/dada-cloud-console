@@ -482,6 +482,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.POST("/projects/:projectId/environments/:envId/apps", h.CreateApp)
 		api.PATCH("/projects/:projectId/environments/:envId/apps/:appName/image", h.UpdateAppImage)
 		api.PATCH("/projects/:projectId/environments/:envId/apps/:appName/profile", h.UpdateAppProfile)
+		api.PATCH("/projects/:projectId/environments/:envId/apps/:appName/start-command", h.UpdateAppStartCommand)
 		api.PUT("/projects/:projectId/environments/:envId/apps/:appName/storage", h.UpdateAppStorage)
 		api.PATCH("/projects/:projectId/environments/:envId/apps/:appName/compose-config", h.UpdateComposeConfig)
 		api.PUT("/projects/:projectId/environments/:envId/apps/:appName/compose-volume", h.UpdateComposeVolume)

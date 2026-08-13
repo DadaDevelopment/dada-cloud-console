@@ -91,6 +91,7 @@ interface AppAlertsBannerProps {
   alerts: AppAlert[];
   logsHref: string;
   storageHref: string;
+  startCommandHref: string;
   projectId: string;
   envId: string;
   appName: string;
@@ -104,7 +105,7 @@ interface AppAlertsBannerProps {
  * a follow-up autofix action once a diagnosis names a fixable cause.
  * Renders nothing when `alerts` is empty or absent.
  */
-export function AppAlertsBanner({ alerts, logsHref, storageHref, projectId, envId, appName }: AppAlertsBannerProps) {
+export function AppAlertsBanner({ alerts, logsHref, storageHref, startCommandHref, projectId, envId, appName }: AppAlertsBannerProps) {
   const { t } = useT();
   const [diagnose, setDiagnose] = useState<DiagnoseState>({ status: "idle" });
   const [autofix, setAutofix] = useState<AutofixState>({ status: "idle" });
@@ -192,6 +193,14 @@ export function AppAlertsBanner({ alerts, logsHref, storageHref, projectId, envI
                 >
                   {t("apps.alerts.crash.cta")}
                 </Link>
+                {alert.cause_kind === "app_needs_args" && (
+                  <Link
+                    href={startCommandHref}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-red-700 dark:text-red-300 underline underline-offset-2 hover:text-red-800 dark:hover:text-red-200"
+                  >
+                    {t("apps.alerts.crash.cause.needsArgs.cta")}
+                  </Link>
+                )}
               </div>
             </div>
 

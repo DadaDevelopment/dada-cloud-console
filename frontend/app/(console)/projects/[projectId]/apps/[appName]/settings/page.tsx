@@ -14,6 +14,7 @@ import { StorageManager } from "@/components/deploy/storage-manager";
 import { ResourceManager } from "@/components/deploy/resource-manager";
 import { PaymentsManager } from "@/components/payments/payments-manager";
 import { CommonConfigEditor } from "@/components/deploy/common-config-editor";
+import { StartCommandEditor } from "@/components/deploy/start-command-editor";
 import { ComposeConfigEditor } from "@/components/deploy/compose-config-editor";
 import { ComposeVolumeEditor } from "@/components/deploy/compose-volume-editor";
 import { ArchiveReuploadControl } from "@/components/deploy/archive-reupload";
@@ -226,13 +227,16 @@ export default function AppSettingsPage() {
         isVM ? (
           <ComposeConfigEditor projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} />
         ) : (
-          <CommonConfigEditor
-            projectId={projectId}
-            envId={envId}
-            appName={appName}
-            canEdit={canEdit}
-            isUploadedSource={isUploadedSource}
-          />
+          <div className="space-y-6">
+            <CommonConfigEditor
+              projectId={projectId}
+              envId={envId}
+              appName={appName}
+              canEdit={canEdit}
+              isUploadedSource={isUploadedSource}
+            />
+            <StartCommandEditor projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} />
+          </div>
         )
       )}
 

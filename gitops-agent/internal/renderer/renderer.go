@@ -121,6 +121,16 @@ type AppSpec struct {
 	Framework          string
 	SecretEnvKeys      []string
 
+	// StartCommand is the optional start command for an app that otherwise
+	// crashloops with no way to say how it should be launched
+	// (cause_kind=app_needs_args). It REPLACES the image CMD rather than
+	// appending to it: the chart renders command: ["sh","-c"] with this string
+	// as the single argument, because the Jenkins-templated images carry a CMD
+	// and no ENTRYPOINT. Empty means unset and must render no startCommand key
+	// at all (see commonValues.StartCommand) so the 100+ apps that never touch
+	// this field keep a byte-identical values.yaml.
+	StartCommand string
+
 	// Env is the resolved non-sensitive runtime environment (env_vars rows with
 	// scope runtime|both and is_secret=false). Emitted verbatim into values.yaml's
 	// env: block — safe to commit to git.
@@ -310,6 +320,7 @@ type commonValues struct {
 	ExtraEnv     []commonEnvVar  `yaml:"extraEnv,omitempty"`
 	Pvc          *commonPvc      `yaml:"pvc,omitempty"`
 	WorkloadType string          `yaml:"workloadType,omitempty"`
+	StartCommand string          `yaml:"startCommand,omitempty"`
 
 	PodSecurityContext *commonPodSecurityContext `yaml:"podSecurityContext,omitempty"`
 }
@@ -429,6 +440,7 @@ func RenderAppValues(spec AppSpec) (string, error) {
 		UseDotEnv:    "false",
 		Resources:    resolveResources(spec.Resources, spec.Profile),
 		WorkloadType: spec.WorkloadType,
+		StartCommand: spec.StartCommand,
 	}}
 
 	if spec.VolumePath != "" {

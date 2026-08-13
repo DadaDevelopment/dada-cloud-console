@@ -511,6 +511,47 @@ func TestRenderAppValuesWorkloadType(t *testing.T) {
 	}
 }
 
+// TestRenderAppValuesStartCommandOmittedWhenUnset pins the safety property
+// that a deploy of an app that never set a start command renders byte-
+// identical values.yaml before and after this feature: StartCommand left at
+// its zero value must produce output with no "startCommand" key at all, not
+// "startCommand: \"\"".
+func TestRenderAppValuesStartCommandOmittedWhenUnset(t *testing.T) {
+	withoutStartCommandField, err := renderer.RenderAppValues(renderer.AppSpec{
+		Image: "ghcr.io/dada-tuda/api-service:v1", Port: 8080, Replicas: 1, Profile: "small",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(withoutStartCommandField, "startCommand:") {
+		t.Errorf("expected no startCommand key when StartCommand is unset\nFull output:\n%s", withoutStartCommandField)
+	}
+
+	explicitEmptyStartCommand, err := renderer.RenderAppValues(renderer.AppSpec{
+		Image: "ghcr.io/dada-tuda/api-service:v1", Port: 8080, Replicas: 1, Profile: "small",
+		StartCommand: "",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if withoutStartCommandField != explicitEmptyStartCommand {
+		t.Errorf("rendered output changed for an app with StartCommand unset\nbefore:\n%s\nafter:\n%s", withoutStartCommandField, explicitEmptyStartCommand)
+	}
+}
+
+func TestRenderAppValuesStartCommand(t *testing.T) {
+	got, err := renderer.RenderAppValues(renderer.AppSpec{
+		Image: "ghcr.io/dada-tuda/api-service:v1", Port: 8080, Replicas: 1, Profile: "small",
+		StartCommand: "python agent.py --surname Ivanov",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(got, `startCommand: python agent.py --surname Ivanov`) {
+		t.Errorf("expected startCommand value in rendered values.yaml\nFull output:\n%s", got)
+	}
+}
+
 func TestRenderAppValuesDigest(t *testing.T) {
 	got, err := renderer.RenderAppValues(renderer.AppSpec{
 		Image:    "nexus.dada-tuda.ru/ggrk52/magic-mirror@sha256:d1aceff1453361656f36ef154a5d7badead284272986e7d3f8148b360f66d1cb",
