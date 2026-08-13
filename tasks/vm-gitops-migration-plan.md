@@ -317,3 +317,85 @@ Lock the release flow (the point of all this):
 - [x] **Phase 4** DONE 2026-07-03: pg_dump+tar backups → manual `docker stop` of 4 old containers → DeployStack. New profi-vm stack adopts compose_profi_pg_data.
 - [x] **Phase 5** DONE: verified only compose_profi_pg_data volume (no profi-vm_*), 11 profi tables intact, backend migrated+serving, nginx live (401 basic-auth). Release = bump tag in apps/profi-vm/compose.yaml.
 ```
+
+## Инцидент 2026-08-13 и пересмотр остатка работ
+
+### Что произошло
+
+Цель этапа была узкая: снять расхождение между снапшотами консоли и живым
+стеком. Консоль держала findata на backend `418` / frontend `414`, прод ехал на
+`522` / `535` — релизы findata идут мимо консоли (человек правит тег в агрегате
+`compose.yaml`, Portainer катит из git, консоли никто не сообщает), поэтому
+снапшоты стояли с адопции 8 июля, пока прод уехал на пять недель вперёд.
+
+План был: подравнять `apps/profi-vm/{compose.yaml,.env}` под живой стек
+(коммит `14adb4b8`), затем повторить adopt, чтобы снапшоты пересобрались с
+живого состояния. Adopt на compose-половине — доказанная идентичность
+(`gitops-agent/internal/renderer/vm_adopt_roundtrip_test.go` гоняет реальный
+живой агрегат).
+
+Запуск операции положил `fin-data.pro` на 401 примерно на две минуты.
+
+### Корень
+
+`doAdoptComposeStack` читал исходные `compose.yaml` и `.env` через
+`mgr.EnsureCloned()`. Контракт этого метода — «склонируй, если каталога нет»;
+фетча он не делает. На долгоживущем агенте это no-op, и `ReadFile` отдал
+июльский скаффолд `apps/profi-vm/`, а не мой коммит `14adb4b8`, сделанный за
+минуты до запуска. Воркер отрендерил агрегат на `418`/`414`, заменил base64-блок
+nginx мёртвым шаблоном (`DOMAIN`, `*_UPSTREAM`) и переписал `.env` окружения
+версией на 31 ключ вместо 61 — без SMTP, Sber, OpenAI, multitenancy, RBAC,
+`MAIN_DB_SCHEMA`.
+
+Путь записи (`writeFilesCommitPush`) всегда делал `resetToRemoteHead` перед
+коммитом. Не защищено было ровно чтение — та половина, которая решает, что
+поедет в прод. Ошибки при этом не возникает вообще: файл в устаревшем клоне
+есть, просто протухший.
+
+### Восстановление
+
+Откат `compose.yaml` + `.env` на содержимое `58b0b7ed` (коммит `99843318`),
+redeploy стека 3 через Portainer API. Проверено: контейнеры `522`/`535`,
+`/` = 200, `/docs` = 200, `/api/health` = 404 (как до), env бэкенда 65 ключей с
+байт-в-байт совпадающими хешами значений, postgres на внешнем томе
+`compose_profi_pg_data`, 15 таблиц public, 125 MB. Данных не потеряно. Окно
+уложилось в потолок 5 минут, но сайт в нём отдавал 401.
+
+### Фикс
+
+`dada-cloud` `59aa0560`: `SyncHard()` перед чтением источника в
+`doAdoptComposeStack` + `gitops-agent/internal/git/staleread_test.go` — три
+теста, включая главный: файл в клоне уже есть и молча устарел, никакой ошибки
+чтения не возникает.
+
+### Открытые пункты
+
+- [ ] **Мина в снапшотах.** `resource_snapshots` для findata держат `418`/`414`
+      с `adopted_from = profi-vm`. Любая деплой-операция на findata прогонит
+      `renderEnvAggregate` из них и сломает прод тем же способом. До 8 июля там
+      было `194`/`174` — мина не новая, но и не снятая. Снимается повторным
+      adopt.
+- [ ] **Ф4 повтор** — только после того, как `59aa0560` доедет в кластер.
+      Блокер на 2026-08-13 03:33: Jenkins сгашен другим оператором под restore
+      тома `jenkins-home` (`argo-infra` `0a6138a7b`, назад в `1` — `28e1294db`),
+      под не стартует из-за `fsck` на PVC. CI лежит, образ не собрать.
+- [ ] **Ф5** — сверить снапшоты `522`/`535` и корректный base64 nginx, пустой
+      дифф агрегата, здоровье контейнеров, окно < 5 минут.
+- [ ] **Ф6** — убрать `apps/profi-vm/` (после успешного adopt, не раньше:
+      это источник); починить `mapfile` в `scripts/vm-discover.sh` под bash 3.2
+      на macOS.
+- [ ] **Ф7** — довести `portainer-agent/internal/worker/discover_workload.go`
+      (ветка `claude/vm-gitops-migration-plan-ym7qrr`, `1652918f`) до
+      периодического снятия живого состояния VM, иначе снапшоты снова протухнут.
+- [ ] **Тот же класс несвежести** на остальных читателях git в воркере:
+      `resize_app.go:67/75`, `move_app.go:152/306`, `dbwatcher.go:474/478`,
+      `envvars.go`, `aimodel.go`, `preview.go`, `delete_project_keycloak.go`.
+      `SyncHard` есть только в `orphangc.go:389`. Решить, чинить ли скопом.
+- [ ] **Исходная цель** — VM-тракт через тот же `POST /api/v1/deploy`, что и
+      кубер, ноль портейнер-специфики в Jenkinsfile. Не начата.
+
+### Правило, вытекающее из инцидента
+
+Перед прод-операцией доказывать надо не только «что сделает код», но и «на
+каких входных данных он это сделает». Round-trip был доказан, входные данные —
+нет.
