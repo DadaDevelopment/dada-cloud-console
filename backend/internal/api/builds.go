@@ -285,11 +285,12 @@ func (h *Handler) TriggerBuild(c *gin.Context) {
 	// Resolve the linked repo for this app/env.
 	var gitRepoID uuid.UUID
 	var prodBranch, provider, cloneURL string
+	var frameworkOverride *string
 	err = h.pool.QueryRow(c.Request.Context(),
-		`SELECT id, production_branch, provider, clone_url FROM git_repos
+		`SELECT id, production_branch, provider, clone_url, framework_override FROM git_repos
 		 WHERE project_id = $1 AND environment_id = $2 AND app_name = $3`,
 		projectID, envID, appName,
-	).Scan(&gitRepoID, &prodBranch, &provider, &cloneURL)
+	).Scan(&gitRepoID, &prodBranch, &provider, &cloneURL, &frameworkOverride)
 	if err == pgx.ErrNoRows {
 		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
 			ProjectID:     projectID,
@@ -310,9 +311,13 @@ func (h *Handler) TriggerBuild(c *gin.Context) {
 
 	commitSHA := placeholderCommitSHA()
 	var headSHA *string
+	var redetected string
 	if provider == "archive" {
 		if id := archiveUploadIDFromCloneURL(cloneURL); id != "" {
 			headSHA = &id
+		}
+		if frameworkOverride == nil {
+			redetected = h.redetectArchiveFramework(c.Request.Context(), gitRepoID, cloneURL)
 		}
 	}
 
@@ -339,13 +344,17 @@ func (h *Handler) TriggerBuild(c *gin.Context) {
 	}
 	b.Source = sourceForProvider(provider)
 
+	auditMeta := map[string]any{"build_id": b.ID.String(), "branch": b.Branch}
+	if redetected != "" {
+		auditMeta["redetected_framework"] = redetected
+	}
 	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
 		ProjectID:     projectID,
 		EnvironmentID: envID,
 		Action:        "TriggerBuild",
 		ResourceKind:  "Build",
 		ResourceName:  appName,
-		Metadata:      map[string]any{"build_id": b.ID.String(), "branch": b.Branch},
+		Metadata:      auditMeta,
 	})
 	h.notifyAuditEvent(claims, projectID, "TriggerBuild", appName)
 

@@ -22,11 +22,16 @@ import (
 //
 // PresignGet mints a short-lived download URL for the same key, so a user who
 // lost their local checkout can pull back the exact archive they uploaded.
+//
+// GetObject reads the archive back into the API process, bounded by maxBytes,
+// so a rebuild can re-run framework detection against the source the user
+// already uploaded instead of asking them to upload it again.
 type SourceUploader interface {
 	Enabled() bool
 	Bucket() string
 	PutObject(ctx context.Context, key string, r io.Reader, size int64, contentType string) error
 	PresignGet(ctx context.Context, key, filename string, ttl time.Duration) (string, error)
+	GetObject(ctx context.Context, key string, maxBytes int64) ([]byte, error)
 }
 
 type minioSourceUploader struct {
@@ -75,6 +80,19 @@ func (u *minioSourceUploader) PresignGet(ctx context.Context, key, filename stri
 	return presigned.String(), nil
 }
 
+func (u *minioSourceUploader) GetObject(ctx context.Context, key string, maxBytes int64) ([]byte, error) {
+	obj, err := u.client.GetObject(ctx, u.bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("get source archive: %w", err)
+	}
+	defer obj.Close()
+	data, err := io.ReadAll(io.LimitReader(obj, maxBytes))
+	if err != nil {
+		return nil, fmt.Errorf("read source archive: %w", err)
+	}
+	return data, nil
+}
+
 type disabledSourceUploader struct{ err error }
 
 func (d disabledSourceUploader) Enabled() bool { return false }
@@ -93,4 +111,11 @@ func (d disabledSourceUploader) PresignGet(context.Context, string, string, time
 		return "", fmt.Errorf("source upload not configured: %w", d.err)
 	}
 	return "", fmt.Errorf("source upload not configured")
+}
+
+func (d disabledSourceUploader) GetObject(context.Context, string, int64) ([]byte, error) {
+	if d.err != nil {
+		return nil, fmt.Errorf("source upload not configured: %w", d.err)
+	}
+	return nil, fmt.Errorf("source upload not configured")
 }

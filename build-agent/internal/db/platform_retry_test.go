@@ -22,6 +22,9 @@ func seedPlatformFailedBuild(t *testing.T, pool *pgxpool.Pool, gitRepoID, envID 
 		         'platform_error', 'Maximum checkout retry attempts reached, aborting', $6, $7, $8, $8)`,
 		buildID, gitRepoID, envID, appName, commitSHA, attempt,
 		time.Now().Add(-finishedAgo-time.Minute), time.Now().Add(-finishedAgo))
+	t.Cleanup(func() {
+		exec(t, pool, `DELETE FROM builds WHERE id = $1`, buildID)
+	})
 	return buildID
 }
 

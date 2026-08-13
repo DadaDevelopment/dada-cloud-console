@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -42,19 +43,34 @@ func buildTestArchive(t *testing.T) []byte {
 // TestDownloadSourceArchive_HappyPath already exercises against a real
 // endpoint contract.
 type fakeSourceUploader struct {
-	bucket string
-	puts   int
+	bucket  string
+	puts    int
+	objects map[string][]byte
 }
 
 func (f *fakeSourceUploader) Enabled() bool  { return true }
 func (f *fakeSourceUploader) Bucket() string { return f.bucket }
 func (f *fakeSourceUploader) PutObject(ctx context.Context, key string, r io.Reader, size int64, contentType string) error {
 	f.puts++
-	_, err := io.Copy(io.Discard, r)
-	return err
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	if f.objects == nil {
+		f.objects = map[string][]byte{}
+	}
+	f.objects[key] = data
+	return nil
 }
 func (f *fakeSourceUploader) PresignGet(ctx context.Context, key, filename string, ttl time.Duration) (string, error) {
 	return "https://example.invalid/" + key, nil
+}
+func (f *fakeSourceUploader) GetObject(ctx context.Context, key string, maxBytes int64) ([]byte, error) {
+	data, ok := f.objects[key]
+	if !ok {
+		return nil, fmt.Errorf("no such object %q", key)
+	}
+	return data, nil
 }
 
 func newUploadSourceArchiveCtx(t *testing.T, projectID, envID uuid.UUID, appName string, claims *auth.Claims, archive []byte) (*gin.Context, *httptest.ResponseRecorder) {
