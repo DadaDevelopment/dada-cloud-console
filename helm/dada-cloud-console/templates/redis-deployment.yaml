@@ -20,6 +20,9 @@ spec:
         {{- include "dada-cloud-console.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: redis
     spec:
+      {{- with .Values.global.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
       containers:
         - name: redis
           image: {{ .Values.redis.image | quote }}
