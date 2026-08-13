@@ -182,20 +182,33 @@ func (w *boxOperationsWorker) claim(ctx context.Context) ([]boxOperationRow, err
 // deliberately runs on the parent: once the deadline fires, the derived
 // context is dead, and writing the outcome through it would fail — leaving the
 // row in Reconciling, which is exactly the wedge the deadline exists to end.
+//
+// The verdict audit row is written here, AFTER markTerminal has already moved
+// the operation to Ready, never inside the execute* handler. auditInsertSQL
+// (audit.go) downgrades outcome='success' to 'pending' whenever the row names
+// an operation that is not yet terminal, on the understanding that the verdict
+// is always the second of a pair, written once the first half is done. A
+// handler that audited its own success while the operation still sat in
+// Reconciling therefore produced a verdict row stored as pending, and
+// audit_events is append-only, so it stayed that way: the finished operation
+// became permanently indistinguishable from one still in flight. execute*
+// only returns the entry it wants written; a confirmed Ready write is what
+// earns the row.
 func (w *boxOperationsWorker) execute(parent context.Context, op boxOperationRow) {
 	h := w.h
 	ctx, cancel := context.WithTimeout(parent, w.opTimeout())
 	defer cancel()
+	var entry auditEntry
 	var err error
 	switch op.Action {
 	case models.ActionBoxUp:
-		err = h.executeBoxUp(ctx, op.Payload)
+		entry, err = h.executeBoxUp(ctx, op.Payload)
 	case models.ActionDeleteBox:
-		err = h.executeDeleteBox(ctx, op.Payload)
+		entry, err = h.executeDeleteBox(ctx, op.Payload)
 	case models.ActionSuspendBox:
-		err = h.executeSuspendBox(ctx, op.Payload)
+		entry, err = h.executeSuspendBox(ctx, op.Payload)
 	case models.ActionResumeBox:
-		err = h.executeResumeBox(ctx, op.Payload)
+		entry, err = h.executeResumeBox(ctx, op.Payload)
 	default:
 		err = fmt.Errorf("%w: %s", errBoxOperationUnimplemented, op.Action)
 		log.Warn().Str("operation", op.ID.String()).Str("action", op.Action).
@@ -203,7 +216,10 @@ func (w *boxOperationsWorker) execute(parent context.Context, op boxOperationRow
 	}
 
 	if err == nil {
-		w.markTerminal(parent, op.ID, models.OperationStatusReady, "")
+		if markErr := w.markTerminal(parent, op.ID, models.OperationStatusReady, ""); markErr == nil && entry.Action != "" {
+			entry.OperationID = op.ID
+			h.recordSystemAudit(parent, entry)
+		}
 		return
 	}
 
@@ -223,59 +239,70 @@ func (w *boxOperationsWorker) execute(parent context.Context, op boxOperationRow
 		Int("attempts", op.Attempts).Msg("box worker: operation failed, will retry")
 }
 
-// markTerminal writes an operation's status and error_message. Created is a
-// legal value here too, for the retry case, where the write is terminal only
-// for this tick.
-func (w *boxOperationsWorker) markTerminal(ctx context.Context, id uuid.UUID, status models.OperationStatus, errMsg string) {
-	if _, err := w.h.pool.Exec(ctx,
+// markTerminal writes an operation's status and error_message, and reports
+// whether that write actually landed. Created is a legal status value here
+// too, for the retry case, where the write is terminal only for this tick.
+//
+// The return value is what gates the verdict audit write in execute: a
+// success entry must never be recorded against an operation this call failed
+// to move to Ready, or the audit row would claim a status the operations table
+// itself does not yet show.
+func (w *boxOperationsWorker) markTerminal(ctx context.Context, id uuid.UUID, status models.OperationStatus, errMsg string) error {
+	_, err := w.h.pool.Exec(ctx,
 		`UPDATE operations SET status = $2, error_message = $3, updated_at = now() WHERE id = $1`,
-		id, string(status), errMsg); err != nil {
+		id, string(status), errMsg)
+	if err != nil {
 		log.Warn().Err(err).Str("operation", id.String()).Msg("box worker: failed to write operation status")
 	}
+	return err
 }
 
 // executeBoxUp brings a claimed box up through bootBoxInstance — the exact
 // path the synchronous BoxUp door uses — and records the result on the box
 // row. A box that moved on between enqueue and claim (already ready, or
 // already being torn down) is treated as success: a stale operation on a box
-// that is no longer pending is not a failure of the operation itself.
-func (h *Handler) executeBoxUp(ctx context.Context, payload json.RawMessage) error {
+// that is no longer pending is not a failure of the operation itself. It
+// reports the audit entry the caller should record once the operation is
+// confirmed Ready, rather than writing it itself; the zero auditEntry (a
+// blank Action) means no row is warranted, as for the already-moved-on cases
+// above.
+func (h *Handler) executeBoxUp(ctx context.Context, payload json.RawMessage) (auditEntry, error) {
 	var p models.BoxUpPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
-		return fmt.Errorf("decode BoxUp payload: %w", err)
+		return auditEntry{}, fmt.Errorf("decode BoxUp payload: %w", err)
 	}
 	stack := h.boxStack
 	if stack == nil {
-		return errors.New("box runtime not configured")
+		return auditEntry{}, errors.New("box runtime not configured")
 	}
 	b, err := h.loadBoxByID(ctx, p.BoxID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
+			return auditEntry{}, nil
 		}
-		return fmt.Errorf("load box: %w", err)
+		return auditEntry{}, fmt.Errorf("load box: %w", err)
 	}
 	if b.Status == models.BoxStatusDeleting || b.Status == models.BoxStatusDeleted ||
 		b.Status == models.BoxStatusFailed || b.Status == models.BoxStatusReady || b.Status == models.BoxStatusIdle {
-		return nil
+		return auditEntry{}, nil
 	}
 
 	if _, err := h.pool.Exec(ctx,
 		`UPDATE boxes SET status = 'Booting', updated_at = now() WHERE id = $1`, p.BoxID); err != nil {
-		return fmt.Errorf("mark box booting: %w", err)
+		return auditEntry{}, fmt.Errorf("mark box booting: %w", err)
 	}
 
 	res, mcpURL, sshHost, spawnErr := h.bootBoxInstance(ctx, stack, b.ProjectID, b, p.SSHPublicKey)
 	if spawnErr != nil {
 		h.failBox(context.Background(), p.BoxID, spawnErr.Error())
-		return spawnErr
+		return auditEntry{}, spawnErr
 	}
 	updated, err := h.markBoxReady(ctx, p.BoxID, res.Instance, mcpURL, sshHost)
 	if err != nil {
-		return fmt.Errorf("record ready box: %w", err)
+		return auditEntry{}, fmt.Errorf("record ready box: %w", err)
 	}
 
-	h.recordSystemAudit(ctx, auditEntry{
+	return auditEntry{
 		ProjectID:     b.ProjectID,
 		EnvironmentID: b.EnvironmentID,
 		Action:        models.ActionBoxUp,
@@ -287,8 +314,7 @@ func (h *Handler) executeBoxUp(ctx context.Context, payload json.RawMessage) err
 			"pool": poolLabelFor(res.PoolHit), "time_to_ready_ms": res.Timeline.Total().Milliseconds(),
 			"claimed_by": "box-operations-worker",
 		},
-	})
-	return nil
+	}, nil
 }
 
 // executeDeleteBox destroys a claimed box's instance and tombstones its row.
@@ -300,30 +326,33 @@ func (h *Handler) executeBoxUp(ctx context.Context, payload json.RawMessage) err
 // live credential valid until something else happened to withdraw it.
 // revokeBoxSessions is idempotent, so calling it again for the handler's own
 // operations is a no-op rather than a double-revoke.
-func (h *Handler) executeDeleteBox(ctx context.Context, payload json.RawMessage) error {
+//
+// Like executeBoxUp, it reports the audit entry to record rather than writing
+// it: the caller writes it only after confirming the operation reached Ready.
+func (h *Handler) executeDeleteBox(ctx context.Context, payload json.RawMessage) (auditEntry, error) {
 	var p models.DeleteBoxPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
-		return fmt.Errorf("decode DeleteBox payload: %w", err)
+		return auditEntry{}, fmt.Errorf("decode DeleteBox payload: %w", err)
 	}
 	b, err := h.loadBoxByID(ctx, p.BoxID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
+			return auditEntry{}, nil
 		}
-		return fmt.Errorf("load box: %w", err)
+		return auditEntry{}, fmt.Errorf("load box: %w", err)
 	}
 	if b.Status == models.BoxStatusDeleted {
-		return nil
+		return auditEntry{}, nil
 	}
 
 	if _, err := h.revokeBoxSessions(ctx, p.BoxID); err != nil {
-		return fmt.Errorf("revoke sessions: %w", err)
+		return auditEntry{}, fmt.Errorf("revoke sessions: %w", err)
 	}
 
 	if stack := h.boxStack; stack != nil && b.InstanceRef != "" {
 		inst := instanceFor(b.ID.String(), b.InstanceRef, b.NodeRef, b.Image, b.Region, b.SSHHost, b.SSHPort, b.MCPURL)
 		if err := stack.runtime.Destroy(ctx, inst); err != nil {
-			return fmt.Errorf("destroy instance: %w", err)
+			return auditEntry{}, fmt.Errorf("destroy instance: %w", err)
 		}
 		stack.publishBoxPoolGauges()
 	}
@@ -331,10 +360,10 @@ func (h *Handler) executeDeleteBox(ctx context.Context, payload json.RawMessage)
 	if _, err := h.pool.Exec(ctx,
 		`UPDATE boxes SET status = 'Deleted', deleted_at = now(), updated_at = now() WHERE id = $1`,
 		p.BoxID); err != nil {
-		return fmt.Errorf("mark box deleted: %w", err)
+		return auditEntry{}, fmt.Errorf("mark box deleted: %w", err)
 	}
 
-	h.recordSystemAudit(ctx, auditEntry{
+	return auditEntry{
 		ProjectID:     b.ProjectID,
 		EnvironmentID: b.EnvironmentID,
 		Action:        models.ActionDeleteBox,
@@ -342,8 +371,7 @@ func (h *Handler) executeDeleteBox(ctx context.Context, payload json.RawMessage)
 		ResourceName:  b.Name,
 		Outcome:       auditOutcomeSuccess,
 		Metadata:      p,
-	})
-	return nil
+	}, nil
 }
 
 // loadBoxByID loads a box by primary key, including deleted/tombstoned rows —

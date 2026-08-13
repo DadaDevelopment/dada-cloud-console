@@ -319,6 +319,71 @@ func TestBoxOperationsWorker_BoxUpBringsTheBoxReady(t *testing.T) {
 	}
 }
 
+// completionAudit reads the operation_id and outcome of the row the worker
+// wrote when the operation finished, so a test can prove two things at once:
+// that the intent row (written pending at enqueue) and the completion write
+// are the SAME operation, AND that the completion write actually landed as
+// 'success' rather than 'pending'. The second part matters because
+// auditInsertSQL (audit.go) downgrades outcome='success' to 'pending'
+// whenever the row names an operation not yet in a terminal status -- so a
+// completion write issued before the operations row reaches Ready produces a
+// row that carries the right operation_id but is still indistinguishable from
+// an operation in flight, which is the same "stuck pending forever" defect
+// one step later. audit_events is append-only, so a row born 'pending' stays
+// 'pending' no matter how long ago the operation actually finished.
+func completionAudit(t *testing.T, pool *pgxpool.Pool, action string, boxID uuid.UUID) (opID uuid.UUID, outcome string) {
+	t.Helper()
+	if err := pool.QueryRow(context.Background(),
+		`SELECT operation_id, outcome FROM audit_events
+		  WHERE action = $1 AND metadata->>'box_id' = $2
+		  ORDER BY created_at DESC LIMIT 1`,
+		action, boxID.String(),
+	).Scan(&opID, &outcome); err != nil {
+		t.Fatalf("read completion audit row for %s: %v", action, err)
+	}
+	return opID, outcome
+}
+
+// TestBoxOperationsWorker_BoxUpLinksCompletionAuditToItsOperation pins the
+// intent-verdict pairing the admin audit join depends on: the pending row a
+// handler writes at enqueue time and the row the worker writes on completion
+// must carry the SAME operation_id AND must have actually landed as
+// outcome='success', not 'pending'. A completion row written before
+// operations.status reaches Ready would carry the right operation_id and
+// still be indistinguishable from an operation still in flight -- the same
+// "stuck pending forever" defect one layer deeper, since audit_events is
+// append-only and never rewrites a row born pending.
+func TestBoxOperationsWorker_BoxUpLinksCompletionAuditToItsOperation(t *testing.T) {
+	pool := testOptimisticPool(t)
+	deps, spec, _, _, _ := box.NewWarmFixture(0)
+
+	boxID, opID, _, boxName := seedBoxOperation(t, pool, models.BoxStatusRequested, "",
+		models.ActionBoxUp, models.BoxUpPayload{})
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE operations SET payload = $2 WHERE id = $1`, opID,
+		mustMarshal(t, models.BoxUpPayload{BoxID: boxID, Name: boxName, Image: spec.Image, Profile: spec.Profile, Region: spec.Region})); err != nil {
+		t.Fatalf("fix up payload with the real box id: %v", err)
+	}
+
+	h := newTestBoxWorkerHandler(pool, deps.Runtime, deps.Pool)
+	w := &boxOperationsWorker{h: h}
+	w.tick(context.Background())
+
+	gotOpID, gotOutcome := completionAudit(t, pool, string(models.ActionBoxUp), boxID)
+	if gotOpID != opID {
+		t.Errorf("completion audit operation_id = %v, want %v (the claimed operation): "+
+			"a completion row with no operation_id can never be joined to the pending intent row", gotOpID, opID)
+	}
+	if gotOutcome != auditOutcomeSuccess {
+		t.Errorf("completion audit outcome = %q, want %q: a verdict row written before the operation "+
+			"reached a terminal status is downgraded to pending by auditInsertSQL and never recovers, "+
+			"leaving the operation permanently indistinguishable from one still in flight", gotOutcome, auditOutcomeSuccess)
+	}
+	if status, errMsg, _ := operationStatus(t, pool, opID); status != string(models.OperationStatusReady) {
+		t.Errorf("operation status = %q, want Ready: the assertions above only prove anything if the operation actually reached a terminal status; error_message=%q", status, errMsg)
+	}
+}
+
 // hangingRuntime is a runtime whose Destroy never returns on its own: it waits
 // for the caller's context, exactly like a kubelet exec stream nothing ever
 // closes. It is how the deadline is proven without waiting six minutes.

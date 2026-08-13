@@ -57,45 +57,51 @@ func (h *Handler) boxSleeper() (box.Sleeper, error) {
 // reaper's idle/TTL path and the spend cap never did, so a credential issued
 // before the sleep would start working again the moment the box woke up. It is
 // idempotent, so doing it twice for the handler's own operations is a no-op.
-func (h *Handler) executeSuspendBox(ctx context.Context, payload json.RawMessage) error {
+//
+// It reports the audit entry to record rather than writing it: the caller
+// (boxOperationsWorker.execute) writes it only after confirming the operation
+// reached Ready, so the verdict row is never stamped 'pending' by
+// auditInsertSQL for having been written while the operation was still
+// Reconciling.
+func (h *Handler) executeSuspendBox(ctx context.Context, payload json.RawMessage) (auditEntry, error) {
 	var p models.SuspendBoxPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
-		return fmt.Errorf("decode SuspendBox payload: %w", err)
+		return auditEntry{}, fmt.Errorf("decode SuspendBox payload: %w", err)
 	}
 	b, err := h.loadBoxByID(ctx, p.BoxID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
+			return auditEntry{}, nil
 		}
-		return fmt.Errorf("load box: %w", err)
+		return auditEntry{}, fmt.Errorf("load box: %w", err)
 	}
 	if b.Status == models.BoxStatusSleeping || b.Status == models.BoxStatusDeleting ||
 		b.Status == models.BoxStatusDeleted || b.Status == models.BoxStatusFailed {
-		return nil
+		return auditEntry{}, nil
 	}
 	sleeper, err := h.boxSleeper()
 	if err != nil {
-		return err
+		return auditEntry{}, err
 	}
 	if _, err := h.revokeBoxSessions(ctx, p.BoxID); err != nil {
-		return fmt.Errorf("revoke sessions: %w", err)
+		return auditEntry{}, fmt.Errorf("revoke sessions: %w", err)
 	}
 	if b.InstanceRef != "" {
 		inst := instanceFor(b.ID.String(), b.InstanceRef, b.NodeRef, b.Image, b.Region, b.SSHHost, b.SSHPort, b.MCPURL)
 		if err := sleeper.Suspend(ctx, inst); err != nil {
-			return fmt.Errorf("suspend instance: %w", err)
+			return auditEntry{}, fmt.Errorf("suspend instance: %w", err)
 		}
 	}
 	if _, err := h.pool.Exec(ctx,
 		`UPDATE boxes SET status = 'Sleeping', slept_at = now(), updated_at = now() WHERE id = $1`,
 		p.BoxID); err != nil {
-		return fmt.Errorf("mark box sleeping: %w", err)
+		return auditEntry{}, fmt.Errorf("mark box sleeping: %w", err)
 	}
 	if stack := h.boxStack; stack != nil {
 		h.withdrawBoxExposures(ctx, stack, b)
 	}
 
-	h.recordSystemAudit(ctx, auditEntry{
+	return auditEntry{
 		ProjectID:     b.ProjectID,
 		EnvironmentID: b.EnvironmentID,
 		Action:        models.ActionSuspendBox,
@@ -105,8 +111,7 @@ func (h *Handler) executeSuspendBox(ctx context.Context, payload json.RawMessage
 		Metadata: map[string]any{
 			"box_id": p.BoxID, "reason": p.Reason, "claimed_by": "box-operations-worker",
 		},
-	})
-	return nil
+	}, nil
 }
 
 // executeResumeBox rebuilds a body around a sleeping box's surviving disk and
@@ -139,34 +144,38 @@ func (h *Handler) executeSuspendBox(ctx context.Context, payload json.RawMessage
 // and the customer's only notice being a prototype that is gone. Clearing them
 // here is what makes "warned twice before deletion" true per sleep rather than
 // once per lifetime.
-func (h *Handler) executeResumeBox(ctx context.Context, payload json.RawMessage) error {
+//
+// Like executeSuspendBox, it reports the audit entry to record rather than
+// writing it: the caller writes it only after markTerminal has confirmed the
+// operation reached Ready.
+func (h *Handler) executeResumeBox(ctx context.Context, payload json.RawMessage) (auditEntry, error) {
 	var p models.ResumeBoxPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
-		return fmt.Errorf("decode ResumeBox payload: %w", err)
+		return auditEntry{}, fmt.Errorf("decode ResumeBox payload: %w", err)
 	}
 	stack := h.boxStack
 	if stack == nil {
-		return errors.New("box runtime not configured")
+		return auditEntry{}, errors.New("box runtime not configured")
 	}
 	b, err := h.loadBoxByID(ctx, p.BoxID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
+			return auditEntry{}, nil
 		}
-		return fmt.Errorf("load box: %w", err)
+		return auditEntry{}, fmt.Errorf("load box: %w", err)
 	}
 	if b.Status == models.BoxStatusReady || b.Status == models.BoxStatusIdle {
-		return nil
+		return auditEntry{}, nil
 	}
 	if b.Status != models.BoxStatusSleeping {
-		return nil
+		return auditEntry{}, nil
 	}
 	sleeper, err := h.boxSleeper()
 	if err != nil {
-		return err
+		return auditEntry{}, err
 	}
 	if b.InstanceRef == "" {
-		return errors.New("cannot resume a box that never had an instance")
+		return auditEntry{}, errors.New("cannot resume a box that never had an instance")
 	}
 
 	spec := box.Spec{
@@ -182,13 +191,13 @@ func (h *Handler) executeResumeBox(ctx context.Context, payload json.RawMessage)
 	}
 	inst := instanceFor(b.ID.String(), b.InstanceRef, b.NodeRef, b.Image, b.Region, b.SSHHost, b.SSHPort, b.MCPURL)
 	if err := sleeper.Resume(ctx, inst, spec); err != nil {
-		return fmt.Errorf("resume instance: %w", err)
+		return auditEntry{}, fmt.Errorf("resume instance: %w", err)
 	}
 	if err := stack.runtime.Bind(ctx, inst, spec); err != nil {
-		return fmt.Errorf("rebind resumed box: %w", err)
+		return auditEntry{}, fmt.Errorf("rebind resumed box: %w", err)
 	}
 	if err := stack.runtime.ProgramNetwork(ctx, inst); err != nil {
-		return fmt.Errorf("program resumed box network: %w", err)
+		return auditEntry{}, fmt.Errorf("program resumed box network: %w", err)
 	}
 	if restarter, ok := stack.runtime.(box.ServiceRestarter); ok {
 		if err := restarter.RestartServices(ctx, inst); err != nil {
@@ -198,10 +207,10 @@ func (h *Handler) executeResumeBox(ctx context.Context, payload json.RawMessage)
 	}
 	canary, err := stack.runtime.Exec(ctx, inst, box.CanaryCommand)
 	if err != nil {
-		return fmt.Errorf("canary a resumed box: %w", err)
+		return auditEntry{}, fmt.Errorf("canary a resumed box: %w", err)
 	}
 	if err := box.EvaluateReadiness(canary); err != nil {
-		return fmt.Errorf("resumed box is not ready: %w", err)
+		return auditEntry{}, fmt.Errorf("resumed box is not ready: %w", err)
 	}
 
 	mcpURL := fmt.Sprintf("%s/api/v1/box/session/mcp", stack.sessions)
@@ -230,11 +239,11 @@ func (h *Handler) executeResumeBox(ctx context.Context, payload json.RawMessage)
 		        updated_at           = now()
 		  WHERE id = $1`,
 		b.ID, inst.InstanceRef, inst.NodeRef, sshHost, mcpURL); err != nil {
-		return fmt.Errorf("record resumed box: %w", err)
+		return auditEntry{}, fmt.Errorf("record resumed box: %w", err)
 	}
 	h.republishBoxExposures(ctx, stack, b)
 
-	h.recordSystemAudit(ctx, auditEntry{
+	return auditEntry{
 		ProjectID:     b.ProjectID,
 		EnvironmentID: b.EnvironmentID,
 		Action:        models.ActionResumeBox,
@@ -244,8 +253,7 @@ func (h *Handler) executeResumeBox(ctx context.Context, payload json.RawMessage)
 		Metadata: map[string]any{
 			"box_id": p.BoxID, "instance_ref": inst.InstanceRef, "claimed_by": "box-operations-worker",
 		},
-	})
-	return nil
+	}, nil
 }
 
 // withdrawBoxExposures tears down the Service and Ingress of every live
