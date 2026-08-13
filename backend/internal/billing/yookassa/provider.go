@@ -86,6 +86,23 @@ func NewProvider(pool *pgxpool.Pool, client *Client, returnURL string, sendRecei
 	}
 }
 
+// ErrReceiptEmailRequired reports a payer with no known email on a shop that
+// fiscalises. YooKassa answers such a charge with 400 "Receipt is missing or
+// illegal", so the charge is impossible rather than merely receiptless, and the
+// caller is owed that verdict before any money flow is attempted.
+var ErrReceiptEmailRequired = errors.New("yookassa: fiscal receipt requires a customer email")
+
+// requireReceiptEmail refuses a charge that fiscalization makes impossible.
+// With SendReceipt on, an empty email is not a missing nicety: the shop rejects
+// the whole payment, and finding that out from a 400 after a pending row exists
+// leaves a payment row that can never settle.
+func (p *YooKassaProvider) requireReceiptEmail(customerEmail string) error {
+	if p.SendReceipt && customerEmail == "" {
+		return ErrReceiptEmailRequired
+	}
+	return nil
+}
+
 // receiptFor builds the 54-FZ receipt block for one plan charge, or nil when
 // fiscalization is off or no customer email is known — a receipt without a
 // delivery address is not a receipt the customer will ever see, and YooKassa
@@ -123,6 +140,10 @@ func (p *YooKassaProvider) receiptFor(plan pricing.Plan, amount Amount, customer
 // nothing else: a recurring charge the payer did not agree to is a chargeback
 // with extra steps.
 func (p *YooKassaProvider) Checkout(ctx context.Context, orgID string, plan pricing.Plan, customerEmail, createdBySub, projectID string, saveMethod bool) (paymentID, confirmationURL string, err error) {
+	if err = p.requireReceiptEmail(customerEmail); err != nil {
+		return "", "", err
+	}
+
 	id := uuid.New()
 	amountValue := fmt.Sprintf("%.2f", plan.PriceRUB)
 
@@ -323,6 +344,9 @@ const autopayCreatedBySub = "system:autopay"
 func (p *YooKassaProvider) ChargeSaved(ctx context.Context, orgID string, plan pricing.Plan, methodID, customerEmail string) (ChargeResult, error) {
 	if methodID == "" {
 		return ChargeResult{}, errors.New("yookassa: charge without a saved payment method")
+	}
+	if err := p.requireReceiptEmail(customerEmail); err != nil {
+		return ChargeResult{}, err
 	}
 	id := uuid.New()
 	amountValue := fmt.Sprintf("%.2f", plan.PriceRUB)

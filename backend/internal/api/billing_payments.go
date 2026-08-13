@@ -116,6 +116,11 @@ func (h *Handler) BillingCheckout(c *gin.Context) {
 	paymentID, confirmationURL, err := h.yookassa.Checkout(c.Request.Context(), orgID, *plan, claims.Email, claims.Subject, projectID.String(), body.Autopay)
 	if err != nil {
 		log.Printf("payments: checkout failed org=%s plan=%s: %v", orgID, body.Plan, err)
+		if errors.Is(err, yookassa.ErrReceiptEmailRequired) {
+			respondErrorCode(c, http.StatusUnprocessableEntity, "receipt_email_required",
+				"для оплаты нужен подтверждённый e-mail: на него придёт кассовый чек")
+			return
+		}
 		respondError(c, http.StatusInternalServerError, "failed to start checkout")
 		return
 	}
