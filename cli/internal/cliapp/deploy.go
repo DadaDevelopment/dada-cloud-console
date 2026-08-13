@@ -3,6 +3,9 @@ package cliapp
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,12 +18,14 @@ import (
 	"github.com/dada-tuda/console/cli/internal/apiclient"
 	"github.com/dada-tuda/console/cli/internal/appname"
 	"github.com/dada-tuda/console/cli/internal/archive"
+	"github.com/dada-tuda/console/cli/internal/gitremote"
 )
 
 // DeployOptions are the resolved inputs to a single `ddc deploy` run.
 type DeployOptions struct {
 	Dir     string
 	AppName string
+	Project string
 }
 
 // buildPoll* control how often ddc asks the console for build status while
@@ -36,44 +41,32 @@ const (
 // package the directory, upload it, stream build status, then print the
 // live URL once the platform has assigned one.
 func Deploy(ctx context.Context, cfg Config, opts DeployOptions, in io.Reader, out io.Writer) error {
-	client := apiclient.New(cfg.APIBase, &http.Client{}, TokenSource(cfg), agentmarker.DetectFromEnv())
-
-	projectID, envID, err := resolveTarget(ctx, client, in, out)
-	if err != nil {
+	if err := EnsureLoggedIn(ctx, cfg, out); err != nil {
 		return err
 	}
+	client := apiclient.New(cfg.APIBase, &http.Client{}, TokenSource(cfg), agentmarker.DetectFromEnv())
 
 	appName, err := resolveAppName(opts)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "App: %s\n", appName)
 
-	entries, total, err := archive.Plan(opts.Dir)
+	target, err := resolveTarget(ctx, client, opts, appName, in, out)
 	if err != nil {
-		return fmt.Errorf("scanning %s: %w", opts.Dir, err)
+		return err
 	}
-	if total > archive.MaxBytes {
-		return fmt.Errorf("this project is %.1fMB, over the console's %dMB upload limit - "+
-			"trim large files or add them to .gitignore and try again",
-			float64(total)/1024/1024, archive.MaxBytes/1024/1024)
-	}
-	fmt.Fprintf(out, "Packaging %d files (%.1fMB)...\n", len(entries), float64(total)/1024/1024)
+	projectID, envID := target.ProjectID, target.EnvID
+	fmt.Fprintf(out, "App: %s -> %s / %s\n", appName, target.ProjectName, target.EnvName)
 
-	data, err := archive.Build(opts.Dir, entries)
-	if err != nil {
-		return fmt.Errorf("building archive: %w", err)
+	buildID, fromGit := deployFromGit(ctx, client, projectID, envID, appName, opts.Dir, out)
+	if !fromGit {
+		buildID, err = deployFromArchive(ctx, client, projectID, envID, appName, opts.Dir, out)
+		if err != nil {
+			return err
+		}
 	}
 
-	fmt.Fprintln(out, "Uploading...")
-	uploadResp, err := client.UploadSourceArchive(ctx, projectID, envID, appName, appName+".tar.gz", data)
-	if err != nil {
-		return fmt.Errorf("upload failed: %s", apiclient.Explain(err))
-	}
-	fmt.Fprintf(out, "Detected: %s (port %d)\n", nonEmpty(uploadResp.Detected.Framework, "unknown"), uploadResp.Detected.Port)
-	fmt.Fprintf(out, "Build queued: %s\n", uploadResp.Build.ID)
-
-	finalStatus, err := streamBuildStatus(ctx, client, projectID, envID, appName, uploadResp.Build.ID, out)
+	finalStatus, err := streamBuildStatus(ctx, client, projectID, envID, appName, buildID, out)
 	if err != nil {
 		return err
 	}
@@ -93,6 +86,119 @@ func Deploy(ctx context.Context, cfg Config, opts DeployOptions, in io.Reader, o
 	return nil
 }
 
+// deployFromGit builds straight from the folder's GitHub remote when that is
+// possible, which is both faster and gives the console a real commit instead
+// of an opaque archive. Every reason it cannot is announced in one line and
+// answered by returning ok=false, so the caller falls back to the upload path
+// rather than failing the deploy.
+func deployFromGit(ctx context.Context, client *apiclient.Client, projectID, envID, appName, dir string, out io.Writer) (string, bool) {
+	info := gitremote.Detect(dir)
+	if !info.IsRepo {
+		return "", false
+	}
+	fallback := func(reason string) (string, bool) {
+		fmt.Fprintf(out, "Uploading the folder instead of building from git: %s.\n", reason)
+		return "", false
+	}
+	if info.Unsupported != "" {
+		return fallback(info.Unsupported)
+	}
+	if info.Dirty {
+		return fallback("you have uncommitted changes")
+	}
+	if !info.HeadPushed {
+		return fallback("this commit is not pushed to origin/" + info.Branch)
+	}
+
+	repos, err := client.ListGitRepos(ctx, projectID, envID)
+	if err != nil {
+		return fallback("could not read this environment's repositories")
+	}
+	linked, found := findGitRepo(repos, appName)
+	switch {
+	case found && linked.RepoFullName != info.FullName:
+		return fallback(fmt.Sprintf("app %q is already linked to %s", appName, linked.RepoFullName))
+	case !found:
+		fmt.Fprintf(out, "Linking %s (%s)...\n", info.FullName, info.Branch)
+		_, err := client.ConnectGitRepo(ctx, projectID, envID, apiclient.ConnectGitRepoRequest{
+			RepoFullName:     info.FullName,
+			AppName:          appName,
+			ProductionBranch: info.Branch,
+			RootDir:          rootDirOrDot(info.SubdirOfRoot),
+			AutoDeploy:       true,
+			Provider:         "github",
+		})
+		if err != nil && !isAlreadyConnected(err) {
+			var apiErr *apiclient.APIError
+			if errors.As(err, &apiErr) && apiErr.Code == "github_access_required" {
+				return fallback("the platform cannot clone this repository - connect GitHub to the project to build from it")
+			}
+			return fallback("linking the repository failed (" + apiclient.Explain(err) + ")")
+		}
+	}
+
+	build, err := client.TriggerBuild(ctx, projectID, envID, appName)
+	if err != nil {
+		return fallback("starting the build from git failed (" + apiclient.Explain(err) + ")")
+	}
+	fmt.Fprintf(out, "Source: github.com/%s @ %s\n", info.FullName, info.Branch)
+	fmt.Fprintf(out, "Build queued: %s\n", build.ID)
+	return build.ID, true
+}
+
+func rootDirOrDot(sub string) string {
+	if sub == "" {
+		return "."
+	}
+	return sub
+}
+
+func findGitRepo(repos []apiclient.GitRepo, appName string) (apiclient.GitRepo, bool) {
+	for _, r := range repos {
+		if r.AppName == appName {
+			return r, true
+		}
+	}
+	return apiclient.GitRepo{}, false
+}
+
+// isAlreadyConnected reports the harmless half of the link conflict: this app
+// is already linked to this very repository, which is exactly the state the
+// caller wanted.
+func isAlreadyConnected(err error) bool {
+	var apiErr *apiclient.APIError
+	return errors.As(err, &apiErr) && apiErr.Code == "repo_already_connected"
+}
+
+// deployFromArchive is the no-git path: package the directory, upload it, and
+// return the id of the build the upload queued.
+func deployFromArchive(ctx context.Context, client *apiclient.Client, projectID, envID, appName, dir string, out io.Writer) (string, error) {
+	entries, total, err := archive.Plan(dir)
+	if err != nil {
+		return "", fmt.Errorf("scanning %s: %w", dir, err)
+	}
+	if total > archive.MaxBytes {
+		return "", fmt.Errorf("this project is %.1fMB, over the console's %dMB upload limit - "+
+			"trim large files or add them to .gitignore and try again",
+			float64(total)/1024/1024, archive.MaxBytes/1024/1024)
+	}
+	fmt.Fprintf(out, "Packaging %d files (%.1fMB)...\n", len(entries), float64(total)/1024/1024)
+
+	data, err := archive.Build(dir, entries)
+	if err != nil {
+		return "", fmt.Errorf("building archive: %w", err)
+	}
+
+	fmt.Fprintln(out, "Uploading...")
+	uploadResp, err := client.UploadSourceArchive(ctx, projectID, envID, appName, appName+".tar.gz", data)
+	if err != nil {
+		return "", fmt.Errorf("upload failed: %s", apiclient.Explain(err))
+	}
+	fmt.Fprintf(out, "Detected: %s (port %d)\n", nonEmpty(uploadResp.Detected.Framework, "unknown"), uploadResp.Detected.Port)
+	fmt.Fprintf(out, "Build queued: %s\n", uploadResp.Build.ID)
+	return uploadResp.Build.ID, nil
+}
+
 func nonEmpty(s, def string) string {
 	if s == "" {
 		return def
@@ -100,50 +206,148 @@ func nonEmpty(s, def string) string {
 	return s
 }
 
-// resolveTarget picks a project and environment. With exactly one of each
-// visible to the caller, it picks silently; otherwise it prompts.
-func resolveTarget(ctx context.Context, client *apiclient.Client, in io.Reader, out io.Writer) (projectID, envID string, err error) {
+// resolveTarget decides where this directory deploys to. The first run in a
+// folder never shows a menu: it reuses the project named after the folder, or
+// creates it. Later runs reuse what was remembered for that folder. The menu
+// survives only as the fallback for --project naming something ambiguous.
+func resolveTarget(ctx context.Context, client *apiclient.Client, opts DeployOptions, appName string, in io.Reader, out io.Writer) (Target, error) {
+	if opts.Project == "" {
+		if remembered, ok, err := LookupTarget(opts.Dir); err == nil && ok {
+			return remembered, nil
+		}
+	}
+
 	projects, err := client.ListProjects(ctx)
 	if err != nil {
-		return "", "", fmt.Errorf("listing projects: %s", apiclient.Explain(err))
-	}
-	if len(projects) == 0 {
-		return "", "", fmt.Errorf("no projects visible to your account - create one in the console first")
+		return Target{}, fmt.Errorf("listing projects: %s", apiclient.Explain(err))
 	}
 
-	var project apiclient.Project
-	if len(projects) == 1 {
-		project = projects[0]
-	} else {
-		project, err = choose(in, out, "Select a project", projects, func(p apiclient.Project) string {
-			return fmt.Sprintf("%s (%s)", nonEmpty(p.DisplayName, p.Name), p.Name)
-		})
+	wanted := opts.Project
+	if wanted == "" {
+		wanted = appName
+	}
+
+	project, found := findProject(projects, wanted)
+	if !found {
+		if opts.Project != "" {
+			return Target{}, fmt.Errorf("no project named %q - run it without --project to create one", opts.Project)
+		}
+		project, err = createProjectForFolder(ctx, client, wanted, out)
 		if err != nil {
-			return "", "", err
+			return Target{}, err
 		}
 	}
 
+	env, err := resolveEnvironment(ctx, client, project, in, out)
+	if err != nil {
+		return Target{}, err
+	}
+
+	target := Target{
+		ProjectID:   project.ID,
+		ProjectName: nonEmpty(project.DisplayName, project.Name),
+		EnvID:       env.ID,
+		EnvName:     env.Name,
+		AppName:     appName,
+	}
+	if err := RememberTarget(opts.Dir, target); err != nil {
+		fmt.Fprintf(out, "note: could not remember this folder's target (%v)\n", err)
+	}
+	return target, nil
+}
+
+// createProjectForFolder mints the project this folder deploys into. Slugs
+// are unique platform-wide (backend/internal/api/projects.go:218), so a name
+// another tenant already took comes back 409 and is retried with a short
+// suffix rather than dumping the user back into a menu.
+func createProjectForFolder(ctx context.Context, client *apiclient.Client, wanted string, out io.Writer) (apiclient.Project, error) {
+	slug := appname.NormalizeProject(wanted)
+	if !appname.ValidProject(slug) {
+		return apiclient.Project{}, fmt.Errorf("could not derive a project name from %q - pass an existing one with --project", wanted)
+	}
+
+	fmt.Fprintf(out, "First deploy from this folder - creating project %q...\n", slug)
+	project, err := client.CreateProject(ctx, slug)
+	if err == nil {
+		return project, nil
+	}
+
+	var apiErr *apiclient.APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusConflict {
+		return apiclient.Project{}, fmt.Errorf("creating project %q: %s", slug, apiclient.Explain(err))
+	}
+
+	taken := slug
+	suffixed, sufErr := suffixSlug(slug)
+	if sufErr != nil {
+		return apiclient.Project{}, sufErr
+	}
+	fmt.Fprintf(out, "Name %q is taken platform-wide - using %q instead.\n", taken, suffixed)
+	project, err = client.CreateProject(ctx, suffixed)
+	if err != nil {
+		return apiclient.Project{}, fmt.Errorf("creating project %q: %s", suffixed, apiclient.Explain(err))
+	}
+	return project, nil
+}
+
+// suffixSlug appends a random 6-hex-digit suffix, trimming the base so the
+// result still fits the console's 40-character project slug limit.
+func suffixSlug(slug string) (string, error) {
+	var raw [3]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	suffix := "-" + hex.EncodeToString(raw[:])
+	base := slug
+	if len(base)+len(suffix) > 40 {
+		base = strings.Trim(base[:40-len(suffix)], "-")
+	}
+	return base + suffix, nil
+}
+
+// findProject matches by exact name first, then by display name, so both
+// `--project my-api` and `--project "My API"` land on the same row.
+func findProject(projects []apiclient.Project, wanted string) (apiclient.Project, bool) {
+	for _, p := range projects {
+		if p.Name == wanted {
+			return p, true
+		}
+	}
+	for _, p := range projects {
+		if p.DisplayName == wanted {
+			return p, true
+		}
+	}
+	return apiclient.Project{}, false
+}
+
+// resolveEnvironment picks the environment to deploy into: the production one
+// when the project has it, the only one when there is only one, and a prompt
+// only when neither rule decides.
+func resolveEnvironment(ctx context.Context, client *apiclient.Client, project apiclient.Project, in io.Reader, out io.Writer) (apiclient.Environment, error) {
 	envs, err := client.GetProjectEnvironments(ctx, project.ID)
 	if err != nil {
-		return "", "", fmt.Errorf("listing environments: %s", apiclient.Explain(err))
+		return apiclient.Environment{}, fmt.Errorf("listing environments: %s", apiclient.Explain(err))
 	}
 	if len(envs) == 0 {
-		return "", "", fmt.Errorf("project %q has no environments", project.Name)
+		return apiclient.Environment{}, fmt.Errorf("project %q has no environments", project.Name)
 	}
-
-	var env apiclient.Environment
 	if len(envs) == 1 {
-		env = envs[0]
-	} else {
-		env, err = choose(in, out, "Select an environment", envs, func(e apiclient.Environment) string {
-			return fmt.Sprintf("%s (%s)", e.Name, e.Type)
-		})
-		if err != nil {
-			return "", "", err
+		return envs[0], nil
+	}
+	for _, e := range envs {
+		if e.Name == "prod" || e.Name == "production" {
+			return e, nil
 		}
 	}
-
-	return project.ID, env.ID, nil
+	for _, e := range envs {
+		if e.Type == "prod" {
+			return e, nil
+		}
+	}
+	return choose(in, out, "Select an environment", envs, func(e apiclient.Environment) string {
+		return fmt.Sprintf("%s (%s)", e.Name, e.Type)
+	})
 }
 
 // choose prints a numbered list of items and reads a 1-based selection from

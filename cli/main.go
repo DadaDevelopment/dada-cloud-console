@@ -22,7 +22,8 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  deploy [dir]     package and deploy dir (default: current directory)")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "flags for deploy:")
-	fmt.Fprintln(os.Stderr, "  --name <name>    app name (default: derived from the directory name)")
+	fmt.Fprintln(os.Stderr, "  --name <name>       app name (default: derived from the directory name)")
+	fmt.Fprintln(os.Stderr, "  --project <name>    deploy into an existing project instead of this folder's own")
 }
 
 func main() {
@@ -71,6 +72,12 @@ func parseDeployArgs(args []string) (cliapp.DeployOptions, error) {
 				return opts, fmt.Errorf("--name requires a value")
 			}
 			opts.AppName = args[i+1]
+			i += 2
+		case "--project":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("--project requires a value")
+			}
+			opts.Project = args[i+1]
 			i += 2
 		default:
 			if len(args[i]) > 0 && args[i][0] == '-' {

@@ -1,7 +1,9 @@
 package apiclient
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"time"
 )
 
@@ -35,6 +37,38 @@ func (c *Client) ListProjects(ctx context.Context) ([]Project, error) {
 		return nil, err
 	}
 	return out.Projects, nil
+}
+
+// createProjectRequest mirrors backend/internal/api/projects.go:113. Only
+// slug is required; an empty default_environment makes the server name the
+// first environment "prod".
+type createProjectRequest struct {
+	Slug        string `json:"slug"`
+	DisplayName string `json:"display_name,omitempty"`
+}
+
+// createProjectResponse mirrors the 201 body of POST /projects
+// (backend/internal/api/projects.go:244).
+type createProjectResponse struct {
+	ProjectID            string `json:"project_id"`
+	DefaultEnvironmentID string `json:"default_environment_id"`
+	OrgID                string `json:"org_id"`
+	Role                 string `json:"role"`
+}
+
+// CreateProject creates a project owned by the caller in their personal org.
+// The slug is unique platform-wide, so a name another tenant already took
+// comes back as HTTP 409 - callers are expected to retry with a variant.
+func (c *Client) CreateProject(ctx context.Context, slug string) (Project, error) {
+	body, err := json.Marshal(createProjectRequest{Slug: slug, DisplayName: slug})
+	if err != nil {
+		return Project{}, err
+	}
+	var out createProjectResponse
+	if err := c.doJSON(ctx, "POST", "/projects", bytes.NewReader(body), "application/json", &out); err != nil {
+		return Project{}, err
+	}
+	return Project{ID: out.ProjectID, Name: slug, DisplayName: slug, Role: out.Role}, nil
 }
 
 type getProjectResponse struct {
