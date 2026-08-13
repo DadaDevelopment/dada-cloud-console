@@ -869,7 +869,6 @@ ${PUSH_WITH_RETRY_SH}
             }
 
         } catch (err) {
-            currentBuild.result = 'FAILURE'
             currentBuild.description = (currentStageName == 'Docker push' || currentStageName == 'GitOps write-back')
                     ? "FAILED AT PUBLISH (${currentStageName}) — code and tests passed"
                     : "FAILED AT ${currentStageName}"
@@ -877,6 +876,7 @@ ${PUSH_WITH_RETRY_SH}
         }
 
         if (currentBuild.result != 'FAILURE') {
+            currentBuild.description = "OK ${resolvedTag}"
             echo "✅ DADA Cloud Console — ${resolvedTag}"
             echo "   Backend:         ${BACKEND_IMAGE}:${resolvedTag}"
             echo "   Frontend:        ${FRONTEND_IMAGE}:${resolvedTag}"
