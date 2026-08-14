@@ -53,7 +53,7 @@ const buildSelectCols = `id, git_repo_id, environment_id, app_name, status, trig
 // gr.id = b.git_repo_id" query.
 const buildSelectColsWithSource = `b.id, b.git_repo_id, b.environment_id, b.app_name, b.status, b.trigger,
 		b.commit_sha, b.commit_message, b.head_sha, b.branch, b.image_uri, b.logs_ref, b.pr_number,
-		b.started_at, b.finished_at, b.created_at, b.updated_at, b.error_message, b.fail_reason, gr.provider`
+		b.started_at, b.finished_at, b.created_at, b.updated_at, b.error_message, b.fail_reason, gr.provider, b.archive_url`
 
 func scanBuild(s interface {
 	Scan(dest ...any) error
@@ -64,15 +64,23 @@ func scanBuild(s interface {
 }
 
 // scanBuildWithSource scans a row selected with buildSelectColsWithSource,
-// deriving build.Source from the joined git_repos.provider.
+// deriving build.Source from the build's own archive_url when it has one and
+// from the joined git_repos.provider otherwise. The per-build answer matters
+// since migration 121: a git-connected app can have archive builds in its
+// history without its source binding ever changing, and calling those "git"
+// would show the user a commit-less build attributed to their repo.
 func scanBuildWithSource(s interface {
 	Scan(dest ...any) error
 }, b *build) error {
-	var provider *string
+	var provider, archiveURL *string
 	if err := s.Scan(&b.ID, &b.GitRepoID, &b.EnvironmentID, &b.AppName, &b.Status, &b.Trigger,
 		&b.CommitSHA, &b.CommitMessage, &b.HeadSHA, &b.Branch, &b.ImageURI, &b.LogsRef, &b.PRNumber,
-		&b.StartedAt, &b.FinishedAt, &b.CreatedAt, &b.UpdatedAt, &b.ErrorMessage, &b.FailReason, &provider); err != nil {
+		&b.StartedAt, &b.FinishedAt, &b.CreatedAt, &b.UpdatedAt, &b.ErrorMessage, &b.FailReason, &provider, &archiveURL); err != nil {
 		return err
+	}
+	if archiveURL != nil && *archiveURL != "" {
+		b.Source = "archive"
+		return nil
 	}
 	if provider != nil {
 		b.Source = sourceForProvider(*provider)

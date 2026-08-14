@@ -207,6 +207,13 @@ func (h *Handler) UploadSourceArchive(c *gin.Context) {
 		port = 8080
 	}
 
+	// The upsert deliberately leaves a git-linked app alone. Rewriting the row
+	// to provider='archive' is a one-way door the user is never shown: the
+	// GitHub binding, the installation and the production branch are gone, so
+	// every later push is delivered to the webhook, resolves to no repo, and is
+	// dropped without a log line - auto deploy dies quietly and permanently
+	// because someone uploaded a folder once. The archive rides on the build
+	// instead, and this row keeps describing where the app's code lives.
 	var gitRepoID uuid.UUID
 	if err := h.pool.QueryRow(c.Request.Context(),
 		`INSERT INTO git_repos
@@ -214,14 +221,14 @@ func (h *Handler) UploadSourceArchive(c *gin.Context) {
 		    production_branch, framework_override, port, worker, created_by)
 		 VALUES ($1, $2, $3, 'archive', $4, $5, 'upload', $6, $7, $8, $9)
 		 ON CONFLICT (project_id, environment_id, app_name) DO UPDATE SET
-		   provider           = 'archive',
-		   repo_full_name     = EXCLUDED.repo_full_name,
-		   clone_url          = EXCLUDED.clone_url,
-		   installation_id    = NULL,
-		   production_branch  = 'upload',
-		   framework_override = EXCLUDED.framework_override,
-		   port               = EXCLUDED.port,
-		   worker             = EXCLUDED.worker,
+		   provider           = CASE WHEN git_repos.provider = 'archive' THEN 'archive' ELSE git_repos.provider END,
+		   repo_full_name     = CASE WHEN git_repos.provider = 'archive' THEN EXCLUDED.repo_full_name ELSE git_repos.repo_full_name END,
+		   clone_url          = CASE WHEN git_repos.provider = 'archive' THEN EXCLUDED.clone_url ELSE git_repos.clone_url END,
+		   installation_id    = CASE WHEN git_repos.provider = 'archive' THEN NULL ELSE git_repos.installation_id END,
+		   production_branch  = CASE WHEN git_repos.provider = 'archive' THEN 'upload' ELSE git_repos.production_branch END,
+		   framework_override = CASE WHEN git_repos.provider = 'archive' THEN EXCLUDED.framework_override ELSE git_repos.framework_override END,
+		   port               = CASE WHEN git_repos.provider = 'archive' THEN EXCLUDED.port ELSE git_repos.port END,
+		   worker             = CASE WHEN git_repos.provider = 'archive' THEN EXCLUDED.worker ELSE git_repos.worker END,
 		   updated_at         = NOW()
 		 RETURNING id`,
 		projectID, envID, appName, "upload/"+appName, artifactURI,
@@ -244,10 +251,12 @@ func (h *Handler) UploadSourceArchive(c *gin.Context) {
 	var b build
 	row := h.pool.QueryRow(c.Request.Context(),
 		`INSERT INTO builds
-		   (git_repo_id, environment_id, app_name, commit_sha, branch, head_sha, commit_message, triggered_by, trigger, status)
-		 VALUES ($1, $2, $3, $4, 'upload', $5, $6, $7, 'manual', 'queued')
+		   (git_repo_id, environment_id, app_name, commit_sha, branch, head_sha, commit_message, triggered_by, trigger, status,
+		    archive_url, archive_framework, archive_port)
+		 VALUES ($1, $2, $3, $4, 'upload', $5, $6, $7, 'manual', 'queued', $8, $9, $10)
 		 RETURNING `+buildSelectCols,
 		gitRepoID, envID, appName, commitSHA, headSHA, commitMessage, claims.UserID,
+		artifactURI, frameworkOverride, port,
 	)
 	if err := scanBuild(row, &b); err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to queue build")

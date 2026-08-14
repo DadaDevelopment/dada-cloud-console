@@ -154,3 +154,42 @@ func TestDownloadSourceArchive_InsufficientRole_Forbidden(t *testing.T) {
 		t.Fatalf("code=%d body=%s want 403", rec.Code, rec.Body.String())
 	}
 }
+
+// TestDownloadSourceArchive_GitLinkedApp_FindsBuildArchive covers the app that
+// is connected to GitHub but was deployed once from an uploaded folder. Since
+// migration 121 the archive lives on the build row and git_repos still says
+// 'github', so the download must find the archive through the build rather than
+// report that the app never had one.
+func TestDownloadSourceArchive_GitLinkedApp_FindsBuildArchive(t *testing.T) {
+	pool := testSourceArchivePool(t)
+	projectID, envID, appName := seedSourceArchiveProject(t, pool, "acme")
+	seedGitHubRepo(t, pool, projectID, envID, appName, "keksmd/family-tree")
+
+	var gitRepoID uuid.UUID
+	if err := pool.QueryRow(context.Background(),
+		`SELECT id FROM git_repos WHERE project_id=$1 AND environment_id=$2 AND app_name=$3`,
+		projectID, envID, appName,
+	).Scan(&gitRepoID); err != nil {
+		t.Fatalf("lookup seeded git_repos row: %v", err)
+	}
+	archive := "s3://test-bucket/source-uploads/" + projectID.String() + "/" + appName + "/abc123.tar.gz"
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO builds (git_repo_id, environment_id, app_name, commit_sha, branch, status, archive_url)
+		 VALUES ($1, $2, $3, 'manual-1', 'upload', 'queued', $4)`,
+		gitRepoID, envID, appName, archive,
+	); err != nil {
+		t.Fatalf("seed build with archive: %v", err)
+	}
+
+	h := &Handler{
+		pool:           pool,
+		sourceUploader: cloudtask.NewSourceUploader("minio.local:9000", "test-bucket", "us-east-1", "key", "secret", true),
+	}
+	claims := &auth.Claims{UserID: uuid.New(), Groups: []string{"/platform-admins"}}
+	c, rec := newSourceArchiveDownloadCtx(projectID, envID, appName, claims)
+	h.DownloadSourceArchive(c)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code=%d body=%s want 200", rec.Code, rec.Body.String())
+	}
+}

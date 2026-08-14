@@ -158,6 +158,14 @@ type pullRequestEvent struct {
 // and returns 200 fast. pull_request events are routed to
 // handlePullRequestWebhook for preview deployments; every other event is
 // accepted but not acted on.
+//
+// A push that enqueues nothing is logged explicitly, with how many git_repos
+// rows matched the pushed repo. That case used to be invisible: GitHub shows a
+// green delivery, the console shows no build, and telling "no app is linked to
+// this repo" apart from "the platform dropped it" meant reading git_repos by
+// hand. It cost the owner an afternoon on keksmd/family-tree, whose only row
+// had been rewritten to upload/<app> by an archive upload, so linked_apps was
+// zero and the loop below never ran.
 func (s *Server) githubWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -193,7 +201,7 @@ func (s *Server) githubWebhook(w http.ResponseWriter, r *http.Request) {
 	branch := strings.TrimPrefix(ev.Ref, "refs/heads/")
 	log.Info().Str("event", event).Str("repo", ev.Repository.FullName).Str("branch", branch).Msg("webhook received")
 
-	enqueued := 0
+	enqueued, linked := 0, 0
 	if s.pool != nil && ev.Repository.FullName != "" {
 		repos, rerr := db.ResolveReposByFullName(r.Context(), s.pool, ev.Repository.FullName)
 		if rerr != nil {
@@ -201,6 +209,7 @@ func (s *Server) githubWebhook(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "resolve error", http.StatusInternalServerError)
 			return
 		}
+		linked = len(repos)
 		sig := r.Header.Get("X-Hub-Signature-256")
 		for _, repo := range repos {
 			if !s.verifyWebhook(repo.WebhookSecret, body, sig) {
@@ -208,6 +217,10 @@ func (s *Server) githubWebhook(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if repo.ProductionBranch != branch || !repo.AutoDeploy {
+				log.Info().Str("repo", repo.RepoFullName).Str("app", repo.AppName).
+					Str("branch", branch).Str("production_branch", repo.ProductionBranch).
+					Bool("auto_deploy", repo.AutoDeploy).
+					Msg("webhook: push ignored, not this app's deploy branch")
 				continue
 			}
 			if _, err := db.InsertBuildFromWebhook(r.Context(), s.pool,
@@ -217,6 +230,11 @@ func (s *Server) githubWebhook(w http.ResponseWriter, r *http.Request) {
 			}
 			enqueued++
 		}
+	}
+
+	if enqueued == 0 {
+		log.Info().Str("repo", ev.Repository.FullName).Str("branch", branch).
+			Int("linked_apps", linked).Msg("webhook: push enqueued no build")
 	}
 
 	if enqueued > 0 && s.nudger != nil {

@@ -40,6 +40,16 @@ type Build struct {
 	ForkUnsafe    bool       // fork-PR safety: never inject secrets when true
 	TriggeredBy   *uuid.UUID // human who triggered a manual build; nil for push/webhook
 	CreatedAt     time.Time
+
+	// ArchiveURL is the s3:// object this build takes its source from, set when
+	// the user uploaded a folder instead of building the linked repository. It
+	// lives on the build rather than on git_repos so an upload is one build from
+	// these files, not a permanent switch of the app away from git.
+	// ArchiveFramework and ArchivePort carry that upload's detection, which the
+	// Jenkins job needs because there is no repository to detect from.
+	ArchiveURL       *string
+	ArchiveFramework *string
+	ArchivePort      *int
 }
 
 // ReclaimBuild is an in-flight build plus the Jenkins references needed to
@@ -124,6 +134,7 @@ func InFlightBuilds(ctx context.Context, pool *pgxpool.Pool) ([]ReclaimBuild, er
 	rows, err := pool.Query(ctx, `
 		SELECT id, git_repo_id, environment_id, app_name, commit_sha, branch,
 		       trigger, status, pr_number, fork_unsafe, triggered_by, created_at,
+		       archive_url, archive_framework, archive_port,
 		       jenkins_queue_id, jenkins_build_number
 		FROM   builds
 		WHERE  status IN ('detecting','building','pushing')
@@ -140,6 +151,7 @@ func InFlightBuilds(ctx context.Context, pool *pgxpool.Pool) ([]ReclaimBuild, er
 		if err := rows.Scan(
 			&rb.ID, &rb.GitRepoID, &rb.EnvironmentID, &rb.AppName, &rb.CommitSHA, &rb.Branch,
 			&rb.Trigger, &rb.Status, &rb.PRNumber, &rb.ForkUnsafe, &rb.TriggeredBy, &rb.CreatedAt,
+			&rb.ArchiveURL, &rb.ArchiveFramework, &rb.ArchivePort,
 			&rb.JenkinsQueueID, &rb.JenkinsBuildNumber,
 		); err != nil {
 			return nil, fmt.Errorf("scan in-flight build: %w", err)
@@ -233,13 +245,15 @@ func ClaimQueued(ctx context.Context, pool *pgxpool.Pool) (*Build, error) {
 			FOR UPDATE SKIP LOCKED
 		)
 		RETURNING id, git_repo_id, environment_id, app_name,
-		          commit_sha, branch, trigger, status, pr_number, fork_unsafe, triggered_by, created_at
+		          commit_sha, branch, trigger, status, pr_number, fork_unsafe, triggered_by, created_at,
+		          archive_url, archive_framework, archive_port
 	`)
 
 	var b Build
 	if err := row.Scan(
 		&b.ID, &b.GitRepoID, &b.EnvironmentID, &b.AppName,
 		&b.CommitSHA, &b.Branch, &b.Trigger, &b.Status, &b.PRNumber, &b.ForkUnsafe, &b.TriggeredBy, &b.CreatedAt,
+		&b.ArchiveURL, &b.ArchiveFramework, &b.ArchivePort,
 	); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil // empty queue

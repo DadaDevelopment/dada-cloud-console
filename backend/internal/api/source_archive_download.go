@@ -8,6 +8,7 @@ import (
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -39,6 +40,42 @@ func sourceArchiveExt(key string) string {
 		return key[idx:]
 	}
 	return ""
+}
+
+// latestUploadedArchive returns the s3:// URI of the most recent archive
+// uploaded for this app, or pgx.ErrNoRows when nothing was ever uploaded.
+//
+// It looks at the builds first, because that is where an upload records its
+// source since migration 121. Only an app that has never been connected to git
+// still carries the archive on its git_repos row (provider='archive'), and that
+// row is the fallback so archives uploaded before 121 stay downloadable.
+func (h *Handler) latestUploadedArchive(c *gin.Context, projectID, envID uuid.UUID, appName string) (string, error) {
+	var archiveURL string
+	err := h.pool.QueryRow(c.Request.Context(),
+		`SELECT archive_url FROM builds
+		  WHERE environment_id = $1 AND app_name = $2 AND archive_url IS NOT NULL
+		  ORDER BY created_at DESC LIMIT 1`,
+		envID, appName,
+	).Scan(&archiveURL)
+	if err == nil {
+		return archiveURL, nil
+	}
+	if err != pgx.ErrNoRows {
+		return "", err
+	}
+
+	var provider, cloneURL string
+	if err := h.pool.QueryRow(c.Request.Context(),
+		`SELECT provider, clone_url FROM git_repos
+		 WHERE project_id = $1 AND environment_id = $2 AND app_name = $3`,
+		projectID, envID, appName,
+	).Scan(&provider, &cloneURL); err != nil {
+		return "", err
+	}
+	if provider != "archive" {
+		return "", pgx.ErrNoRows
+	}
+	return cloneURL, nil
 }
 
 // DownloadSourceArchive hands back a short-lived presigned URL to the source
@@ -93,13 +130,8 @@ func (h *Handler) DownloadSourceArchive(c *gin.Context) {
 		return
 	}
 
-	var provider, cloneURL string
-	err := h.pool.QueryRow(c.Request.Context(),
-		`SELECT provider, clone_url FROM git_repos
-		 WHERE project_id = $1 AND environment_id = $2 AND app_name = $3`,
-		projectID, envID, appName,
-	).Scan(&provider, &cloneURL)
-	if err == pgx.ErrNoRows || (err == nil && provider != "archive") {
+	archiveURL, err := h.latestUploadedArchive(c, projectID, envID, appName)
+	if err == pgx.ErrNoRows {
 		reject(http.StatusNotFound, "no_uploaded_source", "this app has no uploaded source archive")
 		return
 	}
@@ -107,6 +139,7 @@ func (h *Handler) DownloadSourceArchive(c *gin.Context) {
 		reject(http.StatusInternalServerError, "source_lookup_failed", "failed to look up uploaded source")
 		return
 	}
+	cloneURL := archiveURL
 
 	bucket, key, err := parseSourceArchiveURL(cloneURL)
 	if err != nil || bucket != h.sourceUploader.Bucket() {

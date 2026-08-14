@@ -202,3 +202,85 @@ func TestUploadSourceArchive_InsufficientRole_Forbidden(t *testing.T) {
 		t.Fatalf("PutObject calls = %d, want 0 (should be forbidden before storage write)", uploader.puts)
 	}
 }
+
+// seedGitHubRepo seeds the row an app gets when it is connected to GitHub: a
+// real repo full name, an https clone URL and a production branch that pushes
+// are matched against by the build-agent webhook.
+func seedGitHubRepo(t *testing.T, pool *pgxpool.Pool, projectID, envID uuid.UUID, appName, fullName string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO git_repos (project_id, environment_id, app_name, provider, repo_full_name, clone_url, production_branch, auto_deploy)
+		 VALUES ($1, $2, $3, 'github', $4, $5, 'main', true)`,
+		projectID, envID, appName, fullName, "https://github.com/"+fullName+".git",
+	); err != nil {
+		t.Fatalf("seed github git_repos: %v", err)
+	}
+}
+
+// TestUploadSourceArchive_GitLinkedApp_KeepsGitBinding locks the fix for the
+// keksmd/family-tree incident (2026-08-14): uploading an archive for an app
+// that is connected to GitHub used to rewrite its single git_repos row to
+// provider='archive' / repo_full_name='upload/<app>' / production_branch='upload'
+// and NULL the installation. That is a silent one-way door - every later push
+// reached the webhook, resolved to no repo and was dropped, so auto deploy died
+// for good because someone uploaded a folder once (or because a ddc deploy fell
+// back to an archive for a few transient seconds).
+//
+// The archive must ride on the build row instead, leaving the app's source
+// binding describing where the code actually lives.
+func TestUploadSourceArchive_GitLinkedApp_KeepsGitBinding(t *testing.T) {
+	pool := testSourceArchivePool(t)
+	projectID, envID, appName := seedSourceArchiveProject(t, pool, "acme")
+	seedGitHubRepo(t, pool, projectID, envID, appName, "keksmd/family-tree")
+
+	uploader := &fakeSourceUploader{bucket: "test-bucket"}
+	h := &Handler{pool: pool, sourceUploader: uploader}
+	claims := &auth.Claims{UserID: seedUser(t, pool), Groups: []string{"/platform-admins"}}
+	c, rec := newUploadSourceArchiveCtx(t, projectID, envID, appName, claims, buildTestArchive(t))
+	h.UploadSourceArchive(c)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("code=%d body=%s want 202", rec.Code, rec.Body.String())
+	}
+
+	var provider, fullName, cloneURL, branch string
+	var autoDeploy bool
+	if err := pool.QueryRow(context.Background(),
+		`SELECT provider, repo_full_name, clone_url, production_branch, auto_deploy
+		   FROM git_repos WHERE project_id=$1 AND environment_id=$2 AND app_name=$3`,
+		projectID, envID, appName,
+	).Scan(&provider, &fullName, &cloneURL, &branch, &autoDeploy); err != nil {
+		t.Fatalf("read git_repos row: %v", err)
+	}
+	if provider != "github" {
+		t.Fatalf("provider = %q, want github (upload must not unbind the app from git)", provider)
+	}
+	if fullName != "keksmd/family-tree" {
+		t.Fatalf("repo_full_name = %q, want keksmd/family-tree", fullName)
+	}
+	if cloneURL != "https://github.com/keksmd/family-tree.git" {
+		t.Fatalf("clone_url = %q, want the github clone url", cloneURL)
+	}
+	if branch != "main" {
+		t.Fatalf("production_branch = %q, want main (pushes must still match)", branch)
+	}
+	if !autoDeploy {
+		t.Fatalf("auto_deploy = false, want true")
+	}
+
+	var archiveURL string
+	var archivePort int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT archive_url, archive_port FROM builds
+		  WHERE environment_id=$1 AND app_name=$2 ORDER BY created_at DESC LIMIT 1`,
+		envID, appName,
+	).Scan(&archiveURL, &archivePort); err != nil {
+		t.Fatalf("read queued build: %v", err)
+	}
+	if archiveURL == "" {
+		t.Fatalf("build.archive_url is empty; the build has no way to find the uploaded source")
+	}
+	if archivePort <= 0 {
+		t.Fatalf("build.archive_port = %d, want the detected port", archivePort)
+	}
+}

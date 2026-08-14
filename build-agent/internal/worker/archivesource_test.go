@@ -135,3 +135,55 @@ func TestGitCredsGitHubAnonUnaffectedByArchivePresigner(t *testing.T) {
 		t.Fatalf("anon github path must return the bare clone url, got %q", cloneURL)
 	}
 }
+
+// TestSourceForBuild_ArchiveOverridesGitRepo covers the per-build archive
+// source. A build queued by an archive upload carries the S3 URI on the build
+// row, while git_repos keeps describing the app's GitHub binding, so this build
+// must be run against the archive without the repo row ever being rewritten -
+// the rewrite is what silently killed auto deploy on keksmd/family-tree.
+func TestSourceForBuild_ArchiveOverridesGitRepo(t *testing.T) {
+	token := []byte("secret")
+	repo := &db.Repo{
+		Provider:          "github",
+		CloneURL:          "https://github.com/keksmd/family-tree.git",
+		InstallationID:    42,
+		TokenEncrypted:    token,
+		FrameworkOverride: "nextjs",
+		Port:              3000,
+	}
+	archive := "s3://uploads/source-uploads/proj/app/abc123.tar.gz"
+	framework := "static"
+	port := 8080
+	b := &db.Build{ArchiveURL: &archive, ArchiveFramework: &framework, ArchivePort: &port}
+
+	got := sourceForBuild(repo, b)
+
+	if got.Provider != "archive" {
+		t.Fatalf("provider = %q, want archive", got.Provider)
+	}
+	if got.CloneURL != archive {
+		t.Fatalf("clone_url = %q, want %q", got.CloneURL, archive)
+	}
+	if got.InstallationID != 0 || got.TokenEncrypted != nil {
+		t.Fatalf("git credentials leaked into the archive build: installation=%d token=%v", got.InstallationID, got.TokenEncrypted)
+	}
+	if got.FrameworkOverride != "static" {
+		t.Fatalf("framework = %q, want static", got.FrameworkOverride)
+	}
+	if got.Port != 8080 {
+		t.Fatalf("port = %d, want 8080", got.Port)
+	}
+	if repo.Provider != "github" || repo.CloneURL != "https://github.com/keksmd/family-tree.git" || repo.InstallationID != 42 {
+		t.Fatalf("git_repos row was mutated: %+v", repo)
+	}
+}
+
+// TestSourceForBuild_GitBuildUntouched keeps a normal push-triggered build
+// running against git: no archive on the build row means nothing to override.
+func TestSourceForBuild_GitBuildUntouched(t *testing.T) {
+	repo := &db.Repo{Provider: "github", CloneURL: "https://github.com/keksmd/family-tree.git", InstallationID: 42}
+	got := sourceForBuild(repo, &db.Build{})
+	if got != repo {
+		t.Fatalf("git build got a rewritten repo: %+v", got)
+	}
+}

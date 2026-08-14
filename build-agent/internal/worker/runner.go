@@ -659,6 +659,7 @@ func (r *Runner) run(ctx context.Context, b *db.Build) {
 		r.fail(ctx, b, db.StatusDetecting, fmt.Errorf("load repo: %w", err))
 		return
 	}
+	repo = sourceForBuild(repo, b)
 
 	r.postStatus(ctx, repo, b, "pending", "build started")
 
@@ -1000,6 +1001,7 @@ func (r *Runner) reattach(ctx context.Context, rb db.ReclaimBuild) {
 		r.fail(ctx, b, b.Status, fmt.Errorf("reattach load repo: %w", err))
 		return
 	}
+	repo = sourceForBuild(repo, b)
 
 	number := 0
 	if rb.JenkinsBuildNumber != nil {
@@ -1494,6 +1496,36 @@ func imageDigest(uri string) string {
 		return ""
 	}
 	return d
+}
+
+// sourceForBuild returns the repo as this one build should read it. A build
+// carrying an uploaded archive is built from that archive whatever the app is
+// linked to, so the whole downstream path - clone credentials, the Jenkins
+// parameters, framework detection, the commit status that must not be posted
+// against a synthetic sha - sees "archive" without any of it needing to know
+// the difference between a repo that IS an archive and a repo that has one
+// build from one.
+//
+// The app's own row is left describing where its code lives. That is the point:
+// an upload used to overwrite it, which took the GitHub binding with it and
+// silently ended auto deploy for good.
+func sourceForBuild(repo *db.Repo, b *db.Build) *db.Repo {
+	if b.ArchiveURL == nil || *b.ArchiveURL == "" || repo == nil {
+		return repo
+	}
+	src := *repo
+	src.Provider = "archive"
+	src.CloneURL = *b.ArchiveURL
+	src.InstallationID = 0
+	src.TokenEncrypted = nil
+	src.FrameworkOverride = ""
+	if b.ArchiveFramework != nil {
+		src.FrameworkOverride = *b.ArchiveFramework
+	}
+	if b.ArchivePort != nil && *b.ArchivePort > 0 {
+		src.Port = *b.ArchivePort
+	}
+	return &src
 }
 
 // shouldResolveHeadCommit reports whether a build's commit_sha is the synthetic
