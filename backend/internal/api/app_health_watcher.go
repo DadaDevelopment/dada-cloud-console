@@ -704,7 +704,7 @@ func (w *appHealthWatcher) maybeCauseRefresh(ctx context.Context, alert appHealt
 // itself, on demand, through the existing env-var reveal endpoint, right
 // before it writes the fix back.
 func sslNotSupportedCrashText(key string) string {
-	return key + " требует SSL-соединение, а база данных его не поддерживает. Нужно дописать sslmode=disable в конец строки подключения."
+	return key + " требует SSL-соединение, а база данных его не поддерживает. Первое, что стоит попробовать — дописать sslmode=disable в конец строки подключения. Если ошибка вернётся, SSL включён в самом коде приложения (ssl: true при создании клиента базы) — убирать надо там."
 }
 
 // connStringCrashText composes the owner-facing sentence for
