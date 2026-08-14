@@ -1,13 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { timeAgo } from "@/lib/format";
 import { useT } from "@/lib/i18n/console/context";
 import { Spinner } from "@/components/ui/spinner";
-import { diagnoseApi, cloudTasksApi } from "@/lib/api";
-import type { AppAlert } from "@/lib/app-alerts";
-import type { AppDiagnosis } from "@/lib/types";
+import { diagnoseApi, cloudTasksApi, databasesApi, envVarsApi } from "@/lib/api";
+import { parseBadConnCauseLine, type AppAlert } from "@/lib/app-alerts";
+import type { AppDiagnosis, ResourceSnapshot } from "@/lib/types";
 
 /**
  * Maps the watcher's raw container reason to the message key, so an
@@ -36,6 +36,13 @@ function crashTextKey(reason?: string): string {
  * the platform kinds, never the accusatory app_code styling. An unknown or
  * absent kind returns null so the banner prints no verdict line at all,
  * rather than defaulting to "your code" without the backend having said so.
+ *
+ * `bad_connection_string` deliberately returns null here too, even though it
+ * IS a recognized kind: its message names a live env var key and value the
+ * backend only knows at alert time, which a static translation key cannot
+ * carry. The render below handles that kind with its own block that reads
+ * `alert.cause_line` (see parseBadConnCauseLine) and interpolates the
+ * translated template instead.
  */
 function crashCauseKey(kind?: string): string | null {
   switch (kind) {
@@ -86,6 +93,147 @@ type AutofixState =
   | { status: "pending" }
   | { status: "error"; message: string }
   | { status: "done"; prUrl?: string };
+
+type BadConnDbListState =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "loaded"; databases: ResourceSnapshot[] };
+
+type BadConnRepairState =
+  | { status: "idle" }
+  | { status: "pending" }
+  | { status: "error"; message: string }
+  | { status: "done" };
+
+/**
+ * The one-click fix for a `bad_connection_string` alert: fetches the app's
+ * environment's managed databases, and if there is exactly one, offers a
+ * button that pulls its real DSN (GetDatabaseCredentials, the same
+ * reveal-credentials endpoint the database page already uses) and writes it
+ * into the env var named in `causeLine` (SetEnvVar, same as the manual env
+ * editor) -- both endpoints already exist, already routed, already audited.
+ *
+ * Candidate databases are resolved by ENVIRONMENT, never by the database's
+ * `appRef`: the console's own snapshot of a ServiceDatabaseV2's appRef is a
+ * renderer default (falls back to the database's own name whenever no real
+ * binding was set — gitops-agent/internal/renderer/renderer.go), not proof of
+ * a binding, and both existing appRef-gated seed paths in the backend have
+ * accordingly never once fired in production (zero SeedDatabaseDSN audit
+ * rows, cluster-wide, ever). Environment-scoped listing has no such false
+ * signal to trust.
+ *
+ * Three branches, matching how many databases the environment actually has:
+ * zero -> renders nothing (no DSN to offer); exactly one -> a labelled
+ * repair button; more than one -> a link to the databases page instead of a
+ * guess, since nothing here can know which one the app actually wants.
+ */
+function BadConnDbRepair({
+  projectId,
+  envId,
+  appName,
+  causeLine,
+}: {
+  projectId: string;
+  envId: string;
+  appName: string;
+  causeLine?: string;
+}) {
+  const { t } = useT();
+  const parsed = parseBadConnCauseLine(causeLine);
+  const [dbList, setDbList] = useState<BadConnDbListState>({ status: "loading" });
+  const [repair, setRepair] = useState<BadConnRepairState>({ status: "idle" });
+
+  useEffect(() => {
+    let cancelled = false;
+    databasesApi
+      .list(projectId, envId)
+      .then((res) => {
+        if (!cancelled) setDbList({ status: "loaded", databases: res.databases });
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setDbList({
+            status: "error",
+            message: err instanceof Error ? err.message : t("apps.alerts.crash.cause.badConn.repair.listError"),
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, envId, t]);
+
+  if (!parsed) return null;
+
+  async function handleRepair(dbName: string) {
+    setRepair({ status: "pending" });
+    try {
+      const creds = await databasesApi.credentials(projectId, envId, dbName);
+      if (!creds.dsn) {
+        setRepair({ status: "error", message: t("apps.alerts.crash.cause.badConn.repair.noDsn") });
+        return;
+      }
+      await envVarsApi.upsert(projectId, envId, appName, parsed!.key, {
+        value: creds.dsn,
+        is_secret: true,
+        scope: "runtime",
+      });
+      setRepair({ status: "done" });
+    } catch (err) {
+      setRepair({
+        status: "error",
+        message: err instanceof Error ? err.message : t("apps.alerts.crash.cause.badConn.repair.error"),
+      });
+    }
+  }
+
+  if (dbList.status === "loading") {
+    return (
+      <p className="text-xs text-red-500 dark:text-red-400">
+        {t("apps.alerts.crash.cause.badConn.repair.checking")}
+      </p>
+    );
+  }
+  if (dbList.status === "error") {
+    return <p className="text-xs text-red-600 dark:text-red-400">{dbList.message}</p>;
+  }
+  if (dbList.databases.length === 0) {
+    return null;
+  }
+  if (repair.status === "done") {
+    return (
+      <p className="text-xs font-semibold text-red-800 dark:text-red-200">
+        {t("apps.alerts.crash.cause.badConn.repair.done")}
+      </p>
+    );
+  }
+  if (dbList.databases.length > 1) {
+    return (
+      <Link
+        href={`/projects/${projectId}/databases${envId ? `?envId=${envId}` : ""}`}
+        className="inline-flex items-center gap-1 text-xs font-semibold text-red-700 dark:text-red-300 underline underline-offset-2 hover:text-red-800 dark:hover:text-red-200"
+      >
+        {t("apps.alerts.crash.cause.badConn.repair.chooseCta")}
+      </Link>
+    );
+  }
+
+  const db = dbList.databases[0];
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        onClick={() => handleRepair(db.name)}
+        disabled={repair.status === "pending"}
+        className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+      >
+        {repair.status === "pending" && <Spinner size="sm" />}
+        {t("apps.alerts.crash.cause.badConn.repair.cta", { db: db.name })}
+      </button>
+      {repair.status === "error" && <span className="text-xs text-red-600 dark:text-red-400">{repair.message}</span>}
+    </div>
+  );
+}
 
 interface AppAlertsBannerProps {
   alerts: AppAlert[];
@@ -165,7 +313,26 @@ export function AppAlertsBanner({ alerts, logsHref, storageHref, startCommandHre
                     ) : (
                       <p className="text-xs">{t(crashCauseKey(alert.cause_kind)!)}</p>
                     ))}
-                  {alert.cause_line && (
+                  {alert.cause_kind === "bad_connection_string" &&
+                    (() => {
+                      const parsed = parseBadConnCauseLine(alert.cause_line);
+                      return (
+                        <>
+                          <p className="text-xs font-semibold text-red-800 dark:text-red-200">
+                            {parsed
+                              ? t("apps.alerts.crash.cause.badConn", { key: parsed.key, value: parsed.value })
+                              : alert.cause}
+                          </p>
+                          <BadConnDbRepair
+                            projectId={projectId}
+                            envId={envId}
+                            appName={appName}
+                            causeLine={alert.cause_line}
+                          />
+                        </>
+                      );
+                    })()}
+                  {alert.cause_line && alert.cause_kind !== "bad_connection_string" && (
                     <div className="overflow-x-auto rounded-md bg-red-100/70 dark:bg-red-950/60 px-2.5 py-1.5">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-red-500 dark:text-red-400">
                         {t("apps.alerts.crash.cause.line")}

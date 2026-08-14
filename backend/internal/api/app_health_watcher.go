@@ -676,7 +676,33 @@ func (w *appHealthWatcher) maybeCauseRefresh(ctx context.Context, alert appHealt
 	if causeKind != notify.CauseKindResourceLimit && causeKind != notify.CauseKindPlatformRegistry {
 		causeLine = notify.ExtractCauseLine(logExcerpt)
 	}
+
+	if env, envErr := w.h.appEnvVarsByNamespace(ctx, alert.Namespace, alert.AppName); envErr == nil {
+		if badKey, badValue, ok := notify.ClassifyConnectionStringFailure(logExcerpt, env); ok {
+			causeKind = notify.CauseKindBadConnectionString
+			cause = connStringCrashText(badKey, badValue)
+			causeLine = badKey + "=" + badValue
+		}
+	}
 	return logExcerpt, cause, causeLine, causeKind, true
+}
+
+// connStringCrashText composes the owner-facing sentence for
+// CauseKindBadConnectionString, naming the exact env var key and the exact
+// bad value so the owner does not have to go hunting for either -- the
+// underlying bug (see notify.ClassifyConnectionStringFailure) is that the
+// crash log itself lies about this (Node's pg-connection-string reports the
+// phantom host "base", not the real value), so this is the only place that
+// ever states the truth.
+//
+// value is a bare host with no credentials in it by construction --
+// ClassifyConnectionStringFailure only ever matches a scheme-less value, and
+// a scheme-less string has nowhere to carry a user:password@ segment -- so
+// no redaction is needed here. If a future signature ever widened the match
+// to admit a value with a scheme (and therefore a possible password), this
+// function would need to strip it before formatting.
+func connStringCrashText(key, value string) string {
+	return key + " = " + value + " — это имя хоста без схемы, приложение не может подключиться. Нужна полная строка подключения с протоколом, пользователем и паролем — возьмите её целиком со страницы базы данных."
 }
 
 // maybeNotify sends the owner alert for one detected bad-state app, gated by

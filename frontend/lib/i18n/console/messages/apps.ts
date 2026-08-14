@@ -716,6 +716,38 @@ export const apps: Messages = {
     en: "The program exited right after start: it expects command-line arguments (a CLI script), and the platform starts an app without any. Neither a platform failure nor a bug in your code — set a start command with the arguments it needs in the app's settings.",
   },
   "apps.alerts.crash.cause.needsArgs.cta": { ru: "Задать команду запуска", en: "Set a start command" },
+  "apps.alerts.crash.cause.badConn": {
+    ru: "{key} = {value} — это имя хоста без схемы, приложение не может подключиться. Нужна полная строка подключения.",
+    en: "{key} = {value} — this is a bare host name with no scheme, the app cannot connect. It needs the full connection string.",
+  },
+  "apps.alerts.crash.cause.badConn.repair.checking": {
+    ru: "Проверяю базы данных в окружении…",
+    en: "Checking databases in this environment…",
+  },
+  "apps.alerts.crash.cause.badConn.repair.listError": {
+    ru: "Не удалось получить список баз данных",
+    en: "Could not load the list of databases",
+  },
+  "apps.alerts.crash.cause.badConn.repair.noDsn": {
+    ru: "У этой базы данных пока нет строки подключения",
+    en: "This database has no connection string yet",
+  },
+  "apps.alerts.crash.cause.badConn.repair.error": {
+    ru: "Не удалось исправить переменную окружения",
+    en: "Failed to fix the environment variable",
+  },
+  "apps.alerts.crash.cause.badConn.repair.done": {
+    ru: "Исправлено — переменная обновлена, деплой запущен",
+    en: "Fixed — the variable was updated and a deploy was queued",
+  },
+  "apps.alerts.crash.cause.badConn.repair.chooseCta": {
+    ru: "В окружении несколько баз данных — выбрать на странице баз данных",
+    en: "This environment has several databases — pick one on the databases page",
+  },
+  "apps.alerts.crash.cause.badConn.repair.cta": {
+    ru: "Подставить строку подключения из базы {db}",
+    en: "Fill in the connection string from database {db}",
+  },
   "apps.alerts.crash.cause.line": { ru: "Из логов:", en: "From the logs:" },
   "apps.alerts.crash.cta": { ru: "Смотреть логи", en: "View logs" },
   "apps.alerts.crash.diagnose": { ru: "Разобраться", en: "Diagnose" },

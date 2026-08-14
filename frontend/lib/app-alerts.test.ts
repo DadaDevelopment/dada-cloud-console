@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { getOperationalAppAlerts, type AppAlert } from "./app-alerts.ts";
+import { getOperationalAppAlerts, parseBadConnCauseLine, type AppAlert } from "./app-alerts.ts";
 
 const alerts: AppAlert[] = [
   { type: "crash", detected_at: "2026-08-04T00:00:00Z" },
@@ -11,4 +11,27 @@ const alerts: AppAlert[] = [
 
 test("getOperationalAppAlerts keeps a public-route failure actionable", () => {
   assert.deepEqual(getOperationalAppAlerts(alerts).map((alert) => alert.type), ["crash", "volume", "url"]);
+});
+
+test("parseBadConnCauseLine splits the live megafactory shape", () => {
+  assert.deepEqual(parseBadConnCauseLine("DATABASE_URL=pg-router.databases.svc.cluster.local"), {
+    key: "DATABASE_URL",
+    value: "pg-router.databases.svc.cluster.local",
+  });
+});
+
+test("parseBadConnCauseLine returns null when there is no cause_line", () => {
+  assert.equal(parseBadConnCauseLine(undefined), null);
+  assert.equal(parseBadConnCauseLine(""), null);
+});
+
+test("parseBadConnCauseLine returns null when there is no separator", () => {
+  assert.equal(parseBadConnCauseLine("not-a-key-value-pair"), null);
+});
+
+test("parseBadConnCauseLine splits on the first = only", () => {
+  assert.deepEqual(parseBadConnCauseLine("CONNECTION_STRING=host=weird"), {
+    key: "CONNECTION_STRING",
+    value: "host=weird",
+  });
 });
