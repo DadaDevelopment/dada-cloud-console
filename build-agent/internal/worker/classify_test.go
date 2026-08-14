@@ -21,6 +21,13 @@ func TestClassifyFailure(t *testing.T) {
 			wantDetail: "ERROR: framework 'dockerfile' has no template and repo ships no Dockerfile — add a Dockerfile to the repo or extend dadaBuildPipeline",
 		},
 		{
+			name: "empty framework gets its own verdict, not the no-Dockerfile one",
+			console: "[2026-08-13T09:12:03.100Z] ERROR: framework '' has no template and repo ships no Dockerfile — add a Dockerfile to the repo or extend dadaBuildPipeline\n" +
+				"[2026-08-13T09:12:03.140Z] Finished: FAILURE\n",
+			wantCode:   buildFailFrameworkUndetected,
+			wantDetail: frameworkUndetectedDetail,
+		},
+		{
 			name: "buildkit user code failure reports what the step printed, not the wrapper",
 			console: "[2026-07-24T01:00:00.000Z] #12 3.212 error: unknown package\n" +
 				"[2026-07-24T01:00:01.000Z] ERROR: failed to solve: process \"/bin/sh -c pip install -r requirements.txt\" did not complete successfully: exit code: 1\n" +

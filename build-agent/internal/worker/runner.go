@@ -107,6 +107,31 @@ func isJenkinsVerdict(err error) bool {
 // Dockerfile and the pipeline had no template for the detected framework.
 const buildFailNoDockerfile = "no_dockerfile"
 
+// buildFailFrameworkUndetected marks a build where detection itself came back
+// empty: neither build-agent's own scan nor the pipeline recognized any
+// manifest at all, so there was no framework to look up a template for in
+// the first place.
+//
+// The pipeline's own error line for this is "framework '' has no template
+// and repo ships no Dockerfile" -- textually a no_dockerfile failure, but a
+// dishonest one. It tells the owner to add a Dockerfile as if their stack
+// were known and merely undockerized, when the truth is the platform never
+// recognized the stack at all. On 2026-08-13 three of five build failures on
+// the platform carried this exact empty-framework line, and the fix owed to
+// the user is different: name the manifests we do look for, so they can add
+// one instead of guessing what "add a Dockerfile" is supposed to mean for a
+// repo they believe already has a working build.
+const buildFailFrameworkUndetected = "framework_undetected"
+
+// frameworkUndetectedDetail is the message persisted for
+// buildFailFrameworkUndetected. It replaces the pipeline's own line rather
+// than quoting it, because "add a Dockerfile" is only half true here: a
+// recognized manifest also fixes it, and naming the manifests is what turns
+// a dead end into an actionable next step.
+const frameworkUndetectedDetail = "could not determine the app's stack: no known manifest found " +
+	"(package.json, requirements.txt, pyproject.toml, go.mod, pom.xml, build.gradle) and the repo ships no Dockerfile " +
+	"-- add one of those manifests, or a Dockerfile, to the repo root"
+
 // buildFailDockerfileBuild marks a build that failed inside the docker
 // build/buildx step (a bad Dockerfile, missing base image, failed RUN, etc).
 const buildFailDockerfileBuild = "dockerfile_build_failed"
@@ -246,6 +271,11 @@ func isCheckoutExhausted(line string) bool {
 // recognized matched, so the caller falls back to the generic message.
 func classifyFailure(console string) (code string, detail string) {
 	lines := normalizeConsole(console)
+	for _, line := range lines {
+		if strings.Contains(line, "framework '' has no template and repo ships no Dockerfile") {
+			return buildFailFrameworkUndetected, frameworkUndetectedDetail
+		}
+	}
 	for _, line := range lines {
 		if strings.Contains(line, "has no template and repo ships no Dockerfile") {
 			return buildFailNoDockerfile, line
