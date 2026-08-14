@@ -86,6 +86,7 @@ type archiveRun struct {
 	ExportedRows  int64
 	DeletedRows   int64
 	BytesEstimate int64
+	BytesBefore   int64
 	Bucket        string
 	S3URI         string
 	Auto          bool
@@ -161,7 +162,8 @@ func (w *dbArchiveWorker) openRuns(ctx context.Context) ([]archiveRun, error) {
 	rows, err := w.h.pool.Query(ctx, `
 		SELECT id, project_id, environment_id, resource_name, datname, shard,
 		       schema_name, table_name, cutoff_column, cutoff_date, phase,
-		       planned_rows, exported_rows, deleted_rows, bytes_estimate, bucket, s3_uri, auto
+		       planned_rows, exported_rows, deleted_rows, bytes_estimate, bytes_before,
+		       bucket, s3_uri, auto
 		  FROM db_archive_runs
 		 WHERE phase NOT IN ('done', 'failed')
 		 ORDER BY created_at`)
@@ -175,7 +177,7 @@ func (w *dbArchiveWorker) openRuns(ctx context.Context) ([]archiveRun, error) {
 		var r archiveRun
 		if err := rows.Scan(&r.ID, &r.ProjectID, &r.EnvironmentID, &r.ResourceName, &r.Datname,
 			&r.Shard, &r.Schema, &r.Table, &r.CutoffColumn, &r.Cutoff, &r.Phase,
-			&r.PlannedRows, &r.ExportedRows, &r.DeletedRows, &r.BytesEstimate,
+			&r.PlannedRows, &r.ExportedRows, &r.DeletedRows, &r.BytesEstimate, &r.BytesBefore,
 			&r.Bucket, &r.S3URI, &r.Auto); err != nil {
 			return nil, err
 		}
@@ -485,6 +487,13 @@ func (w *dbArchiveWorker) repack(ctx context.Context, r archiveRun) error {
 	if err != nil {
 		return err
 	}
+	if r.BytesBefore == 0 {
+		if err := w.stampBytesBefore(ctx, r.ID, tableBytes); err != nil {
+			return err
+		}
+		r.BytesBefore = tableBytes
+	}
+
 	name := archiveJobName(r.ID, dbArchiveRepack)
 	done, err := w.jobs.Ensure(ctx, name, func() *batchv1.Job {
 		return archiveRepackJob(name, r, pg, w.repackImage())
@@ -498,7 +507,21 @@ func (w *dbArchiveWorker) repack(ctx context.Context, r archiveRun) error {
 		`SELECT pg_total_relation_size($1::regclass)`, qualified).Scan(&afterBytes); err != nil {
 		return err
 	}
-	return w.finish(ctx, r, archiveFreedBytes(tableBytes, afterBytes), nil)
+	return w.finish(ctx, r, archiveFreedBytes(r.BytesBefore, afterBytes), nil)
+}
+
+// stampBytesBefore records the size the table had going into the rewrite.
+//
+// The phase re-enters once per tick, and the tick that creates the Job returns
+// before the Job has run. Only the LAST re-entry reaches the "after" read, and
+// by then a size measured in the same call is already the post-rewrite one, so
+// every completed run reported that it had freed nothing. Persisting the size
+// on the first entry also survives a console pod that rolls mid-rewrite.
+func (w *dbArchiveWorker) stampBytesBefore(ctx context.Context, id uuid.UUID, bytes int64) error {
+	_, err := w.h.pool.Exec(ctx,
+		`UPDATE db_archive_runs SET bytes_before = $2, updated_at = NOW() WHERE id = $1`,
+		id, bytes)
+	return err
 }
 
 // archiveFreedBytes is what the repack actually returned. A table that grew
