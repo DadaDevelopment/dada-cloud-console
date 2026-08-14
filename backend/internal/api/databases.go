@@ -339,7 +339,7 @@ func (h *Handler) createManagedDatabase(ctx context.Context, actorID, projectID,
 			}
 		}
 		if req.AppRef != "" {
-			dsn := fmt.Sprintf("postgres://%s:%s@%s:5432/%s", dbUser, password, req.Name, req.Database)
+			dsn := fmt.Sprintf("postgres://%s:%s@%s:5432/%s?sslmode=disable", dbUser, password, req.Name, req.Database)
 			if err := h.seedEnvVar(ctx, envID, req.AppRef, "DATABASE_URL", dsn, actorID); err != nil {
 				return nil, &opFault{http.StatusInternalServerError, "seed_dsn_failed", "failed to inject database connection string"}
 			}
@@ -793,6 +793,16 @@ func (h *Handler) GetDatabaseCredentials(c *gin.Context) {
 // getaddrinfo), so the endpoint hands the whole string over instead.
 // url.UserPassword percent-encodes credentials, which matters because generated
 // passwords may carry characters that are structural in a URL.
+//
+// sslmode=disable is appended on purpose, not left for the client library to
+// guess: pg-router (edoburu/pgbouncer, verified live against both the
+// transaction and session pools in the databases namespace) carries no
+// client_tls_sslmode directive, so it answers any TLS handshake with "server
+// does not support SSL, but SSL was required". Client libraries that default
+// to requesting TLS (node-postgres, Prisma, Heroku-style templates) crash
+// loop on that unless the DSN spells out sslmode explicitly. A live user hit
+// exactly this after we fixed the previous bare-host bug: same DSN, new
+// crash, "the server does not support SSL connections".
 func postgresDSN(username, password, host, port, database string) string {
 	if host == "" || database == "" {
 		return ""
@@ -801,10 +811,11 @@ func postgresDSN(username, password, host, port, database string) string {
 		port = "5432"
 	}
 	u := url.URL{
-		Scheme: "postgresql",
-		User:   url.UserPassword(username, password),
-		Host:   net.JoinHostPort(host, port),
-		Path:   "/" + database,
+		Scheme:   "postgresql",
+		User:     url.UserPassword(username, password),
+		Host:     net.JoinHostPort(host, port),
+		Path:     "/" + database,
+		RawQuery: "sslmode=disable",
 	}
 	return u.String()
 }

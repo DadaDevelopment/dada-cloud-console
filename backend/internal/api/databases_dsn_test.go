@@ -1,6 +1,9 @@
 package api
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestPostgresDSN(t *testing.T) {
 	cases := []struct {
@@ -14,7 +17,7 @@ func TestPostgresDSN(t *testing.T) {
 			host:     "pg-router.databases.svc.cluster.local",
 			port:     "5432",
 			database: "megafactory",
-			want:     "postgresql://app:s3cr3t@pg-router.databases.svc.cluster.local:5432/megafactory",
+			want:     "postgresql://app:s3cr3t@pg-router.databases.svc.cluster.local:5432/megafactory?sslmode=disable",
 		},
 		{
 			name:     "percent-encodes credentials that would break the url",
@@ -23,7 +26,7 @@ func TestPostgresDSN(t *testing.T) {
 			host:     "db.internal",
 			port:     "5432",
 			database: "app",
-			want:     "postgresql://app%40tenant:p%2Fa%3As%20s%40@db.internal:5432/app",
+			want:     "postgresql://app%40tenant:p%2Fa%3As%20s%40@db.internal:5432/app?sslmode=disable",
 		},
 		{
 			name:     "defaults the port",
@@ -31,7 +34,7 @@ func TestPostgresDSN(t *testing.T) {
 			pass:     "x",
 			host:     "db.internal",
 			database: "app",
-			want:     "postgresql://app:x@db.internal:5432/app",
+			want:     "postgresql://app:x@db.internal:5432/app?sslmode=disable",
 		},
 		{
 			name:     "yields nothing without a host",
@@ -55,5 +58,18 @@ func TestPostgresDSN(t *testing.T) {
 				t.Fatalf("postgresDSN = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestPostgresDSNCarriesExplicitSSLMode guards the megafactory incident:
+// pg-router has no client_tls_sslmode configured (verified live 2026-08-14
+// against both the transaction and session pools with psql sslmode=require,
+// which failed with "server does not support SSL, but SSL was required").
+// Client libraries that default to requesting TLS then crash loop on a DSN
+// that leaves sslmode unstated, so postgresDSN must always spell it out.
+func TestPostgresDSNCarriesExplicitSSLMode(t *testing.T) {
+	dsn := postgresDSN("app", "x", "pg-router.databases.svc.cluster.local", "5432", "megafactory")
+	if !strings.Contains(dsn, "sslmode=disable") {
+		t.Fatalf("postgresDSN = %q, want it to carry sslmode=disable", dsn)
 	}
 }
