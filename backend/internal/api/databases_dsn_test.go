@@ -106,3 +106,44 @@ func TestPostgresDSNTLSFlagOnRewritesOnlyTheInternalHost(t *testing.T) {
 		t.Fatalf("postgresDSN(external) = %q, want %q (only the bare in-cluster host is rewritten)", external, wantExternal)
 	}
 }
+
+// TestManagedDBEffectiveHostAgreesWithTheDSN pins the two halves of the reveal
+// payload together. The host field and the dsn field are read by the same user
+// in the same glance, and a user who copies the host into their own connection
+// string must land on the same endpoint the dsn would have given them.
+func TestManagedDBEffectiveHostAgreesWithTheDSN(t *testing.T) {
+	t.Setenv("MANAGED_DB_TLS_DSN_ENABLED", "true")
+
+	host := managedDBEffectiveHost("pg-router.databases.svc.cluster.local")
+	if host != "db.pv.dada-tuda.ru" {
+		t.Fatalf("managedDBEffectiveHost = %q, want the TLS hostname the dsn uses", host)
+	}
+	if mode := managedDBEffectiveSSLMode(host); mode != "require" {
+		t.Fatalf("managedDBEffectiveSSLMode = %q, want require", mode)
+	}
+	if again := managedDBEffectiveHost(host); again != host {
+		t.Fatalf("managedDBEffectiveHost is not idempotent: %q -> %q", host, again)
+	}
+
+	external := managedDBEffectiveHost("db-external.dada-tuda.ru")
+	if external != "db-external.dada-tuda.ru" {
+		t.Fatalf("managedDBEffectiveHost(external) = %q, want it untouched", external)
+	}
+	if mode := managedDBEffectiveSSLMode(external); mode != "disable" {
+		t.Fatalf("managedDBEffectiveSSLMode(external) = %q, want disable", mode)
+	}
+}
+
+// TestManagedDBEffectiveHostStaysInternalWhileFlagOff proves the host field
+// cannot advertise a name the infra has not been confirmed to serve.
+func TestManagedDBEffectiveHostStaysInternalWhileFlagOff(t *testing.T) {
+	t.Setenv("MANAGED_DB_TLS_DSN_ENABLED", "")
+
+	host := managedDBEffectiveHost("pg-router.databases.svc.cluster.local")
+	if host != "pg-router.databases.svc.cluster.local" {
+		t.Fatalf("managedDBEffectiveHost = %q, want the internal host while the flag is off", host)
+	}
+	if mode := managedDBEffectiveSSLMode(host); mode != "disable" {
+		t.Fatalf("managedDBEffectiveSSLMode = %q, want disable", mode)
+	}
+}

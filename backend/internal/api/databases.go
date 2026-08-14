@@ -820,6 +820,7 @@ func (h *Handler) GetDatabaseCredentials(c *gin.Context) {
 	}
 
 	dsn := postgresDSN(creds.Username, creds.Password, host, port, database)
+	host = managedDBEffectiveHost(host)
 
 	dsnSeeded := false
 	if boundAppRef != "" && dsn != "" {
@@ -834,6 +835,7 @@ func (h *Handler) GetDatabaseCredentials(c *gin.Context) {
 
 	resp := gin.H{
 		"host":                 host,
+		"sslmode":              managedDBEffectiveSSLMode(host),
 		"port":                 port,
 		"database":             database,
 		"username":             creds.Username,
@@ -899,11 +901,8 @@ func postgresDSN(username, password, host, port, database string) string {
 	if port == "" {
 		port = "5432"
 	}
-	sslmode := "disable"
-	if host == pgRouterInternalHost && managedDBTLSDSNEnabled() {
-		host = pgRouterTLSHostname
-		sslmode = "require"
-	}
+	host = managedDBEffectiveHost(host)
+	sslmode := managedDBEffectiveSSLMode(host)
 	u := url.URL{
 		Scheme:   "postgresql",
 		User:     url.UserPassword(username, password),
@@ -912,6 +911,35 @@ func postgresDSN(username, password, host, port, database string) string {
 		RawQuery: "sslmode=" + sslmode,
 	}
 	return u.String()
+}
+
+// managedDBEffectiveHost maps a raw connection-secret endpoint to the hostname
+// the platform actually wants users to type. Only the bare in-cluster router
+// name is rewritten, and only once the TLS chain is confirmed live; every other
+// endpoint (external, per-namespace fallback) passes through untouched. It is
+// idempotent, so it is safe to apply to a host that has already been mapped.
+//
+// The database page must call this before showing the host field. Showing the
+// pre-mapped host next to a DSN built from the mapped one is what produced the
+// split the flag rollout exposed: dsn said db.pv.dada-tuda.ru while the host
+// field beside it still said pg-router.databases.svc.cluster.local, and users
+// assemble connection strings from whichever of the two they read first.
+func managedDBEffectiveHost(host string) string {
+	if host == pgRouterInternalHost && managedDBTLSDSNEnabled() {
+		return pgRouterTLSHostname
+	}
+	return host
+}
+
+// managedDBEffectiveSSLMode reports the sslmode that belongs with a host
+// already passed through managedDBEffectiveHost. Only the TLS-verified name
+// carries a certificate, so it is the only host that gets require; everything
+// else keeps the pre-TLS disable it always had.
+func managedDBEffectiveSSLMode(host string) string {
+	if host == pgRouterTLSHostname {
+		return "require"
+	}
+	return "disable"
 }
 
 // pgRouterInternalHost is the bare in-cluster Service DNS name for the shared
