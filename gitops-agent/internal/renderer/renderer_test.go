@@ -488,6 +488,33 @@ func TestRenderAppValuesNoVolumeOmitsPvc(t *testing.T) {
 	}
 }
 
+func TestRenderAppValuesHostAlias(t *testing.T) {
+	got, err := renderer.RenderAppValues(renderer.AppSpec{
+		Image: "ghcr.io/dada-tuda/api-service:v1", Port: 8080, Replicas: 1, Profile: "small",
+		PgRouterHostAliasIP: "10.43.7.9",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "hostAliases:") ||
+		!strings.Contains(got, "ip: 10.43.7.9") ||
+		!strings.Contains(got, "db.dada-tuda.ru") {
+		t.Errorf("expected hostAliases entry for db.dada-tuda.ru -> 10.43.7.9\nFull output:\n%s", got)
+	}
+}
+
+func TestRenderAppValuesNoHostAliasByDefault(t *testing.T) {
+	got, err := renderer.RenderAppValues(renderer.AppSpec{
+		Image: "ghcr.io/dada-tuda/api-service:v1", Port: 8080, Replicas: 1, Profile: "small",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(got, "hostAliases:") {
+		t.Errorf("expected no hostAliases block when PgRouterHostAliasIP unset\nFull output:\n%s", got)
+	}
+}
+
 func TestRenderAppValuesWorkloadType(t *testing.T) {
 	got, err := renderer.RenderAppValues(renderer.AppSpec{
 		Image: "ghcr.io/dada-tuda/api-service:v1", Port: 8080, Replicas: 1, Profile: "small",

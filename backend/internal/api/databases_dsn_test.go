@@ -73,3 +73,36 @@ func TestPostgresDSNCarriesExplicitSSLMode(t *testing.T) {
 		t.Fatalf("postgresDSN = %q, want it to carry sslmode=disable", dsn)
 	}
 }
+
+// TestPostgresDSNTLSFlagOff pins that MANAGED_DB_TLS_DSN_ENABLED unset (the
+// default, and the state of every environment until the paired infra work --
+// pg-router TLS listener, LE cert, gitops-agent hostAliases rollout -- is
+// confirmed live) renders byte-identical output to before this change existed,
+// for both the bare in-cluster host and any other host.
+func TestPostgresDSNTLSFlagOff(t *testing.T) {
+	dsn := postgresDSN("app", "x", "pg-router.databases.svc.cluster.local", "5432", "megafactory")
+	want := "postgresql://app:x@pg-router.databases.svc.cluster.local:5432/megafactory?sslmode=disable"
+	if dsn != want {
+		t.Fatalf("postgresDSN = %q, want %q (flag must default off)", dsn, want)
+	}
+}
+
+// TestPostgresDSNTLSFlagOnRewritesOnlyTheInternalHost proves the rewrite only
+// fires for the exact bare-in-cluster endpoint, so an externally-routed host
+// (already public, unrelated to this cert) is never touched even with the
+// flag on.
+func TestPostgresDSNTLSFlagOnRewritesOnlyTheInternalHost(t *testing.T) {
+	t.Setenv("MANAGED_DB_TLS_DSN_ENABLED", "true")
+
+	dsn := postgresDSN("app", "x", "pg-router.databases.svc.cluster.local", "5432", "megafactory")
+	want := "postgresql://app:x@db.dada-tuda.ru:5432/megafactory?sslmode=require"
+	if dsn != want {
+		t.Fatalf("postgresDSN = %q, want %q", dsn, want)
+	}
+
+	external := postgresDSN("app", "x", "db-external.dada-tuda.ru", "5432", "megafactory")
+	wantExternal := "postgresql://app:x@db-external.dada-tuda.ru:5432/megafactory?sslmode=disable"
+	if external != wantExternal {
+		t.Fatalf("postgresDSN(external) = %q, want %q (only the bare in-cluster host is rewritten)", external, wantExternal)
+	}
+}

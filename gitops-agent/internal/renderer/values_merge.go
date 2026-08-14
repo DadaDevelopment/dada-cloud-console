@@ -29,6 +29,7 @@ var ownedCommonKeys = []string{
 	"workloadType",
 	"startCommand",
 	"podSecurityContext",
+	"hostAliases",
 }
 
 // MergeAppValues applies a freshly rendered values.yaml onto the one already in

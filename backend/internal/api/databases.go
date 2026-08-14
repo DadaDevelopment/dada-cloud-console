@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
@@ -860,15 +861,37 @@ func (h *Handler) GetDatabaseCredentials(c *gin.Context) {
 // url.UserPassword percent-encodes credentials, which matters because generated
 // passwords may carry characters that are structural in a URL.
 //
-// sslmode=disable is appended on purpose, not left for the client library to
+// sslmode=disable was appended on purpose, not left for the client library to
 // guess: pg-router (edoburu/pgbouncer, verified live against both the
-// transaction and session pools in the databases namespace) carries no
-// client_tls_sslmode directive, so it answers any TLS handshake with "server
+// transaction and session pools in the databases namespace) carried no
+// client_tls_sslmode directive, so it answered any TLS handshake with "server
 // does not support SSL, but SSL was required". Client libraries that default
 // to requesting TLS (node-postgres, Prisma, Heroku-style templates) crash
-// loop on that unless the DSN spells out sslmode explicitly. A live user hit
-// exactly this after we fixed the previous bare-host bug: same DSN, new
+// looped on that unless the DSN spelled out sslmode explicitly. A live user
+// hit exactly this after the previous bare-host bug was fixed: same DSN, new
 // crash, "the server does not support SSL connections".
+//
+// That is now half-fixed at the infra layer: pg-router gained
+// client_tls_sslmode=allow and a publicly trusted cert was issued for
+// pgRouterTLSHostname (db.dada-tuda.ru, ClusterIssuer letsencrypt-dns01) --
+// but ONLY for a host reachable and name-matched from inside the app's own
+// pod, which pgRouterInternalHost (the *.svc.cluster.local Service DNS name)
+// is not: no public CA will ever sign that name, so a client that verifies
+// the certificate (node-postgres 8+ with ssl:true, the exact default every
+// Supabase/Neon/Heroku-style snippet copies) still cannot connect to it.
+// Closing that gap needs the app's own pod to resolve db.dada-tuda.ru to
+// pg-router's ClusterIP, which is a hostAliases entry rendered by gitops-agent
+// (see renderer.AppSpec.PgRouterHostAliasIP), not something this function can
+// do by itself.
+//
+// So this only switches the *bare, in-cluster* endpoint (host ==
+// pgRouterInternalHost) over to the TLS-verified name and mode, and only when
+// managedDBTLSDSNEnabled() reports the infra side is actually live -- default
+// off, so every DSN issued before that flag flips (and every host that is not
+// pgRouterInternalHost, e.g. the externally-routed endpoint) keeps rendering
+// exactly the old sslmode=disable string it always did. Existing DSNs already
+// sitting in an app's env are never rewritten by this function; only a fresh
+// call renders the new form.
 func postgresDSN(username, password, host, port, database string) string {
 	if host == "" || database == "" {
 		return ""
@@ -876,14 +899,42 @@ func postgresDSN(username, password, host, port, database string) string {
 	if port == "" {
 		port = "5432"
 	}
+	sslmode := "disable"
+	if host == pgRouterInternalHost && managedDBTLSDSNEnabled() {
+		host = pgRouterTLSHostname
+		sslmode = "require"
+	}
 	u := url.URL{
 		Scheme:   "postgresql",
 		User:     url.UserPassword(username, password),
 		Host:     net.JoinHostPort(host, port),
 		Path:     "/" + database,
-		RawQuery: "sslmode=disable",
+		RawQuery: "sslmode=" + sslmode,
 	}
 	return u.String()
+}
+
+// pgRouterInternalHost is the bare in-cluster Service DNS name for the shared
+// managed-Postgres router, written into the connection secret every
+// ServiceDatabaseV2 exposes. No public CA will ever sign a *.svc.cluster.local
+// name, so this is the host postgresDSN rewrites, never the one it emits.
+const pgRouterInternalHost = "pg-router.databases.svc.cluster.local"
+
+// pgRouterTLSHostname is the DNS name the platform's managed-Postgres TLS
+// certificate is issued for (ClusterIssuer letsencrypt-dns01, dnsName
+// db.dada-tuda.ru). It only resolves inside an app's pod once gitops-agent has
+// rendered the matching hostAliases entry -- see
+// renderer.AppSpec.PgRouterHostAliasIP.
+const pgRouterTLSHostname = "db.dada-tuda.ru"
+
+// managedDBTLSDSNEnabled gates postgresDSN's switch to db.dada-tuda.ru /
+// sslmode=require behind an explicit env flag so a DSN handed to a new user
+// cannot go live before the paired infra (pg-router TLS listener, the LE
+// certificate, and the gitops-agent hostAliases rollout) is confirmed up.
+// Default false: unset or any value other than "true" keeps the pre-TLS
+// behavior byte-for-byte.
+func managedDBTLSDSNEnabled() bool {
+	return os.Getenv("MANAGED_DB_TLS_DSN_ENABLED") == "true"
 }
 
 // serviceDatabaseNamespace pulls the app namespace from a ServiceDatabaseV2

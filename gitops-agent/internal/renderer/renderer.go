@@ -173,6 +173,17 @@ type AppSpec struct {
 	// apps created before this field existed keep their bare "<app>-<env>" name and
 	// are never renamed. See ScopedArgoName.
 	ArgoName string
+
+	// PgRouterHostAliasIP, when non-empty, renders a common.hostAliases entry
+	// mapping db.dada-tuda.ru to this IP inside the app's own pod. The publicly
+	// trusted certificate the platform issues for managed-Postgres TLS is bound to
+	// db.dada-tuda.ru, not to the in-cluster pg-router Service DNS name, so a client
+	// library that verifies the certificate hostname (node-postgres 8+ with
+	// ssl:true, the exact default every Supabase/Neon/Heroku-style snippet copies)
+	// needs that name to resolve from inside the pod. Empty is the default and
+	// renders no hostAliases key at all, so every app that predates this field, or
+	// runs before the platform enables it, keeps a byte-identical values.yaml.
+	PgRouterHostAliasIP string
 }
 
 // ScopedArgoName builds a collision-free ArgoCD Application name for a NEW app:
@@ -323,7 +334,22 @@ type commonValues struct {
 	StartCommand string          `yaml:"startCommand,omitempty"`
 
 	PodSecurityContext *commonPodSecurityContext `yaml:"podSecurityContext,omitempty"`
+	HostAliases        []commonHostAlias         `yaml:"hostAliases,omitempty"`
 }
+
+// commonHostAlias mirrors a single PodSpec.hostAliases entry: one IP mapped to
+// one or more hostnames, resolved inside the app's own pod via /etc/hosts. See
+// AppSpec.PgRouterHostAliasIP for why the platform needs this.
+type commonHostAlias struct {
+	IP        string   `yaml:"ip"`
+	Hostnames []string `yaml:"hostnames"`
+}
+
+// pgRouterHostAliasHostname is the DNS name the platform's managed-Postgres TLS
+// certificate is issued for (ClusterIssuer letsencrypt-dns01, dnsName
+// db.dada-tuda.ru). It is a platform-wide constant, not a per-app value: every
+// app that opts into the alias resolves the same name to the same router.
+const pgRouterHostAliasHostname = "db.dada-tuda.ru"
 
 // commonPodSecurityContext hands a persistent volume to a non-root image.
 //
@@ -451,6 +477,12 @@ func RenderAppValues(spec AppSpec) (string, error) {
 		}
 		if spec.VolumeFSGroup > 0 {
 			values.Common.PodSecurityContext = &commonPodSecurityContext{FSGroup: spec.VolumeFSGroup}
+		}
+	}
+
+	if spec.PgRouterHostAliasIP != "" {
+		values.Common.HostAliases = []commonHostAlias{
+			{IP: spec.PgRouterHostAliasIP, Hostnames: []string{pgRouterHostAliasHostname}},
 		}
 	}
 

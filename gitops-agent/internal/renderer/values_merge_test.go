@@ -216,3 +216,39 @@ func TestMergeAppValuesWritesStartCommandIntoExistingFile(t *testing.T) {
 		t.Fatal("clearing the start command must delete the key, not leave the old one in git")
 	}
 }
+
+func TestMergeAppValuesWritesHostAliasIntoExistingFile(t *testing.T) {
+	rendered, err := RenderAppValues(AppSpec{
+		Name: "app", Image: "nexus/app:1", Replicas: 1,
+		PgRouterHostAliasIP: "10.43.7.9",
+	})
+	if err != nil {
+		t.Fatalf("RenderAppValues: %v", err)
+	}
+	merged, err := MergeAppValues(mergeFixtureValues, rendered)
+	if err != nil {
+		t.Fatalf("MergeAppValues: %v", err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(merged), &doc); err != nil {
+		t.Fatalf("merged values do not parse: %v", err)
+	}
+	if _, ok := common(t, doc)["hostAliases"]; !ok {
+		t.Fatal("hostAliases must survive the merge onto an existing values.yaml; check ownedCommonKeys")
+	}
+
+	cleared, err := RenderAppValues(AppSpec{Name: "app", Image: "nexus/app:1", Replicas: 1})
+	if err != nil {
+		t.Fatalf("RenderAppValues: %v", err)
+	}
+	back, err := MergeAppValues(merged, cleared)
+	if err != nil {
+		t.Fatalf("MergeAppValues: %v", err)
+	}
+	if err := yaml.Unmarshal([]byte(back), &doc); err != nil {
+		t.Fatalf("merged values do not parse: %v", err)
+	}
+	if _, ok := common(t, doc)["hostAliases"]; ok {
+		t.Fatal("clearing the host alias must delete the key, not leave the stale IP in git")
+	}
+}
