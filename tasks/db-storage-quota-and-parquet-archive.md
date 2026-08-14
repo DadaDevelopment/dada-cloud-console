@@ -178,3 +178,34 @@ watcher квоты её не увидят никогда. Отгруженная
 `internal` кроме отсутствия лимита хранилища добавляет роли
 `idle_in_transaction_session_timeout=15min` и снимает лимит соединений
 (композиция `servicedatabasev2-postgresql-k10`, `$tiers`).
+
+## Первый живой прогон архива (2026-08-14, agent-sandbox)
+
+База `archive-probe` на shard-0, таблица `public.events`: 300k строк / 302 МБ,
+из них 232.5k старше 90 дней. План вернул помесячные корзины, run
+`649e9e07-9bfb-4f43-be18-362c83b24d94`, cutoff `2026-05-16`, planned_rows
+231750.
+
+Что сломалось и чинилось по ходу:
+
+- **Фаза `sink` ждала бакет ~5 минут** — операция `CreateS3Bucket` и коммит в
+  argo-infra прошли сразу, но CR `s3buckets.platform.dada-tuda.ru/dada-archive`
+  появился в `agent-sandbox-prod` только после синка Argo. Не баг, но фаза
+  выглядит зависшей: run не пишет, чего именно ждёт.
+- **Фаза `export` падала с `BackoffLimitExceeded`.** Настоящая причина —
+  `duckdb: command not found` (exit 127): в образе `datacatering/duckdb:v1.3.2`
+  бинарь лежит `/duckdb`, PATH пуст. Из run-строки этого не видно вообще, поды
+  Job'а к моменту разбора уже собрал GC. Починено: export и verify резолвят
+  бинарь через `command -v duckdb || echo /duckdb` (commit `0daba5de`).
+- **Фаза `repack` не могла отработать ни на одной базе.** `pg_repack` требует
+  серверного расширения, а шарды крутят стоковый bitnami: в
+  `pg_available_extensions` его нет. Освобождение места — единственное, ради
+  чего архив вообще нужен квоте (`pg_database_size`), — было недоставимо.
+  Заменено на `VACUUM FULL` с `lock_timeout=15s` (commit `b61391fb`). Замер в
+  песочнице: 295 МБ → 66 МБ, база 604 → 376 МБ, 2.9 с на 300k строк, то есть
+  ~минута ACCESS EXCLUSIVE на 5 ГБ. Скрипт прогнан вживую в поде того же
+  образа против `archive-probe`, прежде чем попал в код.
+
+Открыто: `pg_repack` вернётся только вместе со своим образом шарда; онлайновая
+альтернатива без эксклюзивного лока — pgcompacttable (нужен `pgstattuple`, он
+на шарде есть).
