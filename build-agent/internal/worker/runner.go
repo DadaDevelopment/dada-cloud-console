@@ -112,9 +112,10 @@ const buildFailNoDockerfile = "no_dockerfile"
 // manifest at all, so there was no framework to look up a template for in
 // the first place.
 //
-// The pipeline's own error line for this is "framework '' has no template
-// and repo ships no Dockerfile" -- textually a no_dockerfile failure, but a
-// dishonest one. It tells the owner to add a Dockerfile as if their stack
+// The pipeline's own error line for this names the framework as an empty
+// string: "framework [empty] has no template and repo ships no Dockerfile"
+// -- textually a no_dockerfile failure, but a dishonest one. It tells the
+// owner to add a Dockerfile as if their stack
 // were known and merely undockerized, when the truth is the platform never
 // recognized the stack at all. On 2026-08-13 three of five build failures on
 // the platform carried this exact empty-framework line, and the fix owed to
