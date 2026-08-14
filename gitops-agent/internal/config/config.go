@@ -111,6 +111,14 @@ type Config struct {
 	DBRouterHost string
 	DBRouterPort string
 
+	// PgRouterClusterIP is the in-cluster ClusterIP of the pg-router Service.
+	// When set, the gitops-agent process wires it into renderer.PgRouterClusterIP
+	// at startup, so every rendered app gets a common.hostAliases entry mapping
+	// db.pv.dada-tuda.ru (the hostname the platform's managed-Postgres TLS
+	// certificate is issued for) to this IP. Empty is the default and keeps
+	// values.yaml output byte-identical to before this field existed.
+	PgRouterClusterIP string
+
 	// DBRouterDirectShards are shards whose databases keep their direct address
 	// even when the router is enabled.
 	//
@@ -185,6 +193,7 @@ func Load() (*Config, error) {
 		DBRouterHost:         getEnv("DB_ROUTER_HOST", ""),
 		DBRouterPort:         getEnv("DB_ROUTER_PORT", "5432"),
 		DBRouterDirectShards: splitList(os.Getenv("DB_ROUTER_DIRECT_SHARDS")),
+		PgRouterClusterIP:    getEnv("PG_ROUTER_CLUSTER_IP", ""),
 	}
 
 	if cfg.DatabaseURL == "" {

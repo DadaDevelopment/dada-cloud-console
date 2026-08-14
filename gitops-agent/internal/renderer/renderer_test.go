@@ -515,6 +515,62 @@ func TestRenderAppValuesNoHostAliasByDefault(t *testing.T) {
 	}
 }
 
+func TestRenderAppValuesDefaultsHostAliasFromClusterIP(t *testing.T) {
+	prev := renderer.PgRouterClusterIP
+	renderer.PgRouterClusterIP = "10.96.139.238"
+	defer func() { renderer.PgRouterClusterIP = prev }()
+
+	got, err := renderer.RenderAppValues(renderer.AppSpec{
+		Image: "ghcr.io/dada-tuda/api-service:v1", Port: 8080, Replicas: 1, Profile: "small",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "hostAliases:") ||
+		!strings.Contains(got, "ip: 10.96.139.238") ||
+		!strings.Contains(got, "db.pv.dada-tuda.ru") {
+		t.Errorf("expected hostAliases entry defaulted from PgRouterClusterIP\nFull output:\n%s", got)
+	}
+}
+
+func TestRenderAppValuesResourcesOnlyOwnerAppNeverGetsHostAlias(t *testing.T) {
+	prev := renderer.PgRouterClusterIP
+	renderer.PgRouterClusterIP = "10.96.139.238"
+	defer func() { renderer.PgRouterClusterIP = prev }()
+
+	got, err := renderer.RenderAppValues(renderer.AppSpec{
+		Image: "ghcr.io/dada-tuda/api-service:v1", Port: 8080, Replicas: 1, Profile: "small",
+		ResourcesOnly:      true,
+		ResourcesValueFile: "app/resources.values.yaml",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(got, "hostAliases:") {
+		t.Errorf("owner app (ResourcesOnly) has no podSpec, must never get hostAliases\nFull output:\n%s", got)
+	}
+}
+
+func TestRenderAppValuesExplicitHostAliasOverridesClusterIPDefault(t *testing.T) {
+	prev := renderer.PgRouterClusterIP
+	renderer.PgRouterClusterIP = "10.96.139.238"
+	defer func() { renderer.PgRouterClusterIP = prev }()
+
+	got, err := renderer.RenderAppValues(renderer.AppSpec{
+		Image: "ghcr.io/dada-tuda/api-service:v1", Port: 8080, Replicas: 1, Profile: "small",
+		PgRouterHostAliasIP: "10.43.7.9",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "ip: 10.43.7.9") {
+		t.Errorf("explicit PgRouterHostAliasIP must win over the PgRouterClusterIP default\nFull output:\n%s", got)
+	}
+	if strings.Contains(got, "10.96.139.238") {
+		t.Errorf("cluster-ip default must not leak in when the spec set an explicit IP\nFull output:\n%s", got)
+	}
+}
+
 func TestRenderAppValuesWorkloadType(t *testing.T) {
 	got, err := renderer.RenderAppValues(renderer.AppSpec{
 		Image: "ghcr.io/dada-tuda/api-service:v1", Port: 8080, Replicas: 1, Profile: "small",

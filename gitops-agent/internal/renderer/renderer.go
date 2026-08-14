@@ -207,6 +207,15 @@ const (
 	WorkloadBranch  = "develop"
 )
 
+// PgRouterClusterIP is the in-cluster ClusterIP of the pg-router Service, set
+// once at process start from PG_ROUTER_CLUSTER_IP (see internal/config). When
+// non-empty, RenderAppValues uses it as the default AppSpec.PgRouterHostAliasIP
+// for any workload app that does not set the field explicitly, so every app
+// gets the db.pv.dada-tuda.ru hostAliases entry without every call site having
+// to look the IP up itself. Empty is the default and reproduces today's
+// behaviour byte-for-byte: no hostAliases key at all.
+var PgRouterClusterIP string
+
 func ChartFor(framework string) string {
 	switch framework {
 	case "python", "fastapi", "django", "flask":
@@ -480,9 +489,13 @@ func RenderAppValues(spec AppSpec) (string, error) {
 		}
 	}
 
-	if spec.PgRouterHostAliasIP != "" {
+	hostAliasIP := spec.PgRouterHostAliasIP
+	if hostAliasIP == "" && !spec.ResourcesOnly {
+		hostAliasIP = PgRouterClusterIP
+	}
+	if hostAliasIP != "" {
 		values.Common.HostAliases = []commonHostAlias{
-			{IP: spec.PgRouterHostAliasIP, Hostnames: []string{pgRouterHostAliasHostname}},
+			{IP: hostAliasIP, Hostnames: []string{pgRouterHostAliasHostname}},
 		}
 	}
 

@@ -10,6 +10,7 @@ import (
 	"github.com/dada-tuda/console/gitops-agent/internal/db"
 	"github.com/dada-tuda/console/gitops-agent/internal/git"
 	"github.com/dada-tuda/console/gitops-agent/internal/k8s"
+	"github.com/dada-tuda/console/gitops-agent/internal/renderer"
 	"github.com/dada-tuda/console/gitops-agent/internal/server"
 	"github.com/dada-tuda/console/gitops-agent/internal/worker"
 	"github.com/rs/zerolog"
@@ -23,6 +24,8 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("loading config")
 	}
+
+	renderer.PgRouterClusterIP = cfg.PgRouterClusterIP
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
