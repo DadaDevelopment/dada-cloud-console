@@ -384,10 +384,10 @@ func (h *Handler) enqueueDatabaseEnforcement(ctx context.Context, d managedDatab
 	var opID uuid.UUID
 	err = h.pool.QueryRow(ctx,
 		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
-		 SELECT $1, $2, $3, 'SetDatabaseEnforcement', 'ServiceDatabaseV2', $4, 'Created', $5
+		 SELECT $1, $2, $3, 'SetDatabaseEnforcement', 'ServiceDatabaseV2', $4::text, 'Created', $5::jsonb
 		 WHERE NOT EXISTS (
 		   SELECT 1 FROM operations
-		   WHERE environment_id = $3 AND resource_kind = 'ServiceDatabaseV2' AND resource_name = $4
+		   WHERE environment_id = $3 AND resource_kind = 'ServiceDatabaseV2' AND resource_name = $4::text
 		     AND action = 'SetDatabaseEnforcement' AND status IN ('Created', 'Reconciling')
 		 )
 		 RETURNING id`,

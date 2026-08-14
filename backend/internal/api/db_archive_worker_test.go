@@ -55,6 +55,32 @@ func TestRepackHasHeadroomFailsClosed(t *testing.T) {
 	}
 }
 
+// TestRepackCopyBytes_MeasuresLiveRowsNotTheBloatedRelation pins the number the
+// headroom guard is taken against.
+//
+// The delete leaves every page where it was, so the relation keeps its old size
+// while the rewrite copies only what survived. Measured on Postgres 17: a
+// 546 MB relation holding 10% of its rows rewrote into 55 MB, i.e. the live
+// share, so a guard taken against the relation would refuse to reclaim exactly
+// the databases too full to reclaim any other way.
+func TestRepackCopyBytes_MeasuresLiveRowsNotTheBloatedRelation(t *testing.T) {
+	const relation = 546 << 20
+	got := repackCopyBytes(relation, 199_999, 1_800_001)
+	if want := int64(55 << 20); got < want*9/10 || got > want*12/10 {
+		t.Fatalf("repackCopyBytes = %s, want about %s (the measured rewrite)",
+			humanBytes(got), humanBytes(want))
+	}
+	if got := repackCopyBytes(relation, 2_000_000, 0); got != relation {
+		t.Fatalf("a run that deleted nothing copies the whole relation, got %s", humanBytes(got))
+	}
+	if got := repackCopyBytes(relation, 0, 2_000_000); got != 0 {
+		t.Fatalf("an emptied table copies nothing, got %s", humanBytes(got))
+	}
+	if got := repackCopyBytes(0, 10, 10); got != 0 {
+		t.Fatalf("unknown relation size stays unknown, got %d", got)
+	}
+}
+
 func TestArchiveShardPVC(t *testing.T) {
 	cases := map[string]string{
 		"postgresql.databases.svc.cluster.local": "data-postgresql-0",
