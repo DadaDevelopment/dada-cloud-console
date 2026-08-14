@@ -30,8 +30,17 @@ export type AppAlertType = "crash" | "volume" | "url";
  * current bad value, because the crash log itself cannot be trusted here
  * (Node's pg-connection-string reports a phantom host "base" instead of the
  * real value — see the backend's notify.ClassifyConnectionStringFailure doc
- * comment). Missing or empty means the backend could
- * not classify it — the console must not guess "your code" in that case.
+ * comment). `"ssl_not_supported"` means a connection-string-shaped env var
+ * already has a scheme and holds a well-formed DSN, but the client was told
+ * to negotiate SSL against a database endpoint that does not support it
+ * (see the backend's notify.ClassifySSLNotSupported) — also neutral. Here
+ * `cause_line` holds ONLY the bare key name, never "KEY=VALUE": unlike the
+ * bare-host case this DSN can carry a real password, so the backend never
+ * writes the value into cause/cause_line at all — the console reveals the
+ * current value itself, on demand, right before writing the fix back (see
+ * AppAlertsBanner's SSL repair block). Missing or empty means the backend
+ * could not classify it — the console must not guess "your code" in that
+ * case.
  */
 export type AppAlertCauseKind =
   | "app_code"
@@ -40,7 +49,8 @@ export type AppAlertCauseKind =
   | "platform_registry"
   | "resource_limit"
   | "app_needs_args"
-  | "bad_connection_string";
+  | "bad_connection_string"
+  | "ssl_not_supported";
 
 export interface AppAlert {
   type: AppAlertType;
@@ -99,4 +109,38 @@ export function parseBadConnCauseLine(causeLine?: string): { key: string; value:
   const idx = causeLine.indexOf("=");
   if (idx <= 0) return null;
   return { key: causeLine.slice(0, idx), value: causeLine.slice(idx + 1) };
+}
+
+/**
+ * True when dsn's query string already sets an "sslmode" parameter
+ * (case-insensitively). Mirrors the backend's notify.hasSSLModeParam
+ * exactly — see connstring_cause.go's doc comment on connStringHasSchemePrefix
+ * for why this codebase duplicates small parsing helpers between the two
+ * packages rather than sharing them across the Go/TypeScript boundary.
+ */
+function hasSSLModeParam(dsn: string): boolean {
+  const idx = dsn.indexOf("?");
+  if (idx === -1) return false;
+  return dsn
+    .slice(idx + 1)
+    .split("&")
+    .some((pair) => {
+      const eq = pair.indexOf("=");
+      const key = eq >= 0 ? pair.slice(0, eq) : pair;
+      return key.toLowerCase() === "sslmode";
+    });
+}
+
+/**
+ * Returns dsn with "sslmode=disable" added to its query string, preserving
+ * every existing parameter and never duplicating the key if already
+ * present. Mirrors the backend's notify.SuggestSSLModeDisable exactly (see
+ * that function's doc comment for why the fix is "add one parameter", not
+ * "replace the whole value" — the DSN is otherwise well-formed).
+ */
+export function suggestSSLModeDisable(dsn: string): string {
+  if (hasSSLModeParam(dsn)) return dsn;
+  if (!dsn.includes("?")) return `${dsn}?sslmode=disable`;
+  if (dsn.endsWith("?") || dsn.endsWith("&")) return `${dsn}sslmode=disable`;
+  return `${dsn}&sslmode=disable`;
 }

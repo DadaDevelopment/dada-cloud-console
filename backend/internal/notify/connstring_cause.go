@@ -140,3 +140,120 @@ func ClassifyConnectionStringFailure(logExcerpt string, env map[string]string) (
 	k := candidates[0]
 	return k, env[k], true
 }
+
+// CauseKindSSLNotSupported is the cause_kind value for a crash whose real
+// root is the mirror image of CauseKindBadConnectionString: the env var
+// already carries a full, scheme-ful DSN, but the client library was told
+// (explicitly via a "sslmode" query param, or by its own default) to
+// negotiate SSL against a Postgres endpoint that does not speak TLS at all --
+// pg-router, this platform's own connection pooler for managed databases,
+// is one such endpoint. The client then fails immediately with a message to
+// the effect of "The server does not support SSL connections" before a
+// single query runs. Distinct from CauseKindBadConnectionString: the DSN
+// here is otherwise well-formed, so the fix is not "supply a whole new
+// value" but "add one query parameter to the existing one" -- see
+// SuggestSSLModeDisable.
+const CauseKindSSLNotSupported = "ssl_not_supported"
+
+// sslNotSupportedSignatures are log substrings a Postgres client driver
+// prints when the server refuses an SSL-negotiated connection outright. Kept
+// to the driver-agnostic core of the sentence ("does not support SSL
+// connections") rather than the full "The server does not support SSL
+// connections" so a differently-worded prefix from another client library
+// still matches; the suffix is the part that is actually diagnostic.
+var sslNotSupportedSignatures = []string{
+	"does not support SSL connections",
+}
+
+// hasSSLModeParam reports whether dsn's query string already sets an
+// "sslmode" parameter (case-insensitively, matching how Postgres itself
+// treats the key), so callers can tell a DSN that needs the fix from one
+// that was already repaired -- this is what makes SuggestSSLModeDisable
+// idempotent instead of piling up "&sslmode=disable&sslmode=disable...".
+func hasSSLModeParam(dsn string) bool {
+	idx := strings.Index(dsn, "?")
+	if idx == -1 {
+		return false
+	}
+	for _, pair := range strings.Split(dsn[idx+1:], "&") {
+		key := pair
+		if eq := strings.Index(pair, "="); eq >= 0 {
+			key = pair[:eq]
+		}
+		if strings.EqualFold(key, "sslmode") {
+			return true
+		}
+	}
+	return false
+}
+
+// ClassifySSLNotSupported looks at a crashed container's log excerpt
+// together with its current env vars and decides whether the crash is a
+// client requiring SSL against a Postgres endpoint that does not support it
+// (see CauseKindSSLNotSupported).
+//
+// It returns ok=false unless BOTH:
+//  1. logExcerpt carries an SSL-refused signature (sslNotSupportedSignatures),
+//     and
+//  2. env holds at least one connection-string-shaped key
+//     (looksLikeConnStringKey) whose value HAS a scheme prefix
+//     (connStringHasSchemePrefix) -- the opposite requirement from
+//     ClassifyConnectionStringFailure, since a bare host cannot carry an
+//     sslmode param to begin with -- and does not already set sslmode.
+//
+// When multiple candidates exist, keys are sorted so the result is
+// deterministic across ticks (matching ClassifyConnectionStringFailure's
+// rationale); the log excerpt never echoes the DSN value for this failure
+// mode, so there is nothing to corroborate against as that function does.
+func ClassifySSLNotSupported(logExcerpt string, env map[string]string) (key string, value string, ok bool) {
+	sslFailure := false
+	for _, sig := range sslNotSupportedSignatures {
+		if strings.Contains(logExcerpt, sig) {
+			sslFailure = true
+			break
+		}
+	}
+	if !sslFailure {
+		return "", "", false
+	}
+
+	candidates := make([]string, 0, len(env))
+	for k, v := range env {
+		if v == "" || !looksLikeConnStringKey(k) {
+			continue
+		}
+		if !connStringHasSchemePrefix.MatchString(v) {
+			continue
+		}
+		if hasSSLModeParam(v) {
+			continue
+		}
+		candidates = append(candidates, k)
+	}
+	if len(candidates) == 0 {
+		return "", "", false
+	}
+	sort.Strings(candidates)
+	k := candidates[0]
+	return k, env[k], true
+}
+
+// SuggestSSLModeDisable returns dsn with "sslmode=disable" added to its
+// query string, preserving every existing parameter and never duplicating
+// the key if it is already present (see hasSSLModeParam) -- the fix this
+// platform's console offers for CauseKindSSLNotSupported writes exactly this
+// return value back into the env var via the existing SetEnvVar handle, so
+// idempotency here is what keeps repeated clicks (or a retried request)
+// from corrupting the DSN.
+func SuggestSSLModeDisable(dsn string) string {
+	if hasSSLModeParam(dsn) {
+		return dsn
+	}
+	if !strings.Contains(dsn, "?") {
+		return dsn + "?sslmode=disable"
+	}
+	if strings.HasSuffix(dsn, "?") || strings.HasSuffix(dsn, "&") {
+		return dsn + "sslmode=disable"
+	}
+	return dsn + "&sslmode=disable"
+}

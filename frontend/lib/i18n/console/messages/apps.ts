@@ -748,6 +748,22 @@ export const apps: Messages = {
     ru: "Подставить строку подключения из базы {db}",
     en: "Fill in the connection string from database {db}",
   },
+  "apps.alerts.crash.cause.sslNotSupported": {
+    ru: "{key} требует SSL-соединение, а база данных его не поддерживает. Нажмите кнопку ниже — платформа допишет sslmode=disable в конец строки подключения и запустит новый деплой.",
+    en: "{key} requires an SSL connection, but the database does not support one. Click the button below — the platform will add sslmode=disable to the end of the connection string and start a new deploy.",
+  },
+  "apps.alerts.crash.cause.sslNotSupported.repair.cta": {
+    ru: "Дописать sslmode=disable в {key}",
+    en: "Add sslmode=disable to {key}",
+  },
+  "apps.alerts.crash.cause.sslNotSupported.repair.done": {
+    ru: "Исправлено — переменная обновлена, деплой запущен",
+    en: "Fixed — the variable was updated and a deploy was queued",
+  },
+  "apps.alerts.crash.cause.sslNotSupported.repair.error": {
+    ru: "Не удалось исправить переменную окружения",
+    en: "Failed to fix the environment variable",
+  },
   "apps.alerts.crash.cause.line": { ru: "Из логов:", en: "From the logs:" },
   "apps.alerts.crash.cta": { ru: "Смотреть логи", en: "View logs" },
   "apps.alerts.crash.diagnose": { ru: "Разобраться", en: "Diagnose" },

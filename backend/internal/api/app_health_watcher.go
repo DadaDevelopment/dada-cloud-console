@@ -682,9 +682,29 @@ func (w *appHealthWatcher) maybeCauseRefresh(ctx context.Context, alert appHealt
 			causeKind = notify.CauseKindBadConnectionString
 			cause = connStringCrashText(badKey, badValue)
 			causeLine = badKey + "=" + badValue
+		} else if sslKey, _, ok := notify.ClassifySSLNotSupported(logExcerpt, env); ok {
+			causeKind = notify.CauseKindSSLNotSupported
+			cause = sslNotSupportedCrashText(sslKey)
+			causeLine = sslKey
 		}
 	}
 	return logExcerpt, cause, causeLine, causeKind, true
+}
+
+// sslNotSupportedCrashText composes the owner-facing sentence for
+// CauseKindSSLNotSupported, naming the exact env var so the owner does not
+// have to go hunting for it -- mirrors connStringCrashText's role for
+// CauseKindBadConnectionString. Unlike connStringCrashText this never
+// interpolates the env var's VALUE into the text: ClassifySSLNotSupported
+// only ever matches a scheme-ful DSN, which (unlike the bare-host case
+// CauseKindBadConnectionString handles) can carry a real user:password@
+// segment, and that value must never land in app_health_alerts.cause or the
+// console banner in plaintext. causeLine below deliberately carries just the
+// key name for the same reason -- the console reveals the current value
+// itself, on demand, through the existing env-var reveal endpoint, right
+// before it writes the fix back.
+func sslNotSupportedCrashText(key string) string {
+	return key + " требует SSL-соединение, а база данных его не поддерживает. Нужно дописать sslmode=disable в конец строки подключения."
 }
 
 // connStringCrashText composes the owner-facing sentence for

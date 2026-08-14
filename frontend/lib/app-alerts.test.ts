@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { getOperationalAppAlerts, parseBadConnCauseLine, type AppAlert } from "./app-alerts.ts";
+import { getOperationalAppAlerts, parseBadConnCauseLine, suggestSSLModeDisable, type AppAlert } from "./app-alerts.ts";
 
 const alerts: AppAlert[] = [
   { type: "crash", detected_at: "2026-08-04T00:00:00Z" },
@@ -34,4 +34,29 @@ test("parseBadConnCauseLine splits on the first = only", () => {
     key: "CONNECTION_STRING",
     value: "host=weird",
   });
+});
+
+test("suggestSSLModeDisable appends sslmode=disable to the live megafactory DSN", () => {
+  assert.equal(
+    suggestSSLModeDisable("postgresql://svc-megafactory:secret@pg-router.databases.svc.cluster.local:5432/megafactory"),
+    "postgresql://svc-megafactory:secret@pg-router.databases.svc.cluster.local:5432/megafactory?sslmode=disable",
+  );
+});
+
+test("suggestSSLModeDisable preserves existing query params", () => {
+  assert.equal(
+    suggestSSLModeDisable("postgresql://svc:pw@host:5432/db?application_name=megafactory"),
+    "postgresql://svc:pw@host:5432/db?application_name=megafactory&sslmode=disable",
+  );
+});
+
+test("suggestSSLModeDisable is idempotent when sslmode=disable is already set", () => {
+  const dsn = "postgresql://svc:pw@host:5432/db?sslmode=disable";
+  assert.equal(suggestSSLModeDisable(dsn), dsn);
+  assert.equal(suggestSSLModeDisable(suggestSSLModeDisable(dsn)), dsn);
+});
+
+test("suggestSSLModeDisable detects an existing sslmode case-insensitively and leaves it alone", () => {
+  const dsn = "postgresql://svc:pw@host:5432/db?SSLMode=require";
+  assert.equal(suggestSSLModeDisable(dsn), dsn);
 });

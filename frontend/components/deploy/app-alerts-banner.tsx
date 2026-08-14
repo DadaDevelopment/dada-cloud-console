@@ -6,7 +6,7 @@ import { timeAgo } from "@/lib/format";
 import { useT } from "@/lib/i18n/console/context";
 import { Spinner } from "@/components/ui/spinner";
 import { diagnoseApi, cloudTasksApi, databasesApi, envVarsApi } from "@/lib/api";
-import { parseBadConnCauseLine, type AppAlert } from "@/lib/app-alerts";
+import { parseBadConnCauseLine, suggestSSLModeDisable, type AppAlert } from "@/lib/app-alerts";
 import type { AppDiagnosis, ResourceSnapshot } from "@/lib/types";
 
 /**
@@ -235,6 +235,86 @@ function BadConnDbRepair({
   );
 }
 
+type SslRepairState =
+  | { status: "idle" }
+  | { status: "pending" }
+  | { status: "error"; message: string }
+  | { status: "done" };
+
+/**
+ * The one-click fix for a `ssl_not_supported` alert: `causeLine` here is
+ * just the bare env var key (see AppAlertCauseKind's doc comment on why —
+ * unlike `bad_connection_string`, the DSN here can carry a real password, so
+ * the backend never puts the value into cause/cause_line). The button
+ * reveals the CURRENT value through the existing reveal endpoint at click
+ * time, appends sslmode=disable to it with suggestSSLModeDisable (mirrors
+ * the backend's notify.SuggestSSLModeDisable), and writes the result back
+ * through the same SetEnvVar handle the manual env editor already uses —
+ * both endpoints already exist, already routed, already audited. Nothing
+ * here ever assigns the plaintext DSN to component state that could end up
+ * rendered; it only ever flows from the reveal response into the upsert
+ * call.
+ */
+function SslRepair({
+  projectId,
+  envId,
+  appName,
+  causeLine,
+}: {
+  projectId: string;
+  envId: string;
+  appName: string;
+  causeLine?: string;
+}) {
+  const { t } = useT();
+  const [repair, setRepair] = useState<SslRepairState>({ status: "idle" });
+  const key = causeLine?.trim();
+
+  if (!key) return null;
+
+  async function handleRepair() {
+    setRepair({ status: "pending" });
+    try {
+      const revealed = await envVarsApi.reveal(projectId, envId, appName, key!);
+      const fixedValue = suggestSSLModeDisable(revealed.value);
+      await envVarsApi.upsert(projectId, envId, appName, key!, {
+        value: fixedValue,
+        is_secret: true,
+        scope: "runtime",
+      });
+      setRepair({ status: "done" });
+    } catch (err) {
+      setRepair({
+        status: "error",
+        message: err instanceof Error ? err.message : t("apps.alerts.crash.cause.sslNotSupported.repair.error"),
+      });
+    }
+  }
+
+  if (repair.status === "done") {
+    return (
+      <p className="text-xs font-semibold text-red-800 dark:text-red-200">
+        {t("apps.alerts.crash.cause.sslNotSupported.repair.done")}
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        onClick={handleRepair}
+        disabled={repair.status === "pending"}
+        className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+      >
+        {repair.status === "pending" && <Spinner size="sm" />}
+        {t("apps.alerts.crash.cause.sslNotSupported.repair.cta", { key })}
+      </button>
+      {repair.status === "error" && <span className="text-xs text-red-600 dark:text-red-400">{repair.message}</span>}
+    </div>
+  );
+}
+
 interface AppAlertsBannerProps {
   alerts: AppAlert[];
   logsHref: string;
@@ -332,7 +412,20 @@ export function AppAlertsBanner({ alerts, logsHref, storageHref, startCommandHre
                         </>
                       );
                     })()}
-                  {alert.cause_line && alert.cause_kind !== "bad_connection_string" && (
+                  {alert.cause_kind === "ssl_not_supported" && (
+                    <>
+                      <p className="text-xs font-semibold text-red-800 dark:text-red-200">
+                        {t("apps.alerts.crash.cause.sslNotSupported", { key: alert.cause_line ?? "" })}
+                      </p>
+                      <SslRepair
+                        projectId={projectId}
+                        envId={envId}
+                        appName={appName}
+                        causeLine={alert.cause_line}
+                      />
+                    </>
+                  )}
+                  {alert.cause_line && alert.cause_kind !== "bad_connection_string" && alert.cause_kind !== "ssl_not_supported" && (
                     <div className="overflow-x-auto rounded-md bg-red-100/70 dark:bg-red-950/60 px-2.5 py-1.5">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-red-500 dark:text-red-400">
                         {t("apps.alerts.crash.cause.line")}
