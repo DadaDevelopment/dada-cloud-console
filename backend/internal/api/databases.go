@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -283,6 +284,14 @@ type managedDatabaseResult struct {
 //
 // Quota tier and shard placement belong to the Crossplane path only: a VM
 // compose database is a container of its own and is bounded by its own limits.
+//
+// A Crossplane database bound to an app (app_ref set) has no credential to
+// seed here: its connection secret does not exist until the composition
+// finishes reconciling, so the DSN handoff cannot happen inline the way the VM
+// branch above does it. deliverDatabaseDSNAsync (db_dsn_delivery.go) is
+// spawned after commit to wait for that secret and inject DATABASE_URL once it
+// appears; GetDatabaseCredentials' reveal path runs the same idempotent
+// seedDatabaseDSNIfAbsent synchronously as a manual fallback.
 func (h *Handler) createManagedDatabase(ctx context.Context, actorID, projectID, envID uuid.UUID, req createServiceDatabaseRequest) (*managedDatabaseResult, *opFault) {
 	if req.Name == "" {
 		return nil, &opFault{http.StatusBadRequest, "name_required", "name is required"}
@@ -396,6 +405,10 @@ func (h *Handler) createManagedDatabase(ctx context.Context, actorID, projectID,
 
 	if err = tx.Commit(ctx); err != nil {
 		return nil, &opFault{http.StatusInternalServerError, "tx_commit_failed", "failed to create operation"}
+	}
+
+	if engine == "" && req.AppRef != "" {
+		go h.deliverDatabaseDSNAsync(context.Background(), projectID, envID, req.Name, req.AppRef, actorID)
 	}
 
 	return &managedDatabaseResult{Operation: op, Runtime: runtime, Engine: engine, Shard: shard}, nil
@@ -706,7 +719,8 @@ func (h *Handler) GetDatabaseCredentials(c *gin.Context) {
 	// "mlflow-v2" bound to app "mlflow-db" publishes "mlflow-db-db-credentials").
 	// Standalone DBs self-own (appRef defaults to the DB name), so fall back to name.
 	namespace := serviceDatabaseNamespace(summaryRaw)
-	secretOwner := serviceDatabaseAppRef(summaryRaw)
+	boundAppRef := serviceDatabaseAppRef(summaryRaw)
+	secretOwner := boundAppRef
 	if secretOwner == "" {
 		secretOwner = name
 	}
@@ -738,15 +752,28 @@ func (h *Handler) GetDatabaseCredentials(c *gin.Context) {
 		port = "5432"
 	}
 
-	audit(auditOutcomeSuccess, map[string]any{"revealed": true, "namespace": namespace})
+	dsn := postgresDSN(creds.Username, creds.Password, host, port, database)
+
+	dsnSeeded := false
+	if boundAppRef != "" && dsn != "" {
+		if seeded, seedErr := h.seedDatabaseDSNIfAbsent(c.Request.Context(), projectID, envID, name, boundAppRef, dsn, claims.UserID, "reveal"); seedErr != nil {
+			log.Printf("db-dsn-delivery: reveal fallback for %s/%s: %v", name, boundAppRef, seedErr)
+		} else {
+			dsnSeeded = seeded
+		}
+	}
+
+	audit(auditOutcomeSuccess, map[string]any{"revealed": true, "namespace": namespace, "dsn_seeded_on_reveal": dsnSeeded})
 
 	resp := gin.H{
-		"host":     host,
-		"port":     port,
-		"database": database,
-		"username": creds.Username,
-		"password": creds.Password,
-		"dsn":      postgresDSN(creds.Username, creds.Password, host, port, database),
+		"host":                 host,
+		"port":                 port,
+		"database":             database,
+		"username":             creds.Username,
+		"password":             creds.Password,
+		"dsn":                  dsn,
+		"database_url_seeded":  dsnSeeded,
+		"database_url_app_ref": boundAppRef,
 	}
 	extHost, extPort := creds.ExternalHost, creds.ExternalPort
 	if extHost != "" {

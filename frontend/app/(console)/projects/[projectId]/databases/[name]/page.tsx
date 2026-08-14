@@ -3,6 +3,17 @@ import { useCallback, useEffect, useState, FormEvent } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { databasesApi } from "@/lib/api";
 import type { ResourceSnapshot, DBBackup, DatabaseCredentialsResponse } from "@/lib/types";
+
+/**
+ * GetDatabaseCredentials now reports whether it just seeded DATABASE_URL into
+ * the bound app's env as a reveal-time fallback. lib/types.ts is owned by a
+ * parallel change in flight, so these two fields are widened here rather than
+ * added to the shared DatabaseCredentialsResponse type.
+ */
+type DatabaseCredentialsWithSeedInfo = DatabaseCredentialsResponse & {
+  database_url_seeded?: boolean;
+  database_url_app_ref?: string;
+};
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { CopyButton } from "@/components/ui/copy-button";
@@ -144,7 +155,7 @@ export default function DatabaseDetailPage() {
   const [isRestoreSubmitting, setIsRestoreSubmitting] = useState(false);
   const [restoreError, setRestoreError] = useState<string | null>(null);
 
-  const [creds, setCreds] = useState<DatabaseCredentialsResponse | null>(null);
+  const [creds, setCreds] = useState<DatabaseCredentialsWithSeedInfo | null>(null);
   const [credsLoading, setCredsLoading] = useState(false);
   const [revealPw, setRevealPw] = useState(false);
   const [credsError, setCredsError] = useState<{ kind: "notReady" | "notConfigured" | "generic"; message?: string } | null>(null);
@@ -154,7 +165,7 @@ export default function DatabaseDetailPage() {
     setCredsError(null);
     try {
       const r = await databasesApi.credentials(projectId, envId, name);
-      setCreds(r);
+      setCreds(r as DatabaseCredentialsWithSeedInfo);
     } catch (e) {
       const status = (e as { status?: number } | undefined)?.status;
       if (status === 404) setCredsError({ kind: "notReady" });
@@ -375,6 +386,11 @@ export default function DatabaseDetailPage() {
           )}
           {creds ? (
             <div className="space-y-3 border-t border-gray-100 dark:border-gray-800 pt-4">
+              {creds.database_url_seeded && (
+                <p className="rounded-md border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30 px-3 py-2 text-xs text-green-800 dark:text-green-300">
+                  {t("databases.detail.access.dbUrlSeeded", { app: creds.database_url_app_ref || appRef || "" })}
+                </p>
+              )}
               {creds.dsn && (
                 <div>
                   <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{t("databases.detail.access.dsn")}</p>

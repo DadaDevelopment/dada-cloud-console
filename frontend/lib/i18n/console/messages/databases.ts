@@ -95,6 +95,10 @@ export const databases: Messages = {
     ru: "Скопируйте целиком и положите в переменную окружения приложения (обычно DATABASE_URL). Одного хоста недостаточно — приложение не найдёт базу.",
     en: "Copy the whole string into your app's environment variable (usually DATABASE_URL). The host alone is not enough — your app will fail to resolve the database.",
   },
+  "databases.detail.access.dbUrlSeeded": {
+    ru: "DATABASE_URL уже записан в переменные окружения приложения {app} автоматически.",
+    en: "DATABASE_URL was already written into {app}'s environment variables automatically.",
+  },
   "databases.detail.access.externalDsn": { ru: "Строка подключения (внешняя)", en: "Connection string (external)" },
   "databases.detail.access.externalHost": { ru: "Внешний хост (публичный)", en: "External host (public)" },
   "databases.detail.access.externalWarning": {
