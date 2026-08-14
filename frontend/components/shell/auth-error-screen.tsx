@@ -13,14 +13,22 @@ import { ConsoleLangProvider, useT } from "@/lib/i18n/console/context";
  * the backend refused every request because the identity is new and
  * self-serve registration is currently closed - reloading or signing in
  * again cannot fix that, so this variant hides the retry button.
+ *
+ * `bootstrapFailed` is a fourth kind again: sign-in succeeded and self-serve
+ * registration is open, but the one-shot default-project provisioning that
+ * runs for a brand-new, zero-project account failed (network blip, backend
+ * error). Unlike `signupClosed` this IS retryable, so it keeps the retry
+ * button - wired to {@link useProjectContext}'s `retryBootstrap` instead of
+ * a page reload, since a reload alone would just replay the same failure.
  */
-export type AuthErrorVariant = "session" | "denied" | "callback" | "signupClosed";
+export type AuthErrorVariant = "session" | "denied" | "callback" | "signupClosed" | "bootstrapFailed";
 
 const TITLE_KEY: Record<AuthErrorVariant, string> = {
   session: "authError.title",
   denied: "authError.title",
   callback: "authError.title",
   signupClosed: "authError.title.signupClosed",
+  bootstrapFailed: "authError.title.bootstrapFailed",
 };
 
 const BODY_KEY: Record<AuthErrorVariant, string> = {
@@ -28,6 +36,7 @@ const BODY_KEY: Record<AuthErrorVariant, string> = {
   denied: "authError.body.denied",
   callback: "authError.body.callback",
   signupClosed: "authError.body.signupClosed",
+  bootstrapFailed: "authError.body.bootstrapFailed",
 };
 
 interface AuthErrorScreenProps {
@@ -44,7 +53,9 @@ function AuthErrorContent({ onRetry, onLogout, variant = "session" }: AuthErrorS
       <p className="max-w-md text-sm text-gray-600 dark:text-gray-400">{t(BODY_KEY[variant])}</p>
       <div className="flex flex-wrap items-center justify-center gap-3">
         {variant !== "signupClosed" && (
-          <Button onClick={onRetry}>{t(variant === "session" ? "authError.retry" : "authError.retryLogin")}</Button>
+          <Button onClick={onRetry}>
+            {t(variant === "session" || variant === "bootstrapFailed" ? "authError.retry" : "authError.retryLogin")}
+          </Button>
         )}
         <Button variant="outline" onClick={onLogout}>
           {t("authError.logout")}

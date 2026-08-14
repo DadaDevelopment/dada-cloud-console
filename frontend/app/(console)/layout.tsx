@@ -118,20 +118,29 @@ function ConsoleShell({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * Sits between {@link ProjectProvider} and the console shell so a
- * `signup_closed` 403 on the first authenticated request - see
- * {@link useProjectContext}'s `signupClosed` - renders the same dead-end
- * treatment as an `authError` instead of a shell with an empty project
- * switcher, which otherwise reads as a blank console.
+ * Sits between {@link ProjectProvider} and the console shell so two distinct
+ * bootstrap failures never render as a blank console with zero signal:
+ *   - a `signup_closed` 403 on the first authenticated request - see
+ *     {@link useProjectContext}'s `signupClosed` - renders the same dead-end
+ *     treatment as an `authError`, with no retry (the account genuinely
+ *     cannot be provisioned right now).
+ *   - a failed one-shot default-project provisioning for a fresh,
+ *     zero-project account - see `bootstrapError` - renders the same
+ *     dead-end shape but WITH a retry, wired to `retryBootstrap`.
+ * Both used to fall through to a shell with an empty project switcher.
  */
 function ConsoleGate({ children }: { children: React.ReactNode }) {
-  const { signupClosed } = useProjectContext();
+  const { signupClosed, bootstrapError, retryBootstrap } = useProjectContext();
   const { logout } = useAuth();
 
   if (signupClosed) {
     return (
       <AuthErrorScreen variant="signupClosed" onRetry={() => window.location.reload()} onLogout={logout} />
     );
+  }
+
+  if (bootstrapError) {
+    return <AuthErrorScreen variant="bootstrapFailed" onRetry={retryBootstrap} onLogout={logout} />;
   }
 
   return (

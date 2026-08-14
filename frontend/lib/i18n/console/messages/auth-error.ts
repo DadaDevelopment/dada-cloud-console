@@ -31,4 +31,10 @@ export const authError: Messages = {
     ru: "Вход прошёл нормально — дело не в этом. Мы временно не открываем новые аккаунты, попробуй зайти позже.",
     en: "Sign-in went through fine - this isn't a login problem. We aren't opening new accounts right now, check back later.",
   },
+
+  "authError.title.bootstrapFailed": { ru: "Не удалось создать проект", en: "Could not create a project" },
+  "authError.body.bootstrapFailed": {
+    ru: "Вход прошёл нормально — мы просто не смогли завести тебе первый проект. Попробуй ещё раз.",
+    en: "Sign-in went through fine - we just couldn't set up your first project. Try again.",
+  },
 };

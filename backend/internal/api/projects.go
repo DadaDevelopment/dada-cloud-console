@@ -436,12 +436,25 @@ func (h *Handler) EnsureDefaultProject(c *gin.Context) {
 		return
 	}
 	if err != pgx.ErrNoRows {
+		log.Printf("projects: ensure default project lookup user=%s: %v", claims.UserID, err)
+		h.recordAudit(ctx, claims.UserID, auditEntry{
+			Action:       "EnsureDefaultProject",
+			ResourceKind: "Project",
+			Outcome:      auditOutcomeFailure,
+			Metadata:     map[string]any{"reason": "lookup_failed", "status": http.StatusInternalServerError},
+		})
 		respondError(c, http.StatusInternalServerError, "failed to look up projects")
 		return
 	}
 
 	// No visible project — provision the default in the caller's personal org.
 	if claims.Username == "" {
+		h.recordAudit(ctx, claims.UserID, auditEntry{
+			Action:       "EnsureDefaultProject",
+			ResourceKind: "Project",
+			Outcome:      auditOutcomeFailure,
+			Metadata:     map[string]any{"reason": "no_username", "status": http.StatusBadRequest},
+		})
 		respondError(c, http.StatusBadRequest, "no username in token; cannot derive a personal org")
 		return
 	}
@@ -470,6 +483,13 @@ func (h *Handler) EnsureDefaultProject(c *gin.Context) {
 				return
 			}
 		}
+		log.Printf("projects: ensure default project insert user=%s slug=%s: %v", claims.UserID, slug, err)
+		h.recordAudit(ctx, claims.UserID, auditEntry{
+			Action:       "EnsureDefaultProject",
+			ResourceKind: "Project",
+			Outcome:      auditOutcomeFailure,
+			Metadata:     map[string]any{"reason": "create_failed", "status": http.StatusInternalServerError, "error": err.Error()},
+		})
 		respondError(c, http.StatusInternalServerError, "failed to create default project")
 		return
 	}

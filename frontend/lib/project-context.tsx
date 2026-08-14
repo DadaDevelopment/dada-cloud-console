@@ -24,6 +24,7 @@ import {
 } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { projectsApi, isSignupClosedError } from "./api";
+import { runDefaultProjectBootstrap, type BootstrapFailure } from "./project-bootstrap";
 import type { Project, Environment, MemberRole } from "./types";
 
 interface ProjectContextValue {
@@ -51,6 +52,16 @@ interface ProjectContextValue {
    * zero projects, which otherwise reads as a blank console.
    */
   signupClosed: boolean;
+  /**
+   * Set when the one-shot default-project provisioning (see `bootstrapped`
+   * below) failed for a reason other than `signup_closed` - the only class
+   * of dead signup this fixes: a fresh user with zero projects whose
+   * `ensureDefault()` call errored used to be caught silently, leaving them
+   * on a blank console with no signal and no way back. The shell renders a
+   * banner with a retry action when this is set.
+   */
+  bootstrapError: BootstrapFailure | null;
+  retryBootstrap: () => void;
   // environment selection
   selectedEnv: Environment | null;
   setSelectedEnvId: (envId: string) => void;
@@ -77,6 +88,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [signupClosed, setSignupClosed] = useState(false);
+  const [bootstrapError, setBootstrapError] = useState<BootstrapFailure | null>(null);
 
   const [project, setProject] = useState<Project | null>(null);
   const [environments, setEnvironments] = useState<Environment[]>([]);
@@ -104,6 +116,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setProjectsLoading(true);
     setSignupClosed(false);
+    setBootstrapError(null);
     projectsApi
       .list()
       .then(async (d) => {
@@ -113,20 +126,26 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         // the user lands inside a project instead of an empty overview.
         if (list.length === 0 && !bootstrapped.current) {
           bootstrapped.current = true;
-          try {
-            const def = await projectsApi.ensureDefault();
-            if (cancelled) return;
-            const refreshed = await projectsApi.list();
-            if (cancelled) return;
-            setProjects(refreshed.projects ?? []);
+          const outcome = await runDefaultProjectBootstrap({
+            ensureDefault: projectsApi.ensureDefault,
+            listProjects: projectsApi.list,
+          });
+          if (cancelled) return;
+          if (outcome.status === "provisioned") {
+            setProjects(outcome.projects);
             if (projectIdFromPath(window.location.pathname) === null) {
-              router.replace(`/projects/${def.project_id}`);
+              router.replace(`/projects/${outcome.projectId}`);
             }
             return;
-          } catch {
-            if (!cancelled) setProjects([]);
+          }
+          if (outcome.status === "signupClosed") {
+            setSignupClosed(true);
+            setProjects([]);
             return;
           }
+          setBootstrapError(outcome.failure);
+          setProjects([]);
+          return;
         }
         setProjects(list);
       })
@@ -223,6 +242,17 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   const refetch = useCallback(() => setReloadKey((k) => k + 1), []);
   const refetchProjects = useCallback(() => setProjectsReloadKey((k) => k + 1), []);
 
+  /**
+   * Resets the one-shot guard so the projects-list effect re-runs the
+   * default-project bootstrap instead of treating this session as already
+   * provisioned.
+   */
+  const retryBootstrap = useCallback(() => {
+    bootstrapped.current = false;
+    setBootstrapError(null);
+    setProjectsReloadKey((k) => k + 1);
+  }, []);
+
   const selectedEnv = useMemo(
     () => environments.find((e) => e.id === selectedEnvId) ?? null,
     [environments, selectedEnvId],
@@ -241,6 +271,8 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     refetch,
     refetchProjects,
     signupClosed,
+    bootstrapError,
+    retryBootstrap,
     selectedEnv,
     setSelectedEnvId,
   };
