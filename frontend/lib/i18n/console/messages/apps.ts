@@ -749,16 +749,16 @@ export const apps: Messages = {
     en: "Fill in the connection string from database {db}",
   },
   "apps.alerts.crash.cause.sslNotSupported": {
-    ru: "{key} требует SSL-соединение, а база данных его не поддерживает. Нажмите кнопку ниже — платформа допишет sslmode=disable в конец строки подключения и запустит новый деплой.",
-    en: "{key} requires an SSL connection, but the database does not support one. Click the button below — the platform will add sslmode=disable to the end of the connection string and start a new deploy.",
+    ru: "{key} требует SSL-соединение, а база данных его не поддерживает. Кнопка ниже допишет sslmode=disable в строку подключения и запустит новый деплой — это чинит строку подключения. Если приложение всё равно продолжит падать с той же ошибкой, значит SSL включён прямо в коде (например ssl: true при создании клиента БД) — тогда его нужно убрать из кода или подключаться по внешнему адресу, который SSL поддерживает; строка подключения тут уже ни при чём.",
+    en: "{key} requires an SSL connection, but the database does not support one. The button below adds sslmode=disable to the connection string and starts a new deploy — this fixes the connection string. If the app keeps crashing with the same error afterward, SSL is being forced directly in the code (e.g. ssl: true when creating the database client) — remove it there, or connect over an external address that does support SSL; the connection string is no longer the problem at that point.",
   },
   "apps.alerts.crash.cause.sslNotSupported.repair.cta": {
     ru: "Дописать sslmode=disable в {key}",
     en: "Add sslmode=disable to {key}",
   },
   "apps.alerts.crash.cause.sslNotSupported.repair.done": {
-    ru: "Исправлено — переменная обновлена, деплой запущен",
-    en: "Fixed — the variable was updated and a deploy was queued",
+    ru: "Готово — переменная обновлена, деплой запущен. Если ошибка повторится, дело не в строке подключения: SSL включён в коде приложения, и выключить его может только правка кода.",
+    en: "Done — the variable was updated and a deploy was queued. If the error comes back, the connection string is not the issue: SSL is being forced in the app's own code, and only a code change can turn it off.",
   },
   "apps.alerts.crash.cause.sslNotSupported.repair.error": {
     ru: "Не удалось исправить переменную окружения",
