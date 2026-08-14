@@ -213,6 +213,32 @@ func TestArchiveScriptsCarryNoSecret(t *testing.T) {
 	}
 }
 
+// TestArchiveDuckDBPhasesNeverCallABareBinary pins the failure that killed the
+// first real export run: the CLI lives at /duckdb in the image and nothing puts
+// it on PATH, so "duckdb -f ..." exited 127 and the run row only ever said
+// BackoffLimitExceeded.
+func TestArchiveDuckDBPhasesNeverCallABareBinary(t *testing.T) {
+	r := testArchiveRun()
+	creds := testArchiveCreds()
+	conn := archivePGConn{Host: "pg-shard-0.databases", Port: 5432, User: "postgres", Password: "x", Database: r.Datname}
+
+	scripts := map[string]string{
+		"export": archiveExportJob("db-archive-x-export", r, creds, conn, defaultDBArchiveExportImage).Spec.Template.Spec.Containers[0].Command[2],
+		"verify": archiveVerifyScript(r, creds),
+	}
+	for name, script := range scripts {
+		if !strings.Contains(script, archiveDuckDBResolve) {
+			t.Fatalf("%s script does not resolve the DuckDB binary:\n%s", name, script)
+		}
+		for _, line := range strings.Split(script, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "duckdb ") || strings.Contains(trimmed, "$(duckdb ") {
+				t.Fatalf("%s script calls duckdb through PATH: %q", name, trimmed)
+			}
+		}
+	}
+}
+
 func TestDuckDBEndpoint(t *testing.T) {
 	cases := []struct {
 		in     string

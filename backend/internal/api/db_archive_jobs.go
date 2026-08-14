@@ -22,6 +22,14 @@ const defaultDBArchiveExportImage = "datacatering/duckdb:v1.3.2"
 // extension. Same reasoning, same override.
 const defaultDBArchiveRepackImage = "hartmutcouk/pg-repack-docker:1.5.2"
 
+// archiveDuckDBResolve is the shell line every DuckDB phase starts with. The
+// upstream image ships the CLI as /duckdb and puts nothing on PATH, so a script
+// that calls "duckdb" dies with "command not found" -- which is exactly how the
+// first real export failed, three pods deep into the Job backoff, with the run
+// row blaming BackoffLimitExceeded. A mirrored image may well put the binary on
+// PATH, so the lookup prefers PATH and falls back to the known location.
+const archiveDuckDBResolve = "DUCKDB=$(command -v duckdb || echo /duckdb)"
+
 // archiveJobTTLSeconds keeps a finished Job around long enough for an operator
 // to read its logs after the run row already says what happened.
 const archiveJobTTLSeconds = int32(24 * 60 * 60)
@@ -117,12 +125,13 @@ cat > /tmp/newest.sql <<'SQL'
 %s
 SELECT coalesce(max(%s)::VARCHAR, '') FROM read_parquet('%s');
 SQL
-ROWS=$(duckdb -noheader -list -f /tmp/count.sql | tail -n 1)
+%s
+ROWS=$("$DUCKDB" -noheader -list -f /tmp/count.sql | tail -n 1)
 if [ "$ROWS" != "%d" ]; then
   echo "archive holds $ROWS rows, expected %d: refusing to delete"
   exit 1
 fi
-NEWEST=$(duckdb -noheader -list -f /tmp/newest.sql | tail -n 1)
+NEWEST=$("$DUCKDB" -noheader -list -f /tmp/newest.sql | tail -n 1)
 if [ -z "$NEWEST" ]; then
   echo "archive has no value in %s: refusing to delete"
   exit 1
@@ -135,6 +144,7 @@ echo "verified $ROWS rows, newest $NEWEST, cutoff %s"
 `,
 		settings, r.S3URI,
 		settings, duckDBIdentifier(r.CutoffColumn), r.S3URI,
+		archiveDuckDBResolve,
 		r.PlannedRows, r.PlannedRows,
 		r.CutoffColumn,
 		cutoff, cutoff, cutoff)
@@ -216,8 +226,9 @@ func archiveExportJob(name string, r archiveRun, creds cloudtask.S3Credentials, 
 cat > /tmp/export.sql <<'SQL'
 %s
 SQL
-duckdb -f /tmp/export.sql
-`, archiveExportSQL(r, creds))
+%s
+"$DUCKDB" -f /tmp/export.sql
+`, archiveExportSQL(r, creds), archiveDuckDBResolve)
 	return archiveJobSpec(name, image, script, append(archiveS3Env(creds), archivePGEnv(conn)...), r)
 }
 
