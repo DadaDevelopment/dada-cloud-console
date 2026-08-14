@@ -17,6 +17,12 @@ import (
 // the wrong tier keeps working, it is only measured against the wrong limit.
 const dbTierReconcileInterval = 1 * time.Hour
 
+// dbTierRetryAfter is how long a failed tier flip suppresses re-queuing the
+// same tier for the same database. Long enough that a structurally impossible
+// flip costs four operations a day instead of twenty-four, short enough that a
+// transient git or agent failure heals the same working day.
+const dbTierRetryAfter = 6 * time.Hour
+
 // dbTierInternal is the tier reserved for platform-owned databases: no storage
 // limit, so the quota watcher never measures them. The reconciler never
 // overwrites it, and writes it for every database of a DB_QUOTA_EXEMPT_ORGS org.
@@ -183,6 +189,13 @@ func (h *Handler) tieredDatabases(ctx context.Context) ([]tieredDatabase, error)
 // already in flight for this database. The dedupe is a single statement so two
 // replicas racing on the same tick cannot both insert, and so a slow gitops
 // agent cannot accumulate a queue of tier flips.
+//
+// The same statement backs off after a failure: a tier the agent already
+// rejected for this database is not re-queued for dbTierRetryAfter. A database
+// whose CR is not in git at all cannot be tiered by any number of retries, and
+// without the backoff the reconciler queued one operation per such database per
+// hour forever - 17 of them on the first production tick - burying real
+// failures in noise.
 func (h *Handler) enqueueDatabaseTier(ctx context.Context, d tieredDatabase, tier string) (uuid.UUID, error) {
 	payload, err := json.Marshal(models.SetDatabaseTierPayload{
 		Name:   d.Name,
@@ -201,8 +214,16 @@ func (h *Handler) enqueueDatabaseTier(ctx context.Context, d tieredDatabase, tie
 		   WHERE environment_id = $3 AND resource_kind = 'ServiceDatabaseV2' AND resource_name = $4::text
 		     AND action = 'SetDatabaseTier' AND status IN ('Created', 'Reconciling')
 		 )
+		 AND NOT EXISTS (
+		   SELECT 1 FROM operations
+		   WHERE environment_id = $3 AND resource_kind = 'ServiceDatabaseV2' AND resource_name = $4::text
+		     AND action = 'SetDatabaseTier' AND status = 'Failed'
+		     AND payload->>'tier' = $6::text
+		     AND created_at > now() - $7::interval
+		 )
 		 RETURNING id`,
-		systemDeployActorID, d.ProjectID, d.EnvironmentID, d.Name, payload,
+		systemDeployActorID, d.ProjectID, d.EnvironmentID, d.Name, payload, tier,
+		dbTierRetryAfter.String(),
 	).Scan(&opID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

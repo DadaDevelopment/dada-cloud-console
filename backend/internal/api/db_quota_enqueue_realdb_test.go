@@ -83,3 +83,65 @@ func TestEnqueueDatabaseOperations_AreAcceptedByPostgres(t *testing.T) {
 		t.Fatalf("order the archive bucket: %v", err)
 	}
 }
+
+// TestEnqueueDatabaseTier_BacksOffAfterAFailure covers the second half of the
+// dedupe: an in-flight operation is not the only reason to stay quiet. A tier
+// the gitops agent already rejected must not be re-queued every tick, or a
+// database whose CR is missing from git generates a failed operation an hour
+// forever. A different tier is still allowed through, so a plan change is never
+// swallowed by an unrelated failure.
+func TestEnqueueDatabaseTier_BacksOffAfterAFailure(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping tier backoff integration test")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect to TEST_DATABASE_URL: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	suffix := uuid.NewString()[:8]
+	var projectID, envID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO projects (name, display_name) VALUES ($1, $1) RETURNING id`,
+		"db-tier-backoff-test-"+suffix).Scan(&projectID); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+	t.Cleanup(func() { dropSeededProject(pool, projectID) })
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO environments (project_id, name, namespace, type) VALUES ($1, 'prod', $2, 'prod') RETURNING id`,
+		projectID, "ns-"+suffix).Scan(&envID); err != nil {
+		t.Fatalf("seed environment: %v", err)
+	}
+
+	h := &Handler{pool: pool}
+	name := "db-" + suffix
+	d := tieredDatabase{ProjectID: projectID, EnvironmentID: envID, Name: name, AppRef: name}
+
+	opID, err := h.enqueueDatabaseTier(ctx, d, "free")
+	if err != nil {
+		t.Fatalf("enqueue SetDatabaseTier: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE operations SET status = 'Failed', error_message = 'no ServiceDatabaseV2' WHERE id = $1`, opID); err != nil {
+		t.Fatalf("fail the operation: %v", err)
+	}
+
+	again, err := h.enqueueDatabaseTier(ctx, d, "free")
+	if err != nil {
+		t.Fatalf("re-enqueue after failure: %v", err)
+	}
+	if again != uuid.Nil {
+		t.Fatalf("a rejected tier was re-queued immediately as %s", again)
+	}
+
+	other, err := h.enqueueDatabaseTier(ctx, d, "starter")
+	if err != nil {
+		t.Fatalf("enqueue a different tier: %v", err)
+	}
+	if other == uuid.Nil {
+		t.Fatal("a plan change to another tier was swallowed by the backoff")
+	}
+}

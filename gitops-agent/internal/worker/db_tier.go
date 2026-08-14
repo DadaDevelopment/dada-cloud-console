@@ -8,7 +8,6 @@ import (
 
 	"github.com/dada-tuda/console/gitops-agent/internal/db"
 	"github.com/dada-tuda/console/gitops-agent/internal/git"
-	"github.com/dada-tuda/console/gitops-agent/internal/renderer"
 	"gopkg.in/yaml.v3"
 )
 
@@ -61,17 +60,9 @@ func (w *DBWatcher) doSetDatabaseTier(ctx context.Context, op db.Operation) erro
 		return err
 	}
 
-	valuesPath := renderer.ServiceDatabaseResourcesValuesGitPath(projectName, envName, p.AppRef)
-	rv, err := loadResourcesValues(mgr, valuesPath)
+	valuesPath, raw, err := locateServiceDatabase(mgr, projectName, envName, p.AppRef, p.Name)
 	if err != nil {
-		return err
-	}
-	raw, ok, err := rv.ManifestOfKind("ServiceDatabaseV2")
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("set database tier: no ServiceDatabaseV2 in %s", valuesPath)
+		return fmt.Errorf("set database tier: %w", err)
 	}
 
 	patched, changed, err := patchDatabaseTier(raw, p.Name, p.Tier)
