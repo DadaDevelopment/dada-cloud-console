@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
+	"github.com/dada-tuda/console/backend/internal/metrics"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -457,6 +459,7 @@ func writeAuditRow(ctx context.Context, pool *pgxpool.Pool, actorID uuid.UUID, e
 		}
 		var pgErr *pgconn.PgError
 		if !errors.As(err, &pgErr) || pgErr.Code != pgForeignKeyViolation {
+			logAuditWriteFailure(e.Action, "other", err)
 			return
 		}
 		switch pgErr.ConstraintName {
@@ -470,9 +473,24 @@ func writeAuditRow(ctx context.Context, pool *pgxpool.Pool, actorID uuid.UUID, e
 			unresolved["unresolved_operation_id"] = operationID.String()
 			operationID = uuid.Nil
 		default:
+			logAuditWriteFailure(e.Action, "fk_unresolved", err)
 			return
 		}
 	}
+	logAuditWriteFailure(e.Action, "fk_unresolved", errors.New("exhausted foreign key resolution attempts"))
+}
+
+// logAuditWriteFailure is the one place a dropped audit_events row becomes
+// visible. writeAuditRow's contract is best-effort -- a failed audit write
+// must never fail the request that triggered it -- but best-effort must not
+// mean silent: before this, a Postgres error here (a constraint no caller
+// anticipated, a column too narrow, a connection reset) vanished with no log
+// line and no metric, and the row it would have written was gone for good.
+// See backend/internal/metrics/audit_write.go for the live incident that
+// exposed this.
+func logAuditWriteFailure(action, reason string, err error) {
+	log.Printf("audit: dropped %s row (%s): %v", action, reason, err)
+	metrics.RecordAuditWriteFailure(action, reason)
 }
 
 // pgForeignKeyViolation is PostgreSQL's SQLSTATE for a violated foreign key.
