@@ -36,6 +36,12 @@ export const databases: Messages = {
   },
   "databases.modal.pgName.label": { ru: "Имя базы PostgreSQL", en: "PostgreSQL DB Name" },
   "databases.modal.pgName.hint": { ru: "(сгенерировано автоматически)", en: "(auto-generated)" },
+  "databases.modal.appRef.label": { ru: "Приложение", en: "Application" },
+  "databases.modal.appRef.none": { ru: "Не привязывать", en: "No binding" },
+  "databases.modal.appRef.hint": {
+    ru: "При привязке DATABASE_URL будет проставлен в переменные окружения приложения автоматически",
+    en: "When bound, DATABASE_URL is set in the app's environment variables automatically",
+  },
   "databases.modal.backups.title": { ru: "Включить резервные копии", en: "Enable Backups" },
   "databases.modal.backups.subtitle": { ru: "Автоматические плановые резервные копии", en: "Automatic scheduled backups" },
   "databases.modal.schedule.label": { ru: "Расписание", en: "Backup Schedule" },

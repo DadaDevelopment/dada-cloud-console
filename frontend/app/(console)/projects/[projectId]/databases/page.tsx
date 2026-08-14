@@ -2,7 +2,7 @@
 import { useEffect, useState, FormEvent } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { databasesApi } from "@/lib/api";
+import { databasesApi, appsApi } from "@/lib/api";
 import { docsHref } from "@/lib/site";
 import type { ResourceSnapshot } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
@@ -22,6 +22,7 @@ import { QuotaUpsell } from "@/components/billing/quota-upsell";
 interface CreateDbForm {
   name: string;
   database: string;
+  app_ref: string;
   backup_enabled: boolean;
   backup_schedule: string;
   backup_retention: string;
@@ -68,6 +69,7 @@ export default function DatabasesPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [form, setForm] = useState<CreateDbForm>(() => ({
     ...generateDbNames(),
+    app_ref: "",
     backup_enabled: false,
     backup_schedule: "daily",
     backup_retention: "7d",
@@ -75,9 +77,22 @@ export default function DatabasesPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [quotaBlock, setQuotaBlock] = useState<{ resource: string; limit?: number } | null>(null);
+  const [apps, setApps] = useState<ResourceSnapshot[]>([]);
 
   function openCreateModal() {
-    setForm((prev) => ({ ...prev, ...generateDbNames() }));
+    if (selectedEnvId) {
+      appsApi
+        .list(projectId, selectedEnvId)
+        .then((data) => {
+          const list = data.apps ?? [];
+          setApps(list);
+          if (list.length === 1) {
+            setForm((prev) => ({ ...prev, app_ref: list[0].name }));
+          }
+        })
+        .catch(() => setApps([]));
+    }
+    setForm((prev) => ({ ...prev, ...generateDbNames(), app_ref: "" }));
     setSubmitError(null);
     setQuotaBlock(null);
     setIsModalOpen(true);
@@ -124,13 +139,13 @@ export default function DatabasesPage() {
       await databasesApi.create(projectId, selectedEnvId, {
         name: form.name,
         database: form.database,
-        app_ref: "",
+        app_ref: form.app_ref,
         backup_enabled: form.backup_enabled,
         backup_schedule: form.backup_schedule,
         backup_retention: form.backup_retention,
       });
       setIsModalOpen(false);
-      setForm({ ...generateDbNames(), backup_enabled: false, backup_schedule: "daily", backup_retention: "7d" });
+      setForm({ ...generateDbNames(), app_ref: "", backup_enabled: false, backup_schedule: "daily", backup_retention: "7d" });
       setRefreshTick((v) => v + 1);
     } catch (err) {
       const quota = err as { code?: string; resource?: string; limit?: number } | undefined;
@@ -288,6 +303,25 @@ export default function DatabasesPage() {
               title={t("databases.modal.name.validation")}
               className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
+              {t("databases.modal.appRef.label")}
+            </label>
+            <select
+              value={form.app_ref}
+              onChange={(e) => handleFormChange("app_ref", e.target.value)}
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="">{t("databases.modal.appRef.none")}</option>
+              {apps.map((app) => (
+                <option key={app.name} value={app.name}>
+                  {app.name}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("databases.modal.appRef.hint")}</p>
           </div>
 
           <div className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-800 px-4 py-3">

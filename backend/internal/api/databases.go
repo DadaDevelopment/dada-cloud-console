@@ -256,12 +256,51 @@ func (f *opFault) Error() string { return f.Message }
 // managedDatabaseResult is what provisioning a managed database produced: the
 // queued operation, plus the runtime and engine the caller needs for its audit
 // record — both are decided inside the core from the environment, so a caller
-// that guessed them would be recording a guess.
+// that guessed them would be recording a guess. AppRef is the binding actually
+// used (the caller's request value, or the sole-app auto-resolution below),
+// which can differ from the request the caller sent.
 type managedDatabaseResult struct {
 	Operation models.Operation
 	Runtime   string
 	Engine    string
 	Shard     string
+	AppRef    string
+}
+
+// resolveSoleAppRef auto-binds a database to an app when the caller left
+// app_ref empty and the environment holds exactly one App resource: any other
+// count (zero, or two-plus) is ambiguous and is left unresolved rather than
+// guessed. The console has no app picker on the create-database form today, so
+// every managed database is ordered with app_ref="" -- without this, no
+// Crossplane database is ever bound to its app, deliverDatabaseDSNAsync never
+// starts, and DATABASE_URL is never seeded.
+func (h *Handler) resolveSoleAppRef(ctx context.Context, projectID, envID uuid.UUID) (string, error) {
+	rows, err := h.pool.Query(ctx,
+		`SELECT name FROM resource_snapshots WHERE project_id = $1 AND environment_id = $2 AND kind = 'App'`,
+		projectID, envID,
+	)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	var only string
+	count := 0
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return "", err
+		}
+		count++
+		only = name
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	if count != 1 {
+		return "", nil
+	}
+	return only, nil
 }
 
 // createManagedDatabase validates a database request and queues its operation.
@@ -321,6 +360,13 @@ func (h *Handler) createManagedDatabase(ctx context.Context, actorID, projectID,
 	var runtime string
 	_ = h.pool.QueryRow(ctx, `SELECT runtime FROM environments WHERE id = $1`, envID).Scan(&runtime)
 
+	appRef := req.AppRef
+	if appRef == "" {
+		if resolved, rerr := h.resolveSoleAppRef(ctx, projectID, envID); rerr == nil {
+			appRef = resolved
+		}
+	}
+
 	engine := ""
 	if runtime == "vm" {
 		engine = "postgres"
@@ -338,9 +384,9 @@ func (h *Handler) createManagedDatabase(ctx context.Context, actorID, projectID,
 				return nil, &opFault{http.StatusInternalServerError, "seed_credentials_failed", "failed to seed database credentials"}
 			}
 		}
-		if req.AppRef != "" {
+		if appRef != "" {
 			dsn := fmt.Sprintf("postgres://%s:%s@%s:5432/%s?sslmode=disable", dbUser, password, req.Name, req.Database)
-			if err := h.seedEnvVar(ctx, envID, req.AppRef, "DATABASE_URL", dsn, actorID); err != nil {
+			if err := h.seedEnvVar(ctx, envID, appRef, "DATABASE_URL", dsn, actorID); err != nil {
 				return nil, &opFault{http.StatusInternalServerError, "seed_dsn_failed", "failed to inject database connection string"}
 			}
 		}
@@ -358,7 +404,7 @@ func (h *Handler) createManagedDatabase(ctx context.Context, actorID, projectID,
 	payload := models.CreateServiceDatabasePayload{
 		Name:            req.Name,
 		Database:        req.Database,
-		AppRef:          req.AppRef,
+		AppRef:          appRef,
 		Engine:          engine,
 		Tier:            tier,
 		Shard:           shard,
@@ -393,10 +439,10 @@ func (h *Handler) createManagedDatabase(ctx context.Context, actorID, projectID,
 	if err = seedOptimisticSnapshot(ctx, tx, projectID, envID, "ServiceDatabaseV2", req.Name, map[string]any{
 		"name":     req.Name,
 		"kind":     "ServiceDatabaseV2",
-		"app_ref":  req.AppRef,
+		"app_ref":  appRef,
 		"database": req.Database,
 		"spec": map[string]any{
-			"appRef":   req.AppRef,
+			"appRef":   appRef,
 			"database": req.Database,
 		},
 	}); err != nil {
@@ -407,11 +453,11 @@ func (h *Handler) createManagedDatabase(ctx context.Context, actorID, projectID,
 		return nil, &opFault{http.StatusInternalServerError, "tx_commit_failed", "failed to create operation"}
 	}
 
-	if engine == "" && req.AppRef != "" {
-		go h.deliverDatabaseDSNAsync(context.Background(), projectID, envID, req.Name, req.AppRef, actorID)
+	if engine == "" && appRef != "" {
+		go h.deliverDatabaseDSNAsync(context.Background(), projectID, envID, req.Name, appRef, actorID)
 	}
 
-	return &managedDatabaseResult{Operation: op, Runtime: runtime, Engine: engine, Shard: shard}, nil
+	return &managedDatabaseResult{Operation: op, Runtime: runtime, Engine: engine, Shard: shard, AppRef: appRef}, nil
 }
 
 // CreateServiceDatabase enqueues an operation to provision a new ServiceDatabase CRD.
@@ -512,7 +558,8 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 
 	audit(res.Operation.ID, auditOutcomeSuccess, map[string]any{
 		"database":         req.Database,
-		"app_ref":          req.AppRef,
+		"app_ref":          res.AppRef,
+		"app_ref_resolved": res.AppRef != "" && req.AppRef == "",
 		"engine":           res.Engine,
 		"runtime":          res.Runtime,
 		"shard":            res.Shard,
