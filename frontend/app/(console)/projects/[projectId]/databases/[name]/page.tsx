@@ -24,6 +24,12 @@ import { StateChip } from "@/components/ui/state-chip";
 import type { ChipTone } from "@/components/ui/state-chip";
 import { canMutate } from "@/lib/rbac";
 import { maskDsnPassword } from "@/lib/dsn";
+import {
+  credentialsRetryBudgetMs,
+  revealCredentialsWithProvisionRetry,
+  type CredentialsRetryProgress,
+  type DatabaseCredentialsErrorKind,
+} from "@/lib/db-credentials-retry";
 import { timeAgo } from "@/lib/format";
 import { useT } from "@/lib/i18n/console/context";
 import { DbInsights } from "@/components/databases/db-insights";
@@ -158,22 +164,48 @@ export default function DatabaseDetailPage() {
   const [creds, setCreds] = useState<DatabaseCredentialsWithSeedInfo | null>(null);
   const [credsLoading, setCredsLoading] = useState(false);
   const [revealPw, setRevealPw] = useState(false);
-  const [credsError, setCredsError] = useState<{ kind: "notReady" | "notConfigured" | "generic"; message?: string } | null>(null);
+  const [credsError, setCredsError] = useState<{ kind: DatabaseCredentialsErrorKind; message?: string } | null>(null);
+  const [credsRetry, setCredsRetry] = useState<CredentialsRetryProgress | null>(null);
 
+  /**
+   * Reveals credentials, waiting out a database whose secret has not been
+   * written yet instead of handing that wait back to the user as another
+   * blind click. `Committed` on the provisioning operation is not a promise
+   * that the secret exists - a measured production case had it appear 78
+   * seconds later - so the retry schedule outlasts that gap.
+   */
   async function revealCreds() {
     setCredsLoading(true);
     setCredsError(null);
-    try {
-      const r = await databasesApi.credentials(projectId, envId, name);
-      setCreds(r as DatabaseCredentialsWithSeedInfo);
-    } catch (e) {
-      const status = (e as { status?: number } | undefined)?.status;
-      if (status === 404) setCredsError({ kind: "notReady" });
-      else if (status === 503) setCredsError({ kind: "notConfigured" });
-      else setCredsError({ kind: "generic", message: e instanceof Error ? e.message : t("databases.detail.access.error") });
-    } finally {
-      setCredsLoading(false);
+    setCredsRetry(null);
+    const result = await revealCredentialsWithProvisionRetry(
+      () => databasesApi.credentials(projectId, envId, name),
+      { onRetry: setCredsRetry },
+    );
+    setCredsRetry(null);
+    setCredsLoading(false);
+    if (result.ok) {
+      setCreds(result.value as DatabaseCredentialsWithSeedInfo);
+      return;
     }
+    setCredsError({ kind: result.kind, message: credsErrorMessage(result) });
+  }
+
+  /**
+   * Picks the copy for a failed reveal. A `notReady` that survived the whole
+   * retry schedule is a different message from one seen on the first try:
+   * telling someone "still provisioning" after three minutes of waiting has
+   * to name the wait, or it reads as the button doing nothing.
+   */
+  function credsErrorMessage(result: { ok: false; kind: DatabaseCredentialsErrorKind; error: unknown; retries: number }): string {
+    if (result.kind === "notConfigured") return t("databases.detail.access.notConfigured");
+    if (result.kind === "generic") {
+      return result.error instanceof Error ? result.error.message : t("databases.detail.access.error");
+    }
+    if (result.retries === 0) return t("databases.detail.access.notReady");
+    return t("databases.detail.access.notReadyExhausted", {
+      minutes: Math.round(credentialsRetryBudgetMs() / 60_000),
+    });
   }
 
   useEffect(() => {
@@ -467,13 +499,17 @@ export default function DatabaseDetailPage() {
                   >
                     {credsLoading ? <><Spinner size="sm" /> {t("databases.detail.access.revealing")}</> : t("databases.detail.access.revealBtn")}
                   </button>
+                  {credsRetry && (
+                    <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">
+                      {t("databases.detail.access.provisioning", {
+                        attempt: credsRetry.attempt,
+                        total: credsRetry.totalAttempts,
+                      })}
+                    </p>
+                  )}
                   {credsError && (
                     <p className={`mt-3 text-sm ${credsError.kind === "generic" ? "text-red-600 dark:text-red-400" : "text-gray-500 dark:text-gray-400"}`}>
-                      {credsError.kind === "notReady"
-                        ? t("databases.detail.access.notReady")
-                        : credsError.kind === "notConfigured"
-                          ? t("databases.detail.access.notConfigured")
-                          : credsError.message}
+                      {credsError.message}
                     </p>
                   )}
                 </>

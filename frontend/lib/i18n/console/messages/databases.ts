@@ -91,6 +91,14 @@ export const databases: Messages = {
     ru: "Учётные данные пока недоступны -- база данных ещё создаётся.",
     en: "Credentials are not available yet -- the database is still provisioning.",
   },
+  "databases.detail.access.provisioning": {
+    ru: "База данных ещё создаётся. Ждём готовности учётных данных, попытка {attempt} из {total} -- закрывать страницу не нужно.",
+    en: "The database is still provisioning. Waiting for credentials, attempt {attempt} of {total} -- no need to leave this page.",
+  },
+  "databases.detail.access.notReadyExhausted": {
+    ru: "Учётные данные так и не появились за {minutes} мин -- база данных всё ещё создаётся. Попробуйте показать их ещё раз чуть позже.",
+    en: "Credentials did not appear within {minutes} min -- the database is still provisioning. Try revealing them again a little later.",
+  },
   "databases.detail.access.notConfigured": {
     ru: "Показ учётных данных не настроен для этого окружения.",
     en: "Credential reveal is not configured for this environment.",
