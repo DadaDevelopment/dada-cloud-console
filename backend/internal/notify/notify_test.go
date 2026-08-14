@@ -5,6 +5,7 @@ import (
 	"mime/quotedprintable"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestClassifyCrashLogPython(t *testing.T) {
@@ -460,5 +461,39 @@ func TestClassifyCrashCauseOrdinaryAppOutputIsNotNeedsArgs(t *testing.T) {
 		if kind, _ := ClassifyCrashCause(excerpt); kind == CauseKindNeedsArgs {
 			t.Fatalf("excerpt %q must not classify as needs-args", excerpt)
 		}
+	}
+}
+
+func TestComposeDatabaseQuotaGraceEndingCountsDownAndOffersEveryWayOut(t *testing.T) {
+	until := time.Date(2026, 8, 15, 9, 0, 0, 0, time.UTC)
+	subject, body := ComposeDatabaseQuotaGraceEnding("odds-research", 1.4, 1, until, 6, "https://console.example/db")
+	if !strings.Contains(subject, "6 ч") {
+		t.Fatalf("subject must carry the hours left, got %q", subject)
+	}
+	if !strings.Contains(body, "15.08.2026 09:00 UTC") {
+		t.Fatalf("body must state the deadline, got %q", body)
+	}
+	for _, want := range []string{"1.4", "Parquet", "Резервные копии"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body must mention %q, got %q", want, body)
+		}
+	}
+}
+
+func TestComposeDatabaseArchiveDoneTellsTheOwnerHowToReadItBack(t *testing.T) {
+	_, body := ComposeDatabaseArchiveDone("odds-research", "public.events", "01.02.2026", 1234567, 2.5,
+		"s3://dada-archive-1111/events/2026-02-01.parquet", true, "https://console.example/db")
+	for _, want := range []string{"s3://dada-archive-1111/events/2026-02-01.parquet", "read_parquet", "01.02.2026"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body must mention %q, got %q", want, body)
+		}
+	}
+}
+
+func TestComposeDatabaseArchiveDoneSeparatesAutomaticFromRequested(t *testing.T) {
+	_, auto := ComposeDatabaseArchiveDone("db", "public.events", "01.02.2026", 10, 1, "s3://b/o", true, "")
+	_, manual := ComposeDatabaseArchiveDone("db", "public.events", "01.02.2026", 10, 1, "s3://b/o", false, "")
+	if auto == manual {
+		t.Fatal("an archive the platform started must not read like one the owner asked for")
 	}
 }

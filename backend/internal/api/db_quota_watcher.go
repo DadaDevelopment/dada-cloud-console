@@ -23,17 +23,34 @@ import (
 // volume watcher's 15m.
 const dbQuotaWatchInterval = 30 * time.Minute
 
-// The quota ladder. A single threshold would flap: a database sitting exactly
-// at its limit would alternate between enforced and released on every tick,
-// and each flip is a commit plus an ALTER ROLE. The release threshold is
-// therefore well below the enforce threshold, and only a database that keeps
-// growing while already read-only reaches frozen.
+// The quota ladder: none -> warn(80%) -> read-only(100%), released at 90%.
+// A single threshold would flap: a database sitting exactly at its limit would
+// alternate between enforced and released on every tick, and each flip is a
+// commit plus an ALTER ROLE. The release threshold is therefore well below the
+// enforce threshold.
+//
+// read-only is the last rung on purpose. The XRD still accepts "frozen"
+// (revoking CONNECT) for compatibility, but nothing here ever asks for it: a
+// database whose owner cannot connect cannot be inspected, archived or emptied,
+// so freezing removes the only ways out of the state it punishes.
 const (
 	dbQuotaWarnRatio    = 0.80
 	dbQuotaEnforceRatio = 1.00
-	dbQuotaFreezeRatio  = 1.25
 	dbQuotaReleaseRatio = 0.90
 )
+
+// dbQuotaGraceWindow is how long a database that is already over quota when a
+// tier is first applied to it keeps full write access. Enforcement there is not
+// a reaction to growth the owner watched happen -- the limit arrived under data
+// that already existed -- so the owner gets a day, plus mail and a banner, to
+// archive, delete or upgrade before the ladder resumes.
+const dbQuotaGraceWindow = 24 * time.Hour
+
+// dbQuotaGraceReminderLead is how long before the grace deadline the last
+// letter goes out. Six hours is inside the same working day as the deadline for
+// most of the estate, which is what makes it a reminder rather than a second
+// copy of the first letter.
+const dbQuotaGraceReminderLead = 6 * time.Hour
 
 // dbQuotaWarnCooldown caps warning mail at one per database per window, the
 // same anti-spam contract the volume watcher uses. State-change mail
@@ -84,8 +101,8 @@ func (h *Handler) StartDBQuotaWatcher(ctx context.Context) {
 		return
 	}
 	w := &dbQuotaWatcher{h: h}
-	log.Printf("db-quota: watcher started interval=%s warn=%.2f enforce=%.2f freeze=%.2f release=%.2f",
-		dbQuotaWatchInterval, dbQuotaWarnRatio, dbQuotaEnforceRatio, dbQuotaFreezeRatio, dbQuotaReleaseRatio)
+	log.Printf("db-quota: watcher started interval=%s warn=%.2f enforce=%.2f release=%.2f grace=%s",
+		dbQuotaWatchInterval, dbQuotaWarnRatio, dbQuotaEnforceRatio, dbQuotaReleaseRatio, dbQuotaGraceWindow)
 	go func() {
 		runWithAdvisoryLock(ctx, h.pool, lockKeyDBQuotaWatch, "db-quota", w.tick)
 		t := time.NewTicker(dbQuotaWatchInterval)
@@ -111,7 +128,9 @@ type managedDatabase struct {
 	Datname       string
 	AppRef        string
 	Tier          string
+	Shard         string
 	State         string
+	GraceUntil    *time.Time
 }
 
 // dbSizesByDatnameFrom extracts datname → bytes out of raw pg_database_size_bytes
@@ -138,30 +157,43 @@ func dbSizesByDatnameFrom(samples []prometheus.Sample) map[string]int64 {
 // keeps a database parked at its limit from flapping between states (and
 // therefore from producing a commit per tick).
 //
-// Freezing is reachable only from read-only: a database that jumps straight
-// past dbQuotaFreezeRatio between two ticks still gets read-only first, so an
-// owner always sees the reversible state before the disruptive one.
+// A database recorded as frozen by an older build falls through the default
+// branch and is re-decided as read-only or none, which is the intended
+// one-way downgrade: this worker never asks for frozen again.
 func decideDBQuotaState(current string, ratio float64) string {
-	switch current {
-	case dbEnforcementFrozen:
+	if current == dbEnforcementReadOnly {
 		if ratio < dbQuotaReleaseRatio {
 			return dbEnforcementNone
-		}
-		return dbEnforcementFrozen
-	case dbEnforcementReadOnly:
-		if ratio < dbQuotaReleaseRatio {
-			return dbEnforcementNone
-		}
-		if ratio >= dbQuotaFreezeRatio {
-			return dbEnforcementFrozen
 		}
 		return dbEnforcementReadOnly
-	default:
-		if ratio >= dbQuotaEnforceRatio {
-			return dbEnforcementReadOnly
-		}
-		return dbEnforcementNone
 	}
+	if ratio >= dbQuotaEnforceRatio {
+		return dbEnforcementReadOnly
+	}
+	return dbEnforcementNone
+}
+
+// applyDBQuotaGrace holds back the first enforcement of a database for
+// dbQuotaGraceWindow. It returns the state to actually apply, whether a grace
+// window should be opened now, and the grace deadline to persist (nil clears
+// it).
+//
+// Grace is granted once per excursion, not once per tick: the deadline is
+// stored, and it is only cleared when the database comes back under the
+// release threshold. Without that, every tick would re-grant a fresh day and
+// the ladder would never advance.
+func applyDBQuotaGrace(want string, graceUntil *time.Time, now time.Time) (state string, startGrace bool, keep *time.Time) {
+	if want != dbEnforcementReadOnly {
+		return want, false, nil
+	}
+	if graceUntil == nil {
+		until := now.Add(dbQuotaGraceWindow)
+		return dbEnforcementNone, true, &until
+	}
+	if now.Before(*graceUntil) {
+		return dbEnforcementNone, false, graceUntil
+	}
+	return dbEnforcementReadOnly, false, graceUntil
 }
 
 // tick measures every managed database once and applies the ladder. Every
@@ -196,8 +228,20 @@ func (w *dbQuotaWatcher) tick(ctx context.Context) {
 		}
 		measured++
 		ratio := float64(size) / float64(limit)
-		want := decideDBQuotaState(d.State, ratio)
-		w.recordQuotaState(ctx, d, limit, size, ratio, want)
+		ladder := decideDBQuotaState(d.State, ratio)
+		want, startGrace, grace := applyDBQuotaGrace(ladder, d.GraceUntil, time.Now())
+		w.recordQuotaState(ctx, d, limit, size, ratio, want, grace)
+		if startGrace {
+			w.notifyGraceStarted(ctx, d, size, limit, *grace)
+			w.maybeAutoArchive(ctx, d, d.Shard, size, limit)
+			continue
+		}
+		if ratio >= dbQuotaEnforceRatio {
+			w.maybeAutoArchive(ctx, d, d.Shard, size, limit)
+		}
+		if grace != nil && want == dbEnforcementNone {
+			w.maybeRemindGrace(ctx, d, size, limit, *grace)
+		}
 		if want != d.State {
 			enforced++
 			w.applyEnforcement(ctx, d, want, size, limit)
@@ -218,7 +262,7 @@ func (w *dbQuotaWatcher) tick(ctx context.Context) {
 func (h *Handler) managedDatabasesForQuota(ctx context.Context) ([]managedDatabase, error) {
 	rows, err := h.pool.Query(ctx,
 		`SELECT rs.project_id, rs.environment_id, rs.name, rs.summary_json,
-		        COALESCE(q.state, '')
+		        COALESCE(q.state, ''), q.grace_until
 		 FROM resource_snapshots rs
 		 LEFT JOIN db_quota_state q
 		        ON q.environment_id = rs.environment_id AND q.name = rs.name
@@ -232,7 +276,7 @@ func (h *Handler) managedDatabasesForQuota(ctx context.Context) ([]managedDataba
 	for rows.Next() {
 		var d managedDatabase
 		var summaryRaw []byte
-		if err := rows.Scan(&d.ProjectID, &d.EnvironmentID, &d.Name, &summaryRaw, &d.State); err != nil {
+		if err := rows.Scan(&d.ProjectID, &d.EnvironmentID, &d.Name, &summaryRaw, &d.State, &d.GraceUntil); err != nil {
 			return nil, err
 		}
 		var summary struct {
@@ -248,6 +292,7 @@ func (h *Handler) managedDatabasesForQuota(ctx context.Context) ([]managedDataba
 		d.Datname = summary.Spec.Database
 		d.AppRef = summary.Spec.AppRef
 		d.Tier = summary.Tier
+		d.Shard = serviceDatabaseShard(summaryRaw)
 		if d.Tier == "" {
 			d.Tier = "unlimited"
 		}
@@ -262,14 +307,15 @@ func (h *Handler) managedDatabasesForQuota(ctx context.Context) ([]managedDataba
 	return out, rows.Err()
 }
 
-// recordQuotaState persists the measurement and the decided state. state_since
-// only moves when the state actually changes, so the console can say how long a
-// database has been read-only rather than "since the last tick".
-func (w *dbQuotaWatcher) recordQuotaState(ctx context.Context, d managedDatabase, limit, size int64, ratio float64, state string) {
+// recordQuotaState persists the measurement, the decided state and the grace
+// deadline. state_since only moves when the state actually changes, so the
+// console can say how long a database has been read-only rather than "since the
+// last tick".
+func (w *dbQuotaWatcher) recordQuotaState(ctx context.Context, d managedDatabase, limit, size int64, ratio float64, state string, graceUntil *time.Time) {
 	_, err := w.h.pool.Exec(ctx,
 		`INSERT INTO db_quota_state
-		   (environment_id, name, project_id, tier, limit_bytes, size_bytes, ratio, state, state_since, last_seen_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW(), NOW())
+		   (environment_id, name, project_id, tier, limit_bytes, size_bytes, ratio, state, grace_until, state_since, last_seen_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW(), NOW())
 		 ON CONFLICT (environment_id, name) DO UPDATE SET
 		   project_id = EXCLUDED.project_id,
 		   tier = EXCLUDED.tier,
@@ -277,11 +323,14 @@ func (w *dbQuotaWatcher) recordQuotaState(ctx context.Context, d managedDatabase
 		   size_bytes = EXCLUDED.size_bytes,
 		   ratio = EXCLUDED.ratio,
 		   state = EXCLUDED.state,
+		   grace_until = EXCLUDED.grace_until,
+		   grace_reminded_at = CASE WHEN db_quota_state.grace_until IS DISTINCT FROM EXCLUDED.grace_until
+		                            THEN NULL ELSE db_quota_state.grace_reminded_at END,
 		   state_since = CASE WHEN db_quota_state.state = EXCLUDED.state
 		                      THEN db_quota_state.state_since ELSE NOW() END,
 		   last_seen_at = NOW(),
 		   updated_at = NOW()`,
-		d.EnvironmentID, d.Name, d.ProjectID, d.Tier, limit, size, ratio, state)
+		d.EnvironmentID, d.Name, d.ProjectID, d.Tier, limit, size, ratio, state, graceUntil)
 	if err != nil {
 		log.Printf("db-quota: state write for %s failed: %v", d.Name, err)
 	}
@@ -386,6 +435,108 @@ func (w *dbQuotaWatcher) notifyEnforcement(ctx context.Context, d managedDatabas
 		return
 	}
 	w.h.recordNotifySend(ctx, d.ProjectID, "DatabaseQuota", d.Name, source, nil)
+}
+
+// notifyGraceStarted mails the owner when the grace window opens. It reuses the
+// operator fallback of notifyEnforcement for the same reason: a database that
+// will stop accepting writes tomorrow must not do so unannounced because the
+// project has no reachable owner.
+func (w *dbQuotaWatcher) notifyGraceStarted(ctx context.Context, d managedDatabase, size, limit int64, until time.Time) {
+	log.Printf("db-quota: %s over quota at first sight (%.0f%%), grace until %s",
+		d.Name, float64(size)/float64(limit)*100, until.UTC().Format(time.RFC3339))
+
+	w.h.recordSystemAudit(ctx, auditEntry{
+		ProjectID:     d.ProjectID,
+		EnvironmentID: d.EnvironmentID,
+		Action:        "DatabaseQuotaGrace",
+		ResourceKind:  "ServiceDatabaseV2",
+		ResourceName:  d.Name,
+		Metadata: map[string]any{
+			"tier":        d.Tier,
+			"size_bytes":  size,
+			"limit_bytes": limit,
+			"grace_until": until.UTC().Format(time.RFC3339),
+		},
+	})
+
+	if w.h.auditNotifier == nil {
+		return
+	}
+	to, source := w.h.resolveAlertRecipient(ctx, d.ProjectID)
+	if to == "" {
+		to = w.h.auditNotifyEmail
+		source = alertSourceOperator
+	}
+	if to == "" {
+		log.Printf("db-quota: no recipient for project %s, dropping grace notice for %s", d.ProjectID, d.Name)
+		return
+	}
+	subject, body := notify.ComposeDatabaseQuotaGrace(
+		d.Name, d.Tier, gigabytes(size), gigabytes(limit), until.UTC(), w.h.databasesConsoleLink(d.ProjectID))
+	if source == alertSourceOperator {
+		subject, body = notify.ComposeNoOwnerFallback(d.ProjectID.String(), w.h.projectDisplayName(ctx, d.ProjectID), subject, body)
+	}
+	if err := w.h.auditNotifier.Send(to, subject, body); err != nil {
+		log.Printf("db-quota: grace notice to %s failed for %s: %v", to, d.Name, err)
+		w.h.recordNotifySend(ctx, d.ProjectID, "DatabaseQuotaGrace", d.Name, source, err)
+		return
+	}
+	w.h.recordNotifySend(ctx, d.ProjectID, "DatabaseQuotaGrace", d.Name, source, nil)
+}
+
+// maybeRemindGrace sends the single letter that goes out shortly before a
+// grace window closes.
+//
+// The claim is a conditional UPDATE rather than a decision made from the
+// deadline: "under six hours left" stays true for twelve consecutive ticks, and
+// an owner who receives the same warning twelve times stops reading any of
+// them. A new grace window clears the claim, so a database that goes over quota
+// again later is reminded again.
+func (w *dbQuotaWatcher) maybeRemindGrace(ctx context.Context, d managedDatabase, size, limit int64, until time.Time) {
+	left := time.Until(until)
+	if left <= 0 || left > dbQuotaGraceReminderLead {
+		return
+	}
+	if w.h.auditNotifier == nil {
+		return
+	}
+	to, source := w.h.resolveAlertRecipient(ctx, d.ProjectID)
+	if to == "" {
+		to = w.h.auditNotifyEmail
+		source = alertSourceOperator
+	}
+	if to == "" {
+		return
+	}
+	if !claimDBQuotaGraceReminder(ctx, w.h.pool, d.EnvironmentID, d.Name) {
+		return
+	}
+	subject, body := notify.ComposeDatabaseQuotaGraceEnding(
+		d.Name, gigabytes(size), gigabytes(limit), until.UTC(),
+		int(math.Ceil(left.Hours())), w.h.databasesConsoleLink(d.ProjectID))
+	if source == alertSourceOperator {
+		subject, body = notify.ComposeNoOwnerFallback(d.ProjectID.String(), w.h.projectDisplayName(ctx, d.ProjectID), subject, body)
+	}
+	if err := w.h.auditNotifier.Send(to, subject, body); err != nil {
+		log.Printf("db-quota: grace reminder to %s failed for %s: %v", to, d.Name, err)
+		w.h.recordNotifySend(ctx, d.ProjectID, "DatabaseQuotaGraceEnding", d.Name, source, err)
+		return
+	}
+	w.h.recordNotifySend(ctx, d.ProjectID, "DatabaseQuotaGraceEnding", d.Name, source, nil)
+}
+
+// claimDBQuotaGraceReminder claims the one reminder this grace window is
+// allowed, returning false when it has already been sent.
+func claimDBQuotaGraceReminder(ctx context.Context, pool *pgxpool.Pool, envID uuid.UUID, name string) bool {
+	tag, err := pool.Exec(ctx,
+		`UPDATE db_quota_state SET grace_reminded_at = NOW()
+		  WHERE environment_id = $1 AND name = $2 AND grace_reminded_at IS NULL`,
+		envID, name)
+	if err != nil {
+		log.Printf("db-quota: grace reminder claim for %s failed: %v", name, err)
+		return false
+	}
+	return tag.RowsAffected() == 1
 }
 
 // maybeWarn sends the pre-enforcement warning, gated by a 24h per-database

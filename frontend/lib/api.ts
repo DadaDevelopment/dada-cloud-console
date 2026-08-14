@@ -23,6 +23,9 @@ import type {
   DatabaseActivityResponse,
   DatabaseQueriesResponse,
   DatabaseAdvisoriesResponse,
+  DatabaseArchivePlan,
+  DatabaseArchiveRun,
+  DatabaseArchiveRunsResponse,
   AppsResponse,
   AppFileListResponse,
   AppFileContent,
@@ -474,6 +477,38 @@ export const databasesApi = {
   tables: (projectId: string, envId: string, name: string) =>
     apiFetch<DatabaseTablesResponse>(
       `/api/v1/projects/${projectId}/environments/${envId}/databases/${name}/tables`
+    ),
+
+  archivePlan: (
+    projectId: string,
+    envId: string,
+    name: string,
+    table: string,
+    opts?: { schema?: string; cutoff?: string }
+  ) => {
+    const q = new URLSearchParams();
+    if (opts?.schema) q.set("schema", opts.schema);
+    if (opts?.cutoff) q.set("cutoff", opts.cutoff);
+    const qs = q.toString();
+    return apiFetch<DatabaseArchivePlan>(
+      `/api/v1/projects/${projectId}/environments/${envId}/databases/${name}/tables/${encodeURIComponent(table)}/archive-plan${qs ? `?${qs}` : ""}`
+    );
+  },
+
+  archiveRuns: (projectId: string, envId: string, name: string) =>
+    apiFetch<DatabaseArchiveRunsResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/databases/${name}/archive-runs`
+    ),
+
+  startArchive: (
+    projectId: string,
+    envId: string,
+    name: string,
+    body: { table: string; schema?: string; cutoff: string }
+  ) =>
+    apiFetch<DatabaseArchiveRun>(
+      `/api/v1/projects/${projectId}/environments/${envId}/databases/${name}/archive-runs`,
+      { method: "POST", body }
     ),
 
   activity: (projectId: string, envId: string, name: string) =>

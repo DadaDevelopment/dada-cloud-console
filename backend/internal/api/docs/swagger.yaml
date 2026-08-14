@@ -238,6 +238,44 @@ definitions:
       storage_class:
         type: string
     type: object
+  api.archiveRunView:
+    properties:
+      auto:
+        type: boolean
+      bytesEstimate:
+        type: integer
+      bytesFreed:
+        type: integer
+      column:
+        type: string
+      createdAt:
+        type: string
+      cutoff:
+        type: string
+      deletedRows:
+        type: integer
+      error:
+        type: string
+      finishedAt:
+        type: string
+      freedHuman:
+        type: string
+      id:
+        type: string
+      manifest:
+        additionalProperties: {}
+        type: object
+      phase:
+        type: string
+      plannedRows:
+        type: integer
+      requestedBy:
+        type: string
+      s3Uri:
+        type: string
+      table:
+        type: string
+    type: object
   api.attachBoxDatabaseRequest:
     properties:
       env_prefix:
@@ -1140,6 +1178,15 @@ definitions:
       scope:
         type: string
       value:
+        type: string
+    type: object
+  api.startArchiveRequest:
+    properties:
+      cutoff:
+        type: string
+      schema:
+        type: string
+      table:
         type: string
     type: object
   api.startDBMoveRequest:
@@ -10972,6 +11019,139 @@ paths:
       summary: What the platform found wrong in this database
       tags:
       - database
+  /projects/{projectId}/environments/{envId}/databases/{name}/archive-runs:
+    get:
+      description: Returns archive runs for one managed database, newest first, including
+        in-progress ones. A finished run carries the manifest describing where its
+        Parquet lives and how to read it.
+      operationId: listDatabaseArchiveRuns
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Database resource name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List a database's archive runs
+      tags:
+      - database
+    post:
+      consumes:
+      - application/json
+      description: 'Queues an archive run for one table: rows strictly older than
+        the cutoff date are exported to Parquet on the project''s archive bucket,
+        verified against the exported object, deleted from the table, and the space
+        returned with pg_repack. The database backup is untouched and still holds
+        the archived rows. Returns the queued run; progress is reported by the archive-runs
+        history endpoint.'
+      operationId: startDatabaseArchive
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Database resource name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Table, schema and cutoff date
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.startArchiveRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/api.archiveRunView'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Archive a table's history to S3 as Parquet
+      tags:
+      - database
   /projects/{projectId}/environments/{envId}/databases/{name}/backups:
     get:
       description: Returns the per-database logical backup catalog (newest first)
@@ -11192,7 +11372,8 @@ paths:
       - application/json
       responses:
         "200":
-          description: object with host, port, database, username, password
+          description: object with host, port, database, username, password and a
+            ready-to-paste dsn
           schema:
             additionalProperties: true
             type: object
@@ -11534,6 +11715,88 @@ paths:
       security:
       - BearerAuth: []
       summary: 'One table: growth, indexes, queries and findings'
+      tags:
+      - database
+  /projects/{projectId}/environments/{envId}/databases/{name}/tables/{table}/archive-plan:
+    get:
+      description: 'Computes what archiving old rows of one table would free: picks
+        the timestamp column a cutoff can be expressed in, buckets the table by month
+        so a cutoff date can be chosen, and — when the cutoff query parameter is given
+        — reports how many rows sit before it and roughly how many bytes they occupy
+        including indexes. Live read against the tenant instance; nothing is exported
+        or deleted.'
+      operationId: getDatabaseArchivePlan
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Database resource name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Table name
+        in: path
+        name: table
+        required: true
+        type: string
+      - description: Schema name, defaults to public
+        in: query
+        name: schema
+        type: string
+      - description: 'Cutoff date (YYYY-MM-DD): rows strictly older than this are
+          counted'
+        in: query
+        name: cutoff
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Preview archiving a table's history to S3
       tags:
       - database
   /projects/{projectId}/environments/{envId}/infra:

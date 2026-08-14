@@ -39,6 +39,8 @@ const (
 	lockKeyDBQuotaWatch      int64 = 0x64616461_000C
 	lockKeyDBStatsCollect    int64 = 0x64616461_000D
 	lockKeyDBMoveDrive       int64 = 0x64616461_000E
+	lockKeyDBTierReconcile   int64 = 0x64616461_000F
+	lockKeyDBArchiveDrive    int64 = 0x64616461_0010
 )
 
 // maxConcurrentAdvisoryLockHolders caps how many background loops may pin a

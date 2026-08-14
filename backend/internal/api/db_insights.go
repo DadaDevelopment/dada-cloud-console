@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -132,7 +133,7 @@ func (h *Handler) resolveInsightsTarget(c *gin.Context) (uuid.UUID, uuid.UUID, d
 // @Failure     404       {object} map[string]string
 // @Router      /projects/{projectId}/environments/{envId}/databases/{name}/insights [get]
 func (h *Handler) GetDatabaseInsights(c *gin.Context) {
-	_, _, target, ok := h.resolveInsightsTarget(c)
+	_, envID, target, ok := h.resolveInsightsTarget(c)
 	if !ok {
 		return
 	}
@@ -190,6 +191,8 @@ func (h *Handler) GetDatabaseInsights(c *gin.Context) {
 		}
 	}
 
+	quotaState, graceUntil := h.databaseQuotaState(ctx, envID, c.Param("name"))
+
 	c.JSON(http.StatusOK, gin.H{
 		"collectedAt":     collectedAt,
 		"stale":           time.Since(collectedAt) > dbInsightsFreshness,
@@ -202,6 +205,9 @@ func (h *Handler) GetDatabaseInsights(c *gin.Context) {
 		"cacheHitRatio":   hitRatio,
 		"connections":     numbackends,
 		"instanceStartAt": instanceStart,
+		"quotaState":      quotaState,
+		"graceUntil":      graceUntil,
+		"warnRatio":       dbQuotaWarnRatio,
 	})
 }
 
@@ -430,4 +436,30 @@ func (h *Handler) ListDatabaseAdvisories(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"advisories": out})
+}
+
+// databaseQuotaState reports what the quota watcher has decided about one
+// database: the enforcement state it is in and, when a grace window is open,
+// the moment it closes.
+//
+// The console needs both to say anything useful about a database that is over
+// its limit -- the size alone cannot distinguish "over quota, one day to fix
+// it" from "already read-only". A database the watcher has never seen has no
+// row, which is not an error: it reads as 'none', the same as a healthy one.
+func (h *Handler) databaseQuotaState(ctx context.Context, envID uuid.UUID, name string) (string, *time.Time) {
+	var (
+		state      string
+		graceUntil *time.Time
+	)
+	err := h.pool.QueryRow(ctx,
+		`SELECT state, grace_until FROM db_quota_state
+		  WHERE environment_id = $1 AND name = $2`,
+		envID, name).Scan(&state, &graceUntil)
+	if err != nil {
+		return dbEnforcementNone, nil
+	}
+	if graceUntil != nil && graceUntil.Before(time.Now()) {
+		graceUntil = nil
+	}
+	return state, graceUntil
 }

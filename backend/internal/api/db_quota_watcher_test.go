@@ -3,6 +3,7 @@ package api
 import (
 	"math"
 	"testing"
+	"time"
 
 	"github.com/dada-tuda/console/backend/internal/prometheus"
 )
@@ -39,10 +40,10 @@ func TestDecideDBQuotaState_Ladder(t *testing.T) {
 		{"at quota goes read-only", dbEnforcementNone, 1.0, dbEnforcementReadOnly},
 		{"far over quota still goes read-only first", dbEnforcementNone, 5.0, dbEnforcementReadOnly},
 		{"read-only holds inside the gap", dbEnforcementReadOnly, 0.95, dbEnforcementReadOnly},
-		{"read-only that keeps growing freezes", dbEnforcementReadOnly, 1.3, dbEnforcementFrozen},
+		{"read-only that keeps growing never escalates", dbEnforcementReadOnly, 5.0, dbEnforcementReadOnly},
 		{"read-only releases below the release line", dbEnforcementReadOnly, 0.5, dbEnforcementNone},
-		{"frozen holds while still over", dbEnforcementFrozen, 1.1, dbEnforcementFrozen},
-		{"frozen releases below the release line", dbEnforcementFrozen, 0.8, dbEnforcementNone},
+		{"legacy frozen downgrades to read-only", dbEnforcementFrozen, 1.1, dbEnforcementReadOnly},
+		{"legacy frozen releases below the release line", dbEnforcementFrozen, 0.8, dbEnforcementNone},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -67,6 +68,70 @@ func TestDecideDBQuotaState_NoFlapAtTheLimit(t *testing.T) {
 	}
 	if state != dbEnforcementReadOnly {
 		t.Fatalf("settled on %q, want read-only", state)
+	}
+}
+
+// The ladder must never ask for frozen again: a database whose owner cannot
+// connect cannot be archived or emptied, so freezing removes the only ways out
+// of the state it punishes. The XRD keeps accepting the value; nothing here
+// produces it.
+func TestDecideDBQuotaState_NeverFreezes(t *testing.T) {
+	for _, current := range []string{dbEnforcementNone, dbEnforcementReadOnly, dbEnforcementFrozen} {
+		for _, ratio := range []float64{0, 0.5, 0.95, 1.0, 1.25, 10} {
+			if got := decideDBQuotaState(current, ratio); got == dbEnforcementFrozen {
+				t.Fatalf("decideDBQuotaState(%q, %.2f) returned frozen", current, ratio)
+			}
+		}
+	}
+}
+
+// A database that is already over quota the first time a tier lands on it gets
+// one day, not enforcement. The day must be granted once per excursion: if
+// every tick re-granted it, enforcement would never arrive.
+func TestApplyDBQuotaGrace_GrantedOnceThenEnforces(t *testing.T) {
+	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+
+	state, start, grace := applyDBQuotaGrace(dbEnforcementReadOnly, nil, now)
+	if state != dbEnforcementNone || !start || grace == nil {
+		t.Fatalf("first sight = (%q, %v, %v), want (none, true, deadline)", state, start, grace)
+	}
+	if got := grace.Sub(now); got != dbQuotaGraceWindow {
+		t.Fatalf("grace window %s, want %s", got, dbQuotaGraceWindow)
+	}
+	first := *grace
+
+	for i := 1; i <= 5; i++ {
+		later := now.Add(time.Duration(i) * time.Hour)
+		state, start, grace = applyDBQuotaGrace(dbEnforcementReadOnly, grace, later)
+		if state != dbEnforcementNone || start {
+			t.Fatalf("tick %d inside grace = (%q, %v), want (none, false)", i, state, start)
+		}
+		if !grace.Equal(first) {
+			t.Fatalf("tick %d moved the deadline to %s, want %s", i, grace, first)
+		}
+	}
+
+	state, start, grace = applyDBQuotaGrace(dbEnforcementReadOnly, grace, first.Add(time.Minute))
+	if state != dbEnforcementReadOnly || start || !grace.Equal(first) {
+		t.Fatalf("after expiry = (%q, %v, %v), want (read-only, false, unchanged deadline)", state, start, grace)
+	}
+}
+
+// Coming back under the release threshold clears the grace deadline, so a
+// database that fills up again months later gets a fresh day rather than
+// instant enforcement on a stale deadline.
+func TestApplyDBQuotaGrace_ClearedOnRelease(t *testing.T) {
+	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	expired := now.Add(-time.Hour)
+
+	state, start, grace := applyDBQuotaGrace(dbEnforcementNone, &expired, now)
+	if state != dbEnforcementNone || start || grace != nil {
+		t.Fatalf("release = (%q, %v, %v), want (none, false, nil)", state, start, grace)
+	}
+
+	state, start, grace = applyDBQuotaGrace(dbEnforcementReadOnly, nil, now)
+	if state != dbEnforcementNone || !start || grace == nil || !grace.After(now) {
+		t.Fatalf("refill = (%q, %v, %v), want a fresh grace window", state, start, grace)
 	}
 }
 

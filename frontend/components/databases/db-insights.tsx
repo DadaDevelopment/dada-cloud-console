@@ -11,6 +11,7 @@ import type {
 } from "@/lib/types";
 import { formatBytes } from "@/components/charts/format";
 import { openAgentChatWith } from "@/components/agent-chat-panel";
+import { DbQuotaPanel } from "@/components/databases/db-quota-panel";
 import { Spinner } from "@/components/ui/spinner";
 import { CopyButton } from "@/components/ui/copy-button";
 import { timeAgo } from "@/lib/format";
@@ -686,6 +687,17 @@ export function DbInsightsView({
             subTone={daysLeft < 14 ? "bad" : "warn"}
           />
         )}
+      </div>
+
+      <div className="mt-4">
+        <DbQuotaPanel
+          projectId={projectId}
+          envId={envId}
+          name={name}
+          insights={insights}
+          tables={tables}
+          now={now}
+        />
       </div>
 
       <div className="mt-4">

@@ -755,6 +755,72 @@ func ComposeDatabaseQuotaEnforced(dbName, state string, usedGB, limitGB float64,
 	return subject, b.String()
 }
 
+// ComposeDatabaseQuotaGrace is the letter for a database that was already over
+// its quota the moment the quota first applied to it. That owner did not watch
+// a limit approach -- the limit arrived under data that was already there -- so
+// the letter leads with "nothing has changed yet", names the deadline, and
+// lists the three ways out before it expires.
+func ComposeDatabaseQuotaGrace(dbName, tier string, usedGB, limitGB float64, graceUntilUTC time.Time, consoleLink string) (subject, body string) {
+	subject = fmt.Sprintf("Dada Cloud: база %s превышает квоту тарифа, есть сутки на решение", dbName)
+	var b strings.Builder
+	fmt.Fprintf(&b, "База данных %s занимает %.1f ГБ при квоте %.0f ГБ на тарифе (%s).\n\n", dbName, usedGB, limitGB, tier)
+	b.WriteString("Прямо сейчас ничего не изменилось: база работает на чтение и на запись как раньше.\n\n")
+	fmt.Fprintf(&b, "До %s включительно действует отсрочка. После неё платформа переведёт базу в режим только для чтения: данные останутся на месте и будут читаться, но запись перестанет проходить.\n\n",
+		graceUntilUTC.Format("02.01.2006 15:04 UTC"))
+	b.WriteString("Что можно сделать за это время:\n")
+	b.WriteString("  1. Перейти на тариф с большей квотой.\n")
+	b.WriteString("  2. Удалить лишние данные и вернуть место (VACUUM FULL / pg_repack).\n")
+	b.WriteString("  3. Выгрузить старые данные в архив: платформа умеет выносить историю append-only таблиц в Parquet на S3 и подчищать ровно эти строки. Данные остаются вашими и читаются любым инструментом.\n\n")
+	b.WriteString("Резервные копии базы делаются как обычно и не затрагиваются ничем из перечисленного.\n\n")
+	fmt.Fprintf(&b, "Открыть базы в консоли: %s\n", consoleLink)
+	return subject, b.String()
+}
+
+// ComposeDatabaseQuotaGraceEnding is the last letter before writes stop.
+//
+// It exists because the grace letter arrives a full day early, which is long
+// enough to be filed and forgotten. This one is deliberately short: the
+// deadline, what happens at it, and the three ways out in one line each.
+func ComposeDatabaseQuotaGraceEnding(dbName string, usedGB, limitGB float64, graceUntilUTC time.Time, hoursLeft int, consoleLink string) (subject, body string) {
+	subject = fmt.Sprintf("Dada Cloud: у базы %s осталось %d ч до перевода в режим только для чтения", dbName, hoursLeft)
+	var b strings.Builder
+	fmt.Fprintf(&b, "База данных %s занимает %.1f ГБ при квоте %.0f ГБ.\n\n", dbName, usedGB, limitGB)
+	fmt.Fprintf(&b, "Отсрочка заканчивается %s. После этого запись в базу отключится, чтение продолжит работать. Данные не удаляются.\n\n",
+		graceUntilUTC.Format("02.01.2006 15:04 UTC"))
+	b.WriteString("Успеть можно так:\n")
+	b.WriteString("  1. Перейти на тариф с большей квотой — ограничение снимется сразу.\n")
+	b.WriteString("  2. Удалить лишние данные и вернуть место (VACUUM FULL / pg_repack).\n")
+	b.WriteString("  3. Выгрузить историю в архив: платформа вынесет старые строки append-only таблицы в Parquet на S3 и подчистит ровно их.\n\n")
+	b.WriteString("Резервные копии базы делаются как обычно и содержат всё.\n\n")
+	fmt.Fprintf(&b, "Открыть базы в консоли: %s\n", consoleLink)
+	return subject, b.String()
+}
+
+// ComposeDatabaseArchiveDone reports a finished archive.
+//
+// The letter has one job beyond "it worked": telling the owner that the rows
+// are still theirs and how to read them without the platform. Someone whose
+// data was moved by an automatic process needs the path back to it in the same
+// message, not in documentation they have to go find.
+func ComposeDatabaseArchiveDone(dbName, table, cutoff string, rows int64, freedGB float64, s3URI string, auto bool, consoleLink string) (subject, body string) {
+	subject = fmt.Sprintf("Dada Cloud: история таблицы %s выгружена в архив", table)
+	var b strings.Builder
+	if auto {
+		fmt.Fprintf(&b, "База %s упёрлась в квоту тарифа, поэтому платформа вынесла старые строки таблицы %s в архив.\n\n", dbName, table)
+	} else {
+		fmt.Fprintf(&b, "Архивирование таблицы %s в базе %s завершено.\n\n", table, dbName)
+	}
+	fmt.Fprintf(&b, "Уехало строк: %d (всё, что старше %s).\n", rows, cutoff)
+	fmt.Fprintf(&b, "Освободилось на диске: %.1f ГБ.\n\n", freedGB)
+	b.WriteString("Данные не потеряны. Они лежат в вашем S3-бакете в формате Parquet — это открытый формат, читается чем угодно:\n")
+	fmt.Fprintf(&b, "  %s\n\n", s3URI)
+	fmt.Fprintf(&b, "DuckDB:  SELECT * FROM read_parquet('%s');\n", s3URI)
+	fmt.Fprintf(&b, "pandas:  pandas.read_parquet('%s')\n\n", s3URI)
+	b.WriteString("Кроме архива, эти строки остаются в резервных копиях базы: бэкапы делались как обычно и ничем из перечисленного не затронуты.\n\n")
+	fmt.Fprintf(&b, "Открыть базы в консоли: %s\n", consoleLink)
+	return subject, b.String()
+}
+
 // ComposeDatabaseQuotaReleased tells the owner the limit is gone, so nobody
 // keeps working around a restriction that no longer exists.
 func ComposeDatabaseQuotaReleased(dbName string, usedGB, limitGB float64, consoleLink string) (subject, body string) {

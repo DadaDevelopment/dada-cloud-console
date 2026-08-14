@@ -353,4 +353,71 @@ export const databases: Messages = {
     ru: "Схему колонок платформа не собирает: сбор идёт только по счётчикам статистики, без чтения структуры и данных.",
     en: "The platform does not collect the column schema: sampling reads statistics counters only, never your structure or data.",
   },
+
+  "databases.quota.banner.warn": {
+    ru: "База заняла {pct}% квоты тарифа",
+    en: "The database is at {pct}% of its plan quota",
+  },
+  "databases.quota.banner.grace": {
+    ru: "Осталось {hours} ч: до {until} база перейдёт в режим только для чтения",
+    en: "{hours} h left: the database goes read-only at {until}",
+  },
+  "databases.quota.banner.readOnly": {
+    ru: "База {db} работает в режиме только для чтения: квота исчерпана",
+    en: "Database {db} is read-only: the quota is used up",
+  },
+  "databases.quota.banner.usage": { ru: "Занято {used} из {limit}.", en: "Using {used} of {limit}." },
+  "databases.quota.banner.body": {
+    ru: "Освободить место можно тремя способами: поднять тариф, удалить лишнее руками, или вынести старые строки в Parquet на S3 — они останутся доступны для чтения.",
+    en: "There are three ways out: move to a bigger plan, delete data yourself, or archive old rows to Parquet on S3 — they stay readable afterwards.",
+  },
+  "databases.quota.banner.readOnlyBody": {
+    ru: "Запись отключена, чтение работает. Как только размер опустится ниже квоты, запись включится автоматически.",
+    en: "Writes are off, reads still work. Writes come back on their own once the size drops below the quota.",
+  },
+  "databases.quota.banner.backupsSafe": {
+    ru: "Бэкапы не трогаются: всё, что было в базе, остаётся в них.",
+    en: "Backups are untouched: everything that was in the database is still in them.",
+  },
+  "databases.quota.banner.upgrade": { ru: "Поднять тариф", en: "Upgrade the plan" },
+  "databases.quota.banner.archive": { ru: "Архивировать старые данные", en: "Archive old data" },
+
+  "databases.quota.archive.title": { ru: "Архивировать {table}", en: "Archive {table}" },
+  "databases.quota.archive.body": {
+    ru: "Строки старше выбранной даты будут выгружены в Parquet на S3, проверены по выгруженному файлу и только после этого удалены из таблицы. Место вернётся в базу.",
+    en: "Rows older than the date you pick are exported to Parquet on S3, verified against the written file, and only then deleted from the table. The space comes back to the database.",
+  },
+  "databases.quota.archive.cutoffLabel": { ru: "Отсечка: архивировать строки строго старше", en: "Cutoff: archive rows strictly older than" },
+  "databases.quota.archive.preview": {
+    ru: "Уедет {rows} строк старше {date}, освободится примерно {size}.",
+    en: "{rows} rows older than {date} will leave, freeing about {size}.",
+  },
+  "databases.quota.archive.remaining": {
+    ru: "В таблице останется {rows} строк. Отсечка считается по колонке {column}.",
+    en: "{rows} rows stay in the table. The cutoff is measured on column {column}.",
+  },
+  "databases.quota.archive.cancel": { ru: "Отмена", en: "Cancel" },
+  "databases.quota.archive.confirm": { ru: "Архивировать", en: "Archive" },
+  "databases.quota.archive.starting": { ru: "Ставим в очередь…", en: "Queueing…" },
+  "databases.quota.archive.planFailed": { ru: "Не удалось посчитать, что попадёт под отсечку", en: "Could not work out what the cutoff would take" },
+  "databases.quota.archive.startFailed": { ru: "Не удалось запустить архивацию", en: "Could not start the archive" },
+
+  "databases.quota.runs.title": { ru: "Архивы", en: "Archives" },
+  "databases.quota.runs.upTo": { ru: "до {date}", en: "up to {date}" },
+  "databases.quota.runs.auto": { ru: "автоматически", en: "automatic" },
+  "databases.quota.runs.done": { ru: "Вынесено {rows} строк, освобождено {freed}", en: "{rows} rows archived, {freed} freed" },
+  "databases.quota.runs.failed": { ru: "Не удалось: {error}", en: "Failed: {error}" },
+  "databases.quota.runs.showHow": { ru: "Как прочитать эти данные", en: "How to read this data" },
+  "databases.quota.runs.hideHow": { ru: "Свернуть", en: "Hide" },
+  "databases.quota.runs.howBody": {
+    ru: "Файл лежит в вашем S3-бакете и читается напрямую, без загрузки:",
+    en: "The file sits in your own S3 bucket and reads directly, no download needed:",
+  },
+
+  "databases.quota.phase.pending": { ru: "В очереди", en: "Queued" },
+  "databases.quota.phase.sink": { ru: "Готовим бакет для архива", en: "Preparing the archive bucket" },
+  "databases.quota.phase.export": { ru: "Выгружаем в Parquet", en: "Exporting to Parquet" },
+  "databases.quota.phase.verify": { ru: "Проверяем выгрузку", en: "Verifying the export" },
+  "databases.quota.phase.delete": { ru: "Удаляем перенесённые строки", en: "Deleting the archived rows" },
+  "databases.quota.phase.repack": { ru: "Возвращаем место базе", en: "Returning the space to the database" },
 };

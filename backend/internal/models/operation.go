@@ -76,6 +76,18 @@ type SetDatabaseShardPayload struct {
 	Shard  string `json:"shard"`
 }
 
+// SetDatabaseTierPayload is the typed payload for SetDatabaseTier operations,
+// emitted by the tier reconciler when a database's quota tier no longer matches
+// the plan its organization is on, and never by a human. Tier maps onto
+// ServiceDatabaseV2.spec.tier, which fixes the connection limit and the storage
+// limit the quota watcher measures against. Like the enforcement payload it
+// carries no other field of the database on purpose.
+type SetDatabaseTierPayload struct {
+	Name   string `json:"name"`
+	AppRef string `json:"app_ref,omitempty"`
+	Tier   string `json:"tier"`
+}
+
 // DeleteServiceDatabasePayload is the typed payload for DeleteServiceDatabase
 // operations. AppRef is the owning app whose resources.values.yaml holds the
 // CR entry (empty = the standalone "service-databases-<project>" chart); the

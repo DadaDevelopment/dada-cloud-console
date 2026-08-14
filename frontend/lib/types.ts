@@ -361,6 +361,72 @@ export interface DatabaseInsights {
   cacheHitRatio?: number | null;
   connections?: number;
   instanceStartAt?: string | null;
+  quotaState?: "none" | "read-only" | "frozen";
+  graceUntil?: string | null;
+  warnRatio?: number;
+}
+
+/** One column the archive planner considered as the cutoff. */
+export interface DatabaseArchiveColumn {
+  name: string;
+  type: string;
+  notNull: boolean;
+  indexed: boolean;
+}
+
+/** Rows in one calendar month of the chosen cutoff column. */
+export interface DatabaseArchiveBucket {
+  month: string;
+  rows: number;
+  estimated: boolean;
+}
+
+/**
+ * What archiving one table would cost and free. `archivable: false` carries the
+ * reason no column can serve as a cutoff, which is the sentence the console
+ * shows instead of a button.
+ */
+export interface DatabaseArchivePlan {
+  table: string;
+  archivable: boolean;
+  reason?: string;
+  column?: DatabaseArchiveColumn;
+  columns: DatabaseArchiveColumn[];
+  totalRows: number;
+  totalBytes: number;
+  totalBytesHuman: string;
+  buckets?: DatabaseArchiveBucket[];
+  bucketsSampled?: boolean;
+  cutoff?: string;
+  cutoffRows?: number;
+  cutoffBytesEstimate?: number;
+  cutoffBytesEstimateHuman?: string;
+  remainingRows?: number;
+}
+
+/** One archive run, queued or finished. */
+export interface DatabaseArchiveRun {
+  id: string;
+  table: string;
+  column: string;
+  cutoff: string;
+  phase: string;
+  plannedRows: number;
+  deletedRows: number;
+  bytesEstimate: number;
+  bytesFreed: number;
+  freedHuman: string;
+  s3Uri: string;
+  manifest: Record<string, unknown>;
+  error?: string;
+  auto: boolean;
+  requestedBy?: string;
+  createdAt: string;
+  finishedAt?: string | null;
+}
+
+export interface DatabaseArchiveRunsResponse {
+  runs: DatabaseArchiveRun[];
 }
 
 export interface DatabaseTableCard {

@@ -273,6 +273,8 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 		return w.doSetDatabaseEnforcement(ctx, op)
 	case "SetDatabaseShard":
 		return w.doSetDatabaseShard(ctx, op)
+	case "SetDatabaseTier":
+		return w.doSetDatabaseTier(ctx, op)
 	case "CreateIngress":
 		return w.doCreateIngress(ctx, op)
 	case "CreateApp":
