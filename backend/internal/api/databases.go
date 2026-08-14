@@ -43,11 +43,30 @@ var databaseTierByPlan = map[string]string{
 // behaviour — so a transient billing-lookup failure never cripples a paying
 // tenant's new database. Drift is corrected by the tier reconciler, not here.
 func (h *Handler) databaseTierFor(ctx context.Context, orgID string) string {
+	if h.dbQuotaExemptOrg(orgID) {
+		return dbTierInternal
+	}
 	plan, err := h.planFor(ctx, orgID)
 	if err != nil {
 		return ""
 	}
 	return databaseTierByPlan[plan.Key]
+}
+
+// dbQuotaExemptOrg reports whether the org owns platform databases rather than
+// customer ones (DB_QUOTA_EXEMPT_ORGS). Its databases are tiered "internal",
+// which carries no storage limit, so neither the create path nor the tier
+// reconciler can hand the control plane a quota to hit.
+func (h *Handler) dbQuotaExemptOrg(orgID string) bool {
+	if orgID == "" || h.cfg == nil {
+		return false
+	}
+	for _, exempt := range h.cfg.DBQuotaExemptOrgs {
+		if exempt == orgID {
+			return true
+		}
+	}
+	return false
 }
 
 // randomPassword returns a 32-hex-char (16-byte) secret suitable for a managed

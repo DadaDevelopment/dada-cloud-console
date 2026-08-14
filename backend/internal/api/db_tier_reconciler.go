@@ -17,10 +17,16 @@ import (
 // the wrong tier keeps working, it is only measured against the wrong limit.
 const dbTierReconcileInterval = 1 * time.Hour
 
-// dbTierInternal is the tier reserved for platform-owned databases. The
-// reconciler never writes it and never overwrites it: those databases belong to
-// the platform, not to a customer plan, and a plan lookup must never be able to
-// put keycloak or the console's own database on a 1 GB quota.
+// dbTierInternal is the tier reserved for platform-owned databases: no storage
+// limit, so the quota watcher never measures them. The reconciler never
+// overwrites it, and writes it for every database of a DB_QUOTA_EXEMPT_ORGS org.
+//
+// The write is the whole point. Not overwriting an "internal" tier protects
+// nothing while nothing ever sets it: on 2026-08-14 all 21 managed databases sat
+// at the XRD default "unlimited", and the reconciler's plan lookup was about to
+// put cloud-console (1.4 GB), keycloak, nexus and powerdns on the 5 GB starter
+// ceiling of org "dada" -- a read-only control plane and no SSO, one growth
+// curve away.
 const dbTierInternal = "internal"
 
 // dbTierReconciler keeps every managed database's ServiceDatabaseV2.spec.tier
@@ -82,6 +88,10 @@ func (r *dbTierReconciler) tick(ctx context.Context) {
 		if d.Tier == dbTierInternal || d.OrgID == "" {
 			continue
 		}
+		if r.h.dbQuotaExemptOrg(d.OrgID) {
+			r.retier(ctx, d, dbTierInternal, &changed)
+			continue
+		}
 		want, ok := planTier[d.OrgID]
 		if !ok {
 			plan, err := r.h.planFor(ctx, d.OrgID)
@@ -92,33 +102,39 @@ func (r *dbTierReconciler) tick(ctx context.Context) {
 			want = databaseTierByPlan[plan.Key]
 			planTier[d.OrgID] = want
 		}
-		if want == "" || want == d.Tier {
-			continue
-		}
-		opID, err := r.h.enqueueDatabaseTier(ctx, d, want)
-		if err != nil {
-			log.Printf("db-tier: enqueue %s for %s failed: %v", want, d.Name, err)
-			continue
-		}
-		if opID == uuid.Nil {
-			continue
-		}
-		changed++
-		log.Printf("db-tier: %s %s -> %s op=%s", d.Name, d.Tier, want, opID)
-		r.h.recordSystemAudit(ctx, auditEntry{
-			ProjectID:     d.ProjectID,
-			EnvironmentID: d.EnvironmentID,
-			OperationID:   opID,
-			Action:        "SetDatabaseTier",
-			ResourceKind:  "ServiceDatabaseV2",
-			ResourceName:  d.Name,
-			Metadata: map[string]any{
-				"from": d.Tier,
-				"to":   want,
-			},
-		})
+		r.retier(ctx, d, want, &changed)
 	}
 	log.Printf("db-tier: tick databases=%d retiered=%d", len(dbs), changed)
+}
+
+// retier enqueues the tier flip unless the database already carries the tier or
+// one is in flight, and records the audit entry the console explains it with.
+func (r *dbTierReconciler) retier(ctx context.Context, d tieredDatabase, want string, changed *int) {
+	if want == "" || want == d.Tier {
+		return
+	}
+	opID, err := r.h.enqueueDatabaseTier(ctx, d, want)
+	if err != nil {
+		log.Printf("db-tier: enqueue %s for %s failed: %v", want, d.Name, err)
+		return
+	}
+	if opID == uuid.Nil {
+		return
+	}
+	*changed++
+	log.Printf("db-tier: %s %s -> %s op=%s", d.Name, d.Tier, want, opID)
+	r.h.recordSystemAudit(ctx, auditEntry{
+		ProjectID:     d.ProjectID,
+		EnvironmentID: d.EnvironmentID,
+		OperationID:   opID,
+		Action:        "SetDatabaseTier",
+		ResourceKind:  "ServiceDatabaseV2",
+		ResourceName:  d.Name,
+		Metadata: map[string]any{
+			"from": d.Tier,
+			"to":   want,
+		},
+	})
 }
 
 // tieredDatabases lists every ServiceDatabaseV2 snapshot with the tier last
@@ -179,10 +195,10 @@ func (h *Handler) enqueueDatabaseTier(ctx context.Context, d tieredDatabase, tie
 	var opID uuid.UUID
 	err = h.pool.QueryRow(ctx,
 		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
-		 SELECT $1, $2, $3, 'SetDatabaseTier', 'ServiceDatabaseV2', $4, 'Created', $5
+		 SELECT $1, $2, $3, 'SetDatabaseTier', 'ServiceDatabaseV2', $4::text, 'Created', $5::jsonb
 		 WHERE NOT EXISTS (
 		   SELECT 1 FROM operations
-		   WHERE environment_id = $3 AND resource_kind = 'ServiceDatabaseV2' AND resource_name = $4
+		   WHERE environment_id = $3 AND resource_kind = 'ServiceDatabaseV2' AND resource_name = $4::text
 		     AND action = 'SetDatabaseTier' AND status IN ('Created', 'Reconciling')
 		 )
 		 RETURNING id`,

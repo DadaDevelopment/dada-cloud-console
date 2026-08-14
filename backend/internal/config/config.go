@@ -550,6 +550,18 @@ type Config struct {
 	// (dozens of apps) and must not be gated by the customer plan ladder.
 	BillingExemptOrgs []string
 
+	// DBQuotaExemptOrgs (DB_QUOTA_EXEMPT_ORGS, comma-separated) owns the
+	// platform's own databases: cloud-console, keycloak, nexus, powerdns, the
+	// gitops agent's. Their ServiceDatabaseV2 tier is "internal" whatever plan
+	// the org happens to be on, so the storage-quota ladder can never put the
+	// control plane or SSO into read-only.
+	//
+	// It defaults to the platform org rather than to empty on purpose: a
+	// protection that holds only once somebody remembers to set an env var is
+	// not a protection. It is deliberately not BillingExemptOrgs, which gates
+	// app and box quotas and is owner policy.
+	DBQuotaExemptOrgs []string
+
 	BillingOverageBlockFactor float64
 
 	AppUsageBackfillDays   int
@@ -874,6 +886,7 @@ func Load() (*Config, error) {
 		ReactivationFixWaveEnabled:  getEnv("REACTIVATION_FIX_WAVE_ENABLED", "false") == "true",
 		BillingMeterIntervalSec:     getEnvInt64("BILLING_METER_INTERVAL_SECS", 3600),
 		BillingExemptOrgs:           splitList(getEnv("BILLING_EXEMPT_ORGS", "")),
+		DBQuotaExemptOrgs:           splitList(getEnv("DB_QUOTA_EXEMPT_ORGS", "dada")),
 		BillingOverageBlockFactor:   getEnvFloat("BILLING_OVERAGE_BLOCK_FACTOR", 3),
 		AppUsageBackfillDays:        getEnvIntAllowZero("APP_USAGE_BACKFILL_DAYS", 21),
 		AppUsageBackfillTenant:      getEnv("APP_USAGE_BACKFILL_TENANT", "opencost"),
