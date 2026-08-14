@@ -533,6 +533,14 @@ export const apps: Messages = {
   "apps.env.field.secretHint": { ru: "Шифруется и маскируется в интерфейсе", en: "Encrypted at rest and masked in the UI" },
   "apps.env.save": { ru: "Сохранить", en: "Save" },
   "apps.env.saving": { ru: "Сохранение…", en: "Saving…" },
+  "apps.env.warning.bareConnectionValue": {
+    ru: "Похоже на голый хост, а не строку подключения. Нужна строка вида postgresql://пользователь:пароль@хост:5432/база — скопируйте её целиком со страницы базы данных, а не отдельное поле.",
+    en: "This looks like a bare host, not a connection string. You need something like postgresql://user:password@host:5432/database — copy the full string from the database page, not a single field.",
+  },
+  "apps.env.warning.savedAnyway": {
+    ru: "Значение сохранено как есть — вы всегда можете исправить его.",
+    en: "The value was saved as-is — you can fix it any time.",
+  },
   "apps.env.error.load": { ru: "Не удалось загрузить переменные", en: "Failed to load env vars" },
   "apps.env.error.reveal": { ru: "Не удалось показать", en: "Failed to reveal" },
   "apps.env.error.revealForbidden": { ru: "Нет прав на просмотр секретов.", en: "You don't have permission to reveal secrets." },

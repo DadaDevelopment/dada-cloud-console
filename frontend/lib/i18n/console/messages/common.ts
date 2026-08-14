@@ -9,6 +9,7 @@ export type Messages = Record<string, Record<ConsoleLocale, string>>;
  */
 export const common: Messages = {
   "common.cancel": { ru: "Отмена", en: "Cancel" },
+  "common.close": { ru: "Закрыть", en: "Close" },
   "common.create": { ru: "Создать", en: "Create" },
   "common.creating": { ru: "Создание…", en: "Creating…" },
   "common.delete": { ru: "Удалить", en: "Delete" },

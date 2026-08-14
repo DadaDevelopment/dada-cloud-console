@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
@@ -288,6 +290,9 @@ func (h *Handler) SetEnvVar(c *gin.Context) {
 	})
 
 	resp := gin.H{"env_var": ev}
+	if warning := connectionStringWarning(key, req.Value); warning != nil {
+		resp["warnings"] = []envVarWarning{*warning}
+	}
 	if op, queued := h.queueEnvApply(c, claims, projectID, envID, appName); queued {
 		resp["operation"] = op
 	}
@@ -401,6 +406,7 @@ func (h *Handler) BulkSetEnvVars(c *gin.Context) {
 	}
 
 	seen := make(map[string]struct{}, len(req.Vars))
+	var warnings []envVarWarning
 	for i := range req.Vars {
 		v := &req.Vars[i]
 		if !validEnvKey(v.Key) {
@@ -423,6 +429,9 @@ func (h *Handler) BulkSetEnvVars(c *gin.Context) {
 			rejectEnv(http.StatusBadRequest, "invalid_scope", "scope must be one of: build, runtime, both")
 			return
 		}
+		if warning := connectionStringWarning(v.Key, v.Value); warning != nil {
+			warnings = append(warnings, *warning)
+		}
 	}
 
 	saved := make([]envVar, 0, len(req.Vars))
@@ -444,6 +453,9 @@ func (h *Handler) BulkSetEnvVars(c *gin.Context) {
 	})
 
 	resp := gin.H{"env_vars": saved}
+	if len(warnings) > 0 {
+		resp["warnings"] = warnings
+	}
 	if op, queued := h.queueEnvApply(c, claims, projectID, envID, appName); queued {
 		resp["operation"] = op
 	}
@@ -472,6 +484,85 @@ func validEnvKey(key string) bool {
 		}
 	}
 	return true
+}
+
+// envVarWarning is a machine-readable, non-blocking note attached to a save
+// response. It exists to survive: an incident where a user pasted the bare
+// host from the database page (pg-router.databases.svc.cluster.local)
+// straight into DATABASE_URL, we accepted it silently eight times in a row,
+// and the app sat in a crash loop for twelve hours before the user gave up.
+// The value is not rejected -- a user is entitled to store whatever string
+// they want -- but the frontend renders this warning where it cannot be
+// missed before the next deploy.
+type envVarWarning struct {
+	Key     string `json:"key"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// connectionKeySuffixes and connectionKeyExact identify env var keys that are
+// conventionally a full connection string (DSN/URL), as opposed to a bare
+// hostname or credential fragment.
+var connectionKeySuffixes = []string{"_URL", "_DSN", "_CONNECTION_STRING"}
+
+var connectionKeyExact = map[string]bool{
+	"DATABASE_URL":      true,
+	"DATABASE_DSN":      true,
+	"REDIS_URL":         true,
+	"MONGO_URL":         true,
+	"MONGODB_URL":       true,
+	"POSTGRES_URL":      true,
+	"POSTGRESQL_URL":    true,
+	"MYSQL_URL":         true,
+	"AMQP_URL":          true,
+	"RABBITMQ_URL":      true,
+	"CONNECTION_STRING": true,
+}
+
+// hasSchemePrefix matches a leading `scheme://`. It deliberately requires the
+// double slash: Go's net/url happily parses "host:5432" as scheme="host",
+// opaque="5432" (no slashes needed for an opaque URL), which would call a
+// bare host-with-port a valid connection string. Requiring "://" is what
+// actually distinguishes "postgresql://host:5432/db" from "host:5432/db" or
+// a plain "host".
+var hasSchemePrefix = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*://`)
+
+// looksLikeConnectionKey reports whether key is a name that conventionally
+// holds a full connection string rather than a bare value.
+func looksLikeConnectionKey(key string) bool {
+	upper := strings.ToUpper(key)
+	if connectionKeyExact[upper] {
+		return true
+	}
+	for _, suffix := range connectionKeySuffixes {
+		if strings.HasSuffix(upper, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// connectionStringWarning flags a value that looks like a bare host/DSN
+// fragment saved under a connection-string-shaped key. It returns nil for
+// empty values (nothing to judge yet), keys unrelated to connections, and
+// values that already carry a `scheme://` prefix.
+func connectionStringWarning(key, value string) *envVarWarning {
+	if value == "" || !looksLikeConnectionKey(key) {
+		return nil
+	}
+	if hasSchemePrefix.MatchString(value) {
+		return nil
+	}
+	return &envVarWarning{
+		Key:  key,
+		Code: "value_is_not_a_connection_string",
+		Message: fmt.Sprintf(
+			"%q looks like a bare host or fragment, not a full connection string. "+
+				"A connection string usually looks like postgresql://user:password@host:5432/database "+
+				"-- copy the full string from the database page instead of a single field.",
+			key,
+		),
+	}
 }
 
 // RevealEnvVar returns the decrypted value of a single env var (write access required).

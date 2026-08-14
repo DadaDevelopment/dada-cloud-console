@@ -1570,6 +1570,30 @@ export interface EnvVarsResponse {
   env_vars: EnvVar[];
 }
 
+/**
+ * Non-blocking, machine-readable note attached to a save response: the value
+ * was accepted, but it looks like a bare host or fragment saved under a
+ * connection-string-shaped key (DATABASE_URL, REDIS_URL, *_DSN, ...) rather
+ * than a full `scheme://user:password@host:port/db` string.
+ */
+export interface EnvVarWarning {
+  key: string;
+  code: "value_is_not_a_connection_string";
+  message: string;
+}
+
+export interface SetEnvVarResponse {
+  env_var: EnvVar;
+  operation?: Operation;
+  warnings?: EnvVarWarning[];
+}
+
+export interface BulkSetEnvVarsResponse {
+  env_vars: EnvVar[];
+  operation?: Operation;
+  warnings?: EnvVarWarning[];
+}
+
 export interface DomainsResponse {
   domains: AppDomain[];
 }

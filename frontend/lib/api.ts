@@ -79,6 +79,8 @@ import type {
   AvailableInstallation,
   RemoteReposResponse,
   EnvVarsResponse,
+  SetEnvVarResponse,
+  BulkSetEnvVarsResponse,
   DomainsResponse,
   Build,
   FrameworkDetection,
@@ -1516,7 +1518,7 @@ export const envVarsApi = {
       scope: "build" | "runtime" | "both";
     }
   ) =>
-    apiFetch<OperationResponse>(
+    apiFetch<SetEnvVarResponse>(
       `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/env/${encodeURIComponent(key)}`,
       { method: "PUT", body: data }
     ),
@@ -1527,7 +1529,7 @@ export const envVarsApi = {
     appName: string,
     vars: { key: string; value: string; is_secret: boolean; scope: "build" | "runtime" | "both" }[]
   ) =>
-    apiFetch<OperationResponse>(
+    apiFetch<BulkSetEnvVarsResponse>(
       `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/env/bulk`,
       { method: "POST", body: { vars } }
     ),

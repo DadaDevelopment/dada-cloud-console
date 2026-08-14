@@ -1,12 +1,13 @@
 "use client";
 import { useCallback, useEffect, useState, FormEvent } from "react";
 import { envVarsApi } from "@/lib/api";
-import type { EnvVar } from "@/lib/types";
+import type { EnvVar, EnvVarWarning } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
 import { CopyButton } from "@/components/ui/copy-button";
 import { useT } from "@/lib/i18n/console/context";
 import { parseEnvBlob } from "@/lib/dotenv";
+import { isBareConnectionValue } from "@/lib/env-connection-warning";
 
 type Scope = "build" | "runtime" | "both";
 
@@ -61,13 +62,16 @@ export function EnvVarsEditor({
   const [form, setForm] = useState<EditState>(EMPTY);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [savedWarnings, setSavedWarnings] = useState<EnvVarWarning[] | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
 
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkText, setBulkText] = useState("");
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
   const [bulkError, setBulkError] = useState<string | null>(null);
+  const [bulkSavedWarnings, setBulkSavedWarnings] = useState<EnvVarWarning[] | null>(null);
   const bulkParsed = parseEnvBlob(bulkText);
+  const liveValueWarning = isBareConnectionValue(form.key, form.value);
 
   const load = useCallback(async () => {
     if (!envId) return;
@@ -104,6 +108,7 @@ export function EnvVarsEditor({
   function openAdd() {
     setForm(EMPTY);
     setSubmitError(null);
+    setSavedWarnings(null);
     setModalOpen(true);
   }
 
@@ -116,26 +121,37 @@ export function EnvVarsEditor({
       editingExisting: true,
     });
     setSubmitError(null);
+    setSavedWarnings(null);
     setModalOpen(true);
   }
 
+  /**
+   * On success, closes the modal immediately unless the server flagged the
+   * value as a likely bare connection fragment -- then the modal stays open
+   * with the warning so it cannot be missed, and the user closes it by hand.
+   * The value is saved either way; this never blocks the write.
+   */
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSubmitError(null);
     setSubmitting(true);
     try {
-      await envVarsApi.upsert(projectId, envId, appName, form.key, {
+      const res = await envVarsApi.upsert(projectId, envId, appName, form.key, {
         value: form.value,
         is_secret: form.is_secret,
         scope: form.scope,
       });
-      setModalOpen(false);
       setRevealed((prev) => {
         const next = { ...prev };
         delete next[form.key];
         return next;
       });
       await load();
+      if (res.warnings && res.warnings.length > 0) {
+        setSavedWarnings(res.warnings);
+      } else {
+        setModalOpen(false);
+      }
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : t("apps.env.error.save"));
     } finally {
@@ -148,16 +164,20 @@ export function EnvVarsEditor({
     setBulkError(null);
     setBulkSubmitting(true);
     try {
-      await envVarsApi.bulkUpsert(
+      const res = await envVarsApi.bulkUpsert(
         projectId,
         envId,
         appName,
         bulkParsed.vars.map((v) => ({ key: v.key, value: v.value, is_secret: true, scope: "runtime" as const }))
       );
-      setBulkOpen(false);
       setBulkText("");
       setRevealed({});
       await load();
+      if (res.warnings && res.warnings.length > 0) {
+        setBulkSavedWarnings(res.warnings);
+      } else {
+        setBulkOpen(false);
+      }
     } catch (err) {
       setBulkError(err instanceof Error ? err.message : t("apps.env.error.save"));
     } finally {
@@ -306,6 +326,7 @@ export function EnvVarsEditor({
         onClose={() => {
           setModalOpen(false);
           setSubmitError(null);
+          setSavedWarnings(null);
         }}
         title={form.editingExisting ? t("apps.env.modal.editTitle", { key: form.key }) : t("apps.env.modal.addTitle")}
       >
@@ -337,6 +358,11 @@ export function EnvVarsEditor({
               placeholder="postgres://…"
               className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
+            {liveValueWarning && (
+              <p role="alert" className="mt-1.5 text-xs text-amber-700 dark:text-amber-400">
+                {t("apps.env.warning.bareConnectionValue")}
+              </p>
+            )}
           </div>
 
           <div className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-800 px-4 py-3">
@@ -384,24 +410,36 @@ export function EnvVarsEditor({
             </div>
           )}
 
+          {savedWarnings && savedWarnings.length > 0 && (
+            <div role="alert" className="rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
+              {savedWarnings.map((w) => (
+                <p key={w.key}>{w.message}</p>
+              ))}
+              <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">{t("apps.env.warning.savedAnyway")}</p>
+            </div>
+          )}
+
           <div className="flex justify-end gap-3 pt-1">
             <button
               type="button"
               onClick={() => {
                 setModalOpen(false);
                 setSubmitError(null);
+                setSavedWarnings(null);
               }}
               className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
             >
-              {t("common.cancel")}
+              {savedWarnings ? t("common.close") : t("common.cancel")}
             </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-            >
-              {submitting ? <><Spinner size="sm" /> {t("apps.env.saving")}</> : t("apps.env.save")}
-            </button>
+            {!savedWarnings && (
+              <button
+                type="submit"
+                disabled={submitting}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              >
+                {submitting ? <><Spinner size="sm" /> {t("apps.env.saving")}</> : t("apps.env.save")}
+              </button>
+            )}
           </div>
         </form>
       </Modal>
@@ -411,6 +449,7 @@ export function EnvVarsEditor({
         onClose={() => {
           setBulkOpen(false);
           setBulkError(null);
+          setBulkSavedWarnings(null);
         }}
         title={t("apps.env.bulk.title")}
       >
@@ -451,24 +490,36 @@ export function EnvVarsEditor({
             </div>
           )}
 
+          {bulkSavedWarnings && bulkSavedWarnings.length > 0 && (
+            <div role="alert" className="rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
+              {bulkSavedWarnings.map((w) => (
+                <p key={w.key}>{w.message}</p>
+              ))}
+              <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">{t("apps.env.warning.savedAnyway")}</p>
+            </div>
+          )}
+
           <div className="flex justify-end gap-3 pt-1">
             <button
               type="button"
               onClick={() => {
                 setBulkOpen(false);
                 setBulkError(null);
+                setBulkSavedWarnings(null);
               }}
               className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
             >
-              {t("common.cancel")}
+              {bulkSavedWarnings ? t("common.close") : t("common.cancel")}
             </button>
-            <button
-              type="submit"
-              disabled={bulkSubmitting || bulkParsed.vars.length === 0}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-            >
-              {bulkSubmitting ? <><Spinner size="sm" /> {t("apps.env.saving")}</> : t("apps.env.bulk.submit")}
-            </button>
+            {!bulkSavedWarnings && (
+              <button
+                type="submit"
+                disabled={bulkSubmitting || bulkParsed.vars.length === 0}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              >
+                {bulkSubmitting ? <><Spinner size="sm" /> {t("apps.env.saving")}</> : t("apps.env.bulk.submit")}
+              </button>
+            )}
           </div>
         </form>
       </Modal>
