@@ -18,9 +18,19 @@ import (
 // pull from.
 const defaultDBArchiveExportImage = "datacatering/duckdb:v1.3.2"
 
-// defaultDBArchiveRepackImage carries pg_repack plus the psql that installs its
-// extension. Same reasoning, same override.
+// defaultDBArchiveRepackImage carries the psql that runs the rewrite. Same
+// reasoning, same override. It is a pg_repack image for historical reasons and
+// because it ships a matching psql 17; the binary itself goes unused, since
+// pg_repack needs a server extension the shards cannot install.
 const defaultDBArchiveRepackImage = "hartmutcouk/pg-repack-docker:1.5.2"
+
+// archiveRepackLockTimeout bounds how long the rewrite waits for the table's
+// ACCESS EXCLUSIVE lock. Long enough to outlast an ordinary statement, short
+// enough that a busy table fails the phase instead of parking every later query
+// behind the pending lock request. It is set by its own -c because VACUUM FULL
+// refuses to run inside the implicit transaction psql wraps a multi-statement
+// -c in, and psql keeps one session across every -c.
+const archiveRepackLockTimeout = "15s"
 
 // archiveDuckDBResolve is the shell line every DuckDB phase starts with. The
 // upstream image ships the CLI as /duckdb and puts nothing on PATH, so a script
@@ -42,7 +52,7 @@ const archiveJobTTLSeconds = int32(24 * 60 * 60)
 const archiveJobBackoff = int32(2)
 
 // archivePGConn is a shard's admin connection broken into the parts libpq reads
-// from the environment. pg_repack takes no connection string, so the Job is
+// from the environment. The rewrite Job takes no connection string, so it is
 // given PGHOST/PGPORT/PGUSER/PGPASSWORD instead.
 type archivePGConn struct {
 	Host     string
@@ -150,16 +160,39 @@ echo "verified $ROWS rows, newest $NEWEST, cutoff %s"
 		cutoff, cutoff, cutoff)
 }
 
-// archiveRepackScript installs pg_repack if the database has never used it and
-// rewrites the one table the run touched. ON_ERROR_STOP is on so a missing
-// extension is reported by this Job rather than by pg_repack's own confusing
-// "program version mismatch". Pure.
+// archiveRepackScript rewrites the one table the run touched so the deleted
+// rows' space goes back to the filesystem.
+//
+// It is VACUUM FULL and not pg_repack, which the phase is still named after,
+// because pg_repack needs a server-side extension and the shards run the stock
+// bitnami postgresql image: on shard-0 "select * from pg_available_extensions
+// where name = 'pg_repack'" returns nothing, so CREATE EXTENSION could never
+// succeed and the phase was undeliverable on every managed database we have.
+//
+// The price is the ACCESS EXCLUSIVE lock VACUUM FULL holds for the rewrite --
+// measured at 2.9s for a 295 MB table, so roughly a minute per 5 GB. lock_timeout
+// keeps that from turning into a queue: if the table is busy the phase fails
+// with a lock error the run row can show, instead of stalling every query
+// behind a lock request that waits forever.
+//
+// Space is reclaimed only when this runs. Plain VACUUM would mark the pages
+// reusable and leave pg_database_size -- what the quota measures -- unchanged,
+// which would make the whole archive pointless to the owner it is offered to.
+// Pure.
 func archiveRepackScript(r archiveRun) string {
-	table := r.Schema + "." + r.Table
+	table := duckDBIdentifier(r.Schema) + "." + duckDBIdentifier(r.Table)
 	return fmt.Sprintf(`set -euo pipefail
-psql -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS pg_repack"
-pg_repack --no-superuser-check --table %q "$PGDATABASE"
-`, table)
+psql -v ON_ERROR_STOP=1 -c "SET lock_timeout = '%s'" -c %s
+`, archiveRepackLockTimeout, shellSingleQuoted("VACUUM (FULL, VERBOSE) "+table))
+}
+
+// shellSingleQuoted wraps a string so the shell passes it through untouched,
+// including the double quotes an SQL identifier needs. A table name is a
+// tenant-chosen string: it reaches this script only through single quotes, and
+// an embedded single quote is closed and re-opened rather than escaped, because
+// backslash escapes do not apply inside shell single quotes. Pure.
+func shellSingleQuoted(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // archiveJobSpec wraps a shell script in the Job shape every archive phase
@@ -208,7 +241,7 @@ func archiveS3Env(creds cloudtask.S3Credentials) []corev1.EnvVar {
 
 // archivePGEnv hands a shard's admin connection to a container as the variables
 // libpq reads. Both the DuckDB postgres extension (which attaches an empty DSN)
-// and pg_repack (which takes no connection string at all) get their connection
+// and the rewrite (which takes no connection string at all) get their connection
 // this way, so the password never reaches a command line or a script body.
 func archivePGEnv(conn archivePGConn) []corev1.EnvVar {
 	return []corev1.EnvVar{

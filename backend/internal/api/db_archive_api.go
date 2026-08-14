@@ -63,7 +63,7 @@ type archiveRunView struct {
 //
 // @ID          startDatabaseArchive
 // @Summary     Archive a table's history to S3 as Parquet
-// @Description Queues an archive run for one table: rows strictly older than the cutoff date are exported to Parquet on the project's archive bucket, verified against the exported object, deleted from the table, and the space returned with pg_repack. The database backup is untouched and still holds the archived rows. Returns the queued run; progress is reported by the archive-runs history endpoint.
+// @Description Queues an archive run for one table: rows strictly older than the cutoff date are exported to Parquet on the project's archive bucket, verified against the exported object, deleted from the table, and the space returned to the filesystem by rewriting the table. The database backup is untouched and still holds the archived rows. Returns the queued run; progress is reported by the archive-runs history endpoint.
 // @Tags        database
 // @Accept      json
 // @Produce     json

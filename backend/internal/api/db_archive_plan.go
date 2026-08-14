@@ -128,7 +128,7 @@ type archiveBucket struct {
 // return to the filesystem.
 //
 // It is proportional to the whole relation, indexes included, because deleting
-// a row removes its index entries too and pg_repack rewrites both. It is an
+// a row removes its index entries too and the rewrite rebuilds both. It is an
 // estimate and is labelled as one everywhere it surfaces: rows are not uniform,
 // and a table whose old rows are narrower than its new ones will free less than
 // this says. Pure.

@@ -48,8 +48,8 @@ const dbArchiveDeleteBatch = 20_000
 // mid-delete.
 const dbArchiveDeleteBudget = 4 * time.Minute
 
-// dbArchiveRepackHeadroom is the free space pg_repack needs relative to the
-// table it rewrites. pg_repack builds a full copy of the table and its indexes
+// dbArchiveRepackHeadroom is the free space the rewrite needs relative to the
+// table it rewrites. VACUUM FULL builds a full copy of the table and its indexes
 // before swapping, so a shard with less headroom than the table's own size runs
 // out of disk mid-rewrite -- on the exact volume the archive was called in to
 // relieve. The margin above 1.0 covers the WAL the rewrite generates.
@@ -433,13 +433,15 @@ func (w *dbArchiveWorker) deleteRows(ctx context.Context, r archiveRun) error {
 //
 // A plain DELETE frees nothing a tenant can see: the pages stay in the
 // relation, and the quota this whole feature exists to satisfy is measured on
-// the relation's size. pg_repack rewrites it without holding an exclusive lock
-// for the duration, which is what keeps the unavailability window to the swap
-// rather than the rewrite.
+// the relation's size. The phase rewrites the table so the pages go back to the
+// filesystem; it is VACUUM FULL rather than pg_repack, because the shards run
+// the stock bitnami image where pg_repack's server extension is not installable
+// at all. The table is therefore locked for the length of the rewrite, and
+// archiveRepackLockTimeout bounds the wait for that lock.
 //
-// The guard runs first and fails closed: pg_repack needs room for a second copy
-// of the table, and running it on a volume that lacks that room turns a storage
-// problem into a full disk on a shared instance.
+// The guard runs first and fails closed: the rewrite needs room for a second
+// copy of the table, and running it on a volume that lacks that room turns a
+// storage problem into a full disk on a shared instance.
 //
 // The copy is of the LIVE rows, not of the relation. That distinction is the
 // whole case this feature serves: the delete leaves every page in place, so a
@@ -640,7 +642,7 @@ func (w *dbArchiveWorker) exportImage() string {
 	return defaultDBArchiveExportImage
 }
 
-// repackImage is the image carrying pg_repack.
+// repackImage is the image carrying the psql that runs the rewrite.
 func (w *dbArchiveWorker) repackImage() string {
 	if w.h.cfg != nil && w.h.cfg.DBArchiveRepackImage != "" {
 		return w.h.cfg.DBArchiveRepackImage

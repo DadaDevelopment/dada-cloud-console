@@ -239,6 +239,30 @@ func TestArchiveDuckDBPhasesNeverCallABareBinary(t *testing.T) {
 	}
 }
 
+// TestArchiveReclaimRewritesWithoutTheMissingExtension pins the reclaim phase to
+// what the shards can actually run: pg_repack needs a server extension, and
+// "select * from pg_available_extensions where name = 'pg_repack'" is empty on
+// the stock bitnami image every shard runs, so CREATE EXTENSION could never
+// succeed and the phase could never return a byte.
+func TestArchiveReclaimRewritesWithoutTheMissingExtension(t *testing.T) {
+	r := testArchiveRun()
+	r.Schema, r.Table = "public", `we"ird`
+	script := archiveRepackScript(r)
+
+	if strings.Contains(script, "pg_repack") {
+		t.Fatalf("reclaim still calls pg_repack, which no shard can install:\n%s", script)
+	}
+	if !strings.Contains(script, "VACUUM (FULL, VERBOSE)") {
+		t.Fatalf("reclaim does not rewrite the table, so it frees nothing:\n%s", script)
+	}
+	if !strings.Contains(script, `-c "SET lock_timeout = '`+archiveRepackLockTimeout+`'"`) {
+		t.Fatalf("reclaim waits for the table lock unbounded:\n%s", script)
+	}
+	if !strings.Contains(script, `'VACUUM (FULL, VERBOSE) "public"."we""ird"'`) {
+		t.Fatalf("reclaim does not quote the table for psql and the shell:\n%s", script)
+	}
+}
+
 func TestDuckDBEndpoint(t *testing.T) {
 	cases := []struct {
 		in     string
