@@ -95,7 +95,7 @@ func TestPostgresDSNTLSFlagOnRewritesOnlyTheInternalHost(t *testing.T) {
 	t.Setenv("MANAGED_DB_TLS_DSN_ENABLED", "true")
 
 	dsn := postgresDSN("app", "x", "pg-router.databases.svc.cluster.local", "5432", "megafactory")
-	want := "postgresql://app:x@db.dada-tuda.ru:5432/megafactory?sslmode=require"
+	want := "postgresql://app:x@db.pv.dada-tuda.ru:5432/megafactory?sslmode=require"
 	if dsn != want {
 		t.Fatalf("postgresDSN = %q, want %q", dsn, want)
 	}

@@ -498,8 +498,8 @@ func TestRenderAppValuesHostAlias(t *testing.T) {
 	}
 	if !strings.Contains(got, "hostAliases:") ||
 		!strings.Contains(got, "ip: 10.43.7.9") ||
-		!strings.Contains(got, "db.dada-tuda.ru") {
-		t.Errorf("expected hostAliases entry for db.dada-tuda.ru -> 10.43.7.9\nFull output:\n%s", got)
+		!strings.Contains(got, "db.pv.dada-tuda.ru") {
+		t.Errorf("expected hostAliases entry for db.pv.dada-tuda.ru -> 10.43.7.9\nFull output:\n%s", got)
 	}
 }
 

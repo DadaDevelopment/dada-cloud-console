@@ -175,9 +175,9 @@ type AppSpec struct {
 	ArgoName string
 
 	// PgRouterHostAliasIP, when non-empty, renders a common.hostAliases entry
-	// mapping db.dada-tuda.ru to this IP inside the app's own pod. The publicly
+	// mapping db.pv.dada-tuda.ru to this IP inside the app's own pod. The publicly
 	// trusted certificate the platform issues for managed-Postgres TLS is bound to
-	// db.dada-tuda.ru, not to the in-cluster pg-router Service DNS name, so a client
+	// db.pv.dada-tuda.ru, not to the in-cluster pg-router Service DNS name, so a client
 	// library that verifies the certificate hostname (node-postgres 8+ with
 	// ssl:true, the exact default every Supabase/Neon/Heroku-style snippet copies)
 	// needs that name to resolve from inside the pod. Empty is the default and
@@ -347,9 +347,9 @@ type commonHostAlias struct {
 
 // pgRouterHostAliasHostname is the DNS name the platform's managed-Postgres TLS
 // certificate is issued for (ClusterIssuer letsencrypt-dns01, dnsName
-// db.dada-tuda.ru). It is a platform-wide constant, not a per-app value: every
+// db.pv.dada-tuda.ru). It is a platform-wide constant, not a per-app value: every
 // app that opts into the alias resolves the same name to the same router.
-const pgRouterHostAliasHostname = "db.dada-tuda.ru"
+const pgRouterHostAliasHostname = "db.pv.dada-tuda.ru"
 
 // commonPodSecurityContext hands a persistent volume to a non-root image.
 //
