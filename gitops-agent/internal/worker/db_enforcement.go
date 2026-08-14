@@ -70,7 +70,7 @@ func (w *DBWatcher) doSetDatabaseEnforcement(ctx context.Context, op db.Operatio
 		return err
 	}
 	if !changed {
-		return nil
+		return db.MarkNoop(ctx, w.pool, op.ID, fmt.Sprintf("database %s already carries enforcement %q", p.Name, p.Enforcement))
 	}
 
 	manifestFile, err := upsertManifestFile(mgr, valuesPath, patched)

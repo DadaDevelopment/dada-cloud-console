@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"log"
 	"os"
 	"testing"
 
@@ -49,7 +50,35 @@ func seedOrphanGCProjectEnv(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 		envID, projectID, envName, namespace); err != nil {
 		t.Fatalf("seed environment: %v", err)
 	}
+	t.Cleanup(func() { dropOrphanGCFixture(pool, projectID, envID) })
 	return projectID, envID
+}
+
+// dropOrphanGCFixture removes everything a fixture project owns once its test
+// is done.
+//
+// It exists because the rig is one shared database [reference_local_realdb_test_rig]:
+// rows left behind here are read by every other package's tests. A single
+// leftover App snapshot from this file made two backend tests fail
+// (TestOverviewNotReadyFreshnessDetectsBlindness,
+// TestPlatformStatusSnapshotReconciler_StaleAppSnapshotIsDegraded), because both
+// read MAX(last_synced_at) across ALL App/k8s snapshots to decide whether the
+// reconciler is alive -- a fresh foreign row makes the platform look healthy
+// [live psql, 2026-08-15]. Order of deletion follows the foreign keys.
+func dropOrphanGCFixture(pool *pgxpool.Pool, projectID, envID uuid.UUID) {
+	ctx := context.Background()
+	for _, q := range []string{
+		`DELETE FROM domain_hostnames WHERE environment_id = $2`,
+		`DELETE FROM resource_snapshots WHERE project_id = $1`,
+		`DELETE FROM operations WHERE project_id = $1`,
+		`DELETE FROM audit_events WHERE project_id = $1`,
+		`DELETE FROM environments WHERE id = $2`,
+		`DELETE FROM projects WHERE id = $1`,
+	} {
+		if _, err := pool.Exec(ctx, q, projectID, envID); err != nil {
+			log.Printf("orphan-gc fixture cleanup failed (%s): %v", q, err)
+		}
+	}
 }
 
 func seedOrphanGCAppSnapshot(t *testing.T, ctx context.Context, pool *pgxpool.Pool, projectID, envID uuid.UUID, name, phase string) {

@@ -329,7 +329,7 @@ func (w *dbArchiveWorker) orderArchiveBucket(ctx context.Context, r archiveRun) 
 		     SELECT 1 FROM operations
 		      WHERE project_id = $2 AND environment_id = $3
 		        AND action = 'CreateS3Bucket' AND resource_name = $4::text
-		        AND status IN ('Created', 'Reconciling')
+		        AND status IN ('Created', 'Processing', 'Reconciling')
 		 )`, systemDeployActorID, r.ProjectID, r.EnvironmentID, dbArchiveBucketResource, payload)
 	if err != nil {
 		return fmt.Errorf("order the archive bucket: %w", err)

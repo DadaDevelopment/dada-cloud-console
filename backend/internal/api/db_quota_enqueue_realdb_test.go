@@ -145,3 +145,56 @@ func TestEnqueueDatabaseTier_BacksOffAfterAFailure(t *testing.T) {
 		t.Fatal("a plan change to another tier was swallowed by the backoff")
 	}
 }
+
+// TestEnqueueDatabaseTier_TreatsProcessingAsInFlight covers the status the
+// gitops agent actually claims a row into. The dedupe originally named only
+// Created and Reconciling, so from the moment the agent picked an operation up
+// the reconciler considered the queue empty and enqueued the same flip again on
+// its next tick - the slower the agent, the deeper the queue.
+func TestEnqueueDatabaseTier_TreatsProcessingAsInFlight(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping tier in-flight integration test")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect to TEST_DATABASE_URL: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	suffix := uuid.NewString()[:8]
+	var projectID, envID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO projects (name, display_name) VALUES ($1, $1) RETURNING id`,
+		"db-tier-inflight-test-"+suffix).Scan(&projectID); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+	t.Cleanup(func() { dropSeededProject(pool, projectID) })
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO environments (project_id, name, namespace, type) VALUES ($1, 'prod', $2, 'prod') RETURNING id`,
+		projectID, "ns-"+suffix).Scan(&envID); err != nil {
+		t.Fatalf("seed environment: %v", err)
+	}
+
+	h := &Handler{pool: pool}
+	name := "db-" + suffix
+	d := tieredDatabase{ProjectID: projectID, EnvironmentID: envID, Name: name, AppRef: name}
+
+	opID, err := h.enqueueDatabaseTier(ctx, d, "free")
+	if err != nil {
+		t.Fatalf("enqueue SetDatabaseTier: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE operations SET status = 'Processing' WHERE id = $1`, opID); err != nil {
+		t.Fatalf("claim the operation: %v", err)
+	}
+
+	again, err := h.enqueueDatabaseTier(ctx, d, "free")
+	if err != nil {
+		t.Fatalf("re-enqueue while processing: %v", err)
+	}
+	if again != uuid.Nil {
+		t.Fatalf("a second tier flip was queued behind one already being processed: %s", again)
+	}
+}

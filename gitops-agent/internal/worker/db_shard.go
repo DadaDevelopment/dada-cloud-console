@@ -74,7 +74,7 @@ func (w *DBWatcher) doSetDatabaseShard(ctx context.Context, op db.Operation) err
 		return err
 	}
 	if !changed {
-		return nil
+		return db.MarkNoop(ctx, w.pool, op.ID, fmt.Sprintf("database %s already placed on shard %q", p.Name, p.Shard))
 	}
 
 	manifestFile, err := upsertManifestFile(mgr, valuesPath, patched)
@@ -155,7 +155,7 @@ func (w *DBWatcher) setShardInHelmValues(ctx context.Context, op db.Operation, m
 		return err
 	}
 	if !changed {
-		return nil
+		return db.MarkNoop(ctx, w.pool, op.ID, fmt.Sprintf("database %s already placed on shard %q", name, shard))
 	}
 
 	commitMsg := fmt.Sprintf(

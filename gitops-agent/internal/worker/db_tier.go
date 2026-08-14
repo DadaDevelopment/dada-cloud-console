@@ -70,7 +70,7 @@ func (w *DBWatcher) doSetDatabaseTier(ctx context.Context, op db.Operation) erro
 		return err
 	}
 	if !changed {
-		return nil
+		return db.MarkNoop(ctx, w.pool, op.ID, fmt.Sprintf("database %s already carries tier %q", p.Name, p.Tier))
 	}
 
 	manifestFile, err := upsertManifestFile(mgr, valuesPath, patched)

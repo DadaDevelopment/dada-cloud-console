@@ -190,6 +190,11 @@ func (h *Handler) tieredDatabases(ctx context.Context) ([]tieredDatabase, error)
 // replicas racing on the same tick cannot both insert, and so a slow gitops
 // agent cannot accumulate a queue of tier flips.
 //
+// "In flight" must include Processing, which is the status the gitops agent
+// claims a row into: without it the reconciler enqueued a second operation for
+// a database whose first one was being worked on right then, so the slower the
+// agent the deeper the queue [live psql, 2026-08-15].
+//
 // The same statement backs off after a failure: a tier the agent already
 // rejected for this database is not re-queued for dbTierRetryAfter. A database
 // whose CR is not in git at all cannot be tiered by any number of retries, and
@@ -212,7 +217,7 @@ func (h *Handler) enqueueDatabaseTier(ctx context.Context, d tieredDatabase, tie
 		 WHERE NOT EXISTS (
 		   SELECT 1 FROM operations
 		   WHERE environment_id = $3 AND resource_kind = 'ServiceDatabaseV2' AND resource_name = $4::text
-		     AND action = 'SetDatabaseTier' AND status IN ('Created', 'Reconciling')
+		     AND action = 'SetDatabaseTier' AND status IN ('Created', 'Processing', 'Reconciling')
 		 )
 		 AND NOT EXISTS (
 		   SELECT 1 FROM operations

@@ -58,7 +58,7 @@ func (h *Handler) recordMovePlacement(ctx context.Context, datname, shard string
 		 WHERE NOT EXISTS (
 		   SELECT 1 FROM operations
 		   WHERE environment_id = $3 AND resource_kind = 'ServiceDatabaseV2' AND resource_name = $4::text
-		     AND action = 'SetDatabaseShard' AND status IN ('Created', 'Reconciling')
+		     AND action = 'SetDatabaseShard' AND status IN ('Created', 'Processing', 'Reconciling')
 		 )
 		 RETURNING id`,
 		systemDeployActorID, projectID, envID, name, payload,

@@ -197,6 +197,59 @@ func recordSuccessAudit(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, s
 	}
 }
 
+// MarkNoop ends an operation whose desired state is already in git: nothing was
+// committed, and nothing needed to be.
+//
+// It exists because the dispatcher [worker/dbwatcher.go poll] writes a terminal
+// status only for a handler that returns an ERROR, while success is written by
+// commitFilesAndRecord -> MarkCommitted. A handler that returns nil without
+// committing therefore ends nothing: the row stays Processing, ClaimPending
+// re-claims it after staleProcessingTimeout, and the operation loops forever
+// while the console shows the user's action as still running. Four handlers took
+// that shortcut on their "already the wanted value" branch, and on prod it
+// stranded a user's SetDatabaseTier for hours [live psql, 2026-08-15].
+//
+// The status is Committed rather than a new one because a no-op is a success by
+// every reader's definition -- git holds exactly what was asked for -- and
+// introducing a status the backend, the console and the admin panel do not know
+// would trade a wedged row for an unreadable one. git_commit stays NULL and the
+// reason rides the audit row, so the two are told apart without putting error
+// text on an operation that did not fail.
+func MarkNoop(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, reason string) error {
+	_, err := pool.Exec(ctx, `
+		UPDATE operations
+		SET    status = 'Committed', updated_at = NOW()
+		WHERE  id = $1
+	`, id)
+	if err != nil {
+		return err
+	}
+	recordNoopAudit(ctx, pool, id, reason)
+	return nil
+}
+
+// recordNoopAudit writes the outcome=success verdict for an operation that had
+// nothing to change, carrying the reason so path analysis can tell a no-op apart
+// from a commit. Guarded and best-effort for the same reasons as
+// recordSuccessAudit.
+func recordNoopAudit(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, reason string) {
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO audit_events
+			(actor_id, project_id, environment_id, operation_id, action, resource_kind, resource_name, outcome, metadata)
+		SELECT o.actor_id, o.project_id, o.environment_id, o.id, o.action, o.resource_kind, o.resource_name, 'success',
+		       jsonb_build_object('phase', 'operation', 'noop', true, 'reason', $2::text)
+		  FROM operations o
+		 WHERE o.id = $1
+		   AND NOT EXISTS (
+			SELECT 1 FROM audit_events a
+			 WHERE a.operation_id = o.id
+			   AND a.outcome IN ('success', 'failure')
+		   )
+	`, id, reason); err != nil {
+		log.Printf("mark noop: audit row insert failed for op %s: %v", id, err)
+	}
+}
+
 // MarkFailed sets status=Failed with an error message, and records the failure
 // in audit_events.
 func MarkFailed(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, code, message string) error {
