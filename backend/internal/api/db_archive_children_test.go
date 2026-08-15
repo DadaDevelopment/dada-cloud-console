@@ -99,7 +99,7 @@ func TestChildrenOnlyBlockTheRowsTheCutoffWouldDelete(t *testing.T) {
 	if len(blocking) != 1 || blocking[0].Rows != 1 {
 		t.Fatalf("one child row inside the window must block and be counted exactly, got %+v", blocking)
 	}
-	if msg := archiveChildrenReason(schema, "observations", blocking); !strings.Contains(msg, "1 rows") {
+	if msg := archiveChildrenReason(schema, "observations", blocking, ""); !strings.Contains(msg, "1 rows") {
 		t.Fatalf("the refusal does not carry the measured overlap: %s", msg)
 	}
 }
@@ -326,7 +326,7 @@ func TestChildrenBlockTheRunBeforeAnythingIsExported(t *testing.T) {
 		t.Fatalf("the blocking child was reported with %d rows", refs[0].Rows)
 	}
 
-	msg := archiveChildrenReason(schema, "observations", refs)
+	msg := archiveChildrenReason(schema, "observations", refs, "")
 	if !strings.Contains(msg, "assessments") || !strings.Contains(msg, "observation_id") {
 		t.Fatalf("the refusal does not name the table to archive first: %s", msg)
 	}
@@ -345,7 +345,7 @@ func TestChildrenBlockTheRunBeforeAnythingIsExported(t *testing.T) {
 	if len(refs) != 2 {
 		t.Fatalf("a cascade child holding rows must block too, got %+v", refs)
 	}
-	if msg := archiveChildrenReason(schema, "observations", refs); !strings.Contains(msg, "cascade") {
+	if msg := archiveChildrenReason(schema, "observations", refs, ""); !strings.Contains(msg, "cascade") {
 		t.Fatalf("the refusal does not warn that a cascade would delete unarchived rows: %s", msg)
 	}
 

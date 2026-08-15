@@ -215,6 +215,55 @@ func archiveChildRowsInWindow(ctx context.Context, conn *pgx.Conn, r archiveRun,
 	return n, nil
 }
 
+// archiveWorkingCutoff is the newest cutoff that none of these foreign keys
+// would refuse: the earliest cutoff-column value among the parent rows the
+// children still point at. A delete removes rows strictly older than the
+// cutoff, so a run stopped at this date leaves every referenced parent in
+// place.
+//
+// Without it the owner is told which table blocks them and nothing about how
+// to get unstuck, and the only way forward is to guess dates or write the join
+// by hand against their own database - which is how this was found.
+//
+// The question is asked once, across every blocking key at once, and is
+// allowed to go unanswered: the join runs over a child column that carries no
+// index in the database this was built for. An unanswered probe costs the
+// sentence its last clause, nothing more, so it fails quiet rather than
+// turning a readable refusal into an error.
+func archiveWorkingCutoff(ctx context.Context, conn *pgx.Conn, r archiveRun, refs []archiveChildRef, budget time.Duration) (time.Time, bool) {
+	if len(refs) == 0 || archiveIsDerived(r) {
+		return time.Time{}, false
+	}
+	ctx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+
+	earliest := time.Time{}
+	for _, ref := range refs {
+		query := fmt.Sprintf(
+			`SELECT min(tgt.%s) FROM %s c JOIN %s tgt ON tgt.%s = c.%s`,
+			pgx.Identifier{r.CutoffColumn}.Sanitize(),
+			pgx.Identifier{r.Schema, ref.Table}.Sanitize(),
+			pgx.Identifier{r.Schema, r.Table}.Sanitize(),
+			pgx.Identifier{ref.ParentColumn}.Sanitize(),
+			pgx.Identifier{ref.Column}.Sanitize())
+
+		var oldest *time.Time
+		if err := conn.QueryRow(ctx, query).Scan(&oldest); err != nil {
+			return time.Time{}, false
+		}
+		if oldest == nil {
+			continue
+		}
+		if earliest.IsZero() || oldest.Before(earliest) {
+			earliest = *oldest
+		}
+	}
+	if earliest.IsZero() {
+		return time.Time{}, false
+	}
+	return earliest, true
+}
+
 // archiveChildrenVerdict is the authoritative answer to whether a run may
 // proceed, and the only place an unanswered foreign key is allowed to stop one.
 //
@@ -241,7 +290,8 @@ func archiveChildrenVerdict(ctx context.Context, conn *pgx.Conn, r archiveRun) e
 	if len(blocking) == 0 {
 		return nil
 	}
-	return errors.New(archiveChildrenReason(r.Schema, r.Table, blocking))
+	working := archiveWorkingCutoffText(ctx, conn, r, blocking, dbArchiveWorkerCutoffBudget)
+	return errors.New(archiveChildrenReason(r.Schema, r.Table, blocking, working))
 }
 
 // archiveChildrenOnItsOwnConn asks the child questions on a connection nothing
@@ -289,7 +339,7 @@ func (h *Handler) archiveChildrenVerdictOnItsOwnConn(ctx context.Context, shard,
 
 // archiveChildrenReason is the sentence the console shows instead of a run that
 // would die in its delete phase. Pure.
-func archiveChildrenReason(schema, table string, refs []archiveChildRef) string {
+func archiveChildrenReason(schema, table string, refs []archiveChildRef, working string) string {
 	if len(refs) == 0 {
 		return ""
 	}
@@ -315,5 +365,33 @@ func archiveChildrenReason(schema, table string, refs []archiveChildRef) string 
 	if unknown {
 		msg += " At least one key could not be answered at all in the time it was given, and an unanswered foreign key is treated as blocking rather than exporting gigabytes that the delete would then refuse."
 	}
+	if working != "" {
+		msg += fmt.Sprintf(" A cutoff of %s is the newest one none of these keys would refuse; check its plan first, since a cutoff that clears the keys can also cover no rows at all.", working)
+	}
 	return msg
+}
+
+// archiveWorkingCutoffText formats the suggestion for the refusal sentence, and
+// says nothing at all when the probe could not answer.
+func archiveWorkingCutoffText(ctx context.Context, conn *pgx.Conn, r archiveRun, refs []archiveChildRef, budget time.Duration) string {
+	cutoff, ok := archiveWorkingCutoff(ctx, conn, r, refs, budget)
+	if !ok {
+		return ""
+	}
+	return cutoff.UTC().Format("2006-01-02")
+}
+
+// archiveWorkingCutoffOnItsOwnConn probes on a connection nothing else is
+// holding, for the same reason the children probes do: a cancelled query takes
+// its connection down with it, and the caller's connection has work left.
+func (h *Handler) archiveWorkingCutoffOnItsOwnConn(ctx context.Context, shard, datname string, r archiveRun, refs []archiveChildRef, budget time.Duration) string {
+	if len(refs) == 0 {
+		return ""
+	}
+	conn, err := h.connectToTenantDB(ctx, shard, datname)
+	if err != nil {
+		return ""
+	}
+	defer conn.Close(context.Background())
+	return archiveWorkingCutoffText(ctx, conn, r, refs, budget)
 }

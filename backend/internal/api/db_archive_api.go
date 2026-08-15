@@ -148,8 +148,7 @@ func (h *Handler) StartDatabaseArchive(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, reason)
 		return
 	}
-	cctx, ccancel := context.WithTimeout(ctx, dbArchiveChildrenAPIBudget)
-	children := h.archiveChildrenOnItsOwnConn(cctx, target.Shard, target.Datname, archiveRun{
+	run := archiveRun{
 		Schema:       schema,
 		Table:        relname,
 		CutoffColumn: columnName,
@@ -157,10 +156,15 @@ func (h *Handler) StartDatabaseArchive(c *gin.Context) {
 		ViaFK:        via.FK,
 		ViaPK:        via.PK,
 		Cutoff:       cutoff,
-	}, candidates, dbArchiveAPIProbeBudget)
+	}
+	cctx, ccancel := context.WithTimeout(ctx, dbArchiveChildrenAPIBudget)
+	children := h.archiveChildrenOnItsOwnConn(cctx, target.Shard, target.Datname, run, candidates, dbArchiveAPIProbeBudget)
 	ccancel()
 	if blocking := archiveChildrenDecided(children); len(blocking) > 0 {
-		respondError(c, http.StatusConflict, archiveChildrenReason(schema, relname, blocking))
+		wctx, wcancel := context.WithTimeout(ctx, dbArchiveAPICutoffBudget)
+		working := h.archiveWorkingCutoffOnItsOwnConn(wctx, target.Shard, target.Datname, run, blocking, dbArchiveAPICutoffBudget)
+		wcancel()
+		respondError(c, http.StatusConflict, archiveChildrenReason(schema, relname, blocking, working))
 		return
 	}
 

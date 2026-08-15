@@ -34,6 +34,15 @@ var dbArchiveAPIProbeBudget = archiveProbeBudget{Probe: 4 * time.Second, Count: 
 // undecided, which is the same answer as a key that ran out on its own.
 const dbArchiveChildrenAPIBudget = 6 * time.Second
 
+// dbArchiveWorkerCutoffBudget and dbArchiveAPICutoffBudget cap the search for a
+// cutoff the foreign keys would accept. The join runs over a child column with
+// no index in the database this was built for, so the probe is expected to go
+// unanswered on an HTTP request and to answer in the worker; either way the
+// refusal itself is already written by the time it is asked.
+const dbArchiveWorkerCutoffBudget = 2 * time.Minute
+
+const dbArchiveAPICutoffBudget = 3 * time.Second
+
 // dbArchiveWorkerProbeBudget is what the same key gets in the worker, before
 // anything has been exported. Nothing is waiting on it there but the run
 // itself, so the question is asked to completion and the answer is a verdict.
@@ -246,25 +255,32 @@ func (h *Handler) GetDatabaseArchivePlan(c *gin.Context) {
 		return
 	}
 	unresolved := []archiveChildRef{}
+	working := ""
 	if cutoff != nil && len(children) > 0 {
 		if column, reason := pickCutoffColumn(cols); reason == "" {
-			cctx, ccancel := context.WithTimeout(ctx, dbArchiveChildrenAPIBudget)
-			children = h.archiveChildrenOnItsOwnConn(cctx, target.Shard, target.Datname, archiveRun{
+			run := archiveRun{
 				Schema:       schema,
 				Table:        relname,
 				CutoffColumn: column.Name,
 				Cutoff:       *cutoff,
-			}, children, dbArchiveAPIProbeBudget)
+			}
+			cctx, ccancel := context.WithTimeout(ctx, dbArchiveChildrenAPIBudget)
+			children = h.archiveChildrenOnItsOwnConn(cctx, target.Shard, target.Datname, run, children, dbArchiveAPIProbeBudget)
 			ccancel()
 			unresolved = archiveChildrenUnknown(children)
 			children = archiveChildrenDecided(children)
+
+			wctx, wcancel := context.WithTimeout(ctx, dbArchiveAPICutoffBudget)
+			working = h.archiveWorkingCutoffOnItsOwnConn(wctx, target.Shard, target.Datname, run, children, dbArchiveAPICutoffBudget)
+			wcancel()
 		}
 	}
 	if len(children) > 0 {
 		c.JSON(http.StatusOK, gin.H{
 			"table":           schema + "." + relname,
 			"archivable":      false,
-			"reason":          archiveChildrenReason(schema, relname, children),
+			"reason":          archiveChildrenReason(schema, relname, children, working),
+			"workingCutoff":   working,
 			"blockedBy":       children,
 			"uncheckedKeys":   unresolved,
 			"columns":         cols,
