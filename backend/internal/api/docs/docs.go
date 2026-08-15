@@ -4493,7 +4493,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Switches YooKassa recurring charges for the org that owns the project. Disabling also deletes the saved payment method. Enabling requires a payment method saved by an earlier checkout. Requires write role on the project.",
+                "description": "Switches YooKassa recurring charges for the org that owns the project. Disabling keeps the saved payment method so renewal can be resumed in one click; use DELETE /billing/payment-method to forget the card. Enabling requires a payment method saved by an earlier checkout. Requires write role on the project.",
                 "consumes": [
                     "application/json"
                 ],
@@ -4731,6 +4731,78 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/billing/payment-method": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Deletes the card saved for recurring charges and turns automatic renewal off. Idempotent. Requires write role on the project.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "billing"
+                ],
+                "summary": "Forget the saved payment method",
+                "operationId": "deleteBillingPaymentMethod",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -20370,6 +20442,26 @@ const docTemplate = `{
                 },
                 "table": {
                     "type": "string"
+                },
+                "via": {
+                    "$ref": "#/definitions/api.archiveVia"
+                }
+            }
+        },
+        "api.archiveVia": {
+            "type": "object",
+            "properties": {
+                "column": {
+                    "type": "string"
+                },
+                "fk": {
+                    "type": "string"
+                },
+                "pk": {
+                    "type": "string"
+                },
+                "table": {
+                    "type": "string"
                 }
             }
         },
@@ -21710,6 +21802,9 @@ const docTemplate = `{
                 },
                 "table": {
                     "type": "string"
+                },
+                "via": {
+                    "$ref": "#/definitions/api.archiveVia"
                 }
             }
         },

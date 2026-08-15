@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, FormEvent } from "react";
 import { useParams } from "next/navigation";
 import { customDomainsApi, appsApi, managedDnsApi } from "@/lib/api";
-import { QuotaUpsell } from "@/components/billing/quota-upsell";
+import { UpgradeDialog } from "@/components/billing/upgrade-dialog";
 import { docsHref } from "@/lib/site";
 import type {
   DomainAuthorization,
@@ -766,7 +766,12 @@ function AddDomainFunnel({
           <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("domains.funnel.inputHelp")}</p>
         </div>
         {quotaBlocked && (
-          <QuotaUpsell resource={quotaBlocked.resource} limit={quotaBlocked.limit} projectId={projectId} />
+          <UpgradeDialog
+              resource={quotaBlocked.resource}
+              limit={quotaBlocked.limit}
+              projectId={projectId}
+              onClose={() => setQuotaBlocked(null)}
+            />
         )}
         {err && (
           <div role="alert" className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">

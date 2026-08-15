@@ -17,7 +17,7 @@ import { ResourceZeroState } from "@/components/ui/resource-zero-state";
 import { Database } from "lucide-react";
 import { useT } from "@/lib/i18n/console/context";
 import { isSettling } from "@/lib/phase";
-import { QuotaUpsell } from "@/components/billing/quota-upsell";
+import { UpgradeDialog } from "@/components/billing/upgrade-dialog";
 
 interface CreateDbForm {
   name: string;
@@ -375,7 +375,12 @@ export default function DatabasesPage() {
           )}
 
           {quotaBlock && (
-            <QuotaUpsell resource={quotaBlock.resource} limit={quotaBlock.limit} projectId={projectId} />
+            <UpgradeDialog
+              resource={quotaBlock.resource}
+              limit={quotaBlock.limit}
+              projectId={projectId}
+              onClose={() => setQuotaBlock(null)}
+            />
           )}
 
           {submitError && (

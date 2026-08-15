@@ -1,13 +1,16 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { gitApi, solutionsApi } from "@/lib/api";
+import { billingApi, gitApi, solutionsApi } from "@/lib/api";
+import type { BillingPlan } from "@/lib/api";
 import type { Solution, SolutionCandidate, SolutionCategory } from "@/lib/types";
 import { ResourceIcon } from "@/components/shell/icons";
 import { Spinner } from "@/components/ui/spinner";
-import { QuotaUpsell } from "@/components/billing/quota-upsell";
+import { UpgradeDialog } from "@/components/billing/upgrade-dialog";
+import { planBadgeClasses, solutionReach, type SolutionReach } from "@/lib/plan-reach";
 import { useT } from "@/lib/i18n/console/context";
 import { trackBuildStart } from "@/lib/build-watch";
+import { trackUxEvent } from "@/lib/ux-telemetry";
 import { templateUxName, type TemplateDeployPlacement } from "@/lib/ux-target-names";
 
 function toKubeName(s: string): string {
@@ -76,7 +79,9 @@ export function TemplateDeployCards({ projectId, envId, placement, compact, hero
   const [paramsFor, setParamsFor] = useState<Solution | null>(null);
   const [deployingKey, setDeployingKey] = useState<string | null>(null);
   const [templateError, setTemplateError] = useState<string | null>(null);
-  const [quotaBlocked, setQuotaBlocked] = useState<{ resource: string; limit?: number } | null>(null);
+  const [quotaBlocked, setQuotaBlocked] = useState<{ resource: string; limit?: number; required?: number; label?: string } | null>(null);
+  const [plans, setPlans] = useState<BillingPlan[] | null>(null);
+  const [storageLimitGB, setStorageLimitGB] = useState<number | null>(null);
   const [query, setQuery] = useState("");
   const [candidates, setCandidates] = useState<SolutionCandidate[] | null>(null);
   const [resolving, setResolving] = useState(false);
@@ -99,6 +104,31 @@ export function TemplateDeployCards({ projectId, envId, placement, compact, hero
       cancelled = true;
     };
   }, [envRuntime]);
+
+  /**
+   * The plan the project holds and what the plans on sale allow, so a tile the
+   * current plan cannot hold says so on the tile instead of after a filled-in
+   * form and a 403. Both calls are best effort: without them every tile stays
+   * unbadged and installable, which is exactly the behaviour before this.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    billingApi
+      .getPlans()
+      .then((data) => {
+        if (!cancelled) setPlans(data.plans);
+      })
+      .catch(() => undefined);
+    billingApi
+      .getAccount(projectId)
+      .then((account) => {
+        if (!cancelled) setStorageLimitGB(account.quotas?.storage_gb ?? null);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   /**
    * Resolves what the customer typed, one debounced request per pause in the
@@ -200,7 +230,28 @@ export function TemplateDeployCards({ projectId, envId, placement, compact, hero
    * worse, come up with no password on a public address. Those open the form
    * first; everything else deploys on the click.
    */
+  function reachOf(s: Solution): SolutionReach {
+    return solutionReach(s.volume?.size, storageLimitGB, plans);
+  }
+
+  /**
+   * Sells the plan instead of spending the customer's work on a refusal we can
+   * already predict. The backend gate still decides; this only skips the round
+   * trip whose answer we know from the tile's own volume size.
+   */
   function deploySolution(s: Solution) {
+    const reach = reachOf(s);
+    if (!reach.reachable) {
+      trackUxEvent("click", `catalog_locked:${s.slug}:${reach.plan?.key ?? "none"}`);
+      setTemplateError(null);
+      setQuotaBlocked({
+        resource: "storage_gb",
+        limit: storageLimitGB ?? undefined,
+        required: reach.requiredGB ?? undefined,
+        label: s.name,
+      });
+      return;
+    }
     if (s.params && s.params.length > 0) {
       setParamsFor(s);
       return;
@@ -307,9 +358,14 @@ export function TemplateDeployCards({ projectId, envId, placement, compact, hero
         </div>
       )}
       {quotaBlocked && (
-        <div className="mt-3">
-          <QuotaUpsell resource={quotaBlocked.resource} limit={quotaBlocked.limit} projectId={projectId} />
-        </div>
+        <UpgradeDialog
+          resource={quotaBlocked.resource}
+          limit={quotaBlocked.limit}
+          required={quotaBlocked.required}
+          projectId={projectId}
+          actionLabel={quotaBlocked.label}
+          onClose={() => setQuotaBlocked(null)}
+        />
       )}
 
       {compact ? (
@@ -352,18 +408,28 @@ export function TemplateDeployCards({ projectId, envId, placement, compact, hero
                 {category.title}
               </p>
               <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {items.map((s) => (
-                  <SolutionCard
-                    key={s.slug}
-                    solution={s}
-                    cta={deployingKey === s.slug ? t("overview.templates.deploying") : t("overview.templates.cta")}
-                    busy={deployingKey === s.slug}
-                    disabled={!!deployingKey || !envId}
-                    uxName={templateUxName(placement, "deploy", s.slug)}
-                    onClick={() => deploySolution(s)}
-                    t={t}
-                  />
-                ))}
+                {items.map((s) => {
+                  const reach = reachOf(s);
+                  return (
+                    <SolutionCard
+                      key={s.slug}
+                      solution={s}
+                      reach={reach}
+                      cta={
+                        !reach.reachable && reach.plan
+                          ? t("upgrade.locked.cta", { plan: reach.plan.name, price: String(reach.plan.price_rub ?? 0) })
+                          : deployingKey === s.slug
+                            ? t("overview.templates.deploying")
+                            : t("overview.templates.cta")
+                      }
+                      busy={deployingKey === s.slug}
+                      disabled={(!!deployingKey || !envId) && reach.reachable}
+                      uxName={templateUxName(placement, "deploy", s.slug)}
+                      onClick={() => deploySolution(s)}
+                      t={t}
+                    />
+                  );
+                })}
               </div>
             </div>
           ))}
@@ -634,6 +700,7 @@ function SolutionCardSkeleton() {
  */
 function SolutionCard({
   solution,
+  reach,
   cta,
   busy,
   disabled,
@@ -642,6 +709,7 @@ function SolutionCard({
   t,
 }: {
   solution: Solution;
+  reach: SolutionReach;
   cta: string;
   busy: boolean;
   disabled: boolean;
@@ -650,6 +718,7 @@ function SolutionCard({
   t: Translate;
 }) {
   const image = solution.source === "image";
+  const locked = !reach.reachable && !!reach.plan;
   return (
     <div className="flex flex-col rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
       <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400">
@@ -671,6 +740,13 @@ function SolutionCard({
         {solution.volume?.size && (
           <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300">
             {t("overview.templates.volume", { size: solution.volume.size })}
+          </span>
+        )}
+        {locked && reach.plan && (
+          <span
+            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${planBadgeClasses(reach.plan.key)}`}
+          >
+            {t("upgrade.locked.badge", { plan: reach.plan.name })}
           </span>
         )}
       </div>

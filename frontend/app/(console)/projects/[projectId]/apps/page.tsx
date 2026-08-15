@@ -20,7 +20,7 @@ import { DeployChooser } from "@/components/deploy/deploy-chooser";
 import { TemplateDeployCards } from "@/components/console/template-deploy-cards";
 import { UploadDeployCard } from "@/components/deploy/upload-deploy";
 import { useT } from "@/lib/i18n/console/context";
-import { QuotaUpsell } from "@/components/billing/quota-upsell";
+import { UpgradeDialog } from "@/components/billing/upgrade-dialog";
 import { Globe, Database, ChevronDown, AlertTriangle } from "lucide-react";
 import { AppPreviewPane } from "@/components/app-preview-pane";
 import { LogsViewer } from "@/components/logs-viewer";
@@ -466,7 +466,12 @@ export default function AppsPage() {
           </div>
 
           {quotaBlocked && (
-            <QuotaUpsell resource={quotaBlocked.resource} limit={quotaBlocked.limit} projectId={projectId} />
+            <UpgradeDialog
+              resource={quotaBlocked.resource}
+              limit={quotaBlocked.limit}
+              projectId={projectId}
+              onClose={() => setQuotaBlocked(null)}
+            />
           )}
 
           {submitError && (

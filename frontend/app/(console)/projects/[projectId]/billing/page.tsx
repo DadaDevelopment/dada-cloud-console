@@ -8,6 +8,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { ConsumptionBreakdown } from "@/components/billing/consumption-breakdown";
 import { useT } from "@/lib/i18n/console/context";
+import { resumablePaymentUrl } from "@/lib/checkout-status";
+import { trackUxEvent } from "@/lib/ux-telemetry";
 import { clsx } from "clsx";
 
 const PLAN_ORDER: BillingPlanKey[] = ["free", "startup", "business", "enterprise"];
@@ -80,6 +82,8 @@ export default function BillingPage() {
   const [autopayConsent, setAutopayConsent] = useState(true);
   const [autopayBusy, setAutopayBusy] = useState(false);
   const [autopayError, setAutopayError] = useState<string | null>(null);
+  const [detachBusy, setDetachBusy] = useState(false);
+  const [detachError, setDetachError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -183,6 +187,26 @@ export default function BillingPage() {
       setAutopayError(status === 409 ? t("billing.autopayNoMethod") : t("billing.autopayError"));
     } finally {
       setAutopayBusy(false);
+    }
+  }
+
+  /**
+   * Forgets the saved card. Separate from turning renewal off on purpose:
+   * pausing renewal used to erase the card too, so the only way back to
+   * automatic renewal was another manual payment.
+   */
+  async function handleDetachMethod() {
+    setDetachError(null);
+    setDetachBusy(true);
+    try {
+      await billingApi.deletePaymentMethod(projectId);
+      setAccount((prev) =>
+        prev ? { ...prev, autopay: { enabled: false, methodTitle: "", failures: 0, nextChargeAt: null } } : prev,
+      );
+    } catch {
+      setDetachError(t("billing.method.detachError"));
+    } finally {
+      setDetachBusy(false);
     }
   }
 
@@ -440,6 +464,39 @@ export default function BillingPage() {
             </div>
           )}
 
+          {account.plan !== "free" && (
+            <div className="mt-4 rounded-lg border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/60 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                {t("billing.method.title")}
+              </p>
+              {autopay?.methodTitle ? (
+                <>
+                  <p className="mt-1 text-sm font-medium text-gray-900 dark:text-gray-100">{autopay.methodTitle}</p>
+                  {autopay.enabled && autopayNextDate && (
+                    <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
+                      {t("billing.method.nextCharge", {
+                        date: autopayNextDate,
+                        amount: String(currentPlanInfo?.price_rub ?? 0),
+                      })}
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    disabled={detachBusy}
+                    onClick={handleDetachMethod}
+                    data-ux="billing_method:detach"
+                    className="mt-2 text-sm font-semibold text-red-600 dark:text-red-400 hover:underline disabled:opacity-60"
+                  >
+                    {detachBusy ? t("billing.method.detaching") : t("billing.method.detach")}
+                  </button>
+                  {detachError && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{detachError}</p>}
+                </>
+              ) : (
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("billing.method.none")}</p>
+              )}
+            </div>
+          )}
+
           {(upgradeCandidates.length > 0 ||
             (expirySoon && currentPlanInfo?.price_rub !== null && (currentPlanInfo?.price_rub ?? 0) > 0)) && (
             <label className="mt-4 flex cursor-pointer items-start gap-2.5">
@@ -545,9 +602,21 @@ export default function BillingPage() {
                     {p.amount_value.toLocaleString("ru")} {p.currency}
                   </span>
                 </div>
-                <span className={clsx("rounded-full px-3 py-1 text-xs font-medium", statusTone(p.status))}>
-                  {t(`billing.status.${p.status}`)}
-                </span>
+                <div className="flex items-center gap-3">
+                  {resumablePaymentUrl(p) && (
+                    <a
+                      href={resumablePaymentUrl(p) as string}
+                      onClick={() => trackUxEvent("click", "payment_resume")}
+                      data-ux="billing_payments:resume"
+                      className="text-xs font-semibold text-blue-600 hover:underline dark:text-blue-400"
+                    >
+                      {t("billing.payments.resume")}
+                    </a>
+                  )}
+                  <span className={clsx("rounded-full px-3 py-1 text-xs font-medium", statusTone(p.status))}>
+                    {t(`billing.status.${p.status}`)}
+                  </span>
+                </div>
               </div>
             ))}
           </div>

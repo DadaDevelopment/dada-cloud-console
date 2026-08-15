@@ -237,17 +237,20 @@ func notifyAutopayCharged(ctx context.Context, pool *pgxpool.Pool, mailer expiry
 // SetBillingAutopay switches automatic renewal on or off for the org owning
 // the project. Requires write role.
 //
-// Turning it off also forgets the saved payment method. Keeping a charge we
-// have been told not to make, merely disarmed by a boolean, is the kind of
-// stored consent that gets a merchant account closed; the next checkout can
-// re-arm it in one tick of a checkbox.
+// Turning it off keeps the saved method and only lowers the flag. It used to
+// erase the method too, which conflated two different decisions: "do not
+// charge me automatically" and "forget my card". A user who paused renewal
+// then had no way back except a full checkout, and the console could not show
+// a payment method at all -- there was nothing left to show. Withdrawal of the
+// instrument is its own action, DeleteBillingPaymentMethod, which erases the
+// method and lowers the flag together.
 //
 // Turning it on is only possible when a saved method already exists -- consent
 // without an instrument is a setting that silently does nothing.
 //
 // @ID          setBillingAutopay
 // @Summary     Enable or disable automatic renewal
-// @Description Switches YooKassa recurring charges for the org that owns the project. Disabling also deletes the saved payment method. Enabling requires a payment method saved by an earlier checkout. Requires write role on the project.
+// @Description Switches YooKassa recurring charges for the org that owns the project. Disabling keeps the saved payment method so renewal can be resumed in one click; use DELETE /billing/payment-method to forget the card. Enabling requires a payment method saved by an earlier checkout. Requires write role on the project.
 // @Tags        billing
 // @Accept      json
 // @Produce     json
@@ -303,11 +306,13 @@ func (h *Handler) SetBillingAutopay(c *gin.Context) {
 
 	now := time.Now().UTC()
 	if !*body.Enabled {
-		if _, err := h.pool.Exec(c.Request.Context(), `
+		var disabledTitle string
+		if err := h.pool.QueryRow(c.Request.Context(), `
 			UPDATE billing_accounts
-			SET autopay_enabled = FALSE, autopay_method_id = '', autopay_method_title = '', autopay_failures = 0, updated_at = $2
+			SET autopay_enabled = FALSE, autopay_failures = 0, updated_at = $2
 			WHERE org_id = $1
-		`, orgID, now); err != nil {
+			RETURNING autopay_method_title
+		`, orgID, now).Scan(&disabledTitle); err != nil {
 			respondError(c, http.StatusInternalServerError, "failed to disable autopay")
 			return
 		}
@@ -317,7 +322,7 @@ func (h *Handler) SetBillingAutopay(c *gin.Context) {
 			ResourceName: orgID,
 			Outcome:      auditOutcomeSuccess,
 		})
-		c.JSON(http.StatusOK, gin.H{"autopay_enabled": false, "autopay_method_title": ""})
+		c.JSON(http.StatusOK, gin.H{"autopay_enabled": false, "autopay_method_title": disabledTitle})
 		return
 	}
 
@@ -347,4 +352,82 @@ func (h *Handler) SetBillingAutopay(c *gin.Context) {
 		Outcome:      auditOutcomeSuccess,
 	})
 	c.JSON(http.StatusOK, gin.H{"autopay_enabled": true, "autopay_method_title": methodTitle})
+}
+
+// DeleteBillingPaymentMethod forgets the card saved by an earlier checkout and
+// switches automatic renewal off with it.
+//
+// This is the half of the old disable behaviour that is genuinely about the
+// instrument. Splitting it out is what lets SetBillingAutopay(false) keep the
+// method: pausing renewal and withdrawing a card are different intents, and a
+// user who only wanted the first should not have to re-enter a card to undo
+// it. Autopay is lowered here too because consent cannot outlive the
+// instrument it was given for -- a charge armed against a method we no longer
+// hold is a charge that can only fail.
+//
+// Idempotent: an account with no saved method is already in the requested
+// state, and answering 200 keeps a double-click from reading as an error.
+//
+// @ID          deleteBillingPaymentMethod
+// @Summary     Forget the saved payment method
+// @Description Deletes the card saved for recurring charges and turns automatic renewal off. Idempotent. Requires write role on the project.
+// @Tags        billing
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Success     200       {object} map[string]interface{}
+// @Failure     401       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Failure     500       {object} map[string]string
+// @Router      /projects/{projectId}/billing/payment-method [delete]
+func (h *Handler) DeleteBillingPaymentMethod(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		return
+	}
+	if !canWrite(role) {
+		respondForbidden(c)
+		return
+	}
+
+	orgID, err := h.projectOrg(c.Request.Context(), projectID)
+	if err != nil || orgID == "" {
+		respondNotFound(c)
+		return
+	}
+
+	tag, err := h.pool.Exec(c.Request.Context(), `
+		UPDATE billing_accounts
+		SET autopay_enabled = FALSE, autopay_method_id = '', autopay_method_title = '', autopay_failures = 0, updated_at = $2
+		WHERE org_id = $1 AND (autopay_method_id <> '' OR autopay_enabled)
+	`, orgID, time.Now().UTC())
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to delete payment method")
+		return
+	}
+	if tag.RowsAffected() > 0 {
+		h.recordSystemAudit(c.Request.Context(), auditEntry{
+			Action:       "PaymentMethodDetached",
+			ResourceKind: "BillingAccount",
+			ResourceName: orgID,
+			Outcome:      auditOutcomeSuccess,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"autopay_enabled": false, "autopay_method_title": ""})
 }

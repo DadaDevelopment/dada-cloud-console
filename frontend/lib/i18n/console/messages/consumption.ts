@@ -57,4 +57,33 @@ export const consumption: Messages = {
   "quota.upsell.plansCta": { ru: "Посмотреть тарифы", en: "See the plans" },
   "quota.upsell.starting": { ru: "Открываем оплату…", en: "Opening checkout…" },
   "quota.upsell.error": { ru: "Не удалось открыть оплату", en: "Could not open checkout" },
+  "upgrade.dialog.title": { ru: "Нужен тариф побольше", en: "This needs a bigger plan" },
+  "upgrade.dialog.text": {
+    ru: "На текущем тарифе доступно {resource}: {limit}. Всё созданное продолжает работать — чтобы создать ещё, поднимите тариф.",
+    en: "Your current plan includes {limit} {resource}. Everything you created keeps running — creating more needs a bigger plan.",
+  },
+  "upgrade.dialog.textRequired": {
+    ru: "Нужно {resource}: {required}, а на текущем тарифе доступно {limit}.",
+    en: "This needs {required} {resource}; your current plan includes {limit}.",
+  },
+  "upgrade.dialog.compareCurrent": { ru: "Сейчас — {plan}", en: "Now — {plan}" },
+  "upgrade.dialog.compareTarget": { ru: "Станет — {plan}", en: "After — {plan}" },
+  "upgrade.dialog.price": { ru: "{price} ₽ за 30 дней", en: "{price} ₽ per 30 days" },
+  "upgrade.dialog.autorenew": { ru: "Продлевать автоматически каждые 30 дней", en: "Renew automatically every 30 days" },
+  "upgrade.dialog.autorenewHint": {
+    ru: "Карта сохранится у платёжного провайдера. Автопродление можно выключить в любой момент, карта при этом останется.",
+    en: "The card is stored by the payment provider. You can turn renewal off at any time and keep the card.",
+  },
+  "upgrade.dialog.pay": { ru: "Оплатить {price} ₽", en: "Pay {price} ₽" },
+  "upgrade.dialog.starting": { ru: "Открываем оплату…", en: "Opening checkout…" },
+  "upgrade.dialog.cancel": { ru: "Не сейчас", en: "Not now" },
+  "upgrade.dialog.close": { ru: "Закрыть", en: "Close" },
+  "upgrade.dialog.error": { ru: "Не удалось открыть оплату", en: "Could not open checkout" },
+  "upgrade.dialog.noPlan": {
+    ru: "Подходящего тарифа нет — напишите нам, подберём вариант.",
+    en: "No plan covers this — write to us and we will work something out.",
+  },
+  "upgrade.dialog.plansCta": { ru: "Посмотреть тарифы", en: "See the plans" },
+  "upgrade.locked.badge": { ru: "{plan}", en: "{plan}" },
+  "upgrade.locked.cta": { ru: "Доступно на {plan} — {price} ₽/30 дн", en: "Available on {plan} — {price} ₽/30 days" },
 };

@@ -1849,8 +1849,10 @@ export interface QuotaOverLimit {
 }
 
 /**
- * Automatic renewal state. `enabled` without a `methodTitle` cannot happen --
- * the backend deletes the saved method when consent is withdrawn.
+ * Automatic renewal state. A `methodTitle` without `enabled` is the normal
+ * state of a paused subscription: turning renewal off keeps the card so it can
+ * be resumed in one click. `enabled` without a `methodTitle` cannot happen --
+ * the backend refuses to arm a charge with no instrument behind it.
  */
 export interface AutopayState {
   enabled: boolean;
@@ -1904,6 +1906,12 @@ export interface Payment {
   status: PaymentStatus;
   created_at: string;
   paid_at: string | null;
+  /**
+   * YooKassa's confirmation page for a payment still pending. Present only on
+   * pending rows: the backend withholds it once a payment is settled, so no
+   * surface can offer to pay for something already paid.
+   */
+  confirmation_url?: string;
 }
 
 export interface CheckoutResponse {
@@ -1925,6 +1933,12 @@ export const billingApi = {
     apiFetch<{ autopay_enabled: boolean; autopay_method_title: string }>(
       `/api/v1/projects/${projectId}/billing/autopay`,
       { method: "PUT", body: { enabled } },
+    ),
+
+  deletePaymentMethod: (projectId: string) =>
+    apiFetch<{ autopay_enabled: boolean; autopay_method_title: string }>(
+      `/api/v1/projects/${projectId}/billing/payment-method`,
+      { method: "DELETE" },
     ),
 
   payments: (projectId: string) =>

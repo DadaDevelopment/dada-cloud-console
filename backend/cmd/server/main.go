@@ -229,10 +229,12 @@ func main() {
 
 		expiryNotifier := notify.New(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPFrom)
 		autopayCharger := api.NewAutopayCharger(pool, cfg)
+		pendingReconciler := api.NewPendingPaymentReconciler(pool, cfg)
 		go func() {
 			ticker := time.NewTicker(1 * time.Hour)
 			defer ticker.Stop()
 			api.SweepPaymentPlanMismatch(meterCtx, pool, cfg.AuditNotifyEmail, time.Now().UTC())
+			api.SweepPendingPayments(meterCtx, pool, pendingReconciler, time.Now().UTC())
 			for {
 				select {
 				case <-meterCtx.Done():
@@ -243,6 +245,7 @@ func main() {
 					api.SweepPlanExpiry(meterCtx, pool, expiryNotifier, cfg.AuditNotifyEmail, now)
 					api.SweepQuotaGrace(meterCtx, pool, expiryNotifier, cfg.AuditNotifyEmail, billingPlans, now)
 					api.SweepPaymentPlanMismatch(meterCtx, pool, cfg.AuditNotifyEmail, now)
+					api.SweepPendingPayments(meterCtx, pool, pendingReconciler, now)
 					if cfg.ReactivationCampaignEnabled {
 						api.SweepReactivation(meterCtx, pool, expiryNotifier, cfg.PublicBaseURL, now)
 					}

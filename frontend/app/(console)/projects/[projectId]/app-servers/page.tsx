@@ -15,7 +15,7 @@ import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
 import { useT } from "@/lib/i18n/console/context";
-import { QuotaUpsell } from "@/components/billing/quota-upsell";
+import { UpgradeDialog } from "@/components/billing/upgrade-dialog";
 
 type AppServerMode = "terraform" | "manual";
 
@@ -449,7 +449,12 @@ export default function AppServersPage() {
           )}
 
           {quotaBlock && (
-            <QuotaUpsell resource={quotaBlock.resource} limit={quotaBlock.limit} projectId={projectId} />
+            <UpgradeDialog
+              resource={quotaBlock.resource}
+              limit={quotaBlock.limit}
+              projectId={projectId}
+              onClose={() => setQuotaBlock(null)}
+            />
           )}
 
           {submitError && (

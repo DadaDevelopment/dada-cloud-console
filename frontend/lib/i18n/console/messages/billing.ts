@@ -67,6 +67,24 @@ export const billing: Messages = {
     en: "The payment was canceled. You can try again on the Billing page.",
   },
   "billing.return.toBilling": { ru: "Открыть Billing", en: "Open Billing" },
+  "billing.return.stuckTitle": { ru: "Платёж не завершён", en: "Payment not completed" },
+  "billing.return.stuckMessage": {
+    ru: "Банк пока не подтвердил оплату. Деньги не списаны — можно продолжить оплату на той же странице.",
+    en: "The bank has not confirmed the payment. Nothing has been charged — you can finish it on the same page.",
+  },
+  "billing.return.resume": { ru: "Продолжить оплату", en: "Continue payment" },
+  "billing.return.retryAction": { ru: "Вернуться и продолжить", en: "Go back and continue" },
+
+  "billing.method.title": { ru: "Платёжный метод", en: "Payment method" },
+  "billing.method.none": {
+    ru: "Карта не сохранена — она сохранится при следующей оплате, если отметить автопродление.",
+    en: "No card saved — one is stored at your next payment if you tick automatic renewal.",
+  },
+  "billing.method.detach": { ru: "Отвязать карту", en: "Detach the card" },
+  "billing.method.detaching": { ru: "Отвязываем...", en: "Detaching..." },
+  "billing.method.detachError": { ru: "Не удалось отвязать карту", en: "Could not detach the card" },
+  "billing.method.nextCharge": { ru: "Следующее списание {date}, {amount} ₽", en: "Next charge {date}, {amount} ₽" },
+  "billing.payments.resume": { ru: "Продолжить оплату", en: "Continue payment" },
 
   "billing.orgScope": {
     ru: "План действует на всю организацию — на все её проекты.",

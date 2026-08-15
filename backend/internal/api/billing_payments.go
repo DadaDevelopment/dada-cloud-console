@@ -17,14 +17,21 @@ import (
 )
 
 // paymentResponse is one row of GET /projects/{projectId}/billing/payments.
+//
+// ConfirmationURL is carried only for rows still pending. YooKassa's
+// confirmation page stays valid for the life of the payment, so handing it
+// back turns a payment the user walked away from into one they can finish in a
+// click instead of starting a second one from scratch. It is withheld on
+// terminal rows so no surface can offer "pay" for something already settled.
 type paymentResponse struct {
-	ID          string     `json:"id"`
-	Plan        string     `json:"plan"`
-	AmountValue string     `json:"amount_value"`
-	Currency    string     `json:"currency"`
-	Status      string     `json:"status"`
-	CreatedAt   time.Time  `json:"created_at"`
-	PaidAt      *time.Time `json:"paid_at,omitempty"`
+	ID              string     `json:"id"`
+	Plan            string     `json:"plan"`
+	AmountValue     string     `json:"amount_value"`
+	Currency        string     `json:"currency"`
+	Status          string     `json:"status"`
+	CreatedAt       time.Time  `json:"created_at"`
+	PaidAt          *time.Time `json:"paid_at,omitempty"`
+	ConfirmationURL string     `json:"confirmation_url,omitempty"`
 }
 
 // BillingCheckout starts a YooKassa payment for a paid plan on the org owning
@@ -304,7 +311,8 @@ func (h *Handler) GetBillingPayments(c *gin.Context) {
 	}
 
 	rows, err := h.pool.Query(c.Request.Context(), `
-		SELECT id, plan, amount_value::text, currency, status, created_at, paid_at
+		SELECT id, plan, amount_value::text, currency, status, created_at, paid_at,
+		       CASE WHEN status = 'pending' THEN COALESCE(confirmation_url, '') ELSE '' END
 		FROM payments WHERE org_id = $1 ORDER BY created_at DESC LIMIT 20
 	`, orgID)
 	if err != nil {
@@ -316,7 +324,7 @@ func (h *Handler) GetBillingPayments(c *gin.Context) {
 	payments := make([]paymentResponse, 0)
 	for rows.Next() {
 		var p paymentResponse
-		if err := rows.Scan(&p.ID, &p.Plan, &p.AmountValue, &p.Currency, &p.Status, &p.CreatedAt, &p.PaidAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Plan, &p.AmountValue, &p.Currency, &p.Status, &p.CreatedAt, &p.PaidAt, &p.ConfirmationURL); err != nil {
 			respondError(c, http.StatusInternalServerError, "failed to read payments")
 			return
 		}
