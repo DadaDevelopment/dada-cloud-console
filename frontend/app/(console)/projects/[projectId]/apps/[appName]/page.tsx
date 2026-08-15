@@ -2,8 +2,8 @@
 import { useEffect, useRef, useState, FormEvent } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { appsApi, endpointsApi, envVarsApi, customDomainsApi } from "@/lib/api";
-import type { ResourceSnapshot, AppVolume, OperationResponse, DomainHostname } from "@/lib/types";
+import { appsApi, endpointsApi, envVarsApi, customDomainsApi, deploymentsApi } from "@/lib/api";
+import type { ResourceSnapshot, AppVolume, OperationResponse, DomainHostname, Deployment } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
@@ -24,6 +24,7 @@ import { normalizeAppUrlStatus, appUrlReasonMessageKey } from "@/lib/app-url-sta
 import { AppNextStepCard } from "@/components/deploy/app-next-step-card";
 import { AppLiveBanner } from "@/components/deploy/app-live-banner";
 import { AppLastMileBanner } from "@/components/deploy/app-last-mile-banner";
+import { AppDeployDriftBanner } from "@/components/deploy/app-deploy-drift-banner";
 import { AppLatestBuildCard } from "@/components/deploy/app-latest-build-card";
 import { getAppNextSteps } from "@/lib/app-next-step";
 import { useT } from "@/lib/i18n/console/context";
@@ -71,6 +72,7 @@ export default function AppDetailPage() {
   const [hostnames, setHostnames] = useState<DomainHostname[]>([]);
   const [isLoadingHostnames, setIsLoadingHostnames] = useState(true);
   const [envCount, setEnvCount] = useState<number | null>(null);
+  const [deployments, setDeployments] = useState<Deployment[]>([]);
 
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [newImage, setNewImage] = useState("");
@@ -159,6 +161,11 @@ export default function AppDetailPage() {
       .list(projectId, envId, appName)
       .then((data) => setEnvCount((data.env_vars ?? []).length))
       .catch(() => setEnvCount(null));
+
+    deploymentsApi
+      .list(projectId, envId, appName)
+      .then((data) => setDeployments(data.deployments ?? []))
+      .catch(() => setDeployments([]));
 
     return () => {
       cancelled = true;
@@ -465,6 +472,13 @@ export default function AppDetailPage() {
       {!isResource && (
         <AppLastMileBanner
           summary={{ http_status: summary.http_status, http_reason: summary.http_reason, http_checked_at: summary.http_checked_at }}
+        />
+      )}
+
+      {!isResource && (
+        <AppDeployDriftBanner
+          deployments={deployments}
+          deploymentsHref={`/projects/${projectId}/apps/${appName}/deployments${envId ? `?envId=${envId}` : ""}`}
         />
       )}
 

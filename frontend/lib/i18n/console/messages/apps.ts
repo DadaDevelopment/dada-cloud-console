@@ -120,6 +120,13 @@ export const apps: Messages = {
     en: "This is what an ordinary visitor gets right now, opening the address -- independent of build status or pod state.",
   },
 
+  "apps.deployDrift.title": { ru: "Под крутит не последний деплой", en: "The pod is running an older deployment" },
+  "apps.deployDrift.desc": {
+    ru: "В истории есть более новый деплой, который так и не заехал на под.",
+    en: "A newer deployment exists in the history but never reached the pod.",
+  },
+  "apps.deployDrift.viewDeployments": { ru: "Смотреть деплои", en: "View deployments" },
+
   "apps.liveBanner.title": { ru: "Приложение развёрнуто", en: "App is live" },
   "apps.liveBanner.desc": {
     ru: "Адрес уже работает и открыт всем в интернете.",
