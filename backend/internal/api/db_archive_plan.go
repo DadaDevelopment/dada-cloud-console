@@ -18,10 +18,18 @@ import (
 // hold a connection open behind a slow scan.
 const dbArchivePlanTimeout = 15 * time.Second
 
-// dbArchiveChildCountTimeout bounds one exact child-row count. It is a fraction
-// of the plan budget because a table can have several foreign keys pointing at
-// it, and no single one of them may spend the whole answer.
-const dbArchiveChildCountTimeout = 4 * time.Second
+// dbArchiveChildProbeTimeout bounds the EXISTS that decides whether one key
+// blocks. It is short because that question stops at the first matching row;
+// a probe that needs longer is a sign the pair is unusable at plan time, and
+// the safe answer there is to keep the key blocking.
+var dbArchiveChildProbeTimeout = 4 * time.Second
+
+// dbArchiveChildCountTimeout bounds the exact count that gives an already
+// blocking key its size. It is a fraction of the plan budget because a table
+// can have several foreign keys pointing at it, and no single one of them may
+// spend the whole answer. Missing it costs a number in a sentence, not the
+// verdict.
+var dbArchiveChildCountTimeout = 4 * time.Second
 
 // dbArchiveHistogramSamplePercent is the TABLESAMPLE fraction used to bucket a
 // table by month.

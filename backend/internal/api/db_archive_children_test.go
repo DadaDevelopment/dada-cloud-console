@@ -100,6 +100,53 @@ func TestChildrenOnlyBlockTheRowsTheCutoffWouldDelete(t *testing.T) {
 	}
 }
 
+// TestTheVerdictSurvivesACountThatCannotFinish pins what the live 5 GB table
+// exposed the first time the narrowed gate ran in production: every key came
+// back marked estimated, because the exact count did not fit its deadline and
+// the verdict was riding on that count. On that pair EXISTS answers in 130 ms
+// what the count needs 2.5 s for, so the decision must ride the probe and only
+// the number may go missing.
+func TestTheVerdictSurvivesACountThatCannotFinish(t *testing.T) {
+	conn := testTenantConn(t)
+	ctx := context.Background()
+	schema := seedParentChild(t, conn)
+
+	if _, err := conn.Exec(ctx,
+		`UPDATE `+pgx.Identifier{schema, "observations"}.Sanitize()+
+			` SET observed_at = TIMESTAMPTZ '2026-09-01 00:00:00+00'`); err != nil {
+		t.Fatalf("move every parent row past the cutoff: %v", err)
+	}
+
+	candidates, err := archiveBlockingChildren(ctx, conn, schema, "observations")
+	if err != nil {
+		t.Fatalf("read candidate children: %v", err)
+	}
+
+	restore := dbArchiveChildCountTimeout
+	dbArchiveChildCountTimeout = time.Nanosecond
+	t.Cleanup(func() { dbArchiveChildCountTimeout = restore })
+
+	run := archiveRun{
+		Schema:       schema,
+		Table:        "observations",
+		CutoffColumn: "observed_at",
+		Cutoff:       time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC),
+	}
+	if blocking := archiveChildrenInWindow(ctx, conn, run, candidates); len(blocking) != 0 {
+		t.Fatalf("a count that cannot finish must not turn a non-blocking key into a refusal, got %+v", blocking)
+	}
+
+	if _, err := conn.Exec(ctx,
+		`UPDATE `+pgx.Identifier{schema, "observations"}.Sanitize()+
+			` SET observed_at = TIMESTAMPTZ '2026-07-01 00:00:00+00' WHERE id = 1`); err != nil {
+		t.Fatalf("pull one parent row back inside the window: %v", err)
+	}
+	blocking := archiveChildrenInWindow(ctx, conn, run, candidates)
+	if len(blocking) != 1 || !blocking[0].Estimated {
+		t.Fatalf("a real blocker whose count timed out must still block, marked estimated, got %+v", blocking)
+	}
+}
+
 // TestDerivedChildCountUsesTheRunsOwnPredicate covers the shape the 10 GB table
 // needed: the archived table has no date of its own, so the window is a join to
 // a dated parent, and the child count has to cut on the same join the delete
