@@ -70,6 +70,9 @@ func (w *DBWatcher) doSetDatabaseTier(ctx context.Context, op db.Operation) erro
 		return err
 	}
 	if !changed {
+		if err := w.recordDatabaseTierSnapshot(ctx, op, p.Name, p.Tier); err != nil {
+			return err
+		}
 		return db.MarkNoop(ctx, w.pool, op.ID, fmt.Sprintf("database %s already carries tier %q", p.Name, p.Tier))
 	}
 
@@ -85,15 +88,34 @@ func (w *DBWatcher) doSetDatabaseTier(ctx context.Context, op db.Operation) erro
 		return err
 	}
 
+	return w.recordDatabaseTierSnapshot(ctx, op, p.Name, p.Tier)
+}
+
+// recordDatabaseTierSnapshot writes the tier this operation ends with into
+// resource_snapshots, on both the branch that committed and the branch that
+// found git already correct.
+//
+// The tier reconciler's own "does this need to change" verdict is read from
+// resource_snapshots.summary_json.tier, not from git. Before this existed, a
+// no-op left that field untouched: whatever made it disagree with git in the
+// first place (a stale sync, a prior failure, a race) kept disagreeing
+// forever, so every reconciler tick re-decided the same change, enqueued it,
+// found git already correct, and ended Committed again without ever fixing
+// the field the decision was made from -- an operation count that only grows,
+// on prod measured at 242 -> 252 SetDatabaseTier rows in under 24h. Writing
+// the observed tier here on every terminal path closes that gap: after this
+// operation, whichever branch it took, the snapshot matches reality and the
+// next tick's comparison agrees there is nothing left to do.
+func (w *DBWatcher) recordDatabaseTierSnapshot(ctx context.Context, op db.Operation, name, tier string) error {
 	patch, _ := json.Marshal(map[string]any{
-		"tier":    p.Tier,
+		"tier":    tier,
 		"tier_at": time.Now().UTC().Format(time.RFC3339),
 	})
-	_, err = w.pool.Exec(ctx, `
+	_, err := w.pool.Exec(ctx, `
 		UPDATE resource_snapshots
 		SET summary_json = COALESCE(summary_json, '{}'::jsonb) || $1::jsonb
 		WHERE environment_id = $2 AND kind = 'ServiceDatabaseV2' AND name = $3
-	`, patch, op.EnvironmentID, p.Name)
+	`, patch, op.EnvironmentID, name)
 	return err
 }
 

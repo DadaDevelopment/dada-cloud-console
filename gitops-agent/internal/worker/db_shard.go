@@ -74,6 +74,9 @@ func (w *DBWatcher) doSetDatabaseShard(ctx context.Context, op db.Operation) err
 		return err
 	}
 	if !changed {
+		if err := w.recordDatabaseShardSnapshot(ctx, op, p.Name, p.Shard); err != nil {
+			return err
+		}
 		return db.MarkNoop(ctx, w.pool, op.ID, fmt.Sprintf("database %s already placed on shard %q", p.Name, p.Shard))
 	}
 
@@ -89,12 +92,24 @@ func (w *DBWatcher) doSetDatabaseShard(ctx context.Context, op db.Operation) err
 		return err
 	}
 
-	patch, _ := json.Marshal(map[string]any{"shard": p.Shard})
-	_, err = w.pool.Exec(ctx, `
+	return w.recordDatabaseShardSnapshot(ctx, op, p.Name, p.Shard)
+}
+
+// recordDatabaseShardSnapshot writes the shard this operation ends with into
+// resource_snapshots, on both the branch that committed and the branch that
+// found git already correct.
+//
+// Mirrors recordDatabaseTierSnapshot in db_tier.go: any caller that decides
+// "does this need to change" from resource_snapshots.summary_json.shard must
+// see that field refreshed on every terminal path, or a stale value disagrees
+// with git forever.
+func (w *DBWatcher) recordDatabaseShardSnapshot(ctx context.Context, op db.Operation, name, shard string) error {
+	patch, _ := json.Marshal(map[string]any{"shard": shard})
+	_, err := w.pool.Exec(ctx, `
 		UPDATE resource_snapshots
 		SET summary_json = COALESCE(summary_json, '{}'::jsonb) || $1::jsonb
 		WHERE environment_id = $2 AND kind = 'ServiceDatabaseV2' AND name = $3
-	`, patch, op.EnvironmentID, p.Name)
+	`, patch, op.EnvironmentID, name)
 	return err
 }
 
@@ -155,6 +170,9 @@ func (w *DBWatcher) setShardInHelmValues(ctx context.Context, op db.Operation, m
 		return err
 	}
 	if !changed {
+		if err := w.recordDatabaseShardSnapshot(ctx, op, name, shard); err != nil {
+			return err
+		}
 		return db.MarkNoop(ctx, w.pool, op.ID, fmt.Sprintf("database %s already placed on shard %q", name, shard))
 	}
 
@@ -166,13 +184,7 @@ func (w *DBWatcher) setShardInHelmValues(ctx context.Context, op db.Operation, m
 		return err
 	}
 
-	patch, _ := json.Marshal(map[string]any{"shard": shard})
-	_, err = w.pool.Exec(ctx, `
-		UPDATE resource_snapshots
-		SET summary_json = COALESCE(summary_json, '{}'::jsonb) || $1::jsonb
-		WHERE environment_id = $2 AND kind = 'ServiceDatabaseV2' AND name = $3
-	`, patch, op.EnvironmentID, name)
-	return err
+	return w.recordDatabaseShardSnapshot(ctx, op, name, shard)
 }
 
 // patchHelmValuesShard sets common.serviceDatabase.shard and reports

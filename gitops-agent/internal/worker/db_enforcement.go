@@ -70,6 +70,9 @@ func (w *DBWatcher) doSetDatabaseEnforcement(ctx context.Context, op db.Operatio
 		return err
 	}
 	if !changed {
+		if err := w.recordDatabaseEnforcementSnapshot(ctx, op, p.Name, p.Enforcement); err != nil {
+			return err
+		}
 		return db.MarkNoop(ctx, w.pool, op.ID, fmt.Sprintf("database %s already carries enforcement %q", p.Name, p.Enforcement))
 	}
 
@@ -85,15 +88,27 @@ func (w *DBWatcher) doSetDatabaseEnforcement(ctx context.Context, op db.Operatio
 		return err
 	}
 
+	return w.recordDatabaseEnforcementSnapshot(ctx, op, p.Name, p.Enforcement)
+}
+
+// recordDatabaseEnforcementSnapshot writes the enforcement state this
+// operation ends with into resource_snapshots, on both the branch that
+// committed and the branch that found git already correct.
+//
+// Mirrors recordDatabaseTierSnapshot in db_tier.go: a caller that ever decides
+// "does this need to change" from resource_snapshots.summary_json.enforcement
+// must see that field refreshed on every terminal path, not only the one that
+// produced a commit, or a stale value would disagree with git forever.
+func (w *DBWatcher) recordDatabaseEnforcementSnapshot(ctx context.Context, op db.Operation, name, enforcement string) error {
 	patch, _ := json.Marshal(map[string]any{
-		"enforcement":    p.Enforcement,
+		"enforcement":    enforcement,
 		"enforcement_at": time.Now().UTC().Format(time.RFC3339),
 	})
-	_, err = w.pool.Exec(ctx, `
+	_, err := w.pool.Exec(ctx, `
 		UPDATE resource_snapshots
 		SET summary_json = COALESCE(summary_json, '{}'::jsonb) || $1::jsonb
 		WHERE environment_id = $2 AND kind = 'ServiceDatabaseV2' AND name = $3
-	`, patch, op.EnvironmentID, p.Name)
+	`, patch, op.EnvironmentID, name)
 	return err
 }
 
