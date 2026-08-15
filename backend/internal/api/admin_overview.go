@@ -214,17 +214,61 @@ type overviewMoney struct {
 // public URL actually answers. Checked+Stale together equal the denominator --
 // every App row with an active hostname -- so a caller can tell "we probed
 // everything and it's fine" from "we do not know" at a glance. Checked splits
-// into OK and Dead; Stale is its own bucket rather than folded into Dead,
-// because an empty DeadApps list next to a large Stale must read as "the
-// prober went blind", never as "everything is healthy" (see project memory
+// into OK, AppResponded and Dead (see isDeadProbeStatus for the boundary);
+// Stale is its own bucket rather than folded into Dead, because an empty
+// DeadApps list next to a large Stale must read as "the prober went blind",
+// never as "everything is healthy" (see project memory
 // admin_broken_panel_read_health_from_own_blindness -- the identical mistake,
 // here for URL probing instead of the k8s reconciler).
+//
+// Dead and Checked are aggregate counts that mix two different owner classes:
+// external customer apps (the product signal an operator watches for) and our
+// own internal apps (the operator's own account or an @dada-tuda.ru staff
+// mailbox, see isInternalOwnerEmail). DeadExternal/DeadInternal and
+// CheckedExternal/CheckedInternal split those same rows by that same
+// predicate so an operator can tell "our product is breaking for customers"
+// from "we broke our own tooling again" without reading DeadApps line by
+// line. Dead == DeadExternal + DeadInternal and Checked == CheckedExternal +
+// CheckedInternal always hold; the aggregate fields are kept for backward
+// compatibility with existing callers.
 type overviewLiveURLs struct {
-	Checked  int               `json:"checked"`
-	OK       int               `json:"ok"`
-	Dead     int               `json:"dead"`
-	Stale    int               `json:"stale"`
-	DeadApps []overviewDeadApp `json:"dead_apps"`
+	Checked         int               `json:"checked"`
+	OK              int               `json:"ok"`
+	Dead            int               `json:"dead"`
+	AppResponded    int               `json:"app_responded"`
+	Stale           int               `json:"stale"`
+	DeadApps        []overviewDeadApp `json:"dead_apps"`
+	DeadExternal    int               `json:"dead_external"`
+	DeadInternal    int               `json:"dead_internal"`
+	CheckedExternal int               `json:"checked_external"`
+	CheckedInternal int               `json:"checked_internal"`
+}
+
+// deadProbeStatuses is the exact set of http_status values that mean "the
+// last-mile probe reached a proxy with no backend behind it", not "the app
+// answered with an error". 502/503/504 are the codes an ingress controller
+// itself generates when it cannot reach any pod for the route (Bad Gateway,
+// Service Unavailable, Gateway Timeout); a bare 0 is the probe never getting
+// a response at all (dial error, timeout, TLS failure). Every other status,
+// including 404/401/403/500, is the target application itself answering --
+// proof the last mile is NOT dead, whatever the app chose to say. This
+// distinction exists because two real apps (telemost-bot, reels-tracker)
+// were counted as dead for answering 404 on `/` while their `/health` route
+// answered 200 the whole time, and a third (n8n behind a stale hash-domain
+// ingress pointing at a deleted Service) answered 503 with no backend at
+// all -- collapsing both into one "dead" bucket made an operator unable to
+// tell a headless API from a genuinely broken route.
+var deadProbeStatuses = map[int]bool{
+	0:   true,
+	502: true,
+	503: true,
+	504: true,
+}
+
+// isDeadProbeStatus reports whether status belongs to deadProbeStatuses --
+// the single predicate overviewLiveURLs uses to decide Dead vs AppResponded.
+func isDeadProbeStatus(status int) bool {
+	return deadProbeStatuses[status]
 }
 
 // overviewDeadApp names one app behind live_urls.dead so an operator can act
@@ -970,13 +1014,15 @@ const overviewDeadAppCap = 20
 // key and a malformed one collapse to the same stale outcome rather than
 // failing the whole overview request.
 //
-// A row only counts as Checked (and only then as OK or Dead) when its
-// http_checked_at parses and falls inside liveURLProbeFreshnessWindow;
-// everything else -- absent, unparseable, or older than the window -- is
-// Stale. Dead is http_status == 0 (probe attempted, target never answered) or
-// http_status >= 400, matching the contract exactly. DeadApps is sorted
-// external-owner-first (see isInternalOwnerEmail) and capped at
-// overviewDeadAppCap.
+// A row only counts as Checked (and only then as OK, AppResponded or Dead)
+// when its http_checked_at parses and falls inside
+// liveURLProbeFreshnessWindow; everything else -- absent, unparseable, or
+// older than the window -- is Stale. Dead is exactly isDeadProbeStatus
+// (http_status 0/502/503/504 -- no backend behind the proxy, or no response
+// at all); every other non-2xx/3xx status is AppResponded, since the
+// application itself is what answered. DeadApps only ever names Dead rows --
+// an app answering 404/401/etc is not in it -- sorted external-owner-first
+// (see isInternalOwnerEmail) and capped at overviewDeadAppCap.
 func (h *Handler) overviewLiveURLs(ctx context.Context) (overviewLiveURLs, error) {
 	out := overviewLiveURLs{DeadApps: []overviewDeadApp{}}
 
@@ -1013,13 +1059,30 @@ func (h *Handler) overviewLiveURLs(ctx context.Context) (overviewLiveURLs, error
 		}
 
 		out.Checked++
+		external := !isInternalOwnerEmail(ownerEmail)
+		if external {
+			out.CheckedExternal++
+		} else {
+			out.CheckedInternal++
+		}
+
 		httpStatus, _ := strconv.Atoi(strings.TrimSpace(httpStatusRaw))
 		if httpStatus != 0 && httpStatus < 400 {
 			out.OK++
 			continue
 		}
 
+		if !isDeadProbeStatus(httpStatus) {
+			out.AppResponded++
+			continue
+		}
+
 		out.Dead++
+		if external {
+			out.DeadExternal++
+		} else {
+			out.DeadInternal++
+		}
 		deadApps = append(deadApps, overviewDeadApp{
 			Name:        name,
 			ProjectName: projectName,
@@ -1028,7 +1091,7 @@ func (h *Handler) overviewLiveURLs(ctx context.Context) (overviewLiveURLs, error
 			HTTPStatus:  httpStatus,
 			HTTPReason:  httpReason,
 			CheckedAt:   checkedAt,
-			External:    !isInternalOwnerEmail(ownerEmail),
+			External:    external,
 		})
 	}
 	if err := rows.Err(); err != nil {

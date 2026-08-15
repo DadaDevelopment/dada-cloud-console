@@ -1289,16 +1289,31 @@ export interface AdminOverviewLiveUrlDeadApp {
  *
  * A green build only proves the image landed, not that the route serves
  * anything -- checked is how many apps had a route to probe, ok answered
- * healthy, dead answered with an error status, and stale is how many were
- * skipped this round and carry no fresh verdict either way. A low dead count
- * next to a high stale count is not good news, it is missing information.
+ * healthy, dead is a proxy with no backend behind it (or no response at
+ * all), app_responded is the application itself answering with a non-2xx/3xx
+ * status (a 404 on the wrong path is not the same failure as a proxy with no
+ * pod behind it -- see evaluateLastMile), and stale is how many were skipped
+ * this round and carry no fresh verdict either way. A low dead count next to
+ * a high stale count is not good news, it is missing information.
+ *
+ * dead/checked mix two owner classes: external customer apps (the product
+ * signal) and our own internal apps (operator/@dada-tuda.ru staff mail, see
+ * isInternalOwnerEmail in backend/internal/api/admin_overview.go). The
+ * *_external/*_internal fields split those same rows by that predicate;
+ * dead === dead_external + dead_internal and checked === checked_external +
+ * checked_internal always hold.
  */
 export interface AdminOverviewLiveUrls {
   checked: number;
   ok: number;
   dead: number;
+  app_responded: number;
   stale: number;
   dead_apps: AdminOverviewLiveUrlDeadApp[];
+  dead_external: number;
+  dead_internal: number;
+  checked_external: number;
+  checked_internal: number;
 }
 
 export interface AdminOverviewDayPoint {

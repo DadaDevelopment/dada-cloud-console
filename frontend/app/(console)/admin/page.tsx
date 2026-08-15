@@ -493,9 +493,12 @@ export default function AdminOverviewPage() {
                   </p>
                 </div>
                 <div>
-                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Не отвечают</p>
-                  <p className={`mt-1 text-xl font-bold ${data.live_urls.dead > 0 ? "text-red-600 dark:text-red-400" : "text-gray-900 dark:text-gray-100"}`}>
-                    {data.live_urls.dead}
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Не отвечают (нет бэкенда)</p>
+                  <p className={`mt-1 text-xl font-bold ${data.live_urls.dead_external > 0 ? "text-red-600 dark:text-red-400" : "text-gray-900 dark:text-gray-100"}`}>
+                    {data.live_urls.dead_external}
+                  </p>
+                  <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    у клиентов, {data.live_urls.dead_internal} у нас самих
                   </p>
                 </div>
                 <div>
@@ -505,6 +508,12 @@ export default function AdminOverviewPage() {
                   </p>
                 </div>
               </div>
+              {data.live_urls.app_responded > 0 && (
+                <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+                  Ещё {data.live_urls.app_responded} приложений отвечают ошибкой на этом же адресе (не корневой роут
+                  и т.п.) — это не последняя миля, это сама реализация приложения.
+                </p>
+              )}
 
               {liveUrlStaleDominates(data.live_urls) && (
                 <div className="mb-4 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">

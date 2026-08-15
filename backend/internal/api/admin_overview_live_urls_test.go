@@ -246,3 +246,128 @@ func TestOverviewLiveURLsDeadAppsListExternalOwnersFirst(t *testing.T) {
 		t.Fatalf("external app at index %d, internal app at index %d: dead_apps must list external owners first", externalIdx, internalIdx)
 	}
 }
+
+// TestOverviewLiveURLsSplitsDeadAndCheckedByOwnerClass pins the fix for the
+// mixed-signal aggregate: an operator reading live_urls.dead alone cannot
+// tell a customer-facing outage from our own internal apps going down.
+// DeadExternal/DeadInternal and CheckedExternal/CheckedInternal must each
+// reflect isInternalOwnerEmail exactly, and the aggregate Dead/Checked must
+// still equal the sum of their two halves.
+func TestOverviewLiveURLsSplitsDeadAndCheckedByOwnerClass(t *testing.T) {
+	pool := overviewBrokenTestPool(t)
+	h := &Handler{pool: pool}
+	suffix := uuid.NewString()[:8]
+	checkedAt := time.Now().Add(-2 * time.Minute).UTC().Format(time.RFC3339)
+
+	before, err := h.overviewLiveURLs(context.Background())
+	if err != nil {
+		t.Fatalf("overviewLiveURLs (before): %v", err)
+	}
+
+	internalProjectID := overviewBrokenSeedProject(t, pool, "liveurl-split-internal-"+suffix)
+	internalEnvID := overviewBrokenSeedEnv(t, pool, internalProjectID, "prod")
+	seedLiveURLOwner(t, pool, internalProjectID, "staff-split-"+suffix, "ops-split+"+suffix+"@dada-tuda.ru")
+	internalDeadName := "internal-split-dead-" + suffix
+	internalOKName := "internal-split-ok-" + suffix
+	seedLiveURLApp(t, pool, internalProjectID, internalEnvID, internalDeadName, fmt.Sprintf(
+		`{"url":"https://internal-split-dead.example.dada-tuda.ru","url_status":"active","http_status":503,"http_reason":"status_503","http_checked_at":"%s"}`,
+		checkedAt))
+	seedLiveURLApp(t, pool, internalProjectID, internalEnvID, internalOKName, fmt.Sprintf(
+		`{"url":"https://internal-split-ok.example.dada-tuda.ru","url_status":"active","http_status":200,"http_reason":"status_200","http_checked_at":"%s"}`,
+		checkedAt))
+
+	externalProjectID := overviewBrokenSeedProject(t, pool, "liveurl-split-external-"+suffix)
+	externalEnvID := overviewBrokenSeedEnv(t, pool, externalProjectID, "prod")
+	seedLiveURLOwner(t, pool, externalProjectID, "customer-split-"+suffix, "customer-split-"+suffix+"@gmail.com")
+	externalDeadName1 := "external-split-dead-1-" + suffix
+	externalDeadName2 := "external-split-dead-2-" + suffix
+	seedLiveURLApp(t, pool, externalProjectID, externalEnvID, externalDeadName1, fmt.Sprintf(
+		`{"url":"https://external-split-dead-1.example.dada-tuda.ru","url_status":"active","http_status":502,"http_reason":"status_502","http_checked_at":"%s"}`,
+		checkedAt))
+	seedLiveURLApp(t, pool, externalProjectID, externalEnvID, externalDeadName2, fmt.Sprintf(
+		`{"url":"https://external-split-dead-2.example.dada-tuda.ru","url_status":"active","http_status":504,"http_reason":"status_504","http_checked_at":"%s"}`,
+		checkedAt))
+
+	after, err := h.overviewLiveURLs(context.Background())
+	if err != nil {
+		t.Fatalf("overviewLiveURLs (after): %v", err)
+	}
+
+	if got := after.DeadExternal - before.DeadExternal; got != 2 {
+		t.Fatalf("DeadExternal delta = %d, want 2: two customer apps went dead", got)
+	}
+	if got := after.DeadInternal - before.DeadInternal; got != 1 {
+		t.Fatalf("DeadInternal delta = %d, want 1: one staff app went dead", got)
+	}
+	if got := after.CheckedExternal - before.CheckedExternal; got != 2 {
+		t.Fatalf("CheckedExternal delta = %d, want 2", got)
+	}
+	if got := after.CheckedInternal - before.CheckedInternal; got != 2 {
+		t.Fatalf("CheckedInternal delta = %d, want 2", got)
+	}
+
+	deadDelta := after.Dead - before.Dead
+	if deadDelta != (after.DeadExternal-before.DeadExternal)+(after.DeadInternal-before.DeadInternal) {
+		t.Fatalf("Dead delta = %d must equal DeadExternal delta + DeadInternal delta", deadDelta)
+	}
+	checkedDelta := after.Checked - before.Checked
+	if checkedDelta != (after.CheckedExternal-before.CheckedExternal)+(after.CheckedInternal-before.CheckedInternal) {
+		t.Fatalf("Checked delta = %d must equal CheckedExternal delta + CheckedInternal delta", checkedDelta)
+	}
+}
+
+// TestOverviewLiveURLsAppErrorIsNotDeadButGatewayErrorIs pins the exact
+// incident that made live_urls.dead lie: telemost-bot and reels-tracker are
+// healthy FastAPI apps with no route at "/" (answer 404 there, 200 on
+// /health) and were counted as dead alongside n8n, whose hash-domain ingress
+// pointed at a Service that no longer exists and answers 503 with no
+// backend at all. A 404 the application itself produced must land in
+// AppResponded, never in Dead or DeadApps; a 503 from a backend-less proxy
+// must land in Dead and be named in DeadApps.
+func TestOverviewLiveURLsAppErrorIsNotDeadButGatewayErrorIs(t *testing.T) {
+	pool := overviewBrokenTestPool(t)
+	h := &Handler{pool: pool}
+	suffix := uuid.NewString()[:8]
+	checkedAt := time.Now().Add(-2 * time.Minute).UTC().Format(time.RFC3339)
+
+	before, err := h.overviewLiveURLs(context.Background())
+	if err != nil {
+		t.Fatalf("overviewLiveURLs (before): %v", err)
+	}
+
+	projectID := overviewBrokenSeedProject(t, pool, "liveurl-classclash-"+suffix)
+	envID := overviewBrokenSeedEnv(t, pool, projectID, "prod")
+
+	appRespondingName := "telemost-bot-like-" + suffix
+	noBackendName := "n8n-hashdomain-like-" + suffix
+
+	seedLiveURLApp(t, pool, projectID, envID, appRespondingName, fmt.Sprintf(
+		`{"url":"https://telemost-bot.example.dada-tuda.ru","url_status":"active","http_status":404,"http_reason":"status_404","http_checked_at":"%s"}`,
+		checkedAt))
+	seedLiveURLApp(t, pool, projectID, envID, noBackendName, fmt.Sprintf(
+		`{"url":"https://n8n-64b3d0.example.dada-tuda.ru","url_status":"active","http_status":503,"http_reason":"status_503","http_checked_at":"%s"}`,
+		checkedAt))
+
+	after, err := h.overviewLiveURLs(context.Background())
+	if err != nil {
+		t.Fatalf("overviewLiveURLs (after): %v", err)
+	}
+
+	if got := after.AppResponded - before.AppResponded; got != 1 {
+		t.Fatalf("AppResponded delta = %d, want 1: the 404 app answered, it did not die", got)
+	}
+	if got := after.Dead - before.Dead; got != 1 {
+		t.Fatalf("Dead delta = %d, want 1: only the backend-less 503 counts as dead", got)
+	}
+
+	byName := map[string]overviewDeadApp{}
+	for _, a := range after.DeadApps {
+		byName[a.Name] = a
+	}
+	if _, ok := byName[appRespondingName]; ok {
+		t.Fatalf("%s answered 404 from the app itself and must NOT appear in dead_apps", appRespondingName)
+	}
+	if _, ok := byName[noBackendName]; !ok {
+		t.Fatalf("dead_apps must name %s (503 from a proxy with no backend)", noBackendName)
+	}
+}
