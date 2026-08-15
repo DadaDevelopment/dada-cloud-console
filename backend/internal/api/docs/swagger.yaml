@@ -168,6 +168,27 @@ definitions:
       trace:
         type: boolean
     type: object
+  api.agentGrantResponse:
+    properties:
+      active:
+        type: boolean
+      agent_username:
+        type: string
+      created_at:
+        type: string
+      expires_at:
+        type: string
+      id:
+        type: string
+      project_id:
+        type: string
+      revoked_at:
+        type: string
+      role:
+        type: string
+      run_ref:
+        type: string
+    type: object
   api.aiRoutingResponse:
     properties:
       markup:
@@ -508,6 +529,17 @@ definitions:
         $ref: '#/definitions/models.AIModelSource'
       version:
         type: string
+    type: object
+  api.createAgentGrantRequest:
+    properties:
+      agent_username:
+        type: string
+      role:
+        type: string
+      run_ref:
+        type: string
+      ttl_minutes:
+        type: integer
     type: object
   api.createAppRequest:
     properties:
@@ -3657,6 +3689,134 @@ paths:
       summary: Get a project with its environments
       tags:
       - project
+  /projects/{projectId}/agent-grants:
+    get:
+      description: Returns the project's agent grants, newest first, including revoked
+        and expired ones — the row is the audit trail of who lent which automation
+        access, for which run, and when it ended.
+      operationId: listAgentGrants
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/api.agentGrantResponse'
+            type: array
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List machine-identity grants on a project
+      tags:
+      - agent-grant
+    post:
+      consumes:
+      - application/json
+      description: 'Gives an /agents identity a Developer or ReadOnly role on exactly
+        this project until it is revoked or expires. Requires Owner/Admin on the project
+        — you can only lend access you already administer. No token is issued: the
+        agent keeps authenticating as itself, and this row is what its role is resolved
+        from.'
+      operationId: createAgentGrant
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Agent identity, role and TTL
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.createAgentGrantRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/api.agentGrantResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Grant a machine identity access to one project
+      tags:
+      - agent-grant
+  /projects/{projectId}/agent-grants/{grantId}:
+    delete:
+      description: 'Ends the grant immediately — the agent''s next request to this
+        project resolves to no access (404). Idempotent: revoking an already-ended
+        grant succeeds. The row is kept as the audit trail.'
+      operationId: revokeAgentGrant
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Grant UUID
+        in: path
+        name: grantId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Revoke a machine-identity grant
+      tags:
+      - agent-grant
   /projects/{projectId}/ai/credentials:
     get:
       description: Lists the providers this project holds a BYOK credential for. Never
@@ -13271,6 +13431,70 @@ paths:
       summary: Get monitoring resource logs
       tags:
       - monitoring
+  /projects/{projectId}/environments/{envId}/monitoring/{appId}/logs/download:
+    get:
+      description: Same scoping/filters as GET .../monitoring/{appId}/logs, but streams
+        the matched entries as a downloadable text/plain .log file (one line per entry,
+        newest first) instead of JSON.
+      operationId: downloadMonitoringLogs
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Monitoring resource UUID
+        in: path
+        name: appId
+        required: true
+        type: string
+      - description: Time range (15m, 1h, 6h, 24h, 7d)
+        in: query
+        name: range
+        type: string
+      - description: Full-text query
+        in: query
+        name: q
+        type: string
+      - description: Log level filter (e.g. ERROR)
+        in: query
+        name: level
+        type: string
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: text/plain .log file
+          schema:
+            type: file
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Download monitoring resource logs as a .log file
+      tags:
+      - monitoring
   /projects/{projectId}/environments/{envId}/monitoring/{appId}/metrics:
     get:
       description: Returns native metric panels for the resource. Metric names are
@@ -14580,6 +14804,76 @@ paths:
       security:
       - BearerAuth: []
       summary: Search aggregated logs in a project
+      tags:
+      - observability
+  /projects/{projectId}/logs/download:
+    get:
+      description: Same scoping/filters as GET /logs, but streams the matched entries
+        as a downloadable text/plain .log file (one line per entry, newest first)
+        instead of JSON.
+      operationId: downloadLogs
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: App server (VM) name to scope logs to
+        in: query
+        name: vm
+        type: string
+      - description: App name to scope logs to
+        in: query
+        name: app
+        type: string
+      - description: Free-text search query
+        in: query
+        name: q
+        type: string
+      - description: 'Time window: 15m, 1h, 6h, 24h or 7d (default 1h)'
+        in: query
+        name: since
+        type: string
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: text/plain .log file
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Download aggregated logs in a project as a .log file
       tags:
       - observability
   /projects/{projectId}/monitoring:
