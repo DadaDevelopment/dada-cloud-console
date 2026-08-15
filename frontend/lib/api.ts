@@ -1041,6 +1041,22 @@ export const logsApi = {
     if (params.size) qs.set("size", String(params.size));
     return apiFetch<LogSearchResponse>(`/api/v1/projects/${projectId}/logs?${qs.toString()}`);
   },
+
+  download: (
+    projectId: string,
+    params: { vm?: string; app?: string; q?: string; since?: string }
+  ) => {
+    const qs = new URLSearchParams();
+    if (params.vm) qs.set("vm", params.vm);
+    if (params.app) qs.set("app", params.app);
+    if (params.q) qs.set("q", params.q);
+    if (params.since) qs.set("since", params.since);
+    const scope = params.app || params.vm || "logs";
+    return downloadAuthed(
+      `/api/v1/projects/${projectId}/logs/download?${qs.toString()}`,
+      `${scope}-${params.since || "1h"}.log`
+    );
+  },
 };
 
 export const endpointsApi = {
@@ -1685,6 +1701,21 @@ export const monitoringApi = {
     if (params.size) qs.set("size", String(params.size));
     return apiFetch<LogSearchResponse>(
       `/api/v1/projects/${projectId}/environments/${envId}/monitoring/${appId}/logs?${qs.toString()}`
+    );
+  },
+
+  downloadLogs: (
+    projectId: string,
+    envId: string,
+    appId: string,
+    params: { q?: string; since?: string }
+  ) => {
+    const qs = new URLSearchParams();
+    if (params.q) qs.set("q", params.q);
+    if (params.since) qs.set("range", params.since);
+    return downloadAuthed(
+      `/api/v1/projects/${projectId}/environments/${envId}/monitoring/${appId}/logs/download?${qs.toString()}`,
+      `${appId}-${params.since || "1h"}.log`
     );
   },
 

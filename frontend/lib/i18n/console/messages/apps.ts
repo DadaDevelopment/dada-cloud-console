@@ -276,6 +276,9 @@ export const apps: Messages = {
   "apps.logs.search.button": { ru: "Найти", en: "Search" },
   "apps.logs.empty": { ru: "Нет строк лога в этом окне.", en: "No log lines in this window." },
   "apps.logs.error": { ru: "Не удалось загрузить логи", en: "Failed to search logs" },
+  "apps.logs.download": { ru: "Скачать .log", en: "Download .log" },
+  "apps.logs.downloading": { ru: "Скачивание…", en: "Downloading…" },
+  "apps.logs.downloadError": { ru: "Не удалось скачать логи", en: "Failed to download logs" },
 
   "apps.builds.crumb.deployments": { ru: "Деплои", en: "Deployments" },
   "apps.builds.crumb.build": { ru: "Сборка {id}", en: "Build {id}" },

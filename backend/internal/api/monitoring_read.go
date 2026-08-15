@@ -789,23 +789,75 @@ func (h *Handler) computeMonitoringMetrics(ctx context.Context, sel, tenant, gro
 // @Failure     503       {object} map[string]string
 // @Router      /projects/{projectId}/environments/{envId}/monitoring/{appId}/logs [get]
 func (h *Handler) GetMonitoringLogs(c *gin.Context) {
-	app, _, _ := h.resolveMonitoringApp(c)
-	if app == nil {
+	res, _, _, ok := h.runMonitoringLogSearch(c, 300)
+	if !ok {
 		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+// DownloadMonitoringLogs is GetMonitoringLogs' download counterpart: same
+// scoping/filters, but streams the matched entries as a downloadable
+// text/plain .log file instead of JSON.
+// GET /projects/:projectId/environments/:envId/monitoring/:appId/logs/download
+//
+// @ID          downloadMonitoringLogs
+// @Summary     Download monitoring resource logs as a .log file
+// @Description Same scoping/filters as GET .../monitoring/{appId}/logs, but streams the matched entries as a downloadable text/plain .log file (one line per entry, newest first) instead of JSON.
+// @Tags        monitoring
+// @Produce     plain
+// @Security    BearerAuth
+// @Param       projectId path     string true  "Project UUID"
+// @Param       envId     path     string true  "Environment UUID"
+// @Param       appId     path     string true  "Monitoring resource UUID"
+// @Param       range     query    string false "Time range (15m, 1h, 6h, 24h, 7d)"
+// @Param       q         query    string false "Full-text query"
+// @Param       level     query    string false "Log level filter (e.g. ERROR)"
+// @Success     200       {file}   file "text/plain .log file"
+// @Failure     401       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Failure     503       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/monitoring/{appId}/logs/download [get]
+func (h *Handler) DownloadMonitoringLogs(c *gin.Context) {
+	res, app, rangeParam, ok := h.runMonitoringLogSearch(c, 10000)
+	if !ok {
+		return
+	}
+
+	filename := fmt.Sprintf("%s-%s.log", app.Name, rangeParam)
+	c.Header("Content-Type", "text/plain; charset=utf-8")
+	c.Header("Content-Disposition", contentDispositionAttachment(filename))
+	for _, e := range res.Entries {
+		stream := e.Stream
+		if stream == "" {
+			stream = "stdout"
+		}
+		fmt.Fprintf(c.Writer, "%s %s %s\n", e.Timestamp, stream, e.Message)
+	}
+}
+
+// runMonitoringLogSearch validates the monitoring app, parses range/q/level,
+// and runs the search shared by GetMonitoringLogs and DownloadMonitoringLogs.
+// ok is false if a response has already been written.
+func (h *Handler) runMonitoringLogSearch(c *gin.Context, size int) (res *logsearch.SearchResult, app *models.MonitoringApp, rangeParam string, ok bool) {
+	app, _, _ = h.resolveMonitoringApp(c)
+	if app == nil {
+		return nil, nil, "", false
 	}
 	if h.appLogsearch == nil {
 		respondError(c, http.StatusServiceUnavailable, "log search not configured")
-		return
+		return nil, nil, "", false
 	}
-	source, ok := monitoringSourceFromQuery(c)
-	if !ok {
-		return
+	source, sourceOK := monitoringSourceFromQuery(c)
+	if !sourceOK {
+		return nil, nil, "", false
 	}
 	orgID := h.monitoringOrgLabel(c.Request.Context(), app.ProjectID)
 	labels := monitoringLabels(orgID, app, source)
 
+	rangeParam = c.Query("range")
 	since := time.Hour
-	switch c.Query("range") {
+	switch rangeParam {
 	case "15m":
 		since = 15 * time.Minute
 	case "6h":
@@ -814,10 +866,12 @@ func (h *Handler) GetMonitoringLogs(c *gin.Context) {
 		since = 24 * time.Hour
 	case "7d":
 		since = 7 * 24 * time.Hour
+	default:
+		rangeParam = "1h"
 	}
 	ctx := c.Request.Context()
 	key := "logs:mon:" + app.ID.String() + ":" + c.Request.URL.RawQuery
-	res, err := cache.Fetch(ctx, h.cache, key, h.cfg.CacheLogsTTL,
+	result, err := cache.Fetch(ctx, h.cache, key, h.cfg.CacheLogsTTL,
 		func() (*logsearch.SearchResult, error) {
 			return h.appLogsearch.Search(ctx, logsearch.SearchOpts{
 				ProjectID:     labels["project_id"],
@@ -826,15 +880,15 @@ func (h *Handler) GetMonitoringLogs(c *gin.Context) {
 				Query:         c.Query("q"),
 				Level:         c.Query("level"),
 				Since:         time.Now().Add(-since),
-				Size:          300,
+				Size:          size,
 			})
 		})
 	if err != nil {
 		respondError(c, http.StatusBadGateway, "log search failed: "+err.Error())
-		return
+		return nil, nil, "", false
 	}
-	if res.Entries == nil {
-		res.Entries = []logsearch.LogEntry{}
+	if result.Entries == nil {
+		result.Entries = []logsearch.LogEntry{}
 	}
 	if claims, ok := auth.GetClaims(c); ok {
 		h.recordViewAudit(claims, auditActionViewAppLogs, auditEntry{
@@ -842,10 +896,10 @@ func (h *Handler) GetMonitoringLogs(c *gin.Context) {
 			EnvironmentID: app.EnvironmentID,
 			ResourceKind:  "App",
 			ResourceName:  app.Name,
-			Metadata:      map[string]any{"source": source, "entries": len(res.Entries)},
+			Metadata:      map[string]any{"source": source, "entries": len(result.Entries)},
 		})
 	}
-	c.JSON(http.StatusOK, res)
+	return result, app, rangeParam, true
 }
 
 // GetMonitoringGrafanaLink ensures the resource's folder+dashboard exist and

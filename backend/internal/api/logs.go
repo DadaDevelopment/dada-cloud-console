@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -40,63 +41,123 @@ import (
 // @Failure     503       {object} map[string]string
 // @Router      /projects/{projectId}/logs [get]
 func (h *Handler) SearchLogs(c *gin.Context) {
+	result, _, _, _, ok := h.runLogSearch(c, 1000, 200)
+	if !ok {
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// DownloadLogs runs the same aggregated search as SearchLogs but returns the
+// matched entries as a plain-text .log file attachment instead of JSON, so
+// users can save a time range of logs the way ArgoCD's log download does.
+// GET /projects/:projectId/logs/download?vm=<server>&app=<app>&q=<text>&since=1h
+//
+// @ID          downloadLogs
+// @Summary     Download aggregated logs in a project as a .log file
+// @Description Same scoping/filters as GET /logs, but streams the matched entries as a downloadable text/plain .log file (one line per entry, newest first) instead of JSON.
+// @Tags        observability
+// @Produce     plain
+// @Security    BearerAuth
+// @Param       projectId path     string true  "Project UUID"
+// @Param       vm        query    string false "App server (VM) name to scope logs to"
+// @Param       app       query    string false "App name to scope logs to"
+// @Param       q         query    string false "Free-text search query"
+// @Param       since     query    string false "Time window: 15m, 1h, 6h, 24h or 7d (default 1h)"
+// @Success     200       {file}   file "text/plain .log file"
+// @Failure     400       {object} map[string]string
+// @Failure     401       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     502       {object} map[string]string
+// @Failure     503       {object} map[string]string
+// @Router      /projects/{projectId}/logs/download [get]
+func (h *Handler) DownloadLogs(c *gin.Context) {
+	result, vm, app, sinceParam, ok := h.runLogSearch(c, 10000, 10000)
+	if !ok {
+		return
+	}
+
+	scope := app
+	if scope == "" {
+		scope = vm
+	}
+	filename := fmt.Sprintf("%s-%s.log", scope, sinceParam)
+
+	c.Header("Content-Type", "text/plain; charset=utf-8")
+	c.Header("Content-Disposition", contentDispositionAttachment(filename))
+	for _, e := range result.Entries {
+		stream := e.Stream
+		if stream == "" {
+			stream = "stdout"
+		}
+		fmt.Fprintf(c.Writer, "%s %s %s\n", e.Timestamp, stream, e.Message)
+	}
+}
+
+// runLogSearch validates the vm/app scoping, parses since/size, and runs the
+// merged user+infra Elasticsearch search shared by SearchLogs and
+// DownloadLogs. maxSize caps the requested ?size param; defaultSize is used
+// when ?size is absent. ok is false if a response has already been written.
+func (h *Handler) runLogSearch(c *gin.Context, maxSize, defaultSize int) (result *logsearch.SearchResult, vm, app, sinceParam string, ok bool) {
 	projectID, err := uuid.Parse(c.Param("projectId"))
 	if err != nil {
 		respondNotFound(c)
-		return
+		return nil, "", "", "", false
 	}
 	if !h.requireProjectMember(c, projectID) {
-		return
+		return nil, "", "", "", false
 	}
 
 	if h.logsearch == nil {
 		respondError(c, http.StatusServiceUnavailable, "log search not configured")
-		return
+		return nil, "", "", "", false
 	}
 
-	vm := c.Query("vm")
-	app := c.Query("app")
+	vm = c.Query("vm")
+	app = c.Query("app")
 	if vm == "" && app == "" {
 		respondError(c, http.StatusBadRequest, "at least one of vm or app query param is required")
-		return
+		return nil, "", "", "", false
 	}
 
 	// Authorization scoping: every requested label must belong to this project.
 	if vm != "" {
-		var ok bool
+		var exists bool
 		if err := h.pool.QueryRow(c.Request.Context(),
 			`SELECT EXISTS(SELECT 1 FROM app_servers WHERE project_id = $1 AND name = $2)`,
 			projectID, vm,
-		).Scan(&ok); err != nil {
+		).Scan(&exists); err != nil {
 			respondError(c, http.StatusInternalServerError, "failed to verify app server")
-			return
+			return nil, "", "", "", false
 		}
-		if !ok {
+		if !exists {
 			respondError(c, http.StatusForbidden, "app server not in project")
-			return
+			return nil, "", "", "", false
 		}
 	}
 	if app != "" {
-		var ok bool
+		var exists bool
 		if err := h.pool.QueryRow(c.Request.Context(),
 			`SELECT EXISTS(SELECT 1 FROM resource_snapshots
 			 WHERE project_id = $1 AND kind = 'App' AND name = $2)`,
 			projectID, app,
-		).Scan(&ok); err != nil {
+		).Scan(&exists); err != nil {
 			respondError(c, http.StatusInternalServerError, "failed to verify app")
-			return
+			return nil, "", "", "", false
 		}
-		if !ok {
+		if !exists {
 			respondError(c, http.StatusForbidden, "app not in project")
-			return
+			return nil, "", "", "", false
 		}
 	}
 
+	sinceParam = c.Query("since")
 	since := time.Hour
-	switch c.Query("since") {
+	switch sinceParam {
 	case "15m":
 		since = 15 * time.Minute
 	case "1h", "":
+		sinceParam = "1h"
 		since = time.Hour
 	case "6h":
 		since = 6 * time.Hour
@@ -106,9 +167,9 @@ func (h *Handler) SearchLogs(c *gin.Context) {
 		since = 7 * 24 * time.Hour
 	}
 
-	size := 200
+	size := defaultSize
 	if s := c.Query("size"); s != "" {
-		if n, err := strconv.Atoi(s); err == nil && n > 0 && n <= 1000 {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 && n <= maxSize {
 			size = n
 		}
 	}
@@ -118,7 +179,7 @@ func (h *Handler) SearchLogs(c *gin.Context) {
 	sinceTime := time.Now().Add(-since)
 
 	key := "logs:search:" + projectID.String() + ":" + c.Request.URL.RawQuery
-	result, err := cache.Fetch(ctx, h.cache, key, h.cfg.CacheLogsTTL,
+	res, err := cache.Fetch(ctx, h.cache, key, h.cfg.CacheLogsTTL,
 		func() (*logsearch.SearchResult, error) {
 			var (
 				wg       sync.WaitGroup
@@ -179,13 +240,13 @@ func (h *Handler) SearchLogs(c *gin.Context) {
 		})
 	if err != nil {
 		respondError(c, http.StatusBadGateway, "log search failed: "+err.Error())
-		return
+		return nil, "", "", "", false
 	}
 
-	if result.Entries == nil {
-		result.Entries = []logsearch.LogEntry{}
+	if res.Entries == nil {
+		res.Entries = []logsearch.LogEntry{}
 	}
-	c.JSON(http.StatusOK, result)
+	return res, vm, app, sinceParam, true
 }
 
 // k8sAppNamespaces returns the namespaces to search infra logs in for an App:

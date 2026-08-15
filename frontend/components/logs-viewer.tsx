@@ -31,6 +31,7 @@ export function LogsViewer({
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const liveRef = useRef(false);
 
@@ -92,6 +93,24 @@ export function LogsViewer({
     setIsLive((v) => !v);
   }
 
+  async function onDownload() {
+    setDownloading(true);
+    try {
+      if (monitoring) {
+        await monitoringApi.downloadLogs(monitoring.projectId, monitoring.envId, monitoring.appId, {
+          q: query,
+          since: effectiveSince,
+        });
+      } else {
+        await logsApi.download(projectId, { vm, app, q: query, since: effectiveSince });
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("apps.logs.downloadError"));
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   return (
     <div className="rounded-xl border border-gray-200 bg-white">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 px-5 py-3">
@@ -140,6 +159,14 @@ export function LogsViewer({
               {t("apps.logs.liveStatus", { since: LIVE_SINCE, interval: String(LIVE_POLL_MS / 1000) })}
             </span>
           )}
+          <button
+            onClick={onDownload}
+            disabled={downloading}
+            title={t("apps.logs.download")}
+            className="rounded-lg border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-500 transition-colors hover:border-blue-300 hover:text-blue-600 disabled:opacity-40"
+          >
+            {downloading ? t("apps.logs.downloading") : t("apps.logs.download")}
+          </button>
         </div>
       </div>
 
