@@ -116,32 +116,37 @@ func TestURLProbeStateSuccessBelowThreshold(t *testing.T) {
 
 // TestParseURLProbeCandidate pins which snapshot rows are worth probing. The
 // skip cases each prevent a false alert on an app that is behaving exactly
-// as its owner intended.
+// as its owner intended. Non-worker rows carry hostnameOriginUnknown because
+// their origin is irrelevant to the decision -- only a worker's hostname
+// origin ever changes the verdict.
 func TestParseURLProbeCandidate(t *testing.T) {
 	cases := []struct {
 		name    string
 		summary string
+		origin  hostnameOrigin
 		wantOK  bool
 		wantPor int
 	}{
-		{"web app", `{"url":"https://app.dada-tuda.ru","port":8080}`, true, 8080},
-		{"non standard port", `{"url":"https://app.dada-tuda.ru","port":3000}`, true, 3000},
-		{"declared worker", `{"url":"https://app.dada-tuda.ru","port":8080,"worker":true}`, false, 0},
-		{"no url", `{"port":8080}`, false, 0},
-		{"empty url", `{"url":"","port":8080}`, false, 0},
-		{"no port", `{"url":"https://app.dada-tuda.ru"}`, false, 0},
-		{"zero port", `{"url":"https://app.dada-tuda.ru","port":0}`, false, 0},
-		{"negative port", `{"url":"https://app.dada-tuda.ru","port":-1}`, false, 0},
-		{"port as string", `{"url":"https://app.dada-tuda.ru","port":"8080"}`, false, 0},
-		{"empty summary", ``, false, 0},
-		{"malformed json", `{"url":`, false, 0},
-		{"json null", `null`, false, 0},
+		{"web app", `{"url":"https://app.dada-tuda.ru","port":8080}`, hostnameOriginUnknown, true, 8080},
+		{"non standard port", `{"url":"https://app.dada-tuda.ru","port":3000}`, hostnameOriginUnknown, true, 3000},
+		{"worker with managed hostname", `{"url":"https://app.dada-tuda.ru","port":8080,"worker":true}`, hostnameOriginManaged, false, 0},
+		{"worker with custom hostname", `{"url":"https://app.dada-tuda.ru","port":8080,"worker":true}`, hostnameOriginCustom, true, 8080},
+		{"worker with unknown hostname", `{"url":"https://app.dada-tuda.ru","port":8080,"worker":true}`, hostnameOriginUnknown, false, 0},
+		{"no url", `{"port":8080}`, hostnameOriginUnknown, false, 0},
+		{"empty url", `{"url":"","port":8080}`, hostnameOriginUnknown, false, 0},
+		{"no port", `{"url":"https://app.dada-tuda.ru"}`, hostnameOriginUnknown, false, 0},
+		{"zero port", `{"url":"https://app.dada-tuda.ru","port":0}`, hostnameOriginUnknown, false, 0},
+		{"negative port", `{"url":"https://app.dada-tuda.ru","port":-1}`, hostnameOriginUnknown, false, 0},
+		{"port as string", `{"url":"https://app.dada-tuda.ru","port":"8080"}`, hostnameOriginUnknown, false, 0},
+		{"empty summary", ``, hostnameOriginUnknown, false, 0},
+		{"malformed json", `{"url":`, hostnameOriginUnknown, false, 0},
+		{"json null", `null`, hostnameOriginUnknown, false, 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, ok := parseURLProbeCandidate("ns-1", "app-1", []byte(c.summary))
+			got, ok := parseURLProbeCandidate("ns-1", "app-1", []byte(c.summary), c.origin)
 			if ok != c.wantOK {
-				t.Fatalf("parseURLProbeCandidate(%q) ok = %v, want %v", c.summary, ok, c.wantOK)
+				t.Fatalf("parseURLProbeCandidate(%q, %v) ok = %v, want %v", c.summary, c.origin, ok, c.wantOK)
 			}
 			if !c.wantOK {
 				return
@@ -151,6 +156,92 @@ func TestParseURLProbeCandidate(t *testing.T) {
 			}
 			if got.Namespace != "ns-1" || got.AppName != "app-1" {
 				t.Fatalf("identity = %s/%s, want ns-1/app-1", got.Namespace, got.AppName)
+			}
+		})
+	}
+}
+
+// TestNormalizeHostnameForMatch pins the url<->domain_hostnames.hostname
+// comparison: the summary carries a full "https://host" URL while
+// domain_hostnames stores a bare host, and both must fold to the same key
+// regardless of scheme, port, trailing slash, or case.
+func TestNormalizeHostnameForMatch(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"bare host", "fanvk-f0e6dc.dada-tuda.ru", "fanvk-f0e6dc.dada-tuda.ru"},
+		{"https url", "https://fanvk-f0e6dc.dada-tuda.ru", "fanvk-f0e6dc.dada-tuda.ru"},
+		{"http url", "http://fanvk-f0e6dc.dada-tuda.ru", "fanvk-f0e6dc.dada-tuda.ru"},
+		{"trailing slash", "https://fanvk-f0e6dc.dada-tuda.ru/", "fanvk-f0e6dc.dada-tuda.ru"},
+		{"explicit port", "https://fanvk-f0e6dc.dada-tuda.ru:443/", "fanvk-f0e6dc.dada-tuda.ru"},
+		{"mixed case", "HTTPS://Fanvk-F0E6DC.Dada-Tuda.RU", "fanvk-f0e6dc.dada-tuda.ru"},
+		{"empty", "", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := normalizeHostnameForMatch(c.in); got != c.want {
+				t.Fatalf("normalizeHostnameForMatch(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+// TestResolveHostnameOrigin pins the loadCandidates-side join: it must match
+// a summary's "https://host" url against a domain_hostnames.hostname row
+// regardless of scheme/port/case, and classify by that row's managed flag.
+// The managed case is the fanvk scenario verbatim: a worker that still
+// carries the default hostname issued back when it was a web app.
+func TestResolveHostnameOrigin(t *testing.T) {
+	cases := []struct {
+		name       string
+		summary    string
+		hostnames  string
+		wantOrigin hostnameOrigin
+	}{
+		{
+			name:       "fanvk: worker carrying orphaned managed default domain",
+			summary:    `{"url":"https://fanvk-f0e6dc.dada-tuda.ru","port":8080,"worker":true}`,
+			hostnames:  `[{"hostname":"fanvk-f0e6dc.dada-tuda.ru","managed":true}]`,
+			wantOrigin: hostnameOriginManaged,
+		},
+		{
+			name:       "worker with a hand-attached custom domain",
+			summary:    `{"url":"https://bot.example.com","port":8080,"worker":true}`,
+			hostnames:  `[{"hostname":"bot.example.com","managed":false}]`,
+			wantOrigin: hostnameOriginCustom,
+		},
+		{
+			name:       "worker whose hostname has no domain_hostnames row",
+			summary:    `{"url":"https://ghost.dada-tuda.ru","port":8080,"worker":true}`,
+			hostnames:  `[]`,
+			wantOrigin: hostnameOriginUnknown,
+		},
+		{
+			name:       "custom domain coexists with an unrelated managed row",
+			summary:    `{"url":"https://bot.example.com","port":8080,"worker":true}`,
+			hostnames:  `[{"hostname":"fanvk-f0e6dc.dada-tuda.ru","managed":true},{"hostname":"bot.example.com","managed":false}]`,
+			wantOrigin: hostnameOriginCustom,
+		},
+		{
+			name:       "scheme/case/port differences still match",
+			summary:    `{"url":"https://Fanvk-F0E6DC.Dada-Tuda.RU:443/","port":8080,"worker":true}`,
+			hostnames:  `[{"hostname":"fanvk-f0e6dc.dada-tuda.ru","managed":true}]`,
+			wantOrigin: hostnameOriginManaged,
+		},
+		{
+			name:       "malformed hostnames json",
+			summary:    `{"url":"https://fanvk-f0e6dc.dada-tuda.ru","port":8080,"worker":true}`,
+			hostnames:  `not json`,
+			wantOrigin: hostnameOriginUnknown,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := resolveHostnameOrigin([]byte(c.summary), []byte(c.hostnames))
+			if got != c.wantOrigin {
+				t.Fatalf("resolveHostnameOrigin(%q, %q) = %v, want %v", c.summary, c.hostnames, got, c.wantOrigin)
 			}
 		})
 	}

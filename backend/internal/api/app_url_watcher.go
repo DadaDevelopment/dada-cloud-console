@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -121,18 +122,57 @@ type urlProbeCandidate struct {
 	Port      int
 }
 
-// parseURLProbeCandidate decides whether one resource_snapshots row is worth
-// probing, purely from its summary JSON. Pure and unit-tested without a
-// database.
+// hostnameOrigin classifies where a worker's hostname came from, decided by
+// loadCandidates from domain_hostnames (managed=true means the row is our
+// own auto-issued surrogate, see migrations/030_default_domains.sql) rather
+// than guessed from the worker flag. apps.go's servesHTTP gate only blocks a
+// worker from being HANDED a fresh default hostname at create time; it does
+// nothing to a hostname the app already carries from before it was switched
+// to a worker (the fanvk case: web app -> default domain issued -> switched
+// to worker -> hostname orphaned, never revoked). A worker can therefore
+// carry either kind of hostname, and only the origin -- not the worker flag
+// -- says whether a human is waiting on that URL.
 //
-// A worker (summary "worker": true) is excluded outright: apps.go already
-// never hands a worker a default hostname, so a worker carrying a "url" can
-// only be a custom domain the user attached on purpose, and this watcher has
-// no business second-guessing that choice. An app with no "url" has nothing
-// public to validate. An app with no numeric "port" is left alone rather
-// than guessing a default: probing the wrong port would misclassify a
-// perfectly healthy app.
-func parseURLProbeCandidate(namespace, appName string, summaryRaw []byte) (urlProbeCandidate, bool) {
+// hostnameOriginUnknown: the url in the summary matched no domain_hostnames
+// row for this app (or the row was never looked up, as for a non-worker app
+// where origin does not affect the verdict). No basis to assume a human
+// attached this domain on purpose, so a worker in this state is left alone
+// exactly like one with a managed hostname.
+//
+// hostnameOriginManaged: the url matched a domain_hostnames row with
+// managed=true, our own auto-issued surrogate domain orphaned on an app that
+// used to be a web app. Our bug, already surfaced honestly by the console's
+// worker-no-HTTP banner (frontend evaluateWorkerNoHTTP); this watcher must
+// not also probe and alert on it.
+//
+// hostnameOriginCustom: the url matched a domain_hostnames row with
+// managed=false, a domain the user attached to this app by hand. A user who
+// points a custom domain at a worker is waiting for HTTP on it regardless of
+// the worker flag, so this is treated like any other web app.
+type hostnameOrigin int
+
+const (
+	hostnameOriginUnknown hostnameOrigin = iota
+	hostnameOriginManaged
+	hostnameOriginCustom
+)
+
+// parseURLProbeCandidate decides whether one resource_snapshots row is worth
+// probing, from its summary JSON plus the hostname origin loadCandidates
+// already resolved against domain_hostnames. Still pure and unit-tested
+// without a database: the join lives in loadCandidates, this function only
+// branches on its result.
+//
+// A non-worker app is probed whenever it has a "url" and a numeric "port",
+// same as before; its hostname origin is irrelevant. A worker is probed only
+// when hostnameOriginCustom: a hostname the user attached on purpose is a
+// promise of HTTP the watcher should hold the app to. A worker with
+// hostnameOriginManaged (our own orphaned surrogate domain) or
+// hostnameOriginUnknown (no domain_hostnames row backs the url at all) is
+// left alone -- there is no evidence a human is waiting on that URL. An app
+// with no numeric "port" is left alone rather than guessing a default:
+// probing the wrong port would misclassify a perfectly healthy app.
+func parseURLProbeCandidate(namespace, appName string, summaryRaw []byte, origin hostnameOrigin) (urlProbeCandidate, bool) {
 	if len(summaryRaw) == 0 {
 		return urlProbeCandidate{}, false
 	}
@@ -140,7 +180,7 @@ func parseURLProbeCandidate(namespace, appName string, summaryRaw []byte) (urlPr
 	if err := json.Unmarshal(summaryRaw, &m); err != nil {
 		return urlProbeCandidate{}, false
 	}
-	if worker, _ := m["worker"].(bool); worker {
+	if worker, _ := m["worker"].(bool); worker && origin != hostnameOriginCustom {
 		return urlProbeCandidate{}, false
 	}
 	urlVal, _ := m["url"].(string)
@@ -152,6 +192,26 @@ func parseURLProbeCandidate(namespace, appName string, summaryRaw []byte) (urlPr
 		return urlProbeCandidate{}, false
 	}
 	return urlProbeCandidate{Namespace: namespace, AppName: appName, Port: int(portVal)}, true
+}
+
+// normalizeHostnameForMatch folds a hostname down to a bare, lowercase host
+// for comparing resource_snapshots' summary "url" (a full "https://host"
+// string, see gitops-agent statusreconciler.go's `"https://" + hostInfo.Hostname`)
+// against domain_hostnames.hostname (stored bare, no scheme). Strips any
+// scheme prefix, any path/query/fragment suffix, and any port, so scheme,
+// trailing slash, explicit port, and case never cause a false non-match.
+func normalizeHostnameForMatch(raw string) string {
+	s := strings.TrimSpace(raw)
+	if idx := strings.Index(s, "://"); idx >= 0 {
+		s = s[idx+3:]
+	}
+	if idx := strings.IndexAny(s, "/?#"); idx >= 0 {
+		s = s[:idx]
+	}
+	if h, _, err := net.SplitHostPort(s); err == nil {
+		s = h
+	}
+	return strings.ToLower(s)
 }
 
 // loadCandidates reads every Ready, publicly-addressed app across every user
@@ -168,6 +228,12 @@ func (w *appURLWatcher) loadCandidates(ctx context.Context) ([]urlProbeCandidate
 		            SELECT 1 FROM app_health_alerts ha
 		            WHERE ha.namespace = e.namespace AND ha.app_name = rs.name
 		              AND COALESCE(ha.last_seen_at, ha.last_sent_at) > now() - make_interval(secs => $1)
+		        ),
+		        COALESCE(
+		            (SELECT json_agg(json_build_object('hostname', dh.hostname, 'managed', dh.managed))
+		             FROM domain_hostnames dh
+		             WHERE dh.environment_id = e.id AND dh.app_name = rs.name),
+		            '[]'
 		        )
 		 FROM resource_snapshots rs
 		 JOIN environments e ON e.id = rs.environment_id
@@ -181,19 +247,59 @@ func (w *appURLWatcher) loadCandidates(ctx context.Context) ([]urlProbeCandidate
 	var out []urlProbeCandidate
 	for rows.Next() {
 		var namespace, appName string
-		var summaryRaw []byte
+		var summaryRaw, hostnamesRaw []byte
 		var crashing bool
-		if scanErr := rows.Scan(&namespace, &appName, &summaryRaw, &crashing); scanErr != nil {
+		if scanErr := rows.Scan(&namespace, &appName, &summaryRaw, &crashing, &hostnamesRaw); scanErr != nil {
 			return nil, scanErr
 		}
 		if crashing {
 			continue
 		}
-		if cand, ok := parseURLProbeCandidate(namespace, appName, summaryRaw); ok {
+		origin := resolveHostnameOrigin(summaryRaw, hostnamesRaw)
+		if cand, ok := parseURLProbeCandidate(namespace, appName, summaryRaw, origin); ok {
 			out = append(out, cand)
 		}
 	}
 	return out, rows.Err()
+}
+
+// domainHostnameRow is one row of the domain_hostnames rows loadCandidates
+// fetches for an app, shaped to match the json_build_object column above.
+type domainHostnameRow struct {
+	Hostname string `json:"hostname"`
+	Managed  bool   `json:"managed"`
+}
+
+// resolveHostnameOrigin decides a candidate's hostnameOrigin by matching the
+// summary's "url" against the domain_hostnames rows loadCandidates already
+// fetched for that app. Kept separate from parseURLProbeCandidate (and unit
+// tested on its own) because it does its own JSON decoding of the
+// domain_hostnames side, which parseURLProbeCandidate has no reason to know
+// about. Malformed summary or hostnames JSON, or no match at all, all fold
+// to hostnameOriginUnknown -- the safe, do-not-probe default.
+func resolveHostnameOrigin(summaryRaw, hostnamesRaw []byte) hostnameOrigin {
+	var summary map[string]any
+	if err := json.Unmarshal(summaryRaw, &summary); err != nil {
+		return hostnameOriginUnknown
+	}
+	urlVal, _ := summary["url"].(string)
+	urlHost := normalizeHostnameForMatch(urlVal)
+	if urlHost == "" {
+		return hostnameOriginUnknown
+	}
+	var hostnames []domainHostnameRow
+	if err := json.Unmarshal(hostnamesRaw, &hostnames); err != nil {
+		return hostnameOriginUnknown
+	}
+	for _, h := range hostnames {
+		if normalizeHostnameForMatch(h.Hostname) == urlHost {
+			if h.Managed {
+				return hostnameOriginManaged
+			}
+			return hostnameOriginCustom
+		}
+	}
+	return hostnameOriginUnknown
 }
 
 // tick probes every candidate app once and records the outcome. Every
