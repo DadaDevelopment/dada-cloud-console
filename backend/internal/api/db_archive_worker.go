@@ -401,6 +401,12 @@ func (w *dbArchiveWorker) verify(ctx context.Context, r archiveRun) error {
 // deleteRows removes what the archive now holds, in batches, within a time
 // budget. Rows are matched by the same predicate the export used, so a row
 // written after the plan is neither exported nor deleted.
+//
+// Each batch commits on its own, so the counter is written after each batch
+// rather than once the budget runs out. A tick cut short by a rollout, a lost
+// connection or a cancelled context has still deleted every batch it finished,
+// and the run must report those rows instead of resetting to what the previous
+// tick left behind.
 func (w *dbArchiveWorker) deleteRows(ctx context.Context, r archiveRun) error {
 	conn, err := w.h.connectToTenantDB(ctx, r.Shard, r.Datname)
 	if err != nil {
@@ -415,16 +421,16 @@ func (w *dbArchiveWorker) deleteRows(ctx context.Context, r archiveRun) error {
 	for time.Now().Before(deadline) {
 		tag, err := conn.Exec(ctx, sql, r.Cutoff)
 		if err != nil {
+			w.recordDeleted(ctx, r, deleted)
 			return fmt.Errorf("delete archived rows: %w", err)
 		}
 		if tag.RowsAffected() == 0 {
 			break
 		}
 		deleted += tag.RowsAffected()
+		w.recordDeleted(ctx, r, deleted)
 	}
-	if _, err := w.h.pool.Exec(ctx,
-		`UPDATE db_archive_runs SET deleted_rows = $2, updated_at = NOW() WHERE id = $1`,
-		r.ID, deleted); err != nil {
+	if err := w.recordDeletedErr(ctx, r, deleted); err != nil {
 		return err
 	}
 	left, err := archiveRowsMatching(ctx, conn, r)
@@ -435,6 +441,24 @@ func (w *dbArchiveWorker) deleteRows(ctx context.Context, r archiveRun) error {
 		return nil
 	}
 	return w.setPhase(ctx, r, dbArchiveRepack)
+}
+
+// recordDeletedErr stores how many rows the run has deleted so far.
+//
+// The write is detached from the caller's context: the counter is most worth
+// saving exactly when that context has just been cancelled, and a delete that
+// really happened must not be forgotten because the tick was cut short.
+func (w *dbArchiveWorker) recordDeletedErr(ctx context.Context, r archiveRun, deleted int64) error {
+	_, err := w.h.pool.Exec(context.WithoutCancel(ctx),
+		`UPDATE db_archive_runs SET deleted_rows = $2, updated_at = NOW() WHERE id = $1`,
+		r.ID, deleted)
+	return err
+}
+
+// recordDeleted stores the progress counter and drops the error, for the paths
+// that are already returning a more important failure to the caller.
+func (w *dbArchiveWorker) recordDeleted(ctx context.Context, r archiveRun, deleted int64) {
+	_ = w.recordDeletedErr(ctx, r, deleted)
 }
 
 // repack returns the freed space to the filesystem.
