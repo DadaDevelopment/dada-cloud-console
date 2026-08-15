@@ -58,10 +58,16 @@ var ingressGeneratedStatuses = map[int]bool{
 // livenessProbeResult is one HTTP check outcome for an app's primary
 // hostname, shaped to drop straight into resource_snapshots.summary_json as
 // http_status / http_reason / http_checked_at.
+//
+// unknownAuthor is internal to the probe and never persisted: it marks a
+// dead verdict that rests on ABSENT evidence rather than on evidence of
+// death -- an ingress-generated status whose body was empty or could not be
+// read to its end. Such a verdict is retried once before it is believed.
 type livenessProbeResult struct {
-	status    int
-	reason    string
-	checkedAt time.Time
+	status        int
+	reason        string
+	checkedAt     time.Time
+	unknownAuthor bool
 }
 
 // livenessProber issues an in-cluster HTTP probe against an app's primary
@@ -128,7 +134,28 @@ func newLivenessProber(baseURL string) *livenessProber {
 // an empty reason would recreate in miniature the false green this whole
 // probe exists to remove. http_status stays 0 whenever no response was ever
 // received.
+//
+// probe wraps probeOnce with a single retry for the one outcome that is not
+// evidence of anything: an ingress-generated 502/503/504 whose body was
+// empty or truncated by a read error. Both are indistinguishable from a
+// dropped connection mid-body, and the classifier's conservative rule turns
+// them into a confident "dead". Observed live on 2026-08-15: fonbet-value
+// was recorded status_503 at 09:11:28Z and app_status_503 at 09:16:28Z with
+// its pod untouched since 04:29 and its body byte-stable across 80 manual
+// probes -- one tick of absent evidence was enough to call a live external
+// user's app dead in the admin panel. A second look costs one request and
+// removes that class; if it too comes back authorless, the verdict stands.
 func (p *livenessProber) probe(ctx context.Context, hostname string) livenessProbeResult {
+	res := p.probeOnce(ctx, hostname)
+	if !res.unknownAuthor {
+		return res
+	}
+	return p.probeOnce(ctx, hostname)
+}
+
+// probeOnce performs exactly one probe attempt, without the retry described
+// on probe.
+func (p *livenessProber) probeOnce(ctx context.Context, hostname string) livenessProbeResult {
 	now := time.Now().UTC()
 
 	target, err := url.Parse(p.baseURL)
@@ -156,21 +183,21 @@ func (p *livenessProber) probe(ctx context.Context, hostname string) livenessPro
 			}
 			return livenessProbeResult{reason: reason, checkedAt: now}
 		}
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, livenessProbeBodyPeek))
+		body, bodyErr := io.ReadAll(io.LimitReader(resp.Body, livenessProbeBodyPeek))
 		resp.Body.Close()
 
 		if resp.StatusCode < 300 || resp.StatusCode >= 400 {
-			return classifyLivenessResponse(resp.StatusCode, body, now)
+			return classifyLivenessResponse(resp.StatusCode, body, bodyErr, now)
 		}
 		if hop == livenessProbeMaxRedirects {
-			res := classifyLivenessResponse(resp.StatusCode, body, now)
+			res := classifyLivenessResponse(resp.StatusCode, body, bodyErr, now)
 			res.reason = "redirect_loop"
 			return res
 		}
 
 		nextTarget, follow := nextRedirectTarget(target, resp.Header.Get("Location"), hostname)
 		if !follow {
-			return classifyLivenessResponse(resp.StatusCode, body, now)
+			return classifyLivenessResponse(resp.StatusCode, body, bodyErr, now)
 		}
 		target = nextTarget
 	}
@@ -196,7 +223,13 @@ func (p *livenessProber) probe(ctx context.Context, hostname string) livenessPro
 // Anything else, including an empty body, keeps the plain status_<code>
 // reason and stays dead: the conservative direction is to leave an unknown
 // author red rather than to invent a false green.
-func classifyLivenessResponse(status int, body []byte, checkedAt time.Time) livenessProbeResult {
+//
+// bodyErr is the error from reading that body. Together with an empty body
+// it is what separates "the ingress answered for a route with no backend"
+// (a real death, ingress page present) from "nothing came back to read"
+// (no evidence at all). The latter sets unknownAuthor so the caller can look
+// again instead of publishing a dead verdict built on silence.
+func classifyLivenessResponse(status int, body []byte, bodyErr error, checkedAt time.Time) livenessProbeResult {
 	reason := ""
 	switch {
 	case ingressGeneratedStatuses[status] && isAppAuthoredBody(body):
@@ -204,7 +237,10 @@ func classifyLivenessResponse(status int, body []byte, checkedAt time.Time) live
 	case status >= 400:
 		reason = fmt.Sprintf("status_%d", status)
 	}
-	return livenessProbeResult{status: status, reason: reason, checkedAt: checkedAt}
+	authorless := ingressGeneratedStatuses[status] &&
+		!isAppAuthoredBody(body) &&
+		(bodyErr != nil || len(bytes.TrimSpace(body)) == 0)
+	return livenessProbeResult{status: status, reason: reason, checkedAt: checkedAt, unknownAuthor: authorless}
 }
 
 // isAppAuthoredBody reports whether body was written by the application

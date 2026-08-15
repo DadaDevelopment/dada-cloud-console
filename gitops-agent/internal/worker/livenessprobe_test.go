@@ -37,7 +37,7 @@ func TestClassifyLivenessResponse_NeverMarksErrorHealthy(t *testing.T) {
 		{503, false},
 	}
 	for _, c := range cases {
-		res := classifyLivenessResponse(c.status, nil, checkedAt)
+		res := classifyLivenessResponse(c.status, nil, nil, checkedAt)
 		if res.status != c.status {
 			t.Fatalf("status %d: recorded status = %d, want %d", c.status, res.status, c.status)
 		}
@@ -197,9 +197,61 @@ func TestClassifyLivenessResponse_NamesTheAuthorOf5xx(t *testing.T) {
 		{"200 stays healthy", 200, appPage, ""},
 	}
 	for _, c := range cases {
-		res := classifyLivenessResponse(c.status, c.body, checkedAt)
+		res := classifyLivenessResponse(c.status, c.body, nil, checkedAt)
 		if res.reason != c.wantReason {
 			t.Fatalf("%s: reason = %q, want %q", c.name, res.reason, c.wantReason)
+		}
+	}
+}
+
+// TestProbe_RetriesOnlyWhenTheAuthorIsUnknown pins the second look added on
+// 2026-08-15, after the admin panel called a live external user's app dead
+// (fonbet-value: status_503 at 09:11:28Z, app_status_503 at 09:16:28Z, pod
+// untouched since 04:29, body byte-stable across 80 manual probes). The
+// retry must fire ONLY for a 502/503/504 that came back with nothing to
+// read: an ingress error page is evidence of death and must not be given a
+// second chance to disappear, and a body that stays absent twice must stay
+// dead rather than decay into a false green. All three poles are asserted
+// together because each of the previous revisions of this classifier passed
+// a one-pole test and shipped a wrong verdict anyway.
+func TestProbe_RetriesOnlyWhenTheAuthorIsUnknown(t *testing.T) {
+	nginxPage := "<html>\r\n<head><title>503 Service Temporarily Unavailable</title></head>\r\n" +
+		"<body>\r\n<center><h1>503 Service Temporarily Unavailable</h1></center>\r\n" +
+		"<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"
+	appPage := `{"application_version":"0.8.2","blockers":["ESPORTSBATTLE_CURRENT_PROCESS_HAS_NOT_COLLECTED"]}`
+
+	cases := []struct {
+		name       string
+		bodies     []string
+		wantReason string
+		wantHits   int
+	}{
+		{"empty then app authored is alive after one retry", []string{"", appPage}, "app_status_503", 2},
+		{"empty twice stays dead", []string{"", ""}, "status_503", 2},
+		{"ingress error page is believed at once", []string{nginxPage, appPage}, "status_503", 1},
+		{"app authored answer is believed at once", []string{appPage, nginxPage}, "app_status_503", 1},
+	}
+
+	for _, c := range cases {
+		hits := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			body := c.bodies[len(c.bodies)-1]
+			if hits < len(c.bodies) {
+				body = c.bodies[hits]
+			}
+			hits++
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(body))
+		}))
+
+		res := newLivenessProber(srv.URL).probe(context.Background(), "app.dada-tuda.ru")
+		srv.Close()
+
+		if res.reason != c.wantReason {
+			t.Fatalf("%s: reason = %q, want %q", c.name, res.reason, c.wantReason)
+		}
+		if hits != c.wantHits {
+			t.Fatalf("%s: upstream hit %d times, want %d", c.name, hits, c.wantHits)
 		}
 	}
 }
