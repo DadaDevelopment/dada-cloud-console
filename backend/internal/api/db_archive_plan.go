@@ -218,6 +218,26 @@ func (h *Handler) GetDatabaseArchivePlan(c *gin.Context) {
 		respondError(c, http.StatusServiceUnavailable, "cannot read the table definition right now")
 		return
 	}
+
+	children, err := archiveBlockingChildren(ctx, conn, schema, relname)
+	if err != nil {
+		respondError(c, http.StatusServiceUnavailable, "cannot read the table's foreign keys right now")
+		return
+	}
+	if len(children) > 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"table":           schema + "." + relname,
+			"archivable":      false,
+			"reason":          archiveChildrenReason(schema, relname, children),
+			"blockedBy":       children,
+			"columns":         cols,
+			"totalRows":       totalRows,
+			"totalBytes":      totalBytes,
+			"totalBytesHuman": humanBytes(totalBytes),
+		})
+		return
+	}
+
 	column, reason := pickCutoffColumn(cols)
 	if reason != "" {
 		vias, viaErr := archiveViaCandidates(ctx, conn, schema, relname)

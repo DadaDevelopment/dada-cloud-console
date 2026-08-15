@@ -129,6 +129,15 @@ func (h *Handler) StartDatabaseArchive(c *gin.Context) {
 		respondNotFound(c)
 		return
 	}
+	children, err := archiveBlockingChildren(ctx, conn, schema, relname)
+	if err != nil {
+		respondError(c, http.StatusServiceUnavailable, "cannot read the table's foreign keys right now")
+		return
+	}
+	if len(children) > 0 {
+		respondError(c, http.StatusConflict, archiveChildrenReason(schema, relname, children))
+		return
+	}
 	via, columnName, reason := resolveArchiveCutoff(ctx, conn, schema, relname, cols, req.Via)
 	if reason != "" {
 		respondError(c, http.StatusBadRequest, reason)
