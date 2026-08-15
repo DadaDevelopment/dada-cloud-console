@@ -514,6 +514,13 @@ export default function AdminOverviewPage() {
                   и т.п.) — это не последняя миля, это сама реализация приложения.
                 </p>
               )}
+              {(data.live_urls.workers ?? 0) > 0 && (
+                <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+                  Ещё {data.live_urls.workers} — воркеры: HTTP они не обслуживают, а домен на них остался с тех
+                  пор, когда они были веб-приложением. Что отвечает такой адрес, про здоровье воркера не говорит
+                  ничего.
+                </p>
+              )}
 
               {liveUrlStaleDominates(data.live_urls) && (
                 <div className="mb-4 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">

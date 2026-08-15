@@ -15,6 +15,7 @@ export interface LastMileSummary {
   http_status?: number;
   http_reason?: string;
   http_checked_at?: string;
+  worker?: boolean;
 }
 
 export interface LastMileVerdict {
@@ -44,18 +45,46 @@ export function isDeadHTTPStatus(status: number): boolean {
 }
 
 /**
+ * Prefix gitops-agent writes into http_reason when a 502/503/504 arrived
+ * with a body the application itself produced instead of ingress-nginx's
+ * default error page (classifyLivenessResponse,
+ * gitops-agent/internal/worker/livenessprobe.go).
+ */
+const APP_AUTHORED_REASON_PREFIX = "app_status_";
+
+/**
+ * The full dead predicate, twin of isDeadProbeResult in
+ * backend/internal/api/admin_overview.go: a 5xx only proves the route has no
+ * backend when nothing behind the route authored it. Measured on production
+ * 2026-08-15, fonbet-value answered 503 from its own container (JSON body
+ * listing its readiness blockers) while ingress-nginx served the same status
+ * class for n8n, whose Service no longer exists -- so the status is read
+ * together with the emitter the probe recorded. `http_status === 0` stays
+ * dead unconditionally: no answer at all carries no authorship, whatever the
+ * reason string happens to say.
+ */
+export function isDeadLastMile(status: number, reason: string): boolean {
+  if (!isDeadHTTPStatus(status)) return false;
+  if (status === 0) return true;
+  return !reason.startsWith(APP_AUTHORED_REASON_PREFIX);
+}
+
+/**
  * Returns null whenever there is nothing honest to say: no probe has run
  * yet (`http_checked_at` absent), the probe found the address serving
  * (2xx/3xx), or the application itself answered with a non-2xx/3xx status
- * (see isDeadHTTPStatus) -- that is a product signal for a different UI
- * surface, not a "last mile is dead" verdict. Absence of data must never
+ * (see isDeadLastMile) -- that is a product signal for a different UI
+ * surface, not a "last mile is dead" verdict. A worker is silent too: it
+ * serves no HTTP at all, so whatever a domain granted before it became a
+ * worker answers says nothing about its health. Absence of data must never
  * render as a health verdict either way.
  */
 export function evaluateLastMile(summary: LastMileSummary | null | undefined): LastMileVerdict | null {
   if (!summary) return null;
+  if (summary.worker === true) return null;
   if (summary.http_checked_at == null || summary.http_checked_at === "") return null;
   if (summary.http_status == null) return null;
-  if (!isDeadHTTPStatus(summary.http_status)) return null;
+  if (!isDeadLastMile(summary.http_status, summary.http_reason ?? "")) return null;
   return {
     status: summary.http_status,
     reason: summary.http_reason ?? "",

@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -37,6 +38,22 @@ const livenessProbeMaxRedirects = 5
 // platform with many hostnames does not serialize into a long per-tick tail
 // (worst case: N apps * livenessProbeTimeout).
 const livenessProbeConcurrency = 8
+
+// livenessProbeBodyPeek bounds how much of a response body the probe reads
+// in order to name its author (see isAppAuthoredBody). The ingress error
+// page it looks for is ~150 bytes; the cap exists so an app streaming a
+// large document can never turn a health probe into a download.
+const livenessProbeBodyPeek = 4096
+
+// ingressGeneratedStatuses are the codes ingress-nginx emits by itself when
+// it cannot reach a backend for the route. They are exactly the codes for
+// which the response body has to be consulted before deciding whether the
+// last mile is dead or the app answered.
+var ingressGeneratedStatuses = map[int]bool{
+	502: true,
+	503: true,
+	504: true,
+}
 
 // livenessProbeResult is one HTTP check outcome for an app's primary
 // hostname, shaped to drop straight into resource_snapshots.summary_json as
@@ -139,21 +156,21 @@ func (p *livenessProber) probe(ctx context.Context, hostname string) livenessPro
 			}
 			return livenessProbeResult{reason: reason, checkedAt: now}
 		}
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, livenessProbeBodyPeek))
 		resp.Body.Close()
 
 		if resp.StatusCode < 300 || resp.StatusCode >= 400 {
-			return classifyLivenessResponse(resp.StatusCode, now)
+			return classifyLivenessResponse(resp.StatusCode, body, now)
 		}
 		if hop == livenessProbeMaxRedirects {
-			res := classifyLivenessResponse(resp.StatusCode, now)
+			res := classifyLivenessResponse(resp.StatusCode, body, now)
 			res.reason = "redirect_loop"
 			return res
 		}
 
 		nextTarget, follow := nextRedirectTarget(target, resp.Header.Get("Location"), hostname)
 		if !follow {
-			return classifyLivenessResponse(resp.StatusCode, now)
+			return classifyLivenessResponse(resp.StatusCode, body, now)
 		}
 		target = nextTarget
 	}
@@ -165,12 +182,45 @@ func (p *livenessProber) probe(ctx context.Context, hostname string) livenessPro
 // result: 4xx/5xx carries a status_<code> reason, anything else (2xx, or a
 // 3xx the caller decided not to chase further) is alive with an empty
 // reason.
-func classifyLivenessResponse(status int, checkedAt time.Time) livenessProbeResult {
+//
+// For the three codes an ingress controller generates on its own
+// (502/503/504) the status alone cannot say WHO answered, and the two
+// possible authors mean opposite things: a live app may deliberately serve
+// 503 while it warms up, and a route with no backend behind it serves the
+// same 503 from nginx. Both were observed live on 2026-08-15 --
+// fonbet-value answered `{"application_version":...,"blockers":[...]}` with
+// content-type application/json from inside a healthy pod, while a stale
+// hash-domain ingress answered nginx's own error page -- so the body is
+// consulted to name the author. An app-authored body is recorded as
+// app_status_<code>, which downstream reads as "the last mile is alive".
+// Anything else, including an empty body, keeps the plain status_<code>
+// reason and stays dead: the conservative direction is to leave an unknown
+// author red rather than to invent a false green.
+func classifyLivenessResponse(status int, body []byte, checkedAt time.Time) livenessProbeResult {
 	reason := ""
-	if status >= 400 {
+	switch {
+	case ingressGeneratedStatuses[status] && isAppAuthoredBody(body):
+		reason = fmt.Sprintf("app_status_%d", status)
+	case status >= 400:
 		reason = fmt.Sprintf("status_%d", status)
 	}
 	return livenessProbeResult{status: status, reason: reason, checkedAt: checkedAt}
+}
+
+// isAppAuthoredBody reports whether body was written by the application
+// rather than by the ingress controller standing in front of it.
+//
+// ingress-nginx serves a fixed, self-identifying error page when it has no
+// backend for a route: a short text/html document whose last line is
+// `<hr><center>nginx</center>`. That signature is the discriminator -- it is
+// present in every default-backend response and absent from anything an app
+// writes itself. An empty body carries no evidence either way and is
+// therefore NOT treated as app-authored.
+func isAppAuthoredBody(body []byte) bool {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return false
+	}
+	return !bytes.Contains(body, []byte("<center>nginx</center>"))
 }
 
 // nextRedirectTarget resolves a 3xx response's Location header against cur

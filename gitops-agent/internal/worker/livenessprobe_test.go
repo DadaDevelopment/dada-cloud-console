@@ -37,7 +37,7 @@ func TestClassifyLivenessResponse_NeverMarksErrorHealthy(t *testing.T) {
 		{503, false},
 	}
 	for _, c := range cases {
-		res := classifyLivenessResponse(c.status, checkedAt)
+		res := classifyLivenessResponse(c.status, nil, checkedAt)
 		if res.status != c.status {
 			t.Fatalf("status %d: recorded status = %d, want %d", c.status, res.status, c.status)
 		}
@@ -165,5 +165,41 @@ func TestProbe_RedirectLoopIsNotHealthy(t *testing.T) {
 	}
 	if hits != livenessProbeMaxRedirects+1 {
 		t.Fatalf("upstream hit %d times, want %d (the hop budget, then stop)", hits, livenessProbeMaxRedirects+1)
+	}
+}
+
+// TestClassifyLivenessResponse_NamesTheAuthorOf5xx pins the discriminator
+// that separates "the route has no backend" from "a live app answered".
+// Both bodies below were captured from production on 2026-08-15 with
+// `curl -D-`: fanvk's hash domain served ingress-nginx's own error page
+// while its worker pod was Running, and fonbet-value's own pod answered 503
+// with its readiness payload from inside a healthy container listening on
+// its declared port. The two poles are asserted together on purpose -- the
+// previous two revisions of this classifier each passed a one-pole test and
+// each shipped a wrong verdict to a paying-shaped external user.
+func TestClassifyLivenessResponse_NamesTheAuthorOf5xx(t *testing.T) {
+	checkedAt := time.Now().UTC()
+	nginxPage := []byte("<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n" +
+		"<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n")
+	appPage := []byte(`{"application_version":"0.8.2","blockers":["ESPORTSBATTLE_CURRENT_PROCESS_HAS_NOT_COLLECTED"]}`)
+
+	cases := []struct {
+		name       string
+		status     int
+		body       []byte
+		wantReason string
+	}{
+		{"ingress error page stays dead", 502, nginxPage, "status_502"},
+		{"app authored 503 is not dead", 503, appPage, "app_status_503"},
+		{"empty body carries no evidence and stays dead", 503, nil, "status_503"},
+		{"504 from the app is not dead", 504, appPage, "app_status_504"},
+		{"404 keeps its plain reason", 404, appPage, "status_404"},
+		{"200 stays healthy", 200, appPage, ""},
+	}
+	for _, c := range cases {
+		res := classifyLivenessResponse(c.status, c.body, checkedAt)
+		if res.reason != c.wantReason {
+			t.Fatalf("%s: reason = %q, want %q", c.name, res.reason, c.wantReason)
+		}
 	}
 }

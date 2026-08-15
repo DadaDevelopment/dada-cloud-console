@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { evaluateLastMile, isDeadHTTPStatus } from "./last-mile-status.ts";
+import { evaluateLastMile, isDeadHTTPStatus, isDeadLastMile } from "./last-mile-status.ts";
 
 test("no verdict when the probe never ran", () => {
   assert.equal(evaluateLastMile(undefined), null);
@@ -82,4 +82,52 @@ test("isDeadHTTPStatus: only 0/502/503/504 are dead, every other status is the a
   assert.equal(isDeadHTTPStatus(403), false);
   assert.equal(isDeadHTTPStatus(500), false);
   assert.equal(isDeadHTTPStatus(200), false);
+});
+
+/**
+ * The emitter half of the same boundary, measured on production
+ * 2026-08-15: fonbet-value's own container answered 503 with a JSON body
+ * listing its readiness blockers, while ingress-nginx answered the exact
+ * same status class for n8n, whose Service no longer exists. gitops-agent
+ * records the difference in http_reason (app_status_<code> vs
+ * status_<code>), so the banner must stop calling a talking app dead while
+ * still calling a backend-less route dead.
+ */
+test("no dead verdict for a 5xx the app itself authored (fonbet-value shape)", () => {
+  assert.equal(
+    evaluateLastMile({ http_status: 503, http_reason: "app_status_503", http_checked_at: "2026-08-15T10:00:00Z" }),
+    null,
+  );
+  assert.equal(
+    evaluateLastMile({ http_status: 502, http_reason: "app_status_502", http_checked_at: "2026-08-15T10:00:00Z" }),
+    null,
+  );
+});
+
+test("a worker has no HTTP surface, so a leftover domain's 502 is not a verdict (fanvk shape)", () => {
+  assert.equal(
+    evaluateLastMile({
+      worker: true,
+      http_status: 502,
+      http_reason: "status_502",
+      http_checked_at: "2026-08-15T10:00:00Z",
+    }),
+    null,
+  );
+});
+
+test("http_status 0 stays dead whatever the reason says: no answer carries no authorship", () => {
+  assert.deepEqual(
+    evaluateLastMile({ http_status: 0, http_reason: "app_status_0", http_checked_at: "2026-08-15T10:00:00Z" }),
+    { status: 0, reason: "app_status_0", checkedAt: "2026-08-15T10:00:00Z" },
+  );
+});
+
+test("isDeadLastMile: the reason names the author, the status alone does not", () => {
+  assert.equal(isDeadLastMile(503, "status_503"), true);
+  assert.equal(isDeadLastMile(503, "app_status_503"), false);
+  assert.equal(isDeadLastMile(502, "app_status_502"), false);
+  assert.equal(isDeadLastMile(504, ""), true);
+  assert.equal(isDeadLastMile(0, "app_status_0"), true);
+  assert.equal(isDeadLastMile(404, "status_404"), false);
 });

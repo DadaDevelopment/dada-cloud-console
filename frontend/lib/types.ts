@@ -1292,7 +1292,8 @@ export interface AdminOverviewLiveUrlDeadApp {
  * healthy, dead is a proxy with no backend behind it (or no response at
  * all), app_responded is the application itself answering with a non-2xx/3xx
  * status (a 404 on the wrong path is not the same failure as a proxy with no
- * pod behind it -- see evaluateLastMile), and stale is how many were skipped
+ * pod behind it -- see evaluateLastMile), workers is apps that serve no HTTP
+ * at all and only carry a leftover domain, and stale is how many were skipped
  * this round and carry no fresh verdict either way. A low dead count next to
  * a high stale count is not good news, it is missing information.
  *
@@ -1308,6 +1309,7 @@ export interface AdminOverviewLiveUrls {
   ok: number;
   dead: number;
   app_responded: number;
+  workers: number;
   stale: number;
   dead_apps: AdminOverviewLiveUrlDeadApp[];
   dead_external: number;

@@ -236,6 +236,7 @@ type overviewLiveURLs struct {
 	OK              int               `json:"ok"`
 	Dead            int               `json:"dead"`
 	AppResponded    int               `json:"app_responded"`
+	Workers         int               `json:"workers"`
 	Stale           int               `json:"stale"`
 	DeadApps        []overviewDeadApp `json:"dead_apps"`
 	DeadExternal    int               `json:"dead_external"`
@@ -266,9 +267,34 @@ var deadProbeStatuses = map[int]bool{
 }
 
 // isDeadProbeStatus reports whether status belongs to deadProbeStatuses --
-// the single predicate overviewLiveURLs uses to decide Dead vs AppResponded.
+// the status-only half of the boundary, kept separate because http_status
+// alone cannot name the emitter (see isDeadProbeResult).
 func isDeadProbeStatus(status int) bool {
 	return deadProbeStatuses[status]
+}
+
+// appAuthoredReasonPrefix is the http_reason prefix gitops-agent writes when
+// a 502/503/504 arrived with a body the application itself produced rather
+// than ingress-nginx's default error page (classifyLivenessResponse,
+// gitops-agent/internal/worker/livenessprobe.go).
+const appAuthoredReasonPrefix = "app_status_"
+
+// isDeadProbeResult is the full Dead predicate: a 5xx is only evidence of a
+// backend-less route when nothing behind the route authored it. Measured on
+// production 2026-08-15, fonbet-value answered 503 from its own container
+// with a JSON body listing its readiness blockers while ingress-nginx served
+// a byte-identical status class for n8n, whose Service no longer exists --
+// the code alone cannot separate them, so the probe now records who wrote
+// the body and this predicate reads it. A bare 0 stays dead unconditionally:
+// no response at all carries no authorship.
+func isDeadProbeResult(status int, reason string) bool {
+	if !isDeadProbeStatus(status) {
+		return false
+	}
+	if status == 0 {
+		return true
+	}
+	return !strings.HasPrefix(reason, appAuthoredReasonPrefix)
 }
 
 // overviewDeadApp names one app behind live_urls.dead so an operator can act
@@ -1017,10 +1043,12 @@ const overviewDeadAppCap = 20
 // A row only counts as Checked (and only then as OK, AppResponded or Dead)
 // when its http_checked_at parses and falls inside
 // liveURLProbeFreshnessWindow; everything else -- absent, unparseable, or
-// older than the window -- is Stale. Dead is exactly isDeadProbeStatus
-// (http_status 0/502/503/504 -- no backend behind the proxy, or no response
-// at all); every other non-2xx/3xx status is AppResponded, since the
-// application itself is what answered. DeadApps only ever names Dead rows --
+// older than the window -- is Stale. A row flagged worker=true is Workers:
+// it serves no HTTP at all, so whatever a leftover domain in front of it
+// answers is neither health nor death. Dead is exactly isDeadProbeResult
+// (http_status 0, or a 502/503/504 that ingress-nginx itself authored);
+// every other non-2xx/3xx status, including a 5xx the app wrote, is
+// AppResponded. DeadApps only ever names Dead rows --
 // an app answering 404/401/etc is not in it -- sorted external-owner-first
 // (see isInternalOwnerEmail) and capped at overviewDeadAppCap.
 func (h *Handler) overviewLiveURLs(ctx context.Context) (overviewLiveURLs, error) {
@@ -1031,7 +1059,8 @@ func (h *Handler) overviewLiveURLs(ctx context.Context) (overviewLiveURLs, error
 		       COALESCE(rs.summary_json->>'url', ''),
 		       COALESCE(rs.summary_json->>'http_status', ''),
 		       COALESCE(rs.summary_json->>'http_reason', ''),
-		       COALESCE(rs.summary_json->>'http_checked_at', '')
+		       COALESCE(rs.summary_json->>'http_checked_at', ''),
+		       COALESCE(rs.summary_json->>'worker', '') = 'true'
 		FROM resource_snapshots rs
 		JOIN projects p     ON p.id = rs.project_id
 		LEFT JOIN users u   ON u.id = p.owner_id
@@ -1048,7 +1077,8 @@ func (h *Handler) overviewLiveURLs(ctx context.Context) (overviewLiveURLs, error
 	now := time.Now()
 	for rows.Next() {
 		var name, projectName, ownerEmail, url, httpStatusRaw, httpReason, checkedAtRaw string
-		if err := rows.Scan(&name, &projectName, &ownerEmail, &url, &httpStatusRaw, &httpReason, &checkedAtRaw); err != nil {
+		var worker bool
+		if err := rows.Scan(&name, &projectName, &ownerEmail, &url, &httpStatusRaw, &httpReason, &checkedAtRaw, &worker); err != nil {
 			return out, err
 		}
 
@@ -1072,7 +1102,12 @@ func (h *Handler) overviewLiveURLs(ctx context.Context) (overviewLiveURLs, error
 			continue
 		}
 
-		if !isDeadProbeStatus(httpStatus) {
+		if worker {
+			out.Workers++
+			continue
+		}
+
+		if !isDeadProbeResult(httpStatus, httpReason) {
 			out.AppResponded++
 			continue
 		}
