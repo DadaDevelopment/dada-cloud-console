@@ -44,16 +44,37 @@ func seedBuild(t *testing.T, pool *pgxpool.Pool, gitRepoID, envID uuid.UUID, app
 }
 
 // seedDeployment inserts a deployments row, optionally linked to a build.
+// It deliberately leaves is_current at its DEFAULT FALSE: that column has no
+// write path in production (see the doc comment on
+// deploymentSelectColsWithSource in deployments.go) and ListDeployments no
+// longer reads it, so seeding it true here would only test a fiction.
 func seedDeployment(t *testing.T, pool *pgxpool.Pool, envID uuid.UUID, appName string, buildID *uuid.UUID, imageURI string) uuid.UUID {
 	t.Helper()
 	var id uuid.UUID
 	if err := pool.QueryRow(context.Background(),
-		`INSERT INTO deployments (environment_id, app_name, build_id, image_uri, trigger, is_current)
-		 VALUES ($1, $2, $3, $4, 'push', true)
+		`INSERT INTO deployments (environment_id, app_name, build_id, image_uri, trigger)
+		 VALUES ($1, $2, $3, $4, 'push')
 		 RETURNING id`,
 		envID, appName, buildID, imageURI,
 	).Scan(&id); err != nil {
 		t.Fatalf("seed deployment: %v", err)
+	}
+	return id
+}
+
+// seedDeploymentAt is seedDeployment with an explicit created_at, for tests
+// that need to control deployment ordering (e.g. which of two deployments of
+// the same image is the freshest).
+func seedDeploymentAt(t *testing.T, pool *pgxpool.Pool, envID uuid.UUID, appName string, imageURI string, createdAt string) uuid.UUID {
+	t.Helper()
+	var id uuid.UUID
+	if err := pool.QueryRow(context.Background(),
+		`INSERT INTO deployments (environment_id, app_name, image_uri, trigger, created_at)
+		 VALUES ($1, $2, $3, 'push', $4::timestamptz)
+		 RETURNING id`,
+		envID, appName, imageURI, createdAt,
+	).Scan(&id); err != nil {
+		t.Fatalf("seed deployment at: %v", err)
 	}
 	return id
 }
@@ -139,5 +160,156 @@ func TestListDeployments_ReturnsCommitProvenance(t *testing.T) {
 	}
 	if d2.Source != "" {
 		t.Fatalf("no-build app: source = %q, want empty (no build_id means no known provenance -- must not claim archive or git)", d2.Source)
+	}
+}
+
+// listDeploymentsFor is a small helper shared by the is_current tests below:
+// it calls ListDeployments for one app and decodes the deployments array.
+func listDeploymentsFor(t *testing.T, h *Handler, projectID, envID uuid.UUID, appName string) []deployment {
+	t.Helper()
+	c, rec := newGetCtx(t, gin.Params{
+		{Key: "projectId", Value: projectID.String()},
+		{Key: "envId", Value: envID.String()},
+		{Key: "appName", Value: appName},
+	}, godClaims(seedUser(t, h.pool)))
+	h.ListDeployments(c)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ListDeployments status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Deployments []deployment `json:"deployments"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v; raw=%s", err, rec.Body.String())
+	}
+	return body.Deployments
+}
+
+// TestListDeployments_CurrentBadgeFollowsRunningImage is the regression gate
+// for the megafactory drift (found live 2026-08-15): the pod kept running an
+// older deploy (image A, 22:58) after a newer one (image B, 23:20) had
+// already landed a row in the deployments ledger, because is_current is
+// never written by any insert path in production and therefore cannot
+// reflect reality. The "current" badge must instead be derived from the
+// app's actual running image (resource_snapshots.summary_json.image): the
+// OLDER deployment, whose image matches what is really running, must be
+// marked current, and the newer, undeployed one must NOT be.
+func TestListDeployments_CurrentBadgeFollowsRunningImage(t *testing.T) {
+	pool := testOptimisticPool(t)
+	h := &Handler{pool: pool, cfg: &config.Config{}}
+	projectID, envID := seedOptimisticFixture(t, pool)
+
+	appName := "megafactory-" + uuid.NewString()[:8]
+	oldImage := "harbor.example/proj/" + appName + "@sha256:" + "09af1723af1723af1723af1723af1723af1723af1723af1723af1723af1723"
+	newImage := "harbor.example/proj/" + appName + "@sha256:" + "5575411e5575411e5575411e5575411e5575411e5575411e5575411e5575411e"
+
+	oldDeployID := seedDeploymentAt(t, pool, envID, appName, oldImage, "2026-08-14 22:58:00+00")
+	newDeployID := seedDeploymentAt(t, pool, envID, appName, newImage, "2026-08-14 23:20:00+00")
+	seedAppWithImage(t, pool, projectID, envID, appName, oldImage)
+
+	deployments := listDeploymentsFor(t, h, projectID, envID, appName)
+	if len(deployments) != 2 {
+		t.Fatalf("got %d deployments, want 2", len(deployments))
+	}
+
+	byID := map[uuid.UUID]deployment{}
+	for _, d := range deployments {
+		byID[d.ID] = d
+	}
+	if !byID[oldDeployID].IsCurrent {
+		t.Fatalf("old (actually running) deployment %s: is_current = false, want true", oldDeployID)
+	}
+	if byID[newDeployID].IsCurrent {
+		t.Fatalf("new (never deployed to the pod) deployment %s: is_current = true, want false -- this is the megafactory drift", newDeployID)
+	}
+}
+
+// TestListDeployments_NoSnapshot_NoCurrent covers an app with deployments
+// rows but no resource_snapshots row at all (e.g. the snapshot was never
+// written or the app was deleted from the cluster): absence of data about
+// what is running must not be rendered as a verdict, so nothing is marked
+// current.
+func TestListDeployments_NoSnapshot_NoCurrent(t *testing.T) {
+	pool := testOptimisticPool(t)
+	h := &Handler{pool: pool, cfg: &config.Config{}}
+	projectID, envID := seedOptimisticFixture(t, pool)
+
+	appName := "no-snapshot-" + uuid.NewString()[:8]
+	seedDeployment(t, pool, envID, appName, nil, "harbor.example/proj/"+appName+"@sha256:aaa")
+
+	deployments := listDeploymentsFor(t, h, projectID, envID, appName)
+	if len(deployments) != 1 {
+		t.Fatalf("got %d deployments, want 1", len(deployments))
+	}
+	if deployments[0].IsCurrent {
+		t.Fatalf("is_current = true with no resource_snapshots row, want false")
+	}
+}
+
+// TestListDeployments_EmptyRunningImage_NoCurrent covers an app with a
+// resource_snapshots row whose summary_json carries no image yet (e.g. a
+// fresh app the reconciler hasn't synced): an empty running image must never
+// be treated as a value to match an empty/absent image_uri against.
+func TestListDeployments_EmptyRunningImage_NoCurrent(t *testing.T) {
+	pool := testOptimisticPool(t)
+	h := &Handler{pool: pool, cfg: &config.Config{}}
+	projectID, envID := seedOptimisticFixture(t, pool)
+
+	appName := "empty-running-" + uuid.NewString()[:8]
+	seedDeployment(t, pool, envID, appName, nil, "harbor.example/proj/"+appName+"@sha256:bbb")
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO resource_snapshots (project_id, environment_id, kind, name, phase, summary_json)
+		 VALUES ($1, $2, 'App', $3, 'Pending', '{}'::jsonb)`,
+		projectID, envID, appName,
+	); err != nil {
+		t.Fatalf("seed empty snapshot: %v", err)
+	}
+
+	deployments := listDeploymentsFor(t, h, projectID, envID, appName)
+	if len(deployments) != 1 {
+		t.Fatalf("got %d deployments, want 1", len(deployments))
+	}
+	if deployments[0].IsCurrent {
+		t.Fatalf("is_current = true with empty running image, want false")
+	}
+}
+
+// TestListDeployments_SameImageTwice_OnlyNewestMarkedCurrent covers an image
+// that was deployed more than once (e.g. a rollback back to an earlier
+// image): exactly one row -- the freshest by created_at -- must carry the
+// current badge, never two.
+func TestListDeployments_SameImageTwice_OnlyNewestMarkedCurrent(t *testing.T) {
+	pool := testOptimisticPool(t)
+	h := &Handler{pool: pool, cfg: &config.Config{}}
+	projectID, envID := seedOptimisticFixture(t, pool)
+
+	appName := "redeployed-" + uuid.NewString()[:8]
+	image := "harbor.example/proj/" + appName + "@sha256:ccc"
+
+	firstID := seedDeploymentAt(t, pool, envID, appName, image, "2026-08-10 10:00:00+00")
+	secondID := seedDeploymentAt(t, pool, envID, appName, image, "2026-08-12 10:00:00+00")
+	seedAppWithImage(t, pool, projectID, envID, appName, image)
+
+	deployments := listDeploymentsFor(t, h, projectID, envID, appName)
+	if len(deployments) != 2 {
+		t.Fatalf("got %d deployments, want 2", len(deployments))
+	}
+
+	byID := map[uuid.UUID]deployment{}
+	current := 0
+	for _, d := range deployments {
+		byID[d.ID] = d
+		if d.IsCurrent {
+			current++
+		}
+	}
+	if current != 1 {
+		t.Fatalf("got %d deployments marked current, want exactly 1", current)
+	}
+	if !byID[secondID].IsCurrent {
+		t.Fatalf("freshest deployment %s (created 2026-08-12): is_current = false, want true", secondID)
+	}
+	if byID[firstID].IsCurrent {
+		t.Fatalf("older deployment %s (created 2026-08-10): is_current = true, want false -- only the freshest may be marked", firstID)
 	}
 }

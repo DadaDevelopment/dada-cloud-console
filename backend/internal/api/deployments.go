@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -41,20 +42,32 @@ type deployment struct {
 // LEFT JOIN git_repos gr ON gr.id = b.git_repo_id" query. Both joins are
 // LEFT because build_id is nullable and a build's git_repo_id may point to
 // a since-deleted repo.
+//
+// d.is_current is deliberately NOT selected here. The column
+// (migrations/013_git_build_deploy.sql:119) has no write path in production
+// -- neither insert site (build-agent/internal/db/deploy.go,
+// backend/internal/api/deployments.go's redeployFrom) ever sets it true, so
+// every row in the live database carries the DEFAULT FALSE forever. Dropping
+// the column would mean tearing out the unique-when-true index under it for
+// no gain, so it stays in the schema as dead weight; deployment.IsCurrent in
+// this package is instead computed in ListDeployments from the app's actual
+// running image (resource_snapshots), which is the only thing that can't
+// lie about what is deployed right now.
 const deploymentSelectColsWithSource = `d.id, d.environment_id, d.app_name, d.build_id, d.operation_id,
-		d.image_uri, d.trigger, d.is_current, d.created_at,
+		d.image_uri, d.trigger, d.created_at,
 		b.commit_sha, b.commit_message, b.head_sha, b.branch, gr.provider`
 
 // scanDeploymentWithSource scans a row selected with
 // deploymentSelectColsWithSource, deriving deployment.Source from the joined
 // git_repos.provider (empty when the deployment has no build_id, i.e. no
-// known provenance).
+// known provenance). d.IsCurrent is left at its zero value (false) here --
+// ListDeployments fills it in afterward from the app's running image.
 func scanDeploymentWithSource(s interface {
 	Scan(dest ...any) error
 }, d *deployment) error {
 	var provider *string
 	if err := s.Scan(&d.ID, &d.EnvironmentID, &d.AppName, &d.BuildID, &d.OperationID,
-		&d.ImageURI, &d.Trigger, &d.IsCurrent, &d.CreatedAt,
+		&d.ImageURI, &d.Trigger, &d.CreatedAt,
 		&d.CommitSHA, &d.CommitMessage, &d.HeadSHA, &d.Branch, &provider); err != nil {
 		return err
 	}
@@ -144,7 +157,52 @@ func (h *Handler) ListDeployments(c *gin.Context) {
 		return
 	}
 
+	markCurrentDeployment(deployments, h.runningImage(c.Request.Context(), projectID, envID, appName))
+
 	c.JSON(http.StatusOK, gin.H{"deployments": deployments})
+}
+
+// runningImage reads the image the app is actually running from its
+// resource_snapshots row (kind='App'), the gitops reconciler's live-state
+// cache. The lookup key is the table's UNIQUE(project_id, environment_id,
+// kind, name) from migrations/001_initial_schema.sql:94, so at most one row
+// can match and no ordering is needed. Returns "" when there is no snapshot
+// yet or the app was never
+// deployed through a path that stamps an image -- callers must treat "" as
+// "unknown", never as a value to match against.
+func (h *Handler) runningImage(ctx context.Context, projectID, envID uuid.UUID, appName string) string {
+	var image string
+	err := h.pool.QueryRow(ctx,
+		`SELECT COALESCE(summary_json->>'image', '') FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3`,
+		projectID, envID, appName,
+	).Scan(&image)
+	if err != nil {
+		return ""
+	}
+	return image
+}
+
+// markCurrentDeployment sets IsCurrent on exactly the deployment whose
+// image_uri matches runningImage, deriving "which deployment is live" from
+// what is actually running instead of the dead is_current column (see the
+// doc comment on deploymentSelectColsWithSource). deployments must already
+// be ordered most-recent-first (ListDeployments orders by d.created_at DESC),
+// so the first match is the freshest deployment of that image -- if the same
+// image was deployed twice, only the newer row gets the badge. When
+// runningImage is empty (no snapshot, or the app was never deployed through
+// a path that stamps one) or matches nothing, no row is marked: absence of
+// data must not render as a verdict.
+func markCurrentDeployment(deployments []deployment, runningImage string) {
+	if runningImage == "" {
+		return
+	}
+	for i := range deployments {
+		if deployments[i].ImageURI == runningImage {
+			deployments[i].IsCurrent = true
+			return
+		}
+	}
 }
 
 // RollbackDeployment re-deploys the image of a prior deployment.
