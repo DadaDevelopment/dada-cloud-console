@@ -101,18 +101,16 @@ func duckDBIdentifier(name string) string {
 // archiveExportSQL is the whole export: attach the tenant database read-only,
 // select everything older than the cutoff, write one Parquet object.
 //
-// The predicate is the same one the plan counted and the delete will use, so
+// The rows are the same ones the plan counted and the delete will remove, so
 // the three steps cannot disagree about which rows the archive covers. Pure.
 func archiveExportSQL(r archiveRun, creds cloudtask.S3Credentials) string {
 	return fmt.Sprintf(`%s
 INSTALL postgres; LOAD postgres;
 ATTACH '' AS src (TYPE POSTGRES, READ_ONLY);
 COPY (
-  SELECT * FROM src.%s.%s WHERE %s < DATE '%s'
+  %s
 ) TO '%s' (FORMAT PARQUET, COMPRESSION ZSTD);`,
-		duckDBS3Settings(creds),
-		duckDBIdentifier(r.Schema), duckDBIdentifier(r.Table),
-		duckDBIdentifier(r.CutoffColumn), r.Cutoff.Format("2006-01-02"), r.S3URI)
+		duckDBS3Settings(creds), archiveExportSelectSQL(r), r.S3URI)
 }
 
 // archiveVerifyScript reads the archive back and fails the Job unless it holds
@@ -126,6 +124,7 @@ COPY (
 func archiveVerifyScript(r archiveRun, creds cloudtask.S3Credentials) string {
 	settings := duckDBS3Settings(creds)
 	cutoff := r.Cutoff.Format("2006-01-02")
+	cutoffColumn := archiveCutoffColumnInArchive(r)
 	return fmt.Sprintf(`set -euo pipefail
 cat > /tmp/count.sql <<'SQL'
 %s
@@ -153,10 +152,10 @@ fi
 echo "verified $ROWS rows, newest $NEWEST, cutoff %s"
 `,
 		settings, r.S3URI,
-		settings, duckDBIdentifier(r.CutoffColumn), r.S3URI,
+		settings, duckDBIdentifier(cutoffColumn), r.S3URI,
 		archiveDuckDBResolve,
 		r.PlannedRows, r.PlannedRows,
-		r.CutoffColumn,
+		cutoffColumn,
 		cutoff, cutoff, cutoff)
 }
 

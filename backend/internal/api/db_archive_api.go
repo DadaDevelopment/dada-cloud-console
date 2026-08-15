@@ -10,6 +10,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // dbArchiveHistoryLimit caps how many runs the history endpoint returns. An
@@ -22,9 +23,10 @@ const dbArchiveHistoryLimit = 50
 // plan endpoint buckets by and what the confirmation text can state without
 // ambiguity about time zones.
 type startArchiveRequest struct {
-	Table  string `json:"table"`
-	Schema string `json:"schema"`
-	Cutoff string `json:"cutoff"`
+	Table  string      `json:"table"`
+	Schema string      `json:"schema"`
+	Cutoff string      `json:"cutoff"`
+	Via    *archiveVia `json:"via,omitempty"`
 }
 
 // archiveRunView is one run as the console shows it.
@@ -32,6 +34,7 @@ type archiveRunView struct {
 	ID            uuid.UUID      `json:"id"`
 	Table         string         `json:"table"`
 	Column        string         `json:"column"`
+	Via           *archiveVia    `json:"via,omitempty"`
 	Cutoff        string         `json:"cutoff"`
 	Phase         string         `json:"phase"`
 	PlannedRows   int64          `json:"plannedRows"`
@@ -126,7 +129,7 @@ func (h *Handler) StartDatabaseArchive(c *gin.Context) {
 		respondNotFound(c)
 		return
 	}
-	column, reason := pickCutoffColumn(cols)
+	via, columnName, reason := resolveArchiveCutoff(ctx, conn, schema, relname, cols, req.Via)
 	if reason != "" {
 		respondError(c, http.StatusBadRequest, reason)
 		return
@@ -136,11 +139,13 @@ func (h *Handler) StartDatabaseArchive(c *gin.Context) {
 	err = h.pool.QueryRow(c.Request.Context(),
 		`INSERT INTO db_archive_runs
 		     (project_id, environment_id, resource_name, datname, shard,
-		      schema_name, table_name, cutoff_column, cutoff_date, requested_by)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		      schema_name, table_name, cutoff_column,
+		      cutoff_via_table, cutoff_via_fk, cutoff_via_pk, cutoff_date, requested_by)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		 RETURNING id`,
 		projectID, envID, c.Param("name"), target.Datname, target.Shard,
-		schema, relname, column.Name, cutoff, claims.Email).Scan(&id)
+		schema, relname, columnName,
+		via.Table, via.FK, via.PK, cutoff, claims.Email).Scan(&id)
 	if err != nil {
 		if isArchiveUniqueViolation(err) {
 			respondError(c, http.StatusConflict, "this table already has an archive in progress")
@@ -150,15 +155,67 @@ func (h *Handler) StartDatabaseArchive(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusAccepted, archiveRunView{
+	view := archiveRunView{
 		ID:        id,
 		Table:     schema + "." + relname,
-		Column:    column.Name,
+		Column:    columnName,
 		Cutoff:    cutoff.Format("2006-01-02"),
 		Phase:     dbArchivePending,
 		Manifest:  map[string]any{},
 		CreatedAt: time.Now().UTC(),
-	})
+	}
+	if via.Table != "" {
+		view.Via = &via
+	}
+	c.JSON(http.StatusAccepted, view)
+}
+
+// resolveArchiveCutoff decides what a run will cut on: a column of the table
+// itself, or a parent's column reached through a foreign key.
+//
+// The derived path exists because the tables that fill a shard are often the
+// ones a cutoff could never select: on the first customer database to fill one,
+// the largest table holds 10 GB of 30 and has no time column at all. Deriving
+// is offered rather than assumed -- a caller-named join wins, a table with
+// exactly one dated parent is unambiguous enough to take silently, and several
+// dated parents is a question only the tenant can answer, so the answer is the
+// list of choices instead of a guess.
+func resolveArchiveCutoff(ctx context.Context, conn *pgx.Conn, schema, table string, cols []archiveColumn, requested *archiveVia) (archiveVia, string, string) {
+	if requested != nil && requested.Table != "" {
+		if requested.FK == "" || requested.PK == "" || requested.Column == "" {
+			return archiveVia{}, "", "via needs table, fk, pk and column"
+		}
+		if err := validateArchiveVia(ctx, conn, schema, table, *requested); err != nil {
+			return archiveVia{}, "", err.Error()
+		}
+		return *requested, requested.Column, ""
+	}
+	if column, reason := pickCutoffColumn(cols); reason == "" {
+		return archiveVia{}, column.Name, ""
+	} else {
+		candidates, err := archiveViaCandidates(ctx, conn, schema, table)
+		if err != nil {
+			return archiveVia{}, "", reason
+		}
+		switch len(candidates) {
+		case 0:
+			return archiveVia{}, "", reason + ", and no foreign key leads to a table that has one"
+		case 1:
+			return candidates[0], candidates[0].Column, ""
+		default:
+			return archiveVia{}, "", reason + ": pick which parent dates these rows by passing via, one of " + describeArchiveVias(candidates)
+		}
+	}
+}
+
+// describeArchiveVias renders the derived cutoffs a table offers as one line a
+// console can show and a caller can copy into a via. Pure.
+func describeArchiveVias(vias []archiveVia) string {
+	out := make([]string, 0, len(vias))
+	for _, v := range vias {
+		out = append(out, v.FK+" -> "+v.Table+"."+v.PK+" on "+v.Column)
+	}
+	return strings.Join(out, "; ")
 }
 
 // ListDatabaseArchiveRuns returns one database's archive history, newest first.
@@ -189,7 +246,8 @@ func (h *Handler) ListDatabaseArchiveRuns(c *gin.Context) {
 	}
 
 	rows, err := h.pool.Query(c.Request.Context(),
-		`SELECT id, schema_name, table_name, cutoff_column, cutoff_date, phase,
+		`SELECT id, schema_name, table_name, cutoff_column,
+		        cutoff_via_table, cutoff_via_fk, cutoff_via_pk, cutoff_date, phase,
 		        planned_rows, deleted_rows, bytes_estimate, bytes_freed,
 		        s3_uri, manifest, error, auto, requested_by, created_at, finished_at
 		   FROM db_archive_runs
@@ -209,11 +267,13 @@ func (h *Handler) ListDatabaseArchiveRuns(c *gin.Context) {
 			v          archiveRunView
 			schema     string
 			table      string
+			via        archiveVia
 			cutoff     time.Time
 			manifest   []byte
 			finishedAt *time.Time
 		)
-		if err := rows.Scan(&v.ID, &schema, &table, &v.Column, &cutoff, &v.Phase,
+		if err := rows.Scan(&v.ID, &schema, &table, &v.Column,
+			&via.Table, &via.FK, &via.PK, &cutoff, &v.Phase,
 			&v.PlannedRows, &v.DeletedRows, &v.BytesEstimate, &v.BytesFreed,
 			&v.S3URI, &manifest, &v.Error, &v.Auto, &v.RequestedBy,
 			&v.CreatedAt, &finishedAt); err != nil {
@@ -221,6 +281,10 @@ func (h *Handler) ListDatabaseArchiveRuns(c *gin.Context) {
 			return
 		}
 		v.Table = schema + "." + table
+		if via.Table != "" {
+			via.Column = v.Column
+			v.Via = &via
+		}
 		v.Cutoff = cutoff.Format("2006-01-02")
 		v.FreedHuman = humanBytes(v.BytesFreed)
 		v.Manifest = map[string]any{}

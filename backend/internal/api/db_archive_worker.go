@@ -80,6 +80,9 @@ type archiveRun struct {
 	Schema        string
 	Table         string
 	CutoffColumn  string
+	ViaTable      string
+	ViaFK         string
+	ViaPK         string
 	Cutoff        time.Time
 	Phase         string
 	PlannedRows   int64
@@ -161,7 +164,8 @@ func (w *dbArchiveWorker) tick(ctx context.Context) {
 func (w *dbArchiveWorker) openRuns(ctx context.Context) ([]archiveRun, error) {
 	rows, err := w.h.pool.Query(ctx, `
 		SELECT id, project_id, environment_id, resource_name, datname, shard,
-		       schema_name, table_name, cutoff_column, cutoff_date, phase,
+		       schema_name, table_name, cutoff_column,
+		       cutoff_via_table, cutoff_via_fk, cutoff_via_pk, cutoff_date, phase,
 		       planned_rows, exported_rows, deleted_rows, bytes_estimate, bytes_before,
 		       bucket, s3_uri, auto
 		  FROM db_archive_runs
@@ -176,7 +180,8 @@ func (w *dbArchiveWorker) openRuns(ctx context.Context) ([]archiveRun, error) {
 	for rows.Next() {
 		var r archiveRun
 		if err := rows.Scan(&r.ID, &r.ProjectID, &r.EnvironmentID, &r.ResourceName, &r.Datname,
-			&r.Shard, &r.Schema, &r.Table, &r.CutoffColumn, &r.Cutoff, &r.Phase,
+			&r.Shard, &r.Schema, &r.Table, &r.CutoffColumn,
+			&r.ViaTable, &r.ViaFK, &r.ViaPK, &r.Cutoff, &r.Phase,
 			&r.PlannedRows, &r.ExportedRows, &r.DeletedRows, &r.BytesEstimate, &r.BytesBefore,
 			&r.Bucket, &r.S3URI, &r.Auto); err != nil {
 			return nil, err
@@ -240,7 +245,6 @@ func (w *dbArchiveWorker) plan(ctx context.Context, r archiveRun) error {
 	}
 	defer conn.Close(context.Background())
 
-	qualified := pgx.Identifier{r.Schema, r.Table}.Sanitize()
 	var totalRows, totalBytes int64
 	if err := conn.QueryRow(ctx,
 		`SELECT GREATEST(c.reltuples, 0)::bigint, pg_total_relation_size(c.oid)
@@ -250,16 +254,22 @@ func (w *dbArchiveWorker) plan(ctx context.Context, r archiveRun) error {
 		return fmt.Errorf("table %s.%s is gone: %w", r.Schema, r.Table, err)
 	}
 
-	cols, err := archiveColumnsOf(ctx, conn, r.Schema, r.Table)
-	if err != nil {
-		return fmt.Errorf("read columns of %s.%s: %w", r.Schema, r.Table, err)
-	}
-	if !archiveColumnUsable(cols, r.CutoffColumn) {
-		return fmt.Errorf("column %q is not a timestamp or date column on %s.%s",
-			r.CutoffColumn, r.Schema, r.Table)
+	if archiveIsDerived(r) {
+		if err := validateArchiveVia(ctx, conn, r.Schema, r.Table, archiveViaOf(r)); err != nil {
+			return err
+		}
+	} else {
+		cols, err := archiveColumnsOf(ctx, conn, r.Schema, r.Table)
+		if err != nil {
+			return fmt.Errorf("read columns of %s.%s: %w", r.Schema, r.Table, err)
+		}
+		if !archiveColumnUsable(cols, r.CutoffColumn) {
+			return fmt.Errorf("column %q is not a timestamp or date column on %s.%s",
+				r.CutoffColumn, r.Schema, r.Table)
+		}
 	}
 
-	rows, err := archiveRowsBefore(ctx, conn, qualified, r.CutoffColumn, r.Cutoff)
+	rows, err := archiveRowsMatching(ctx, conn, r)
 	if err != nil {
 		return fmt.Errorf("count rows before the cutoff: %w", err)
 	}
@@ -394,14 +404,7 @@ func (w *dbArchiveWorker) deleteRows(ctx context.Context, r archiveRun) error {
 	}
 	defer conn.Close(context.Background())
 
-	qualified := pgx.Identifier{r.Schema, r.Table}.Sanitize()
-	col := pgx.Identifier{r.CutoffColumn}.Sanitize()
-	sql := fmt.Sprintf(`
-		WITH doomed AS (
-		    SELECT ctid FROM %[1]s WHERE %[2]s < $1 LIMIT %[3]d FOR UPDATE SKIP LOCKED
-		)
-		DELETE FROM %[1]s WHERE ctid IN (SELECT ctid FROM doomed)`,
-		qualified, col, dbArchiveDeleteBatch)
+	sql := archiveDeleteSQL(r)
 
 	deadline := time.Now().Add(dbArchiveDeleteBudget)
 	deleted := r.DeletedRows
@@ -420,9 +423,8 @@ func (w *dbArchiveWorker) deleteRows(ctx context.Context, r archiveRun) error {
 		r.ID, deleted); err != nil {
 		return err
 	}
-	var left int64
-	if err := conn.QueryRow(ctx, fmt.Sprintf(
-		`SELECT count(*) FROM %s WHERE %s < $1`, qualified, col), r.Cutoff).Scan(&left); err != nil {
+	left, err := archiveRowsMatching(ctx, conn, r)
+	if err != nil {
 		return err
 	}
 	if left > 0 {
@@ -443,7 +445,11 @@ func (w *dbArchiveWorker) deleteRows(ctx context.Context, r archiveRun) error {
 //
 // The guard runs first and fails closed: the rewrite needs room for a second
 // copy of the table, and running it on a volume that lacks that room turns a
-// storage problem into a full disk on a shared instance.
+// storage problem into a full disk on a shared instance. A run that cannot
+// rewrite still ends done rather than failed, and says so in its manifest: the
+// export was verified and the rows are gone, so calling the run a failure would
+// describe delivered work as lost and invite a retry that re-exports rows the
+// table no longer has.
 //
 // The copy is of the LIVE rows, not of the relation. That distinction is the
 // whole case this feature serves: the delete leaves every page in place, so a
@@ -477,10 +483,12 @@ func (w *dbArchiveWorker) repack(ctx context.Context, r archiveRun) error {
 		return err
 	}
 	if !repackHasHeadroom(free, copyBytes) {
-		return fmt.Errorf(
-			"not enough free space on shard %s to repack %s.%s: %s free, %s needed for the %s of live rows. The rows are archived and deleted; an operator has to reclaim the space",
-			r.Shard, r.Schema, r.Table, humanBytes(free),
-			humanBytes(repackNeededBytes(copyBytes)), humanBytes(copyBytes))
+		return w.finish(ctx, r, 0, map[string]any{
+			"reclaimed": false,
+			"reason": fmt.Sprintf(
+				"the rows are archived and deleted, but the space could not be returned to the filesystem: rewriting %s.%s needs %s free on shard %s and only %s is left. The pages are reusable by this table, so it stops growing on disk; an operator can reclaim them once the volume has room",
+				r.Schema, r.Table, humanBytes(repackNeededBytes(copyBytes)), r.Shard, humanBytes(free)),
+		})
 	}
 
 	pg, err := w.shardConn(r.Shard, r.Datname)

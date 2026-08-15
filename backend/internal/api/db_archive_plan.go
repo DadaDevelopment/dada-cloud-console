@@ -220,10 +220,16 @@ func (h *Handler) GetDatabaseArchivePlan(c *gin.Context) {
 	}
 	column, reason := pickCutoffColumn(cols)
 	if reason != "" {
+		vias, viaErr := archiveViaCandidates(ctx, conn, schema, relname)
+		if viaErr != nil {
+			vias = []archiveVia{}
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"table":           schema + "." + relname,
 			"archivable":      false,
+			"archivableVia":   len(vias) > 0,
 			"reason":          reason,
+			"via":             vias,
 			"columns":         cols,
 			"totalRows":       totalRows,
 			"totalBytes":      totalBytes,
