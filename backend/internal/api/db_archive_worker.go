@@ -269,7 +269,7 @@ func (w *dbArchiveWorker) plan(ctx context.Context, r archiveRun) error {
 		}
 	}
 
-	if err := archiveChildrenVerdict(ctx, conn, r); err != nil {
+	if err := w.h.archiveChildrenVerdictOnItsOwnConn(ctx, r.Shard, r.Datname, r); err != nil {
 		return err
 	}
 

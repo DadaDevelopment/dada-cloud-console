@@ -244,6 +244,49 @@ func archiveChildrenVerdict(ctx context.Context, conn *pgx.Conn, r archiveRun) e
 	return errors.New(archiveChildrenReason(r.Schema, r.Table, blocking))
 }
 
+// archiveChildrenOnItsOwnConn asks the child questions on a connection nothing
+// else will need afterwards.
+//
+// A probe that runs out of budget is cancelled mid-query, and pgx answers a
+// cancelled query by closing the connection: every later statement on it fails
+// with "conn closed". Sharing the caller's connection therefore turned one slow
+// foreign key into a dead request -- in production the plan came back 503
+// "cannot read the table's delete rules right now" for the two tables whose
+// keys are slowest, which reads as a broken database rather than a slow key.
+//
+// Failing to get a connection leaves every candidate undecided, which is the
+// same answer as a probe that ran out of time, and lands in the same place: the
+// worker, before anything is exported.
+func (h *Handler) archiveChildrenOnItsOwnConn(ctx context.Context, shard, datname string, r archiveRun, refs []archiveChildRef, budget archiveProbeBudget) []archiveChildRef {
+	if len(refs) == 0 {
+		return refs
+	}
+	conn, err := h.connectToTenantDB(ctx, shard, datname)
+	if err != nil {
+		out := make([]archiveChildRef, 0, len(refs))
+		for _, ref := range refs {
+			ref.Unknown = true
+			ref.Estimated = true
+			out = append(out, ref)
+		}
+		return out
+	}
+	defer conn.Close(context.Background())
+	return archiveChildrenInWindow(ctx, conn, r, refs, budget)
+}
+
+// archiveChildrenVerdictOnItsOwnConn is the worker's verdict, asked on a
+// connection of its own for the reason archiveChildrenOnItsOwnConn documents:
+// the phase that follows still needs a live connection to count rows.
+func (h *Handler) archiveChildrenVerdictOnItsOwnConn(ctx context.Context, shard, datname string, r archiveRun) error {
+	conn, err := h.connectToTenantDB(ctx, shard, datname)
+	if err != nil {
+		return fmt.Errorf("connect to %s on %s: %w", datname, shard, err)
+	}
+	defer conn.Close(context.Background())
+	return archiveChildrenVerdict(ctx, conn, r)
+}
+
 // archiveChildrenReason is the sentence the console shows instead of a run that
 // would die in its delete phase. Pure.
 func archiveChildrenReason(schema, table string, refs []archiveChildRef) string {

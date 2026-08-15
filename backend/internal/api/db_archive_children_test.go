@@ -210,6 +210,47 @@ func TestAProbeThatCannotAnswerDoesNotRefuseTheRequest(t *testing.T) {
 	}
 }
 
+// TestACancelledProbeCostsItsOwnConnectionAndNothingElse pins why the probes
+// need a connection nobody else will reuse. pgx answers a query cancelled by a
+// deadline by closing the connection, so a probe that runs out of budget took
+// the whole request down with it: in production the plan came back 503 "cannot
+// read the table's delete rules right now" for the two tables whose foreign
+// keys are slowest to prove clean.
+func TestACancelledProbeCostsItsOwnConnectionAndNothingElse(t *testing.T) {
+	conn := testTenantConn(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
+	defer cancel()
+	if _, err := conn.Exec(ctx, `SELECT pg_sleep(5)`); err == nil {
+		t.Fatal("expected the sleep to be cancelled by its deadline")
+	}
+	var one int
+	if err := conn.QueryRow(context.Background(), `SELECT 1`).Scan(&one); err == nil {
+		t.Skip("this driver now survives a cancelled query; the separate connection is no longer load-bearing")
+	}
+
+	fresh := testTenantConn(t)
+	schema := seedParentChild(t, fresh)
+	run := archiveRun{
+		Schema:       schema,
+		Table:        "observations",
+		CutoffColumn: "observed_at",
+		Cutoff:       time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC),
+	}
+	candidates, err := archiveBlockingChildren(context.Background(), fresh, schema, "observations")
+	if err != nil {
+		t.Fatalf("read candidate children: %v", err)
+	}
+
+	probeConn := testTenantConn(t)
+	archiveChildrenInWindow(context.Background(), probeConn, run, candidates,
+		archiveProbeBudget{Probe: time.Nanosecond, Count: time.Nanosecond})
+
+	if err := fresh.QueryRow(context.Background(), `SELECT 1`).Scan(&one); err != nil {
+		t.Fatalf("the caller's connection must survive a probe run on its own connection: %v", err)
+	}
+}
+
 // TestDerivedChildCountUsesTheRunsOwnPredicate covers the shape the 10 GB table
 // needed: the archived table has no date of its own, so the window is a join to
 // a dated parent, and the child count has to cut on the same join the delete

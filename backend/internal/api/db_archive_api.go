@@ -149,7 +149,7 @@ func (h *Handler) StartDatabaseArchive(c *gin.Context) {
 		return
 	}
 	cctx, ccancel := context.WithTimeout(ctx, dbArchiveChildrenAPIBudget)
-	children := archiveChildrenInWindow(cctx, conn, archiveRun{
+	children := h.archiveChildrenOnItsOwnConn(cctx, target.Shard, target.Datname, archiveRun{
 		Schema:       schema,
 		Table:        relname,
 		CutoffColumn: columnName,

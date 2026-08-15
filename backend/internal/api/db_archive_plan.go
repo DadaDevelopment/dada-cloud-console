@@ -249,7 +249,7 @@ func (h *Handler) GetDatabaseArchivePlan(c *gin.Context) {
 	if cutoff != nil && len(children) > 0 {
 		if column, reason := pickCutoffColumn(cols); reason == "" {
 			cctx, ccancel := context.WithTimeout(ctx, dbArchiveChildrenAPIBudget)
-			children = archiveChildrenInWindow(cctx, conn, archiveRun{
+			children = h.archiveChildrenOnItsOwnConn(cctx, target.Shard, target.Datname, archiveRun{
 				Schema:       schema,
 				Table:        relname,
 				CutoffColumn: column.Name,
