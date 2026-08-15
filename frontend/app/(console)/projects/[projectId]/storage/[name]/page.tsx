@@ -1,12 +1,13 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { s3bucketsApi } from "@/lib/api";
 import type { ResourceSnapshot, S3BucketCredentialsResponse } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { PhaseBadge } from "@/components/ui/phase-badge";
 import { CopyButton } from "@/components/ui/copy-button";
+import { Modal } from "@/components/ui/modal";
 import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
@@ -33,6 +34,7 @@ export default function BucketDetailPage() {
   const params = useParams<{ projectId: string; name: string }>();
   const { projectId, name } = params;
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { project, selectedEnv, role } = useProjectContext();
   const { t } = useT();
   const envId = searchParams.get("envId") || selectedEnv?.id || "";
@@ -49,6 +51,32 @@ export default function BucketDetailPage() {
 
   const [waitingSince, setWaitingSince] = useState<number | null>(null);
   const [waitedMin, setWaitedMin] = useState(0);
+
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [isDeleteSubmitting, setIsDeleteSubmitting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteConfirmName, setDeleteConfirmName] = useState("");
+
+  /**
+   * Deleting a bucket destroys it at the provider along with every object in
+   * it: the S3Bucket composition does not orphan its Terraform workspace, so
+   * the delete is a terraform destroy, not a detach. Typing the name is the
+   * confirmation for an action with no undo.
+   */
+  async function submitDelete(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setDeleteError(null);
+    setIsDeleteSubmitting(true);
+    try {
+      await s3bucketsApi.remove(projectId, envId, name);
+      setIsDeleteOpen(false);
+      router.push(`/projects/${projectId}/storage`);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : t("storage.delete.error"));
+    } finally {
+      setIsDeleteSubmitting(false);
+    }
+  }
 
   async function revealCreds(silent = false) {
     if (!silent) setCredsLoading(true);
@@ -166,12 +194,21 @@ aws --endpoint-url ${endpointPlaceholder} s3 cp s3://${bucketName}/file.txt ./`;
             { label: bucket.name },
           ]}
         />
-        <div className="mt-2 flex items-center gap-3">
+        <div className="mt-2 flex flex-wrap items-center gap-3">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400">
             <HardDrive className="h-5 w-5" />
           </span>
           <h1 className="font-mono text-2xl font-bold text-gray-900 dark:text-gray-100">{bucket.name}</h1>
           <PhaseBadge phase={bucket.phase} />
+          {canManage && (
+            <button
+              type="button"
+              onClick={() => setIsDeleteOpen(true)}
+              className="ml-auto inline-flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-900 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 transition-colors shadow-sm"
+            >
+              {t("storage.delete.button")}
+            </button>
+          )}
         </div>
         <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
           {t("common.status.synced", { ago: timeAgo(bucket.last_synced_at) })}
@@ -281,6 +318,52 @@ aws --endpoint-url ${endpointPlaceholder} s3 cp s3://${bucketName}/file.txt ./`;
           </pre>
         </section>
       </div>
+
+      <Modal
+        isOpen={isDeleteOpen}
+        onClose={() => { setIsDeleteOpen(false); setDeleteError(null); setDeleteConfirmName(""); }}
+        title={t("storage.delete.modal.title")}
+      >
+        <form onSubmit={submitDelete} className="space-y-4">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            {t("storage.delete.modal.body", { name: bucket.name })}
+          </p>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
+              {t("storage.delete.modal.confirmLabel", { name: bucket.name })}
+            </label>
+            <input
+              type="text"
+              required
+              value={deleteConfirmName}
+              onChange={(e) => setDeleteConfirmName(e.target.value)}
+              placeholder={bucket.name}
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
+            />
+          </div>
+          {deleteError && (
+            <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+              {deleteError}
+            </div>
+          )}
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => { setIsDeleteOpen(false); setDeleteError(null); setDeleteConfirmName(""); }}
+              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 transition-colors"
+            >
+              {t("common.cancel")}
+            </button>
+            <button
+              type="submit"
+              disabled={isDeleteSubmitting || deleteConfirmName !== bucket.name}
+              className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+            >
+              {isDeleteSubmitting ? <><Spinner size="sm" /> {t("common.deleting")}</> : t("common.delete")}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

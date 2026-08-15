@@ -113,8 +113,8 @@ export const storage: Messages = {
   },
   "storage.detail.access.slowTitle": { ru: "Это дольше обычного", en: "This is taking longer than usual" },
   "storage.detail.access.slowHint": {
-    ru: "Известный успешный случай ждал 80 минут — если счётчик уже перевалил за это, скорее всего дело в описании: провайдер Beget принимает не больше 45 символов и не всю пунктуацию, а провал обычно тихий. Описание уже созданного бакета не поменять. Если через пару часов доступа всё ещё нет, создайте отдельный бакет под другим именем с коротким описанием без знаков препинания, а про застрявший напишите нам — удалить его из консоли пока нельзя.",
-    en: "The longest known successful case waited 80 minutes — past that, the usual culprit is the description: Beget's provider accepts at most 45 characters and rejects some punctuation, and the failure is silent. An existing bucket's description can't be edited. If there's still no access after a couple more hours, create a separate bucket under a different name with a short, punctuation-free description, and tell us about the stuck one — the console can't delete it yet.",
+    ru: "Известный успешный случай ждал 80 минут — если счётчик уже перевалил за это, скорее всего дело в описании: провайдер Beget принимает не больше 45 символов и не всю пунктуацию, а провал обычно тихий. Описание уже созданного бакета не поменять. Если через пару часов доступа всё ещё нет, создайте отдельный бакет под другим именем с коротким описанием без знаков препинания, а застрявший удалите здесь же — он пустой, терять в нём нечего.",
+    en: "The longest known successful case waited 80 minutes — past that, the usual culprit is the description: Beget's provider accepts at most 45 characters and rejects some punctuation, and the failure is silent. An existing bucket's description can't be edited. If there's still no access after a couple more hours, create a separate bucket under a different name with a short, punctuation-free description, and delete the stuck one right here — it is empty, so there is nothing in it to lose.",
   },
   "storage.detail.access.notConfigured": {
     ru: "Доступ к учётным данным не настроен для этого окружения.",
@@ -126,6 +126,18 @@ export const storage: Messages = {
     ru: "Чаще всего дело в описании: провайдер принимает не больше 45 символов и не всю пунктуацию. Описание уже созданного бакета изменить нельзя — создайте бакет заново с коротким описанием без знаков препинания.",
     en: "Usually the description: the provider accepts at most 45 characters and rejects some punctuation. An existing bucket's description cannot be edited — create the bucket again with a short, punctuation-free description.",
   },
+
+  "storage.delete.button": { ru: "Удалить бакет", en: "Delete bucket" },
+  "storage.delete.modal.title": { ru: "Удалить бакет", en: "Delete bucket" },
+  "storage.delete.modal.body": {
+    ru: "Бакет «{name}» будет удалён у провайдера вместе со всем содержимым: все объекты внутри пропадут безвозвратно. Восстановить их будет нельзя — если данные нужны, сначала скачайте их через S3 API.",
+    en: "Bucket \"{name}\" will be destroyed at the provider together with everything in it: every object inside is gone for good. There is no way to get them back — if you need the data, download it over the S3 API first.",
+  },
+  "storage.delete.modal.confirmLabel": {
+    ru: "Введите имя бакета «{name}» для подтверждения",
+    en: "Type the bucket name \"{name}\" to confirm",
+  },
+  "storage.delete.error": { ru: "Не удалось удалить бакет", en: "Failed to delete bucket" },
 
   "storage.detail.cli.title": { ru: "Пример aws-cli", en: "aws-cli example" },
   "storage.detail.cli.hint": {

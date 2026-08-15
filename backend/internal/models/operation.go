@@ -110,6 +110,15 @@ type CreateS3BucketPayload struct {
 	AppRef        string `json:"app_ref,omitempty"`
 }
 
+// DeleteS3BucketPayload is the typed payload for DeleteS3Bucket operations.
+// AppRef names the app whose chart carries the S3Bucket CR: the bound app when
+// the bucket was created with one, empty for the per-project standalone
+// "s3-buckets-<project>" chart.
+type DeleteS3BucketPayload struct {
+	Name   string `json:"name"`
+	AppRef string `json:"app_ref,omitempty"`
+}
+
 // AppVolume describes a persistent data directory for a Helm (Kubernetes) app.
 // It maps directly to the workload chart's common.pvc block: a ReadWriteMany
 // PersistentVolumeClaim of Size mounted at Path on every replica. RWX is the

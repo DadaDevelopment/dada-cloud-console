@@ -14005,7 +14005,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Queues an archive run for one table: rows strictly older than the cutoff date are exported to Parquet on the project's archive bucket, verified against the exported object, deleted from the table, and the space returned with pg_repack. The database backup is untouched and still holds the archived rows. Returns the queued run; progress is reported by the archive-runs history endpoint.",
+                "description": "Queues an archive run for one table: rows strictly older than the cutoff date are exported to Parquet on the project's archive bucket, verified against the exported object, deleted from the table, and the space returned to the filesystem by rewriting the table. The database backup is untouched and still holds the archived rows. Returns the queued run; progress is reported by the archive-runs history endpoint.",
                 "consumes": [
                     "application/json"
                 ],
@@ -17957,6 +17957,83 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/environments/{envId}/s3buckets/{name}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Destructive: permanently removes a managed S3 bucket AND its contents. The agent drops the S3Bucket CR from git, Argo prunes it, and Crossplane runs terraform destroy against Beget (the composition does not orphan the bucket). Asynchronous: returns 202 with an operation; poll the operation until terminal.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "storage"
+                ],
+                "summary": "Delete a managed S3 bucket",
+                "operationId": "deleteS3Bucket",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bucket resource name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "object with the accepted operation",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {

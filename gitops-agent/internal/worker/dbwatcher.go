@@ -317,6 +317,8 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 		return w.doSetNamespacePolicy(ctx, op)
 	case "CreateS3Bucket":
 		return w.doCreateS3Bucket(ctx, op)
+	case "DeleteS3Bucket":
+		return w.doDeleteS3Bucket(ctx, op)
 	case "CreatePreviewEnv":
 		return fmt.Errorf("CreatePreviewEnv: превью-окружения убраны как фича, операция не выполняется")
 	case "DeletePreviewEnv":
@@ -3271,6 +3273,99 @@ func (w *DBWatcher) doCreateS3Bucket(ctx context.Context, op db.Operation) error
 		op.ProjectID, op.EnvironmentID,
 		"S3Bucket", p.Name, "Pending", summaryJSON, time.Now(),
 	)
+}
+
+// doDeleteS3Bucket removes an S3Bucket CR entry from its owner app's
+// resources.values.yaml and drops the snapshot; Argo prunes the CR once it
+// leaves git, and — because the S3Bucket composition does NOT set
+// deletionPolicy: Orphan on its Terraform Workspace, unlike every managed
+// database resource — Crossplane's default Delete runs terraform destroy, so the
+// Beget bucket and its objects go with it. AppRef comes from the operation
+// payload (empty = the standalone "s3-buckets-<project>" owner app).
+//
+// Mirrors doDeleteServiceDatabase, including the last-CR case: when the removed
+// bucket was the only manifest in a standalone carrier app, the carrier is
+// removed whole, because ArgoCD refuses to auto-sync a source that renders zero
+// resources and the CR would otherwise survive the delete forever.
+//
+// Differs from doDeleteServiceDatabase in one place on purpose: a bucket whose
+// CR is not in the owner's manifests list fails the operation instead of
+// reporting a silent success. Buckets also reach the console from helm chart
+// templates (mimir, opensearch) and hand-written commits, which this path cannot
+// remove; answering "deleted" for one of those would leave a live, billed bucket
+// behind a green operation.
+func (w *DBWatcher) doDeleteS3Bucket(ctx context.Context, op db.Operation) error {
+	var p struct {
+		Name   string `json:"name"`
+		AppRef string `json:"app_ref"`
+	}
+	if err := json.Unmarshal(op.Payload, &p); err != nil {
+		return fmt.Errorf("parse payload: %w", err)
+	}
+	if p.Name == "" {
+		return fmt.Errorf("delete s3 bucket: name is required")
+	}
+	projectName, envName, _, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
+	if err != nil {
+		return fmt.Errorf("project/env lookup: %w", err)
+	}
+	mgr, err := w.managerFor(ctx, op.ProjectID)
+	if err != nil {
+		return err
+	}
+	if err := mgr.EnsureCloned(); err != nil {
+		return err
+	}
+	valuesPath := renderer.S3BucketResourcesValuesGitPath(projectName, envName, p.AppRef)
+	manifestFile, changed, err := removeManifestsFile(mgr, valuesPath, [][2]string{
+		{"S3Bucket", p.Name},
+	})
+	if err != nil {
+		return fmt.Errorf("remove manifests: %w", err)
+	}
+	if !changed {
+		return fmt.Errorf(
+			"delete s3 bucket %q: no S3Bucket entry in %s — the bucket is not owned by this chart (delivered by a helm chart template or a hand-written commit) and cannot be deleted from the console",
+			p.Name, valuesPath,
+		)
+	}
+
+	commitMsg := fmt.Sprintf(
+		"[DADA Console] Delete S3Bucket %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
+		p.Name, op.ID, projectName, envName,
+	)
+	lastOne := false
+	if p.AppRef == "" {
+		lastOne, err = manifestsFileIsEmpty(manifestFile)
+		if err != nil {
+			return err
+		}
+	}
+	var sha string
+	if lastOne {
+		ownerApp := renderer.S3BucketOwnerApp(p.AppRef, projectName)
+		sha, err = mgr.RemoveAndPush(
+			standaloneOwnerAppPaths(projectName, envName, ownerApp),
+			commitMsg, w.cfg.BotName, w.cfg.BotEmail)
+	} else {
+		sha, err = mgr.CommitFilesAndPush([]git.FileChange{manifestFile}, commitMsg, w.cfg.BotName, w.cfg.BotEmail)
+	}
+	if err != nil {
+		return fmt.Errorf("git push (remove manifests): %w", err)
+	}
+	opID := op.ID
+	_ = db.InsertCommit(ctx, w.pool, sha, mgr.RepoURL(), mgr.Branch(),
+		valuesPath, commitMsg, w.cfg.BotName, w.cfg.BotEmail, &opID, "agent")
+
+	if err := db.MarkCommitted(ctx, w.pool, op.ID, sha, valuesPath); err != nil {
+		return err
+	}
+	_, _ = w.pool.Exec(ctx,
+		`DELETE FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'S3Bucket' AND name = $3`,
+		op.ProjectID, op.EnvironmentID, p.Name,
+	)
+	return nil
 }
 
 func defaultIfEmpty(s, def string) string {

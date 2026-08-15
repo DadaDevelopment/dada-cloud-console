@@ -423,6 +423,12 @@ export const s3bucketsApi = {
     apiFetch<S3BucketCredentialsResponse>(
       `/api/v1/projects/${projectId}/environments/${envId}/s3buckets/${name}/credentials?reveal=true`
     ),
+
+  remove: (projectId: string, envId: string, name: string) =>
+    apiFetch<OperationResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/s3buckets/${name}`,
+      { method: "DELETE" }
+    ),
 };
 
 export const databasesApi = {

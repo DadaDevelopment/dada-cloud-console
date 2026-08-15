@@ -340,6 +340,153 @@ func (h *Handler) CreateS3Bucket(c *gin.Context) {
 	})
 }
 
+// DeleteS3Bucket enqueues an operation to tear down a managed S3 bucket.
+//
+// Destructive on the provider side, unlike the ServiceDatabaseV2 precedent: the
+// S3Bucket composition creates its Terraform Workspace without
+// deletionPolicy: Orphan (see the platform chart's
+// compositions/s3bucket-composition.yaml, where every managed-database resource
+// sets Orphan and the bucket workspace deliberately does not), so Crossplane's
+// default Delete applies — dropping the CR from git runs terraform destroy on
+// beget_s3_bucket, and the bucket and every object in it are gone. The console
+// UI must say that outright; a delete that silently orphaned a billed bucket
+// would be worse than no delete at all.
+//
+// @ID          deleteS3Bucket
+// @Summary     Delete a managed S3 bucket
+// @Description Destructive: permanently removes a managed S3 bucket AND its contents. The agent drops the S3Bucket CR from git, Argo prunes it, and Crossplane runs terraform destroy against Beget (the composition does not orphan the bucket). Asynchronous: returns 202 with an operation; poll the operation until terminal.
+// @Tags        storage
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Param       envId     path     string true "Environment UUID"
+// @Param       name      path     string true "Bucket resource name"
+// @Success     202       {object} map[string]interface{} "object with the accepted operation"
+// @Failure     401       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/s3buckets/{name} [delete]
+func (h *Handler) DeleteS3Bucket(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	projectID, envID, ok := h.parseProjectEnv(c)
+	if !ok {
+		return
+	}
+	name := c.Param("name")
+
+	audit := func(opID uuid.UUID, outcome string, meta map[string]any) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			OperationID:   opID,
+			Action:        "DeleteS3Bucket",
+			ResourceKind:  "S3Bucket",
+			ResourceName:  name,
+			Outcome:       outcome,
+			Metadata:      meta,
+		})
+	}
+	rejectErr := func(status int, reason, msg string) {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": reason, "status": status})
+		respondError(c, status, msg)
+	}
+
+	if _, err := h.requireWriter(c, claims.UserID, projectID); err != nil {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "not_a_writer"})
+		return
+	}
+
+	var summaryRaw []byte
+	err := h.pool.QueryRow(c.Request.Context(),
+		`SELECT summary_json FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'S3Bucket' AND name = $3`,
+		projectID, envID, name,
+	).Scan(&summaryRaw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "not_found", "status": http.StatusNotFound})
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		rejectErr(http.StatusInternalServerError, "lookup_failed", "failed to look up bucket")
+		return
+	}
+
+	appRef := s3BucketAppRef(summaryRaw)
+
+	payload := models.DeleteS3BucketPayload{Name: name, AppRef: appRef}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		rejectErr(http.StatusInternalServerError, "payload_marshal_failed", "failed to marshal payload")
+		return
+	}
+
+	var op models.Operation
+	row := h.pool.QueryRow(c.Request.Context(),
+		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
+		 VALUES ($1, $2, $3, 'DeleteS3Bucket', 'S3Bucket', $4, 'Created', $5)
+		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
+		           status, payload, validation_result, git_commit, git_path, argo_application,
+		           error_code, error_message, created_at, updated_at`,
+		claims.UserID, projectID, envID, name, payloadBytes,
+	)
+	if err = scanOperation(row, &op); err != nil {
+		rejectErr(http.StatusInternalServerError, "operation_insert_failed", "failed to create operation")
+		return
+	}
+
+	audit(op.ID, auditOutcomeSuccess, map[string]any{"app_ref": appRef})
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"operation": op,
+		"message":   "S3Bucket deletion queued",
+	})
+}
+
+// s3BucketStandaloneOwnerPrefix is the per-project carrier app the renderer puts
+// env-level buckets in ("s3-buckets-<project>"); a bucket living there has no
+// bound app, which is exactly what an empty AppRef means to the agent.
+const s3BucketStandaloneOwnerPrefix = "s3-buckets-"
+
+// s3BucketAppRef resolves which app's chart carries a bucket's CR, from the
+// resource snapshot's summary_json. Unlike ServiceDatabaseV2, an S3Bucket CR has
+// no spec.appRef to read back, so the owner has to be recovered from whichever
+// writer touched the snapshot last:
+//   - app_ref — written by the console's own create path (API seed and agent).
+//   - app_name — written by the git-watcher when it reverse-syncs an app's
+//     resources.values.yaml, which is last-writer-wins on commit time and so can
+//     overwrite the create-time summary and take app_ref with it. It holds the
+//     owner app's folder name, which for an env-level bucket is the standalone
+//     carrier and must map back to an empty AppRef.
+//
+// Empty (standalone carrier) is the safe default: a bucket that never went
+// through either writer is looked for in the carrier chart, where the agent
+// finds no CR to remove and fails the operation loudly rather than reporting a
+// delete it did not perform.
+func s3BucketAppRef(summaryRaw []byte) string {
+	if len(summaryRaw) == 0 {
+		return ""
+	}
+	var s struct {
+		AppRef  string `json:"app_ref"`
+		AppName string `json:"app_name"`
+	}
+	if json.Unmarshal(summaryRaw, &s) != nil {
+		return ""
+	}
+	if s.AppRef != "" {
+		return s.AppRef
+	}
+	if s.AppName != "" && !strings.HasPrefix(s.AppName, s3BucketStandaloneOwnerPrefix) {
+		return s.AppName
+	}
+	return ""
+}
+
 // GetS3BucketCredentials reveals an S3 bucket's live access credentials by
 // reading the Crossplane connection secret on demand. Write-gated and audited;
 // the credentials are never persisted in the console database.
