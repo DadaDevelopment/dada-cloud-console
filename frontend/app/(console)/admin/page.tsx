@@ -291,7 +291,7 @@ export default function AdminOverviewPage() {
         <div className="mb-6 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-400">{error}</div>
       )}
 
-      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-5">
         <Card>
           <CardContent className="p-4">
             <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{t("adminOverview.kpi.users")}</p>
@@ -327,6 +327,30 @@ export default function AdminOverviewPage() {
             <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
               {t("adminOverview.kpi.builds7dSub", { ok: data?.builds.last_7d_success ?? 0, failed: data?.builds.last_7d_failed ?? 0 })}
             </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{t("adminOverview.kpi.domains")}</p>
+            <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">
+              {isLoading
+                ? "—"
+                : (data?.domains.active ?? 0) + (data?.domains.pending ?? 0) + (data?.domains.failed ?? 0) + (data?.domains.retired ?? 0)}
+            </p>
+            <p className="mt-1 text-xs">
+              <span className={(data?.domains.failed ?? 0) > 0 ? "text-red-600 dark:text-red-400" : "text-gray-400 dark:text-gray-500"}>
+                {t("adminOverview.kpi.domainsSub", {
+                  active: data?.domains.active ?? 0,
+                  pending: data?.domains.pending ?? 0,
+                  failed: data?.domains.failed ?? 0,
+                })}
+              </span>
+            </p>
+            {(data?.domains.retired ?? 0) > 0 && (
+              <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
+                {t("adminOverview.kpi.domainsRetired", { retired: data?.domains.retired ?? 0 })}
+              </p>
+            )}
           </CardContent>
         </Card>
       </div>

@@ -180,10 +180,22 @@ type overviewBuilds struct {
 	Last24h        int `json:"last_24h"`
 }
 
+// overviewDomains counts domain_hostnames by status for the god-admin
+// overview card. Failed and Retired both start from status='failed', split
+// by the same hostnameReasonAppDeleted marker overviewDomainIssues already
+// filters on: demoteAppHostnames (DeleteApp) stamps that reason on every
+// hostname of a deleted app, so those rows are terminal-by-design tombstones,
+// not live problems. Before this split Failed counted both together and
+// reported the tombstones as breakage on the same response whose issues list
+// a few lines down had already excluded them -- the two numbers on one
+// screen disagreed about what "failed" means. Retired keeps the tombstones
+// visible instead of dropping them, so Active+Pending+Failed+Retired always
+// equals count(*) from domain_hostnames.
 type overviewDomains struct {
 	Active  int `json:"active"`
 	Pending int `json:"pending"`
 	Failed  int `json:"failed"`
+	Retired int `json:"retired"`
 }
 
 // overviewMoney is the money card of the god-admin overview.
@@ -559,9 +571,11 @@ func (h *Handler) overviewDomains(ctx context.Context) (overviewDomains, error) 
 		SELECT
 			count(*) FILTER (WHERE status = 'active'),
 			count(*) FILTER (WHERE status = 'pending'),
-			count(*) FILTER (WHERE status = 'failed')
+			count(*) FILTER (WHERE status = 'failed' AND (status_reason IS NULL OR status_reason <> $1)),
+			count(*) FILTER (WHERE status = 'failed' AND status_reason = $1)
 		FROM domain_hostnames`,
-	).Scan(&out.Active, &out.Pending, &out.Failed)
+		hostnameReasonAppDeleted,
+	).Scan(&out.Active, &out.Pending, &out.Failed, &out.Retired)
 	return out, err
 }
 

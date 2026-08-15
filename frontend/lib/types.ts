@@ -1173,6 +1173,7 @@ export interface AdminOverviewDomains {
   active: number;
   pending: number;
   failed: number;
+  retired: number;
 }
 
 export interface AdminOverviewMoney {

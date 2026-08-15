@@ -28,6 +28,10 @@ export const adminOverview: Messages = {
   "adminOverview.kpi.databases": { ru: "Базы данных", en: "Databases" },
   "adminOverview.kpi.domains": { ru: "Домены", en: "Domains" },
   "adminOverview.kpi.domainsSub": { ru: "{active} активны · {pending} в ожидании · {failed} ошибки", en: "{active} active · {pending} pending · {failed} failed" },
+  "adminOverview.kpi.domainsRetired": {
+    ru: "{retired} сняты вместе с удалённым приложением, не считаются проблемой",
+    en: "{retired} retired along with a deleted app, not counted as a problem",
+  },
 
   "adminOverview.chart.signups": { ru: "Регистрации в день", en: "Signups per day" },
   "adminOverview.chart.builds": { ru: "Сборки в день", en: "Builds per day" },
