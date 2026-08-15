@@ -130,7 +130,17 @@ type Config struct {
 	// the move to shard-0 the old default handed every new tenant a shard
 	// address again.
 	DBRouterDirectShards []string
+
+	LivenessProbeURL         string
+	LivenessProbeMinInterval time.Duration
 }
+
+// livenessProbeMinIntervalDefault floors how often the status reconciler
+// re-probes the same app's hostname, read against that app's own previous
+// http_checked_at rather than a wall-clock schedule. The reconciler ticks
+// every ~30s; without this floor every tick would fire an HTTP request at
+// every user app.
+const livenessProbeMinIntervalDefault = "5m"
 
 func Load() (*Config, error) {
 	dbInterval, err := time.ParseDuration(getEnv("GITOPS_POLL_INTERVAL_DB", "3s"))
@@ -156,6 +166,10 @@ func Load() (*Config, error) {
 	orphanPurge, err := time.ParseDuration(getEnv("GITOPS_ORPHAN_PURGE_AFTER", "2h"))
 	if err != nil {
 		return nil, fmt.Errorf("GITOPS_ORPHAN_PURGE_AFTER: %w", err)
+	}
+	livenessProbeMinInterval, err := time.ParseDuration(getEnv("GITOPS_LIVENESS_PROBE_MIN_INTERVAL", livenessProbeMinIntervalDefault))
+	if err != nil {
+		return nil, fmt.Errorf("GITOPS_LIVENESS_PROBE_MIN_INTERVAL: %w", err)
 	}
 
 	cfg := &Config{
@@ -194,6 +208,9 @@ func Load() (*Config, error) {
 		DBRouterPort:         getEnv("DB_ROUTER_PORT", "5432"),
 		DBRouterDirectShards: splitList(os.Getenv("DB_ROUTER_DIRECT_SHARDS")),
 		PgRouterClusterIP:    getEnv("PG_ROUTER_CLUSTER_IP", ""),
+
+		LivenessProbeURL:         getEnv("LIVENESS_PROBE_URL", ""),
+		LivenessProbeMinInterval: livenessProbeMinInterval,
 	}
 
 	if cfg.DatabaseURL == "" {

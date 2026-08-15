@@ -1153,7 +1153,15 @@ func (r *StatusReconciler) reconcile(ctx context.Context) map[snapKey]bool {
 		}
 	}
 
-	updated := 0
+	phases := make(map[snapKey]string, len(agg))
+	patches := make(map[snapKey]map[string]any, len(agg))
+	prober := newLivenessProber(r.cfg.LivenessProbeURL)
+	var checkTimes map[snapKey]time.Time
+	if prober != nil {
+		checkTimes = r.loadLivenessCheckTimes(ctx)
+	}
+	var candidates []livenessCandidate
+
 	for k, la := range agg {
 		phase := livePhase(la)
 		patchFields := map[string]any{
@@ -1182,8 +1190,26 @@ func (r *StatusReconciler) reconcile(ctx context.Context) map[snapKey]bool {
 			patchFields["url"] = "https://" + hostInfo.Hostname
 			patchFields["url_status"] = hostInfo.Status
 			patchFields["url_reason"] = hostInfo.Reason
+			if prober != nil && hostInfo.Status == "active" && livenessDue(checkTimes[k], r.cfg.LivenessProbeMinInterval) {
+				candidates = append(candidates, livenessCandidate{key: k, hostname: hostInfo.Hostname})
+			}
 		}
-		patch, _ := json.Marshal(patchFields)
+		phases[k] = phase
+		patches[k] = patchFields
+	}
+
+	if len(candidates) > 0 {
+		for k, res := range r.probeLiveness(ctx, prober, candidates) {
+			patches[k]["http_status"] = res.status
+			patches[k]["http_reason"] = res.reason
+			patches[k]["http_checked_at"] = res.checkedAt.Format(time.RFC3339)
+		}
+	}
+
+	updated := 0
+	for k, la := range agg {
+		phase := phases[k]
+		patch, _ := json.Marshal(patches[k])
 		n, err := db.UpdateLiveStatus(ctx, r.pool, k.env, "App", k.app, phase, patch)
 		if err != nil {
 			log.Error().Err(err).Str("app", k.app).Msg("status-reconciler: update snapshot")
