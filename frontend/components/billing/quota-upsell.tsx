@@ -11,6 +11,7 @@ import { trackUxEvent } from "@/lib/ux-telemetry";
 const QUOTA_FIELD: Record<string, keyof BillingQuota> = {
   apps: "apps",
   databases: "databases",
+  storage_gb: "storage_gb",
   domains: "domains",
   team_members: "team_members",
   app_servers: "app_servers",

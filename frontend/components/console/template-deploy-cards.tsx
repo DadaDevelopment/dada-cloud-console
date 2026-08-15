@@ -5,6 +5,7 @@ import { gitApi, solutionsApi } from "@/lib/api";
 import type { Solution, SolutionCandidate, SolutionCategory } from "@/lib/types";
 import { ResourceIcon } from "@/components/shell/icons";
 import { Spinner } from "@/components/ui/spinner";
+import { QuotaUpsell } from "@/components/billing/quota-upsell";
 import { useT } from "@/lib/i18n/console/context";
 import { trackBuildStart } from "@/lib/build-watch";
 import { templateUxName, type TemplateDeployPlacement } from "@/lib/ux-target-names";
@@ -75,6 +76,7 @@ export function TemplateDeployCards({ projectId, envId, placement, compact, hero
   const [paramsFor, setParamsFor] = useState<Solution | null>(null);
   const [deployingKey, setDeployingKey] = useState<string | null>(null);
   const [templateError, setTemplateError] = useState<string | null>(null);
+  const [quotaBlocked, setQuotaBlocked] = useState<{ resource: string; limit?: number } | null>(null);
   const [query, setQuery] = useState("");
   const [candidates, setCandidates] = useState<SolutionCandidate[] | null>(null);
   const [resolving, setResolving] = useState(false);
@@ -162,6 +164,7 @@ export function TemplateDeployCards({ projectId, envId, placement, compact, hero
   }) {
     if (!envId || deployingKey) return;
     setTemplateError(null);
+    setQuotaBlocked(null);
     setDeployingKey(opts.key);
     const appName = uniqueAppName(opts.appBase);
     try {
@@ -179,6 +182,13 @@ export function TemplateDeployCards({ projectId, envId, placement, compact, hero
       if (build?.id) trackBuildStart({ projectId, envId, appName, buildId: build.id });
       router.push(`/projects/${projectId}/apps/${appName}?envId=${envId}`);
     } catch (err) {
+      const quota = err as { code?: string; resource?: string; limit?: number } | undefined;
+      if (quota?.code === "quota_exceeded") {
+        setTemplateError(null);
+        setQuotaBlocked({ resource: quota.resource ?? "apps", limit: quota.limit });
+        setDeployingKey(null);
+        return;
+      }
       setTemplateError(err instanceof Error ? err.message : t("overview.templates.error"));
       setDeployingKey(null);
     }
@@ -294,6 +304,11 @@ export function TemplateDeployCards({ projectId, envId, placement, compact, hero
       {templateError && (
         <div className="mt-3 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm text-red-700 dark:text-red-300">
           {templateError}
+        </div>
+      )}
+      {quotaBlocked && (
+        <div className="mt-3">
+          <QuotaUpsell resource={quotaBlocked.resource} limit={quotaBlocked.limit} projectId={projectId} />
         </div>
       )}
 

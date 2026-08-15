@@ -27,6 +27,7 @@ export const consumption: Messages = {
   "spend.quota.apps": { ru: "Приложения", en: "Apps" },
   "spend.quota.databases": { ru: "Базы данных", en: "Databases" },
   "spend.quota.domains": { ru: "Домены", en: "Domains" },
+  "spend.quota.storage_gb": { ru: "Диск приложения, ГБ", en: "App disk, GB" },
   "spend.quota.team_members": { ru: "Участники", en: "Members" },
   "spend.quota.app_servers": { ru: "Серверы приложений", en: "App servers" },
   "spend.quota.value": { ru: "{used} из {limit}", en: "{used} of {limit}" },
