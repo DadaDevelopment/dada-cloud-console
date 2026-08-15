@@ -112,7 +112,18 @@ func (h *Handler) uxUserFromCookie(ctx context.Context, c *gin.Context) *uuid.UU
 	if err != nil || raw == "" {
 		return nil
 	}
-	sub := clampLen(strings.TrimSpace(raw), 128)
+	return h.uxUserFromSub(ctx, raw)
+}
+
+// uxUserFromSub is the cookie-value half of uxUserFromCookie, split out so a
+// caller that already has the raw dada_uid value (read earlier, off a
+// *gin.Context that may not survive into a detached goroutine) can resolve it
+// without re-reading the request.
+func (h *Handler) uxUserFromSub(ctx context.Context, rawSub string) *uuid.UUID {
+	sub := clampLen(strings.TrimSpace(rawSub), 128)
+	if sub == "" {
+		return nil
+	}
 	if _, err := uuid.Parse(sub); err != nil {
 		return nil
 	}

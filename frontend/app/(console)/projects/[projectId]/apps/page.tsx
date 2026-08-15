@@ -562,8 +562,14 @@ function GroupBlock({ title, primaryEnv, projectId, entries, infra, canCreate, o
         <>
           {(!isVM || primaryEnv.app_server_id) && (
             <div data-onboarding="first-deploy" className="mb-6 grid gap-4 lg:grid-cols-2">
-              <TemplateDeployCards projectId={projectId} envId={primaryEnv.id} placement="apps-empty" envRuntime={primaryEnv.runtime} hero />
-              {!isVM && <UploadDeployCard projectId={projectId} envId={primaryEnv.id} hero />}
+              <div className="contents" data-ux="empty-apps-cta-template">
+                <TemplateDeployCards projectId={projectId} envId={primaryEnv.id} placement="apps-empty" envRuntime={primaryEnv.runtime} hero />
+              </div>
+              {!isVM && (
+                <div className="contents" data-ux="empty-apps-cta-upload">
+                  <UploadDeployCard projectId={projectId} envId={primaryEnv.id} hero />
+                </div>
+              )}
             </div>
           )}
           <EmptyState
@@ -571,10 +577,18 @@ function GroupBlock({ title, primaryEnv, projectId, entries, infra, canCreate, o
             description={isVM ? t("apps.empty.vm.description") : t("apps.empty.k8s.description")}
             action={
               isVM
-                ? { label: t("apps.empty.vm.action"), href: `/projects/${projectId}/app-servers` }
-                : { label: t("apps.empty.k8s.action"), href: `/projects/${projectId}/git/import?envId=${primaryEnv.id}` }
+                ? { label: t("apps.empty.vm.action"), href: `/projects/${projectId}/app-servers`, ux: "empty-apps-cta-appserver" }
+                : {
+                    label: t("apps.empty.k8s.action"),
+                    href: `/projects/${projectId}/git/import?envId=${primaryEnv.id}`,
+                    ux: "empty-apps-cta-git",
+                  }
             }
-            secondary={{ label: t("common.learnMore"), href: docsHref("applications-deploy-from-github") }}
+            secondary={{
+              label: t("common.learnMore"),
+              href: docsHref("applications-deploy-from-github"),
+              ux: "empty-apps-cta-docs",
+            }}
           />
         </>
       ) : (

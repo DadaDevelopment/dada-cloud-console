@@ -11,10 +11,14 @@ export interface EmptyStateProps {
   icon?: React.ReactNode;
   title: string;
   description?: string;
-  /** Primary next step. */
-  action?: { label: string; href: string };
-  /** Secondary link, e.g. docs. */
-  secondary?: { label: string; href: string };
+  /**
+   * Primary next step. `ux` names the control for click telemetry
+   * (`describeTarget` in lib/ux-telemetry.ts prefers it over the visible
+   * label, which is a translated string and moves whenever copy is edited).
+   */
+  action?: { label: string; href: string; ux?: string };
+  /** Secondary link, e.g. docs. `ux` as above. */
+  secondary?: { label: string; href: string; ux?: string };
 }
 
 export function EmptyState({ icon, title, description, action, secondary }: EmptyStateProps) {
@@ -28,6 +32,7 @@ export function EmptyState({ icon, title, description, action, secondary }: Empt
           {action && (
             <Link
               href={action.href}
+              data-ux={action.ux}
               className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white transition-colors hover:bg-blue-700"
             >
               {action.label}
@@ -36,6 +41,7 @@ export function EmptyState({ icon, title, description, action, secondary }: Empt
           {secondary && (
             <Link
               href={secondary.href}
+              data-ux={secondary.ux}
               className="font-medium text-blue-600 hover:text-blue-700"
             >
               {secondary.label} →
