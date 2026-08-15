@@ -273,8 +273,8 @@ func (p *YooKassaProvider) recordCheckoutFailureTx(ctx context.Context, id, acto
 	}
 
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO audit_events (actor_id, action, resource_kind, resource_name, outcome, metadata)
-		VALUES ($1, 'CreatePaymentFailed', 'Payment', $2, 'failure', $3)
+		INSERT INTO audit_events (actor_id, action, resource_kind, resource_name, outcome, metadata, actor_type)
+		VALUES ($1, 'CreatePaymentFailed', 'Payment', $2, 'failure', $3, 'user')
 	`, actorID, orgID, meta); err != nil {
 		return fmt.Errorf("insert audit row: %w", err)
 	}

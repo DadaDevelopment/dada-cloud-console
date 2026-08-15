@@ -169,14 +169,14 @@ func ResolveUser(ctx context.Context, db querier, kc *KeycloakClaims, allowSignu
 		            updated_at = now()
 		    RETURNING id, (xmax = 0) AS inserted, email
 		), signup_event AS (
-		    INSERT INTO audit_events (actor_id, action, resource_kind, resource_name, outcome, metadata)
+		    INSERT INTO audit_events (actor_id, action, resource_kind, resource_name, outcome, metadata, actor_type)
 		    SELECT id, 'SignUp', 'User', email, 'success', jsonb_build_object(
 		        'source', 'provision',
 		        'signup_source', $5::text,
 		        'signup_medium', $6::text,
 		        'signup_campaign', $7::text,
 		        'signup_referrer', $8::text
-		    )
+		    ), 'user'
 		    FROM upserted
 		    WHERE inserted
 		)

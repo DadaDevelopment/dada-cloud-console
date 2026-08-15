@@ -156,13 +156,14 @@ func (h *Handler) requeueRedetectedBuild(ctx context.Context, c redetectCandidat
 			FROM   builds b WHERE b.id = $8
 			RETURNING id, attempt
 		)
-		INSERT INTO audit_events (actor_id, project_id, environment_id, action, resource_kind, resource_name, outcome, metadata)
+		INSERT INTO audit_events (actor_id, project_id, environment_id, action, resource_kind, resource_name, outcome, metadata, actor_type)
 		SELECT $7, $9, $2, 'BuildAutoRetried', 'Build', $3, 'success',
 		       jsonb_build_object(
 		           'build_id', q.id::text, 'previous_build_id', $8::text,
 		           'previous_fail_reason', 'no_dockerfile', 'redetected_framework', $10::text,
 		           'attempt', q.attempt, 'branch', $5
-		       )
+		       ),
+		       'system'
 		FROM   queued q
 	`, c.GitRepoID, c.EnvironmentID, c.AppName, commitSHA, c.Branch, head,
 		systemDeployActorID, c.BuildID, c.ProjectID, framework)

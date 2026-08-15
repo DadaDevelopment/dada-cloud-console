@@ -66,6 +66,18 @@ const (
 	auditOutcomePending = "pending"
 )
 
+// The closed set audit_events.actor_type can hold (migration
+// 124_audit_events_actor_type.sql). Every writer decides this at the point of
+// insert -- see writeAuditRow -- instead of a reader guessing it later from
+// actor_id. auditActorTypeService is reserved for a future machine-to-machine
+// actor that is neither a person nor systemDeployActorID; nothing writes it
+// yet.
+const (
+	auditActorTypeUser    = "user"
+	auditActorTypeSystem  = "system"
+	auditActorTypeService = "service"
+)
+
 // The two request headers a caller may use to self-report what it is. Neither
 // is a fact: a script can send X-Dada-Client: cli/9.9.9 with no CLI anywhere
 // near it. That is exactly why the audit fields they feed are named
@@ -249,7 +261,7 @@ func withClientClaimMetadata(meta []byte, claim clientClaim) []byte {
 // always kept -- a handler that knows it failed knows more than the status.
 const auditInsertSQL = `
 	INSERT INTO audit_events
-	  (actor_id, project_id, environment_id, operation_id, action, resource_kind, resource_name, outcome, metadata)
+	  (actor_id, project_id, environment_id, operation_id, action, resource_kind, resource_name, outcome, metadata, actor_type)
 	SELECT $1, $2, $3, $4, $5, $6, $7,
 	       CASE
 	         WHEN $8::text = 'success'
@@ -262,7 +274,7 @@ const auditInsertSQL = `
 	         THEN 'pending'
 	         ELSE $8::text
 	       END,
-	       $9`
+	       $9, $10`
 
 // Dedupe windows. Both passive signals are emitted from endpoints the console
 // polls, so without collapsing they would drown the write-actions they are
@@ -445,6 +457,11 @@ func writeAuditRow(ctx context.Context, pool *pgxpool.Pool, actorID uuid.UUID, e
 	projectID, environmentID, operationID := e.ProjectID, e.EnvironmentID, e.OperationID
 	unresolved := map[string]string{}
 
+	actorType := auditActorTypeUser
+	if actorID == systemDeployActorID {
+		actorType = auditActorTypeSystem
+	}
+
 	for attempt := 0; attempt < 4; attempt++ {
 		payload := meta
 		if len(unresolved) > 0 {
@@ -452,7 +469,7 @@ func writeAuditRow(ctx context.Context, pool *pgxpool.Pool, actorID uuid.UUID, e
 		}
 		_, err := pool.Exec(ctx, auditInsertSQL,
 			actorID, nullableUUID(projectID), nullableUUID(environmentID), nullableUUID(operationID),
-			e.Action, e.ResourceKind, e.ResourceName, outcome, payload,
+			e.Action, e.ResourceKind, e.ResourceName, outcome, payload, actorType,
 		)
 		if err == nil {
 			return

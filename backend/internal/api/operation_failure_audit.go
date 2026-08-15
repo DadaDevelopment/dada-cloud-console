@@ -33,9 +33,10 @@ func recordOperationFailureAudit(ctx context.Context, pool *pgxpool.Pool, id uui
 	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO audit_events
-			(actor_id, project_id, environment_id, operation_id, action, resource_kind, resource_name, outcome, metadata)
+			(actor_id, project_id, environment_id, operation_id, action, resource_kind, resource_name, outcome, metadata, actor_type)
 		SELECT o.actor_id, o.project_id, o.environment_id, o.id, o.action, o.resource_kind, o.resource_name, 'failure',
-		       jsonb_build_object('reason', $2::text, 'error', left($3::text, 300), 'phase', 'operation')
+		       jsonb_build_object('reason', $2::text, 'error', left($3::text, 300), 'phase', 'operation'),
+		       CASE WHEN o.actor_id = '00000000-0000-0000-0000-000000000000'::uuid THEN 'system' ELSE 'user' END
 		  FROM operations o
 		 WHERE o.id = $1
 		   AND NOT EXISTS (
