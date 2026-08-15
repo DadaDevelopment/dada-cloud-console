@@ -112,6 +112,99 @@ spec:
               or give up silently -- a real payer's two failed checkouts on 2026-08-14 were only
               found a day later by hand-scanning the payments table. Read the CreatePaymentFailed
               rows in audit_events for the failing org(s) and reach out.
+        # DadaPaymentCreateFailing above only covers the checkout call failing
+        # loudly. The rules below cover the two ways it fails quietly: the row
+        # goes pending and nothing ever moves it (dead webhook, dead sweeper),
+        # or the sweeper is the only thing moving it (leaking webhook path).
+        - alert: DadaPaymentStuckPending
+          expr: max by (stage) (dada_payments_pending_age_seconds) > {{ .Values.metrics.alerts.paymentStuckSeconds }}
+          for: 10m
+          # The oldest pending row only gets older, so this cannot flap while
+          # the incident lasts; the hold covers the gap between the row being
+          # settled and the next collector pass zeroing the gauge.
+          keep_firing_for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Payment stuck pending (stage {{`{{ $labels.stage }}`}})"
+            description: >-
+              A payments row has been pending for {{`{{ $value | printf "%.0f" }}`}} seconds
+              (stage={{`{{ $labels.stage }}`}}). stage=awaiting_provider means no YooKassa payment
+              was ever created, so the customer pressed pay and got a dead button. stage=awaiting_payment
+              means YooKassa has the payment but nothing has settled it here — a lost webhook, or the
+              hourly SweepPendingPayments pass not running. Either way somebody has money in flight and
+              no plan: check payments WHERE status='pending' and the backend log line "pending payments:".
+        - alert: DadaPaymentSweeperStale
+          expr: max(dada_payment_sweep_age_seconds) > {{ .Values.metrics.alerts.paymentSweepStaleSeconds }}
+          for: 15m
+          # Monotonic until a pass completes; the hold only spans the collector
+          # pass that resets it after recovery.
+          keep_firing_for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pending-payment sweeper has stopped running"
+            description: >-
+              SweepPendingPayments last completed a pass {{`{{ $value | printf "%.0f" }}`}} seconds ago
+              (before its first pass in a process the age is measured from process start, so "never ran"
+              also fires here). It is the only thing that settles payments a webhook failed to deliver,
+              so while it is down every lost webhook is a customer who paid and did not get their plan.
+        - alert: DadaPaymentWebhookLeaking
+          expr: sum(increase(dada_payment_reconciled_total{outcome="succeeded"}[6h])) > 0
+          for: 5m
+          # Same counter shape as DadaPaymentCreateFailing: increase() over a
+          # window sags to zero between repairs and would otherwise re-fire.
+          keep_firing_for: 6h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Sweeper is repairing paid payments the webhook did not deliver"
+            description: >-
+              The hourly sweeper had to settle {{`{{ $value | printf "%.0f" }}`}} SUCCEEDED payment(s)
+              in the last 6h. That is not the sweeper working, it is the webhook path leaking and the
+              sweeper hiding it: each of those customers paid and then waited up to an hour for the plan
+              they already owned. Check the YooKassa webhook deliveries and the /api/v1/billing/webhook
+              route before the safety net becomes the primary path.
+        - alert: DadaFeedbackUnread
+          expr: max(dada_feedback_open{status="new"}) > 0
+          for: 15m
+          # A gauge of a queue with a human on the other end. The hold stops a
+          # triage session that touches rows one by one from re-alerting.
+          keep_firing_for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Unanswered feedback waiting"
+            description: >-
+              {{`{{ $value | printf "%.0f" }}`}} feedback row(s) are still status='new'. At this scale a
+              user who bothers to write is rarer than a paying one and is telling us what broke before any
+              gauge does. Triage on /admin/feedback; dada_feedback_oldest_unread_age_seconds says how long
+              the oldest has waited.
+        - alert: DadaUsersQuotaLocked
+          expr: max(dada_orgs_quota_locked) > 0
+          for: 30m
+          keep_firing_for: 2h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Org(s) blocked by an expired quota grace"
+            description: >-
+              {{`{{ $value | printf "%.0f" }}`}} free org(s) are past their grace window while still over
+              the free limits, so their next create fails. Nothing tells them this until it happens. Decide
+              deliberately: extend the grace, sell them a plan, or let the gate hold — but do it before they
+              discover it as an unexplained error.
+        - alert: DadaAutopayFailing
+          expr: max(dada_autopay_failing_orgs) > 0
+          for: 30m
+          keep_firing_for: 2h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Paying org(s) with a failing recurring charge"
+            description: >-
+              {{`{{ $value | printf "%.0f" }}`}} org(s) have autopay enabled and autopay_failures > 0. These
+              are existing customers who will lapse to free without deciding to — a declined or expired card,
+              not a churn signal. Reach out while the plan is still live.
     - name: dada-cloud-console.ai
       rules:
         # On 2026-08-04 the shared OpenRouter account ran out of credit. The

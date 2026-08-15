@@ -8,6 +8,7 @@ import (
 
 	"github.com/dada-tuda/console/backend/internal/billing/yookassa"
 	"github.com/dada-tuda/console/backend/internal/config"
+	"github.com/dada-tuda/console/backend/internal/metrics"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -98,6 +99,7 @@ func SweepPendingPayments(ctx context.Context, pool *pgxpool.Pool, rec pendingPa
 	for _, row := range listAbandonedPendingPayments(ctx, pool, now) {
 		abandonPendingPayment(ctx, pool, row, now)
 	}
+	metrics.MarkPaymentSweep(time.Now())
 }
 
 // listPendingPaymentsToReconcile returns the pending rows that have a YooKassa
@@ -147,6 +149,7 @@ func reconcilePendingPayment(ctx context.Context, pool *pgxpool.Pool, rec pendin
 	}
 	switch result.Outcome {
 	case yookassa.OutcomeSucceeded, yookassa.OutcomeCanceled:
+		metrics.RecordPaymentReconciled(string(result.Outcome))
 		log.Printf("pending payments: reconciled payment=%s org=%s plan=%s outcome=%s",
 			row.ID, row.OrgID, row.Plan, result.Outcome)
 		writeAuditRow(ctx, pool, systemDeployActorID, auditEntry{
@@ -246,6 +249,7 @@ func abandonPendingPayment(ctx context.Context, pool *pgxpool.Pool, row pendingP
 		log.Printf("pending payments: commit abandon payment=%s: %v", row.ID, err)
 		return
 	}
+	metrics.RecordPaymentReconciled("abandoned")
 	log.Printf("pending payments: abandoned payment=%s org=%s plan=%s created_at=%s (never reached YooKassa)",
 		row.ID, row.OrgID, row.Plan, row.CreatedAt.Format(time.RFC3339))
 }

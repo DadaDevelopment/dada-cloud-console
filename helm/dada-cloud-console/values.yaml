@@ -542,3 +542,14 @@ metrics:
     # genuinely stopped paying out crosses it within the `for` window. On
     # 2026-08-04 OpenRouter ran at roughly 0.4/min for three hours.
     aiUpstreamFailureRate: 0.2
+    # Fire DadaPaymentStuckPending once a payment has sat pending this long.
+    # 30 minutes is well past a customer-present checkout (the card form times
+    # out long before) and well past the sweeper's 15-minute reconcile window,
+    # so anything still here is a webhook that never arrived or a sweeper that
+    # is not running -- both of which leave a paying customer without the plan
+    # they paid for.
+    paymentStuckSeconds: 1800
+    # Fire DadaPaymentSweeperStale once the hourly pending-payment sweeper has
+    # not completed a pass in this long. Two ticks of slack: one missed tick is
+    # a rollout, two is a wedge.
+    paymentSweepStaleSeconds: 7200
