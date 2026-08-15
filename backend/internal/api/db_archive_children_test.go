@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -38,6 +39,120 @@ func seedParentChild(t *testing.T, conn *pgx.Conn) string {
 		}
 	}
 	return schema
+}
+
+// TestChildrenOnlyBlockTheRowsTheCutoffWouldDelete pins the second half of the
+// gate, found on the same customer database after the first archives landed: a
+// child keeps pointing at the parent's recent rows forever, so counting the
+// child's whole population refuses runs over rows they would never touch. Two
+// of the three keys blocking a 5 GB table held zero rows in the window.
+func TestChildrenOnlyBlockTheRowsTheCutoffWouldDelete(t *testing.T) {
+	conn := testTenantConn(t)
+	ctx := context.Background()
+	schema := seedParentChild(t, conn)
+
+	if _, err := conn.Exec(ctx,
+		`INSERT INTO `+pgx.Identifier{schema, "observations"}.Sanitize()+
+			` SELECT i, TIMESTAMPTZ '2026-09-01 00:00:00+00' FROM generate_series(11, 20) i`); err != nil {
+		t.Fatalf("seed the recent parent rows: %v", err)
+	}
+	if _, err := conn.Exec(ctx,
+		`DELETE FROM `+pgx.Identifier{schema, "assessments"}.Sanitize()); err != nil {
+		t.Fatalf("clear the child: %v", err)
+	}
+	if _, err := conn.Exec(ctx,
+		`INSERT INTO `+pgx.Identifier{schema, "assessments"}.Sanitize()+
+			` SELECT i, i FROM generate_series(11, 20) i`); err != nil {
+		t.Fatalf("point the child at the recent rows only: %v", err)
+	}
+	if _, err := conn.Exec(ctx, `ANALYZE `+pgx.Identifier{schema, "assessments"}.Sanitize()); err != nil {
+		t.Fatalf("analyze the child: %v", err)
+	}
+
+	candidates, err := archiveBlockingChildren(ctx, conn, schema, "observations")
+	if err != nil {
+		t.Fatalf("read candidate children: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].ParentColumn != "id" {
+		t.Fatalf("candidates = %+v, want the assessments key with its referenced column", candidates)
+	}
+
+	run := archiveRun{
+		Schema:       schema,
+		Table:        "observations",
+		CutoffColumn: "observed_at",
+		Cutoff:       time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC),
+	}
+	if blocking := archiveChildrenInWindow(ctx, conn, run, candidates); len(blocking) != 0 {
+		t.Fatalf("a child that points only at rows the cutoff keeps must not block, got %+v", blocking)
+	}
+
+	if _, err := conn.Exec(ctx,
+		`INSERT INTO `+pgx.Identifier{schema, "assessments"}.Sanitize()+` VALUES (1, 1)`); err != nil {
+		t.Fatalf("point one child row at an old parent: %v", err)
+	}
+	blocking := archiveChildrenInWindow(ctx, conn, run, candidates)
+	if len(blocking) != 1 || blocking[0].Rows != 1 {
+		t.Fatalf("one child row inside the window must block and be counted exactly, got %+v", blocking)
+	}
+	if msg := archiveChildrenReason(schema, "observations", blocking); !strings.Contains(msg, "1 rows") {
+		t.Fatalf("the refusal does not carry the measured overlap: %s", msg)
+	}
+}
+
+// TestDerivedChildCountUsesTheRunsOwnPredicate covers the shape the 10 GB table
+// needed: the archived table has no date of its own, so the window is a join to
+// a dated parent, and the child count has to cut on the same join the delete
+// will use.
+func TestDerivedChildCountUsesTheRunsOwnPredicate(t *testing.T) {
+	conn := testTenantConn(t)
+	ctx := context.Background()
+	schema := seedParentChild(t, conn)
+	q := pgx.Identifier{schema}.Sanitize()
+
+	stmts := []string{
+		`ALTER TABLE ` + q + `.assessments ADD COLUMN created_at TIMESTAMPTZ NOT NULL DEFAULT TIMESTAMPTZ '2026-07-01 00:00:00+00'`,
+		`UPDATE ` + q + `.assessments SET created_at = TIMESTAMPTZ '2026-09-01 00:00:00+00' WHERE id > 5`,
+		`CREATE TABLE ` + q + `.candidates (id BIGINT PRIMARY KEY, assessment_id BIGINT NOT NULL REFERENCES ` + q + `.assessments(id))`,
+		`CREATE TABLE ` + q + `.decisions (id BIGINT PRIMARY KEY, candidate_id BIGINT REFERENCES ` + q + `.candidates(id))`,
+		`INSERT INTO ` + q + `.candidates SELECT i, i FROM generate_series(1, 10) i`,
+		`INSERT INTO ` + q + `.decisions SELECT i, i FROM generate_series(6, 10) i`,
+		`ANALYZE ` + q + `.decisions`,
+	}
+	for _, s := range stmts {
+		if _, err := conn.Exec(ctx, s); err != nil {
+			t.Fatalf("seed %q: %v", s, err)
+		}
+	}
+
+	candidates, err := archiveBlockingChildren(ctx, conn, schema, "candidates")
+	if err != nil {
+		t.Fatalf("read candidate children: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].Table != "decisions" {
+		t.Fatalf("candidates = %+v, want the decisions key", candidates)
+	}
+
+	run := archiveRun{
+		Schema:       schema,
+		Table:        "candidates",
+		CutoffColumn: "created_at",
+		ViaTable:     "assessments",
+		ViaFK:        "assessment_id",
+		ViaPK:        "id",
+		Cutoff:       time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC),
+	}
+	if blocking := archiveChildrenInWindow(ctx, conn, run, candidates); len(blocking) != 0 {
+		t.Fatalf("the decisions all hang off parents dated after the cutoff, got %+v", blocking)
+	}
+
+	if _, err := conn.Exec(ctx, `INSERT INTO `+q+`.decisions VALUES (1, 3)`); err != nil {
+		t.Fatalf("point a decision at an old candidate: %v", err)
+	}
+	blocking := archiveChildrenInWindow(ctx, conn, run, candidates)
+	if len(blocking) != 1 || blocking[0].Rows != 1 {
+		t.Fatalf("a decision inside the derived window must block, got %+v", blocking)
+	}
 }
 
 // TestChildrenBlockTheRunBeforeAnythingIsExported pins the ordering the first

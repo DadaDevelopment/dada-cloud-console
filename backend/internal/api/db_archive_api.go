@@ -129,13 +129,9 @@ func (h *Handler) StartDatabaseArchive(c *gin.Context) {
 		respondNotFound(c)
 		return
 	}
-	children, err := archiveBlockingChildren(ctx, conn, schema, relname)
+	candidates, err := archiveBlockingChildren(ctx, conn, schema, relname)
 	if err != nil {
 		respondError(c, http.StatusServiceUnavailable, "cannot read the table's foreign keys right now")
-		return
-	}
-	if len(children) > 0 {
-		respondError(c, http.StatusConflict, archiveChildrenReason(schema, relname, children))
 		return
 	}
 	guards, err := archiveDeleteGuards(ctx, conn, schema, relname)
@@ -150,6 +146,18 @@ func (h *Handler) StartDatabaseArchive(c *gin.Context) {
 	via, columnName, reason := resolveArchiveCutoff(ctx, conn, schema, relname, cols, req.Via)
 	if reason != "" {
 		respondError(c, http.StatusBadRequest, reason)
+		return
+	}
+	if children := archiveChildrenInWindow(ctx, conn, archiveRun{
+		Schema:       schema,
+		Table:        relname,
+		CutoffColumn: columnName,
+		ViaTable:     via.Table,
+		ViaFK:        via.FK,
+		ViaPK:        via.PK,
+		Cutoff:       cutoff,
+	}, candidates); len(children) > 0 {
+		respondError(c, http.StatusConflict, archiveChildrenReason(schema, relname, children))
 		return
 	}
 

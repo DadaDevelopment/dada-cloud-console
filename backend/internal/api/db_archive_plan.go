@@ -18,6 +18,11 @@ import (
 // hold a connection open behind a slow scan.
 const dbArchivePlanTimeout = 15 * time.Second
 
+// dbArchiveChildCountTimeout bounds one exact child-row count. It is a fraction
+// of the plan budget because a table can have several foreign keys pointing at
+// it, and no single one of them may spend the whole answer.
+const dbArchiveChildCountTimeout = 4 * time.Second
+
 // dbArchiveHistogramSamplePercent is the TABLESAMPLE fraction used to bucket a
 // table by month.
 //
@@ -223,6 +228,16 @@ func (h *Handler) GetDatabaseArchivePlan(c *gin.Context) {
 	if err != nil {
 		respondError(c, http.StatusServiceUnavailable, "cannot read the table's foreign keys right now")
 		return
+	}
+	if cutoff != nil && len(children) > 0 {
+		if column, reason := pickCutoffColumn(cols); reason == "" {
+			children = archiveChildrenInWindow(ctx, conn, archiveRun{
+				Schema:       schema,
+				Table:        relname,
+				CutoffColumn: column.Name,
+				Cutoff:       *cutoff,
+			}, children)
+		}
 	}
 	if len(children) > 0 {
 		c.JSON(http.StatusOK, gin.H{
