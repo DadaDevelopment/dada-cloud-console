@@ -18,18 +18,18 @@ import (
 // hold a connection open behind a slow scan.
 const dbArchivePlanTimeout = 15 * time.Second
 
-// dbArchiveChildProbeTimeout bounds the EXISTS that decides whether one key
-// blocks. It is short because that question stops at the first matching row;
-// a probe that needs longer is a sign the pair is unusable at plan time, and
-// the safe answer there is to keep the key blocking.
-var dbArchiveChildProbeTimeout = 4 * time.Second
+// dbArchiveAPIProbeBudget is what a key gets while a human waits on an HTTP
+// request. EXISTS stops at the first matching row, so a key that does block is
+// answered well inside this; a key that does not block has to be proven by a
+// full scan, and on the customer table this was written for that measured 11 s
+// and 41 s. The panel does not get to wait that long, so it is allowed to come
+// back undecided -- see archiveChildRef.Unknown.
+var dbArchiveAPIProbeBudget = archiveProbeBudget{Probe: 4 * time.Second, Count: 4 * time.Second}
 
-// dbArchiveChildCountTimeout bounds the exact count that gives an already
-// blocking key its size. It is a fraction of the plan budget because a table
-// can have several foreign keys pointing at it, and no single one of them may
-// spend the whole answer. Missing it costs a number in a sentence, not the
-// verdict.
-var dbArchiveChildCountTimeout = 4 * time.Second
+// dbArchiveWorkerProbeBudget is what the same key gets in the worker, before
+// anything has been exported. Nothing is waiting on it there but the run
+// itself, so the question is asked to completion and the answer is a verdict.
+var dbArchiveWorkerProbeBudget = archiveProbeBudget{Probe: 5 * time.Minute, Count: 30 * time.Second}
 
 // dbArchiveHistogramSamplePercent is the TABLESAMPLE fraction used to bucket a
 // table by month.
@@ -237,6 +237,7 @@ func (h *Handler) GetDatabaseArchivePlan(c *gin.Context) {
 		respondError(c, http.StatusServiceUnavailable, "cannot read the table's foreign keys right now")
 		return
 	}
+	unresolved := []archiveChildRef{}
 	if cutoff != nil && len(children) > 0 {
 		if column, reason := pickCutoffColumn(cols); reason == "" {
 			children = archiveChildrenInWindow(ctx, conn, archiveRun{
@@ -244,7 +245,9 @@ func (h *Handler) GetDatabaseArchivePlan(c *gin.Context) {
 				Table:        relname,
 				CutoffColumn: column.Name,
 				Cutoff:       *cutoff,
-			}, children)
+			}, children, dbArchiveAPIProbeBudget)
+			unresolved = archiveChildrenUnknown(children)
+			children = archiveChildrenDecided(children)
 		}
 	}
 	if len(children) > 0 {
@@ -253,6 +256,7 @@ func (h *Handler) GetDatabaseArchivePlan(c *gin.Context) {
 			"archivable":      false,
 			"reason":          archiveChildrenReason(schema, relname, children),
 			"blockedBy":       children,
+			"uncheckedKeys":   unresolved,
 			"columns":         cols,
 			"totalRows":       totalRows,
 			"totalBytes":      totalBytes,
@@ -316,6 +320,9 @@ func (h *Handler) GetDatabaseArchivePlan(c *gin.Context) {
 		"totalBytesHuman": humanBytes(totalBytes),
 		"buckets":         buckets,
 		"bucketsSampled":  sampled,
+	}
+	if len(unresolved) > 0 {
+		out["uncheckedKeys"] = unresolved
 	}
 
 	if cutoff != nil {

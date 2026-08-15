@@ -2,8 +2,10 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -22,6 +24,16 @@ type archiveChildRef struct {
 	Cascade      bool   `json:"cascade"`
 	ParentColumn string `json:"-"`
 	Estimated    bool   `json:"estimated,omitempty"`
+	Unknown      bool   `json:"unknown,omitempty"`
+}
+
+// archiveProbeBudget is how long the two child questions are allowed to take.
+// It is a parameter and not a constant because the same question is asked in
+// two places that can afford very different answers: an HTTP handler with a
+// human waiting, and the worker with a whole tick before anything is exported.
+type archiveProbeBudget struct {
+	Probe time.Duration
+	Count time.Duration
 }
 
 // archiveBlockingChildren lists the referencing tables that stand between a run
@@ -96,22 +108,29 @@ func archiveBlockingChildren(ctx context.Context, conn *pgx.Conn, schema, table 
 // The count runs only for a key that already blocks, purely so the refusal can
 // name a size. A count that does not finish in time leaves the catalog estimate
 // in place, marked Estimated, which weakens the sentence and not the verdict.
-// An EXISTS that fails keeps the candidate blocking: refusing on an unfinished
-// measurement is the safe direction, because the alternative is a run that
-// exports gigabytes and dies on the foreign key.
-func archiveChildrenInWindow(ctx context.Context, conn *pgx.Conn, r archiveRun, refs []archiveChildRef) []archiveChildRef {
+//
+// A probe that does not finish in time returns the key marked Unknown, which is
+// neither a yes nor a no. EXISTS is fast only when the answer is yes: proving
+// that a key does NOT block still costs a full scan, and on the customer table
+// this was written for those scans measured 11 s and 41 s against a 4 s panel
+// budget. Treating that silence as a refusal made the gate deny every table it
+// could not measure in a hurry. Callers decide what silence means, and only the
+// caller with time to spare -- the worker, before a single row is exported --
+// is allowed to turn it into a verdict.
+func archiveChildrenInWindow(ctx context.Context, conn *pgx.Conn, r archiveRun, refs []archiveChildRef, budget archiveProbeBudget) []archiveChildRef {
 	out := []archiveChildRef{}
 	for _, ref := range refs {
-		blocks, err := archiveChildBlocksWindow(ctx, conn, r, ref)
+		blocks, err := archiveChildBlocksWindow(ctx, conn, r, ref, budget.Probe)
 		if err == nil && !blocks {
 			continue
 		}
 		if err != nil {
 			ref.Estimated = true
+			ref.Unknown = true
 			out = append(out, ref)
 			continue
 		}
-		if exact, err := archiveChildRowsInWindow(ctx, conn, r, ref); err == nil {
+		if exact, err := archiveChildRowsInWindow(ctx, conn, r, ref, budget.Count); err == nil {
 			ref.Rows = exact
 		} else {
 			ref.Estimated = true
@@ -121,11 +140,42 @@ func archiveChildrenInWindow(ctx context.Context, conn *pgx.Conn, r archiveRun, 
 	return out
 }
 
+// archiveChildrenDecided keeps only the keys that were measured to block.
+//
+// It is what the HTTP handlers use, so that only a measured block refuses a
+// request. A key the probe could not answer inside the request budget is left
+// to the worker, which asks the same question with minutes instead of seconds
+// and stops the run before its first export if the answer turns out to be yes.
+// Refusing on silence in a handler denied every table whose foreign keys are
+// too large to prove clean while a human waits, which is exactly the kind of
+// table an archive exists for.
+func archiveChildrenDecided(refs []archiveChildRef) []archiveChildRef {
+	out := []archiveChildRef{}
+	for _, ref := range refs {
+		if !ref.Unknown {
+			out = append(out, ref)
+		}
+	}
+	return out
+}
+
+// archiveChildrenUnknown keeps only the keys the probe could not answer in the
+// budget it was given.
+func archiveChildrenUnknown(refs []archiveChildRef) []archiveChildRef {
+	out := []archiveChildRef{}
+	for _, ref := range refs {
+		if ref.Unknown {
+			out = append(out, ref)
+		}
+	}
+	return out
+}
+
 // archiveChildBlocksWindow answers whether any child row points at a row this
 // run would delete. It carries the same predicate as the count and the delete,
 // and stops at the first hit.
-func archiveChildBlocksWindow(ctx context.Context, conn *pgx.Conn, r archiveRun, ref archiveChildRef) (bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, dbArchiveChildProbeTimeout)
+func archiveChildBlocksWindow(ctx context.Context, conn *pgx.Conn, r archiveRun, ref archiveChildRef, budget time.Duration) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 
 	query := fmt.Sprintf(
@@ -146,8 +196,8 @@ func archiveChildBlocksWindow(ctx context.Context, conn *pgx.Conn, r archiveRun,
 // archiveChildRowsInWindow counts the child rows whose parent this run would
 // delete. The predicate is archiveWhereSQL so that the count and the delete
 // cannot disagree about which rows the archive covers.
-func archiveChildRowsInWindow(ctx context.Context, conn *pgx.Conn, r archiveRun, ref archiveChildRef) (int64, error) {
-	ctx, cancel := context.WithTimeout(ctx, dbArchiveChildCountTimeout)
+func archiveChildRowsInWindow(ctx context.Context, conn *pgx.Conn, r archiveRun, ref archiveChildRef, budget time.Duration) (int64, error) {
+	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 
 	query := fmt.Sprintf(
@@ -165,6 +215,35 @@ func archiveChildRowsInWindow(ctx context.Context, conn *pgx.Conn, r archiveRun,
 	return n, nil
 }
 
+// archiveChildrenVerdict is the authoritative answer to whether a run may
+// proceed, and the only place an unanswered foreign key is allowed to stop one.
+//
+// It runs in the worker, in the phase before the archive bucket is touched, so
+// the whole question is asked with minutes of budget instead of the seconds an
+// HTTP handler can spare. That matters because EXISTS is fast only when it
+// finds a row: proving that a key holds nothing in the window is a full scan,
+// and the customer database this was built for needs 11 s and 41 s to prove it
+// for two of its keys. Asking here costs a tick; asking too late costs a
+// multi-gigabyte export that every delete batch then refuses.
+//
+// A key still unanswered at this budget blocks. Nothing has been exported yet,
+// so the cost of being wrong in this direction is one failed run with a
+// readable reason.
+func archiveChildrenVerdict(ctx context.Context, conn *pgx.Conn, r archiveRun) error {
+	candidates, err := archiveBlockingChildren(ctx, conn, r.Schema, r.Table)
+	if err != nil {
+		return fmt.Errorf("read foreign keys of %s.%s: %w", r.Schema, r.Table, err)
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	blocking := archiveChildrenInWindow(ctx, conn, r, candidates, dbArchiveWorkerProbeBudget)
+	if len(blocking) == 0 {
+		return nil
+	}
+	return errors.New(archiveChildrenReason(r.Schema, r.Table, blocking))
+}
+
 // archiveChildrenReason is the sentence the console shows instead of a run that
 // would die in its delete phase. Pure.
 func archiveChildrenReason(schema, table string, refs []archiveChildRef) string {
@@ -174,10 +253,12 @@ func archiveChildrenReason(schema, table string, refs []archiveChildRef) string 
 	names := make([]string, 0, len(refs))
 	cascade := false
 	estimated := false
+	unknown := false
 	for _, ref := range refs {
 		names = append(names, fmt.Sprintf("%s.%s (%s, %d rows)", schema, ref.Table, ref.Column, ref.Rows))
 		cascade = cascade || ref.Cascade
 		estimated = estimated || ref.Estimated
+		unknown = unknown || ref.Unknown
 	}
 	msg := fmt.Sprintf(
 		"%s.%s cannot be archived yet: %s still point at the rows this cutoff would delete, so every delete would be refused by the foreign key. Archive those tables first.",
@@ -187,6 +268,9 @@ func archiveChildrenReason(schema, table string, refs []archiveChildRef) string 
 	}
 	if estimated {
 		msg += " At least one count is the table's total rather than a measurement, because counting the exact overlap took too long."
+	}
+	if unknown {
+		msg += " At least one key could not be answered at all in the time it was given, and an unanswered foreign key is treated as blocking rather than exporting gigabytes that the delete would then refuse."
 	}
 	return msg
 }

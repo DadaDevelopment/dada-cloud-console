@@ -269,6 +269,10 @@ func (w *dbArchiveWorker) plan(ctx context.Context, r archiveRun) error {
 		}
 	}
 
+	if err := archiveChildrenVerdict(ctx, conn, r); err != nil {
+		return err
+	}
+
 	rows, err := archiveRowsMatching(ctx, conn, r)
 	if err != nil {
 		return fmt.Errorf("count rows before the cutoff: %w", err)

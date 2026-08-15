@@ -10,6 +10,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// testProbeBudget is the ordinary budget for the seeded ten-row tables, large
+// enough that a timeout in a test is a real failure and not a slow machine.
+var testProbeBudget = archiveProbeBudget{Probe: 10 * time.Second, Count: 10 * time.Second}
+
 // seedParentChild builds a parent with two referencing tables: one that holds
 // rows and one that is empty, plus an unrelated table nobody points at.
 func seedParentChild(t *testing.T, conn *pgx.Conn) string {
@@ -83,7 +87,7 @@ func TestChildrenOnlyBlockTheRowsTheCutoffWouldDelete(t *testing.T) {
 		CutoffColumn: "observed_at",
 		Cutoff:       time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC),
 	}
-	if blocking := archiveChildrenInWindow(ctx, conn, run, candidates); len(blocking) != 0 {
+	if blocking := archiveChildrenInWindow(ctx, conn, run, candidates, testProbeBudget); len(blocking) != 0 {
 		t.Fatalf("a child that points only at rows the cutoff keeps must not block, got %+v", blocking)
 	}
 
@@ -91,7 +95,7 @@ func TestChildrenOnlyBlockTheRowsTheCutoffWouldDelete(t *testing.T) {
 		`INSERT INTO `+pgx.Identifier{schema, "assessments"}.Sanitize()+` VALUES (1, 1)`); err != nil {
 		t.Fatalf("point one child row at an old parent: %v", err)
 	}
-	blocking := archiveChildrenInWindow(ctx, conn, run, candidates)
+	blocking := archiveChildrenInWindow(ctx, conn, run, candidates, testProbeBudget)
 	if len(blocking) != 1 || blocking[0].Rows != 1 {
 		t.Fatalf("one child row inside the window must block and be counted exactly, got %+v", blocking)
 	}
@@ -122,9 +126,7 @@ func TestTheVerdictSurvivesACountThatCannotFinish(t *testing.T) {
 		t.Fatalf("read candidate children: %v", err)
 	}
 
-	restore := dbArchiveChildCountTimeout
-	dbArchiveChildCountTimeout = time.Nanosecond
-	t.Cleanup(func() { dbArchiveChildCountTimeout = restore })
+	deadCount := archiveProbeBudget{Probe: testProbeBudget.Probe, Count: time.Nanosecond}
 
 	run := archiveRun{
 		Schema:       schema,
@@ -132,7 +134,7 @@ func TestTheVerdictSurvivesACountThatCannotFinish(t *testing.T) {
 		CutoffColumn: "observed_at",
 		Cutoff:       time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC),
 	}
-	if blocking := archiveChildrenInWindow(ctx, conn, run, candidates); len(blocking) != 0 {
+	if blocking := archiveChildrenInWindow(ctx, conn, run, candidates, deadCount); len(blocking) != 0 {
 		t.Fatalf("a count that cannot finish must not turn a non-blocking key into a refusal, got %+v", blocking)
 	}
 
@@ -141,9 +143,70 @@ func TestTheVerdictSurvivesACountThatCannotFinish(t *testing.T) {
 			` SET observed_at = TIMESTAMPTZ '2026-07-01 00:00:00+00' WHERE id = 1`); err != nil {
 		t.Fatalf("pull one parent row back inside the window: %v", err)
 	}
-	blocking := archiveChildrenInWindow(ctx, conn, run, candidates)
-	if len(blocking) != 1 || !blocking[0].Estimated {
-		t.Fatalf("a real blocker whose count timed out must still block, marked estimated, got %+v", blocking)
+	blocking := archiveChildrenInWindow(ctx, conn, run, candidates, deadCount)
+	if len(blocking) != 1 || !blocking[0].Estimated || blocking[0].Unknown {
+		t.Fatalf("a real blocker whose count timed out must still block as a decided key, marked estimated, got %+v", blocking)
+	}
+}
+
+// TestAProbeThatCannotAnswerDoesNotRefuseTheRequest pins the third and last way
+// this gate refused everything in production. Proving that a key holds nothing
+// in the window is a full scan -- EXISTS is only fast when it finds a row -- and
+// on the customer database two keys need 11 s and 41 s to come back false
+// against a 4 s request budget. Silence at that budget must leave the request
+// undecided rather than refuse it, and the same silence must still stop the run
+// in the worker, which asks with minutes to spare and before anything is
+// exported.
+func TestAProbeThatCannotAnswerDoesNotRefuseTheRequest(t *testing.T) {
+	conn := testTenantConn(t)
+	ctx := context.Background()
+	schema := seedParentChild(t, conn)
+
+	if _, err := conn.Exec(ctx,
+		`UPDATE `+pgx.Identifier{schema, "observations"}.Sanitize()+
+			` SET observed_at = TIMESTAMPTZ '2026-09-01 00:00:00+00'`); err != nil {
+		t.Fatalf("move every parent row past the cutoff: %v", err)
+	}
+
+	candidates, err := archiveBlockingChildren(ctx, conn, schema, "observations")
+	if err != nil {
+		t.Fatalf("read candidate children: %v", err)
+	}
+
+	run := archiveRun{
+		Schema:       schema,
+		Table:        "observations",
+		CutoffColumn: "observed_at",
+		Cutoff:       time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC),
+	}
+	deadProbe := archiveProbeBudget{Probe: time.Nanosecond, Count: time.Nanosecond}
+
+	refs := archiveChildrenInWindow(ctx, conn, run, candidates, deadProbe)
+	if len(refs) != 1 || !refs[0].Unknown {
+		t.Fatalf("a probe that cannot finish must return the key undecided, got %+v", refs)
+	}
+	if decided := archiveChildrenDecided(refs); len(decided) != 0 {
+		t.Fatalf("an undecided key must not refuse a request, got %+v", decided)
+	}
+	if unknown := archiveChildrenUnknown(refs); len(unknown) != 1 {
+		t.Fatalf("an undecided key must be reported as unchecked, got %+v", unknown)
+	}
+
+	if err := archiveChildrenVerdict(ctx, conn, run); err != nil {
+		t.Fatalf("with its own budget the worker can prove this key clean, got refusal: %v", err)
+	}
+
+	if _, err := conn.Exec(ctx,
+		`UPDATE `+pgx.Identifier{schema, "observations"}.Sanitize()+
+			` SET observed_at = TIMESTAMPTZ '2026-07-01 00:00:00+00' WHERE id = 1`); err != nil {
+		t.Fatalf("pull one parent row back inside the window: %v", err)
+	}
+	err = archiveChildrenVerdict(ctx, conn, run)
+	if err == nil {
+		t.Fatal("a real blocker must stop the run in the worker, before anything is exported")
+	}
+	if !strings.Contains(err.Error(), "assessments") {
+		t.Fatalf("the refusal must name the blocking table, got %v", err)
 	}
 }
 
@@ -189,14 +252,14 @@ func TestDerivedChildCountUsesTheRunsOwnPredicate(t *testing.T) {
 		ViaPK:        "id",
 		Cutoff:       time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC),
 	}
-	if blocking := archiveChildrenInWindow(ctx, conn, run, candidates); len(blocking) != 0 {
+	if blocking := archiveChildrenInWindow(ctx, conn, run, candidates, testProbeBudget); len(blocking) != 0 {
 		t.Fatalf("the decisions all hang off parents dated after the cutoff, got %+v", blocking)
 	}
 
 	if _, err := conn.Exec(ctx, `INSERT INTO `+q+`.decisions VALUES (1, 3)`); err != nil {
 		t.Fatalf("point a decision at an old candidate: %v", err)
 	}
-	blocking := archiveChildrenInWindow(ctx, conn, run, candidates)
+	blocking := archiveChildrenInWindow(ctx, conn, run, candidates, testProbeBudget)
 	if len(blocking) != 1 || blocking[0].Rows != 1 {
 		t.Fatalf("a decision inside the derived window must block, got %+v", blocking)
 	}
