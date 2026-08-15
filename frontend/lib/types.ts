@@ -1272,6 +1272,35 @@ export interface AdminOverviewFailedBuild {
   age_seconds: number;
 }
 
+/** An app whose live route answered with something other than a healthy status. */
+export interface AdminOverviewLiveUrlDeadApp {
+  name: string;
+  project_name: string;
+  owner_email: string;
+  hostname: string;
+  http_status: number;
+  http_reason: string;
+  checked_at: string;
+  external: boolean;
+}
+
+/**
+ * Last-mile probe of apps with a live route: did the address itself answer.
+ *
+ * A green build only proves the image landed, not that the route serves
+ * anything -- checked is how many apps had a route to probe, ok answered
+ * healthy, dead answered with an error status, and stale is how many were
+ * skipped this round and carry no fresh verdict either way. A low dead count
+ * next to a high stale count is not good news, it is missing information.
+ */
+export interface AdminOverviewLiveUrls {
+  checked: number;
+  ok: number;
+  dead: number;
+  stale: number;
+  dead_apps: AdminOverviewLiveUrlDeadApp[];
+}
+
 export interface AdminOverviewDayPoint {
   date: string;
   signups: number;
@@ -1293,6 +1322,7 @@ export interface AdminOverviewResponse {
   domain_issues: AdminOverviewDomainIssue[];
   stuck_operations: AdminOverviewStuckOperations;
   failed_builds: AdminOverviewFailedBuild[];
+  live_urls?: AdminOverviewLiveUrls;
   dynamics: AdminOverviewDayPoint[];
   dynamics_days: number;
 }

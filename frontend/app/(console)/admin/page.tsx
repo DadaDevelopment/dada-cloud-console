@@ -11,6 +11,7 @@ import { StateChip } from "@/components/ui/state-chip";
 import { EChart } from "@/components/charts/echart";
 import { useT } from "@/lib/i18n/console/context";
 import type { EChartsOption } from "echarts";
+import { liveUrlHeadline, liveUrlOkShare, liveUrlStaleDominates } from "@/lib/live-urls";
 
 const REFRESH_MS = 60_000;
 const DYNAMICS_DAYS = 14;
@@ -224,6 +225,30 @@ export default function AdminOverviewPage() {
     { key: "status", header: t("adminOverview.notReady.col.phase"), render: (r) => <StateChip tone="needs-action">{r.status}</StateChip> },
     { key: "project", header: t("adminOverview.notReady.col.project"), render: (r) => <span className="text-gray-700 dark:text-gray-200">{r.project_name}</span> },
     { key: "age", header: "Как давно", render: (r) => <span className="text-xs text-gray-500 dark:text-gray-400">{ageLabel(r.age_seconds)}</span> },
+  ];
+
+  const liveUrlDeadColumns: Column<NonNullable<AdminOverviewResponse["live_urls"]>["dead_apps"][number]>[] = [
+    {
+      key: "scope",
+      header: "Чьё",
+      render: (r) =>
+        r.external ? (
+          <StateChip tone="error">Юзер</StateChip>
+        ) : (
+          <span className="text-xs text-gray-400 dark:text-gray-500">Наше</span>
+        ),
+    },
+    { key: "name", header: t("adminOverview.notReady.col.name"), render: (r) => <span className="font-mono text-xs text-gray-900 dark:text-gray-100">{r.name}</span> },
+    { key: "project", header: t("adminOverview.notReady.col.project"), render: (r) => <span className="text-gray-700 dark:text-gray-200">{r.project_name}</span> },
+    { key: "hostname", header: "Домен", render: (r) => <span className="font-mono text-xs text-gray-700 dark:text-gray-200">{r.hostname}</span> },
+    {
+      key: "status",
+      header: "Ответ",
+      render: (r) => (
+        <StateChip tone="error">{r.http_status > 0 ? r.http_status : r.http_reason}</StateChip>
+      ),
+    },
+    { key: "owner", header: t("adminOverview.notReady.col.owner"), render: (r) => <span className="text-gray-500 dark:text-gray-400">{r.owner_email || "—"}</span> },
   ];
 
   const failedBuildColumns: Column<AdminOverviewResponse["failed_builds"][number]>[] = [
@@ -441,6 +466,77 @@ export default function AdminOverviewPage() {
           </CardContent>
         </Card>
       </div>
+
+      {data?.live_urls && (
+        <div className="mb-6 grid grid-cols-1 gap-4">
+          <Card>
+            <CardHeader className="p-4 pb-2">
+              <CardTitle className="text-sm">
+                Приложения, чей адрес реально отвечает: {liveUrlHeadline(data.live_urls)}
+              </CardTitle>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Зелёная сборка доказывает только доставку образа, не то, что маршрут отдаёт ответ. Здесь —
+                фактическая проверка адреса приложения.
+              </p>
+            </CardHeader>
+            <CardContent className="p-4 pt-0">
+              <div className="mb-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+                <div>
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Проверено</p>
+                  <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100">{data.live_urls.checked}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Отвечают</p>
+                  <p className="mt-1 text-xl font-bold text-green-600 dark:text-green-400">
+                    {data.live_urls.ok}
+                    {liveUrlOkShare(data.live_urls) !== null ? ` (${liveUrlOkShare(data.live_urls)}%)` : ""}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Не отвечают</p>
+                  <p className={`mt-1 text-xl font-bold ${data.live_urls.dead > 0 ? "text-red-600 dark:text-red-400" : "text-gray-900 dark:text-gray-100"}`}>
+                    {data.live_urls.dead}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Не проверено (устарело)</p>
+                  <p className={`mt-1 text-xl font-bold ${data.live_urls.stale > 0 ? "text-amber-600 dark:text-amber-400" : "text-gray-900 dark:text-gray-100"}`}>
+                    {data.live_urls.stale}
+                  </p>
+                </div>
+              </div>
+
+              {liveUrlStaleDominates(data.live_urls) && (
+                <div className="mb-4 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
+                  {data.live_urls.stale} приложений в этом цикле не проверялись — по ним нет свежего вердикта.
+                  Пустой список ниже не значит «все живы», значит «часть не проверена».
+                </div>
+              )}
+
+              <DataTable
+                loading={isLoading}
+                rows={data.live_urls.dead_apps}
+                getRowKey={(r) => `${r.project_name}/${r.name}`}
+                columns={liveUrlDeadColumns}
+                pageSize={10}
+                emptyState={
+                  liveUrlStaleDominates(data.live_urls) ? (
+                    <div className="flex items-center justify-center rounded-lg border border-dashed border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 py-10">
+                      <p className="text-sm font-medium text-amber-600 dark:text-amber-400">
+                        Мёртвых адресов не найдено, но проверка устарела почти целиком — доверять пустоте нельзя
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-center rounded-lg border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 py-10">
+                      <p className="text-sm font-medium text-green-600 dark:text-green-400">Все проверенные адреса отвечают</p>
+                    </div>
+                  )
+                }
+              />
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>
