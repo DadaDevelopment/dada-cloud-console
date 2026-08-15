@@ -217,6 +217,86 @@ func TestMergeAppValuesWritesStartCommandIntoExistingFile(t *testing.T) {
 	}
 }
 
+// assertExtraEnvDSNHasHostAlias re-checks, on a merged common mapping, the
+// same invariant RenderAppValues guarantees on a fresh render: an extraEnv
+// entry naming pgRouterHostAliasHostname is worthless unless hostAliases
+// resolves that same name inside the pod. MergeAppValues treats extraEnv and
+// hostAliases as two independently owned keys (ownedCommonKeys above), each
+// copied from the render or deleted on its own -- nothing in the merge
+// itself ties one to the other, so a future change to either key's handling
+// could silently split them.
+func assertExtraEnvDSNHasHostAlias(t *testing.T, common map[string]any) {
+	t.Helper()
+	dsnHostFound := false
+	if extraEnv, ok := common["extraEnv"].([]any); ok {
+		for _, e := range extraEnv {
+			entry, ok := e.(map[string]any)
+			if !ok {
+				continue
+			}
+			if value, _ := entry["value"].(string); strings.Contains(value, pgRouterHostAliasHostname) {
+				dsnHostFound = true
+			}
+		}
+	}
+	if !dsnHostFound {
+		t.Fatalf("test setup did not emit a %s DSN into extraEnv, so this assertion proves nothing: %#v", pgRouterHostAliasHostname, common)
+	}
+
+	aliasIP := ""
+	if hostAliases, ok := common["hostAliases"].([]any); ok {
+		for _, a := range hostAliases {
+			alias, ok := a.(map[string]any)
+			if !ok {
+				continue
+			}
+			hostnames, _ := alias["hostnames"].([]any)
+			for _, h := range hostnames {
+				if h == pgRouterHostAliasHostname {
+					aliasIP, _ = alias["ip"].(string)
+				}
+			}
+		}
+	}
+	if aliasIP == "" {
+		t.Fatalf("merged values carry a %s DSN in extraEnv but no non-empty hostAliases IP for it: %#v", pgRouterHostAliasHostname, common)
+	}
+}
+
+// TestMergeAppValuesNeverLeavesDSNExtraEnvWithoutHostAlias pins the merge
+// half of the DSN invariant: a render that carries both a
+// db.pv.dada-tuda.ru DSN in extraEnv and its matching hostAliases entry must
+// land both in the merged file, even when the existing git file had neither
+// key. MergeAppValues copies extraEnv and hostAliases independently -- the
+// consistency between them is an accident of both being ownedCommonKeys, not
+// something the merge logic enforces -- so this guards against a change to
+// one code path (e.g. an ownedCommonKeys edit) quietly detaching them.
+func TestMergeAppValuesNeverLeavesDSNExtraEnvWithoutHostAlias(t *testing.T) {
+	rendered, err := RenderAppValues(AppSpec{
+		Name:     "app",
+		Image:    "nexus/app:1",
+		Replicas: 1,
+		Env: map[string]string{
+			"DATABASE_URL": "postgresql://appuser:secret@db.pv.dada-tuda.ru:5432/appdb?sslmode=require",
+		},
+		PgRouterHostAliasIP: "10.43.7.9",
+	})
+	if err != nil {
+		t.Fatalf("RenderAppValues: %v", err)
+	}
+
+	existing := `common:
+    image:
+        name: nexus/app
+        tag: OLD
+    extraEnv:
+        - name: OTHER
+          value: unrelated
+`
+	c := common(t, mergeOrFail(t, existing, rendered))
+	assertExtraEnvDSNHasHostAlias(t, c)
+}
+
 func TestMergeAppValuesWritesHostAliasIntoExistingFile(t *testing.T) {
 	rendered, err := RenderAppValues(AppSpec{
 		Name: "app", Image: "nexus/app:1", Replicas: 1,

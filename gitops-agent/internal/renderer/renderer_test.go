@@ -571,6 +571,90 @@ func TestRenderAppValuesExplicitHostAliasOverridesClusterIPDefault(t *testing.T)
 	}
 }
 
+// requireHostAliasForDSN enforces the invariant behind TLS-verified
+// managed-Postgres DSNs end to end: an extraEnv value naming
+// db.pv.dada-tuda.ru only resolves inside the app's pod because hostAliases
+// maps that same name to an IP (see pgRouterHostAliasHostname's doc in
+// renderer.go and managedDBEffectiveHost in backend/internal/api/databases.go).
+// A render that emits the DSN host without the alias ships a connection
+// string the pod cannot resolve, and today nothing but call-site discipline
+// keeps the two in sync -- PgRouterHostAliasIP and Env are independent
+// AppSpec fields. It fails loudly if the fixture it is called on never
+// actually put the DSN host into extraEnv, so a typo in a test cannot pass by
+// accident.
+func requireHostAliasForDSN(t *testing.T, renderedYAML string) {
+	t.Helper()
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(renderedYAML), &doc); err != nil {
+		t.Fatalf("rendered values do not parse: %v\n%s", err, renderedYAML)
+	}
+	common, _ := doc["common"].(map[string]any)
+	if common == nil {
+		t.Fatalf("no common mapping in rendered values:\n%s", renderedYAML)
+	}
+
+	dsnHostFound := false
+	if extraEnv, ok := common["extraEnv"].([]any); ok {
+		for _, e := range extraEnv {
+			entry, ok := e.(map[string]any)
+			if !ok {
+				continue
+			}
+			if value, _ := entry["value"].(string); strings.Contains(value, "db.pv.dada-tuda.ru") {
+				dsnHostFound = true
+			}
+		}
+	}
+	if !dsnHostFound {
+		t.Fatalf("test setup did not actually emit a db.pv.dada-tuda.ru DSN into extraEnv, so this test proves nothing:\n%s", renderedYAML)
+	}
+
+	aliasIP := ""
+	if hostAliases, ok := common["hostAliases"].([]any); ok {
+		for _, a := range hostAliases {
+			alias, ok := a.(map[string]any)
+			if !ok {
+				continue
+			}
+			hostnames, _ := alias["hostnames"].([]any)
+			for _, h := range hostnames {
+				if h == "db.pv.dada-tuda.ru" {
+					aliasIP, _ = alias["ip"].(string)
+				}
+			}
+		}
+	}
+	if aliasIP == "" {
+		t.Fatalf("extraEnv carries a db.pv.dada-tuda.ru DSN but hostAliases has no non-empty IP for that name; the pod cannot resolve its own database host:\n%s", renderedYAML)
+	}
+}
+
+// TestRenderAppValuesDSNExtraEnvRequiresHostAlias pins the security-relevant
+// half of the DSN rollout: today PgRouterClusterIP is set process-wide from
+// PG_ROUTER_CLUSTER_IP and Env is filled independently from resolved
+// env_vars rows, so nothing in RenderAppValues itself ties a
+// db.pv.dada-tuda.ru DSN to the hostAliases entry that lets the pod resolve
+// it -- the two only line up because every non-ResourcesOnly app currently
+// gets the same process-wide default. A misconfigured or partially rolled
+// out gitops-agent (PgRouterClusterIP unset while the TLS DSN flag is on)
+// would ship a DSN nothing in the pod can resolve.
+func TestRenderAppValuesDSNExtraEnvRequiresHostAlias(t *testing.T) {
+	prev := renderer.PgRouterClusterIP
+	renderer.PgRouterClusterIP = "10.96.139.238"
+	defer func() { renderer.PgRouterClusterIP = prev }()
+
+	got, err := renderer.RenderAppValues(renderer.AppSpec{
+		Image: "ghcr.io/dada-tuda/api-service:v1", Port: 8080, Replicas: 1, Profile: "small",
+		Env: map[string]string{
+			"DATABASE_URL": "postgresql://appuser:secret@db.pv.dada-tuda.ru:5432/appdb?sslmode=require",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	requireHostAliasForDSN(t, got)
+}
+
 func TestRenderAppValuesWorkloadType(t *testing.T) {
 	got, err := renderer.RenderAppValues(renderer.AppSpec{
 		Image: "ghcr.io/dada-tuda/api-service:v1", Port: 8080, Replicas: 1, Profile: "small",
