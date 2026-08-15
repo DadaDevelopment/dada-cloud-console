@@ -238,6 +238,54 @@ func TestSuppressNonHTTPURL(t *testing.T) {
 	}
 }
 
+// TestLastMileFieldsSurviveSummaryTransforms pins the console's user-facing
+// last-mile verdict (the honest "what does a real visitor get" signal from
+// gitops-agent's in-cluster probe, see livenessprobe.go) all the way through
+// the ListApps response pipeline.
+//
+// resource_snapshots.SummaryJSON is json.RawMessage, so ListApps' own SELECT
+// already passes http_status/http_reason/http_checked_at through unchanged —
+// no struct field or json tag stands between the DB row and the HTTP
+// response. The one real risk is the chain of summary-rewriting helpers
+// ListApps calls (FillEffectiveResources, SuppressNonHTTPURL,
+// RestatePlaceholderPhase, FillRepoFullNameAndSource) each round-tripping the
+// blob through json.Unmarshal into map[string]any and back: an unrecognized
+// key survives that round trip today because none of them decode into a
+// typed struct, but the project has form for exactly this class of bug (see
+// project_structs_serialized_without_json_tags_break_console_silently) —
+// this test is the guard that keeps it that way.
+func TestLastMileFieldsSurviveSummaryTransforms(t *testing.T) {
+	apps := []models.ResourceSnapshot{
+		{
+			Name: "megafactory",
+			SummaryJSON: json.RawMessage(
+				`{"port":8080,"url":"https://megafactory-a1b2c3.dada-tuda.ru","status":"Ready","profile":"small",` +
+					`"http_status":404,"http_reason":"status_404","http_checked_at":"2026-08-15T09:00:00Z"}`,
+			),
+		},
+	}
+
+	api.FillEffectiveResources(apps)
+	api.SuppressNonHTTPURL(apps)
+	api.RestatePlaceholderPhase(apps, map[string]string{})
+	api.FillRepoFullNameAndSource(apps, map[string]string{"megafactory": "owner/megafactory"}, map[string]string{"megafactory": "git"})
+
+	var m map[string]any
+	if err := json.Unmarshal(apps[0].SummaryJSON, &m); err != nil {
+		t.Fatalf("summary_json no longer valid JSON after transforms: %v", err)
+	}
+
+	if got, ok := m["http_status"].(float64); !ok || int(got) != 404 {
+		t.Errorf("http_status = %v (ok=%v), want 404", m["http_status"], ok)
+	}
+	if got, _ := m["http_reason"].(string); got != "status_404" {
+		t.Errorf("http_reason = %q, want %q", got, "status_404")
+	}
+	if got, _ := m["http_checked_at"].(string); got != "2026-08-15T09:00:00Z" {
+		t.Errorf("http_checked_at = %q, want %q", got, "2026-08-15T09:00:00Z")
+	}
+}
+
 // TestRestatePlaceholderPhase pins the false-green defect found by dogfooding
 // the upload flow: the pause stand-in image starts instantly and probes are
 // absent, so k8s (and the reconciler) call the app Ready while its real build

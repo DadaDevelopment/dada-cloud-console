@@ -113,6 +113,13 @@ export const apps: Messages = {
   },
   "apps.url.reason.unknown": { ru: "Причина: {reason}", en: "Reason: {reason}" },
 
+  "apps.lastMile.statusLabel": { ru: "Адрес отвечает {code} — проверено {ago}", en: "The address returns {code} — checked {ago}" },
+  "apps.lastMile.unreachableLabel": { ru: "Адрес не отвечает — проверено {ago}", en: "The address is not responding — checked {ago}" },
+  "apps.lastMile.desc": {
+    ru: "Так видит адрес обычный посетитель, зашедший сейчас — это не зависит от статуса сборки или пода.",
+    en: "This is what an ordinary visitor gets right now, opening the address -- independent of build status or pod state.",
+  },
+
   "apps.liveBanner.title": { ru: "Приложение развёрнуто", en: "App is live" },
   "apps.liveBanner.desc": {
     ru: "Адрес уже работает и открыт всем в интернете.",
