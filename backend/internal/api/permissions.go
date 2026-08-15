@@ -94,10 +94,57 @@ func (h *Handler) effectiveRole(ctx context.Context, claims *auth.Claims, projec
 	}
 
 	role, ok := resolveRole(claims, org, projectID.String())
+
+	if isAgent(claims) {
+		granted, found, gerr := h.agentGrantRole(ctx, claims.UserID, projectID)
+		if gerr != nil {
+			return "", gerr
+		}
+		if found {
+			role, ok = models.MaxRole(role, granted), true
+		}
+	}
+
 	if !ok {
 		return "", pgx.ErrNoRows
 	}
 	return role, nil
+}
+
+// agentGrantRole returns the role a live agent_project_grants row (migration
+// 128) gives this identity on the project, and whether any such row exists.
+//
+// A machine identity (/agents) holds no personal org and gets no org cascade, so
+// this table is the only way it reaches a customer project: the token is minted
+// once for the automation and scoped to one project for the length of a run,
+// instead of a human token — which here carries /platform-admins, i.e. Owner on
+// every project of every tenant — being handed to a pod.
+//
+// "Live" is both conditions: not revoked (the run's finish call) and not expired
+// (the clock, for the run that dies without one). Called only from effectiveRole
+// and only for /agents callers, so the whole table is inert for humans and the
+// gate stays a single function.
+func (h *Handler) agentGrantRole(ctx context.Context, agentUserID, projectID uuid.UUID) (models.MemberRole, bool, error) {
+	if agentUserID == uuid.Nil {
+		return "", false, nil
+	}
+	var role string
+	err := h.pool.QueryRow(ctx, `
+		SELECT role
+		  FROM agent_project_grants
+		 WHERE agent_user_id = $1
+		   AND project_id = $2
+		   AND revoked_at IS NULL
+		   AND expires_at > now()
+		 ORDER BY expires_at DESC
+		 LIMIT 1`, agentUserID, projectID).Scan(&role)
+	if err == pgx.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return models.MemberRole(role), true, nil
 }
 
 // projectOrg returns the org_id that owns a project resource row. Returns

@@ -397,6 +397,10 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/projects/:projectId/delete-impact", h.DeleteProjectImpact)
 		api.DELETE("/projects/:projectId", h.DeleteProject)
 
+		api.POST("/projects/:projectId/agent-grants", h.CreateAgentGrant)
+		api.GET("/projects/:projectId/agent-grants", h.ListAgentGrants)
+		api.DELETE("/projects/:projectId/agent-grants/:grantId", h.RevokeAgentGrant)
+
 		// Namespace policies (project settings — LimitRange + ResourceQuota)
 		api.PUT("/projects/:projectId/environments/:envId/namespace-policy", h.SetNamespacePolicy)
 

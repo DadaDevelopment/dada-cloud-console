@@ -3275,6 +3275,191 @@
                 }
             }
         },
+        "/projects/{projectId}/agent-grants": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the project's agent grants, newest first, including revoked and expired ones — the row is the audit trail of who lent which automation access, for which run, and when it ended.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agent-grant"
+                ],
+                "summary": "List machine-identity grants on a project",
+                "operationId": "listAgentGrants",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.agentGrantResponse"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Gives an /agents identity a Developer or ReadOnly role on exactly this project until it is revoked or expires. Requires Owner/Admin on the project — you can only lend access you already administer. No token is issued: the agent keeps authenticating as itself, and this row is what its role is resolved from.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agent-grant"
+                ],
+                "summary": "Grant a machine identity access to one project",
+                "operationId": "createAgentGrant",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Agent identity, role and TTL",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.createAgentGrantRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/api.agentGrantResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/agent-grants/{grantId}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Ends the grant immediately — the agent's next request to this project resolves to no access (404). Idempotent: revoking an already-ended grant succeeds. The row is kept as the audit trail.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agent-grant"
+                ],
+                "summary": "Revoke a machine-identity grant",
+                "operationId": "revokeAgentGrant",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Grant UUID",
+                        "name": "grantId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/ai/credentials": {
             "get": {
                 "security": [
@@ -20279,6 +20464,38 @@
                 }
             }
         },
+        "api.agentGrantResponse": {
+            "type": "object",
+            "properties": {
+                "active": {
+                    "type": "boolean"
+                },
+                "agent_username": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "revoked_at": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "run_ref": {
+                    "type": "string"
+                }
+            }
+        },
         "api.aiRoutingResponse": {
             "type": "object",
             "properties": {
@@ -20765,6 +20982,23 @@
                 },
                 "version": {
                     "type": "string"
+                }
+            }
+        },
+        "api.createAgentGrantRequest": {
+            "type": "object",
+            "properties": {
+                "agent_username": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "run_ref": {
+                    "type": "string"
+                },
+                "ttl_minutes": {
+                    "type": "integer"
                 }
             }
         },
