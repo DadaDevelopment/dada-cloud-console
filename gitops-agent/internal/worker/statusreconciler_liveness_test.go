@@ -217,7 +217,7 @@ func TestReconcile_LivenessProbe_FollowsRedirectToDeadApp(t *testing.T) {
 			t.Errorf("probe Host header = %q, want profi.dada-tuda.ru", req.Host)
 		}
 		if req.URL.Path == "/" {
-			w.Header().Set("Location", "/")
+			w.Header().Set("Location", "/app")
 			w.WriteHeader(http.StatusPermanentRedirect)
 			return
 		}

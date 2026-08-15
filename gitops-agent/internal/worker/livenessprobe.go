@@ -103,11 +103,14 @@ func newLivenessProber(baseURL string) *livenessProber {
 // hop budget running out -- is returned as-is rather than chased further,
 // so the probe can never be steered off the app it was asked to check.
 //
-// The final response classifies as: 2xx or a terminal 3xx (redirect budget
-// exhausted or off-host, read but not followed) is alive with an empty
-// reason; 4xx/5xx carries a status_<code> reason; a transport failure
-// carries dial_error or timeout. http_status stays 0 whenever no response
-// was ever received.
+// The final response classifies as: 2xx, or an off-host 3xx read but not
+// followed, is alive with an empty reason; 4xx/5xx carries a status_<code>
+// reason; a transport failure carries dial_error or timeout. Exhausting the
+// hop budget is reported as redirect_loop rather than as a bare 3xx: an app
+// that redirects forever serves nothing to a visitor, and recording it with
+// an empty reason would recreate in miniature the false green this whole
+// probe exists to remove. http_status stays 0 whenever no response was ever
+// received.
 func (p *livenessProber) probe(ctx context.Context, hostname string) livenessProbeResult {
 	now := time.Now().UTC()
 
@@ -139,8 +142,13 @@ func (p *livenessProber) probe(ctx context.Context, hostname string) livenessPro
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 		resp.Body.Close()
 
-		if resp.StatusCode < 300 || resp.StatusCode >= 400 || hop == livenessProbeMaxRedirects {
+		if resp.StatusCode < 300 || resp.StatusCode >= 400 {
 			return classifyLivenessResponse(resp.StatusCode, now)
+		}
+		if hop == livenessProbeMaxRedirects {
+			res := classifyLivenessResponse(resp.StatusCode, now)
+			res.reason = "redirect_loop"
+			return res
 		}
 
 		nextTarget, follow := nextRedirectTarget(target, resp.Header.Get("Location"), hostname)

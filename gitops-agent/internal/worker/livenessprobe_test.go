@@ -1,6 +1,10 @@
 package worker
 
 import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
@@ -137,5 +141,29 @@ func TestNextRedirectTarget_RefusesMissingLocation(t *testing.T) {
 	_, follow := nextRedirectTarget(cur, "", "profi.dada-tuda.ru")
 	if follow {
 		t.Fatalf("follow = true, want false for an empty Location")
+	}
+}
+
+// TestProbe_RedirectLoopIsNotHealthy pins the residual false-green left by
+// redirect chasing itself: an app that keeps redirecting to a new location
+// forever serves a visitor nothing, so exhausting the hop budget must carry
+// a redirect_loop reason instead of the empty reason that reads as healthy.
+func TestProbe_RedirectLoopIsNotHealthy(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		hits++
+		w.Header().Set("Location", fmt.Sprintf("/hop%d", hits))
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer srv.Close()
+
+	p := newLivenessProber(srv.URL)
+	res := p.probe(context.Background(), "loop.dada-tuda.ru")
+
+	if res.reason != "redirect_loop" {
+		t.Fatalf("reason = %q, want redirect_loop", res.reason)
+	}
+	if hits != livenessProbeMaxRedirects+1 {
+		t.Fatalf("upstream hit %d times, want %d (the hop budget, then stop)", hits, livenessProbeMaxRedirects+1)
 	}
 }
