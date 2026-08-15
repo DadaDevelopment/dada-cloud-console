@@ -139,6 +139,14 @@ func (p *YooKassaProvider) receiptFor(plan pricing.Plan, amount Amount, customer
 // can renew itself later. It reflects a checkbox the customer ticked, and
 // nothing else: a recurring charge the payer did not agree to is a chargeback
 // with extra steps.
+//
+// A CreatePayment failure after the pending row was inserted (P0-PAY-CHECKOUT,
+// 2026-08-15: a real payer's two checkout attempts both left bare pending rows
+// with empty yk_payment_id/confirmation_url that could never settle -- no
+// webhook was ever coming for a payment YooKassa never created) marks that row
+// "canceled" before the error is returned, mirroring ChargeSaved. A row must
+// never sit in "pending" once its one and only path to becoming non-pending --
+// a webhook for a yk_payment_id that does not exist -- is already impossible.
 func (p *YooKassaProvider) Checkout(ctx context.Context, orgID string, plan pricing.Plan, customerEmail, createdBySub, projectID string, saveMethod bool) (paymentID, confirmationURL string, err error) {
 	if err = p.requireReceiptEmail(customerEmail); err != nil {
 		return "", "", err
@@ -176,6 +184,11 @@ func (p *YooKassaProvider) Checkout(ctx context.Context, orgID string, plan pric
 
 	payment, err := p.Client.CreatePayment(ctx, id.String(), req)
 	if err != nil {
+		if _, uerr := p.Pool.Exec(ctx, `
+			UPDATE payments SET status = 'canceled', updated_at = $1 WHERE id = $2
+		`, time.Now().UTC(), id); uerr != nil {
+			return "", "", fmt.Errorf("yookassa: create payment: %w (also failed to mark canceled: %v)", err, uerr)
+		}
 		return "", "", fmt.Errorf("yookassa: create payment: %w", err)
 	}
 

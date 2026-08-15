@@ -247,6 +247,64 @@ func TestCheckout_InsertsPendingRowThenStoresYkPaymentID(t *testing.T) {
 	}
 }
 
+// TestCheckout_ProviderCreateFails_MarksRowCanceledInsteadOfLeavingBarePending
+// pins the P0-PAY-CHECKOUT regression: a real payer's two checkout attempts on
+// 2026-08-14 both inserted a pending payments row and then failed the
+// YooKassa create call, leaving both rows stuck at status=pending with empty
+// yk_payment_id/confirmation_url forever -- no webhook could ever arrive for
+// a payment YooKassa never created, so nothing would ever move that row again.
+// Checkout must now mark the row canceled on a create failure, mirroring
+// ChargeSaved, so a failed attempt is a terminal, visible row rather than a
+// silent stall that looks identical to "still in flight".
+func TestCheckout_ProviderCreateFails_MarksRowCanceledInsteadOfLeavingBarePending(t *testing.T) {
+	pool := testProviderPool(t)
+	orgID := "org-checkout-fail-" + uuid.NewString()[:8]
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM payments WHERE org_id = $1`, orgID)
+	})
+
+	client := declineServer(t)
+	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false, 1, 0)
+	plan := pricing.Plan{Key: "startup", Name: "Startup", PriceRUB: 990}
+
+	paymentID, confirmationURL, err := p.Checkout(context.Background(), orgID, plan, "buyer@example.com", "sub-checkout-fail", uuid.NewString(), false)
+	if err == nil {
+		t.Fatal("Checkout returned no error for a declined create call")
+	}
+	if paymentID != "" || confirmationURL != "" {
+		t.Fatalf("Checkout returned paymentID=%q confirmationURL=%q on failure, want both empty", paymentID, confirmationURL)
+	}
+
+	var rows int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM payments WHERE org_id = $1`, orgID,
+	).Scan(&rows); err != nil {
+		t.Fatalf("count payment rows: %v", err)
+	}
+	if rows != 1 {
+		t.Fatalf("payment rows for org=%d, want exactly 1 (the failed attempt)", rows)
+	}
+
+	var status, ykPaymentID, storedConfirmationURL string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT status, coalesce(yk_payment_id, ''), coalesce(confirmation_url, '') FROM payments WHERE org_id = $1`, orgID,
+	).Scan(&status, &ykPaymentID, &storedConfirmationURL); err != nil {
+		t.Fatalf("read failed checkout row: %v", err)
+	}
+	if status == "pending" {
+		t.Fatal("payment row is still pending after a failed create call; it can never receive a webhook and would be stuck forever")
+	}
+	if status != "canceled" {
+		t.Fatalf("status=%q want canceled", status)
+	}
+	if ykPaymentID != "" {
+		t.Fatalf("yk_payment_id=%q want empty; YooKassa never created this payment", ykPaymentID)
+	}
+	if storedConfirmationURL != "" {
+		t.Fatalf("confirmation_url=%q want empty; YooKassa never created this payment", storedConfirmationURL)
+	}
+}
+
 func planExpiryOf(t *testing.T, pool *pgxpool.Pool, orgID string) *time.Time {
 	t.Helper()
 	var expires *time.Time
