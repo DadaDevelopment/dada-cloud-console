@@ -3,7 +3,9 @@ package api
 import (
 	"context"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
@@ -70,6 +72,39 @@ const noSignalAppSnapshotPredicate = `rs.kind = 'App'
 // snapshots have gone stale altogether", which is what tells the operator
 // whether the not-ready list can be trusted at all.
 const appSnapshotFreshnessWindow = "10 minutes"
+
+// liveURLProbeFreshnessWindow is how long an http_checked_at stamp on a
+// resource_snapshots row counts as current for the last-mile panel. gitops-agent
+// writes summary_json.http_status/http_reason/http_checked_at on its own probe
+// cadence (separate from the 10-minute reconcile freshness window above); a
+// stamp older than this is treated the same as no stamp at all -- stale, not ok
+// -- so a wedged prober reads as blindness rather than as a wave of healthy apps.
+const liveURLProbeFreshnessWindow = 30 * time.Minute
+
+// internalOwnerEmailPrefix and internalOwnerEmailSuffix are the two shapes of
+// an in-house owner email: the operator's own address (any alexkekiy@... form)
+// and any @dada-tuda.ru staff mailbox. Everyone else is an external customer.
+// Kept here rather than reusing a shared helper because no such helper exists
+// yet elsewhere in the codebase (checked: no "external owner" predicate is
+// defined anywhere else in internal/api).
+const (
+	internalOwnerEmailPrefix = "alexkekiy"
+	internalOwnerEmailSuffix = "@dada-tuda.ru"
+)
+
+// isInternalOwnerEmail reports whether email belongs to platform staff rather
+// than a customer, by the same two rules used throughout project docs/config
+// for "is this our own account": the operator's personal address or any
+// @dada-tuda.ru mailbox. An empty email (owner row missing/unjoined) is never
+// treated as internal -- an unknown owner must not be hidden from the
+// external-first ordering the last-mile panel relies on.
+func isInternalOwnerEmail(email string) bool {
+	e := strings.ToLower(strings.TrimSpace(email))
+	if e == "" {
+		return false
+	}
+	return strings.HasPrefix(e, internalOwnerEmailPrefix) || strings.HasSuffix(e, internalOwnerEmailSuffix)
+}
 
 // stuckOperationThreshold is how long an operation may sit in a non-terminal
 // status before the admin overview calls it stuck. It reuses boxOperationLease
@@ -172,6 +207,40 @@ type overviewMoney struct {
 	PaidTotal        float64              `json:"paid_total"`
 	MeteredTotal     float64              `json:"metered_total"`
 	UncollectedTotal float64              `json:"uncollected_total"`
+}
+
+// overviewLiveURLs is the "last mile" the builds card cannot see: builds.
+// last_7d_success only proves an image built and pushed, never that the app's
+// public URL actually answers. Checked+Stale together equal the denominator --
+// every App row with an active hostname -- so a caller can tell "we probed
+// everything and it's fine" from "we do not know" at a glance. Checked splits
+// into OK and Dead; Stale is its own bucket rather than folded into Dead,
+// because an empty DeadApps list next to a large Stale must read as "the
+// prober went blind", never as "everything is healthy" (see project memory
+// admin_broken_panel_read_health_from_own_blindness -- the identical mistake,
+// here for URL probing instead of the k8s reconciler).
+type overviewLiveURLs struct {
+	Checked  int               `json:"checked"`
+	OK       int               `json:"ok"`
+	Dead     int               `json:"dead"`
+	Stale    int               `json:"stale"`
+	DeadApps []overviewDeadApp `json:"dead_apps"`
+}
+
+// overviewDeadApp names one app behind live_urls.dead so an operator can act
+// on it instead of staring at a count. CheckedAt is a pointer because a dead
+// app is by definition one gitops-agent DID manage to probe (a stale/never-
+// probed app lands in live_urls.stale instead, never here) -- but the pointer
+// keeps the zero-value JSON contract honest if that ever changes.
+type overviewDeadApp struct {
+	Name        string     `json:"name"`
+	ProjectName string     `json:"project_name"`
+	OwnerEmail  string     `json:"owner_email"`
+	Hostname    string     `json:"hostname"`
+	HTTPStatus  int        `json:"http_status"`
+	HTTPReason  string     `json:"http_reason"`
+	CheckedAt   *time.Time `json:"checked_at,omitempty"`
+	External    bool       `json:"external"`
 }
 
 type overviewDayPoint struct {
@@ -284,6 +353,11 @@ func (h *Handler) GetAdminOverview(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "failed to aggregate dynamics")
 		return
 	}
+	liveURLs, err := h.overviewLiveURLs(ctx)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to aggregate live URL health")
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"users":               users,
@@ -300,6 +374,7 @@ func (h *Handler) GetAdminOverview(c *gin.Context) {
 		"failed_builds":       failedBuilds,
 		"dynamics":            dynamics,
 		"dynamics_days":       days,
+		"live_urls":           liveURLs,
 	})
 }
 
@@ -871,6 +946,125 @@ func (h *Handler) overviewFailedLatestBuilds(ctx context.Context) ([]overviewFai
 		out = append(out, b)
 	}
 	return out, rows.Err()
+}
+
+// overviewDeadAppCap bounds live_urls.dead_apps the same way every other
+// overview list is capped: a platform-wide outage must not balloon the
+// payload, and 20 named apps, external owners first, is enough for an
+// operator to start triage without reading a raw count.
+const overviewDeadAppCap = 20
+
+// overviewLiveURLs answers the question builds.last_7d_success cannot: of the
+// apps with an active public hostname, how many of them actually respond? The
+// denominator is every App row (kind='App', not deleted -- deletion removes
+// the resource_snapshots row rather than soft-deleting it) with a non-empty
+// summary_json.url and url_status='active'; gitops-agent's status reconciler
+// is the sole writer of both that url/url_status pair and the probe fields
+// consumed below (summary_json.http_status/http_reason/http_checked_at).
+//
+// Those probe fields do not exist in the database yet as this lands -- the
+// reconciler writes them on its own rollout schedule. Every row is therefore
+// expected to read as stale on day one, and the query and Go-side parsing
+// below treat a missing/unparseable http_status, http_reason or
+// http_checked_at as "no result", never as an error: an empty summary_json
+// key and a malformed one collapse to the same stale outcome rather than
+// failing the whole overview request.
+//
+// A row only counts as Checked (and only then as OK or Dead) when its
+// http_checked_at parses and falls inside liveURLProbeFreshnessWindow;
+// everything else -- absent, unparseable, or older than the window -- is
+// Stale. Dead is http_status == 0 (probe attempted, target never answered) or
+// http_status >= 400, matching the contract exactly. DeadApps is sorted
+// external-owner-first (see isInternalOwnerEmail) and capped at
+// overviewDeadAppCap.
+func (h *Handler) overviewLiveURLs(ctx context.Context) (overviewLiveURLs, error) {
+	out := overviewLiveURLs{DeadApps: []overviewDeadApp{}}
+
+	rows, err := h.pool.Query(ctx, `
+		SELECT rs.name, p.display_name, COALESCE(u.email, ''),
+		       COALESCE(rs.summary_json->>'url', ''),
+		       COALESCE(rs.summary_json->>'http_status', ''),
+		       COALESCE(rs.summary_json->>'http_reason', ''),
+		       COALESCE(rs.summary_json->>'http_checked_at', '')
+		FROM resource_snapshots rs
+		JOIN projects p     ON p.id = rs.project_id
+		LEFT JOIN users u   ON u.id = p.owner_id
+		WHERE rs.kind = 'App'
+		  AND COALESCE(rs.summary_json->>'url', '') <> ''
+		  AND rs.summary_json->>'url_status' = 'active'`,
+	)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+
+	deadApps := []overviewDeadApp{}
+	now := time.Now()
+	for rows.Next() {
+		var name, projectName, ownerEmail, url, httpStatusRaw, httpReason, checkedAtRaw string
+		if err := rows.Scan(&name, &projectName, &ownerEmail, &url, &httpStatusRaw, &httpReason, &checkedAtRaw); err != nil {
+			return out, err
+		}
+
+		checkedAt, fresh := parseFreshProbeTimestamp(checkedAtRaw, now)
+		if !fresh {
+			out.Stale++
+			continue
+		}
+
+		out.Checked++
+		httpStatus, _ := strconv.Atoi(strings.TrimSpace(httpStatusRaw))
+		if httpStatus != 0 && httpStatus < 400 {
+			out.OK++
+			continue
+		}
+
+		out.Dead++
+		deadApps = append(deadApps, overviewDeadApp{
+			Name:        name,
+			ProjectName: projectName,
+			OwnerEmail:  ownerEmail,
+			Hostname:    url,
+			HTTPStatus:  httpStatus,
+			HTTPReason:  httpReason,
+			CheckedAt:   checkedAt,
+			External:    !isInternalOwnerEmail(ownerEmail),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+
+	sort.SliceStable(deadApps, func(i, j int) bool {
+		return deadApps[i].External && !deadApps[j].External
+	})
+	if len(deadApps) > overviewDeadAppCap {
+		deadApps = deadApps[:overviewDeadAppCap]
+	}
+	out.DeadApps = deadApps
+
+	return out, nil
+}
+
+// parseFreshProbeTimestamp parses an RFC3339 http_checked_at value and reports
+// whether it both parsed and falls inside liveURLProbeFreshnessWindow of now.
+// An empty or unparseable value returns (nil, false) rather than an error --
+// summary_json is a schemaless bag gitops-agent writes to independently of
+// this handler, so a missing or malformed stamp is a normal "no fresh result"
+// outcome for this panel, not a fault to surface as a 500.
+func parseFreshProbeTimestamp(raw string, now time.Time) (*time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, false
+	}
+	t, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return nil, false
+	}
+	if now.Sub(t) > liveURLProbeFreshnessWindow {
+		return nil, false
+	}
+	return &t, true
 }
 
 // overviewMoney returns the same platform business economics as
