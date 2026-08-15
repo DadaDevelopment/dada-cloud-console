@@ -2,10 +2,12 @@ package worker
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -18,6 +20,18 @@ import (
 // not to wait out a slow one, and it runs once per app per
 // LivenessProbeMinInterval so a stuck probe must never be allowed to pile up.
 const livenessProbeTimeout = 5 * time.Second
+
+// livenessProbeMaxRedirects bounds how many 3xx hops probe() will chase for
+// one app before giving up and reporting the last redirect verbatim. Ingress
+// controllers commonly answer plain HTTP with a same-host scheme-upgrade
+// redirect to HTTPS (nginx-ingress does this by default whenever the Ingress
+// carries a tls block), and following exactly that hop is what turns the
+// probe from "measured the redirect" into "measured the app": the first
+// prod rollout of this feature reported every app as http_status=308
+// (0 real 4xx/5xx ever surfaced) because the redirect itself was treated as
+// the terminal answer. A small bound keeps a misbehaving app's redirect loop
+// from hanging the probe past its timeout budget.
+const livenessProbeMaxRedirects = 5
 
 // livenessProbeConcurrency bounds how many app probes run at once, so a
 // platform with many hostnames does not serialize into a long per-tick tail
@@ -39,6 +53,15 @@ type livenessProbeResult struct {
 // probe a check of the app rather than of the platform's flaky external
 // egress: the request enters the cluster exactly where a real visitor's
 // would, at baseURL, and is routed to the tenant vhost by Host alone.
+//
+// TLS verification is intentionally skipped: baseURL names the ingress
+// controller's in-cluster Service, whose certificate (if any) is issued for
+// that Service name, never for the tenant hostname carried in the Host
+// header this prober sends -- verifying against baseURL's own identity
+// would reject every request. The probe already trusts the platform's own
+// network path to reach the ingress Service; skipping verification here
+// does not extend that trust anywhere a real visitor's TLS handshake
+// relies on.
 type livenessProber struct {
 	baseURL string
 	client  *http.Client
@@ -58,42 +81,118 @@ func newLivenessProber(baseURL string) *livenessProber {
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
 		},
 	}
 }
 
-// probe sends one GET / to p.baseURL with hostname in the Host header and
-// classifies the result. A 2xx or 3xx response (redirects are read, never
-// followed) counts as alive with an empty reason; 4xx/5xx carries a
-// status_<code> reason; a transport failure carries dial_error or timeout.
-// http_status stays 0 whenever no response was ever received.
+// probe sends GET / to p.baseURL with hostname in the Host header, chasing
+// up to livenessProbeMaxRedirects same-host 3xx hops before classifying the
+// result. Following the redirect is the point: an ingress controller
+// commonly answers plain HTTP with a scheme-upgrade redirect to HTTPS
+// before the app ever sees the request, and stopping at that first hop
+// measures the ingress's redirect, not the app -- every probed app then
+// reports the same http_status regardless of whether it is actually up,
+// which is a false green worse than no signal at all.
+//
+// A redirect is followed only when it targets the same hostname the probe
+// was sent for (relative Location, or an absolute one whose host matches);
+// anything else -- a genuinely different host, a missing Location, or the
+// hop budget running out -- is returned as-is rather than chased further,
+// so the probe can never be steered off the app it was asked to check.
+//
+// The final response classifies as: 2xx or a terminal 3xx (redirect budget
+// exhausted or off-host, read but not followed) is alive with an empty
+// reason; 4xx/5xx carries a status_<code> reason; a transport failure
+// carries dial_error or timeout. http_status stays 0 whenever no response
+// was ever received.
 func (p *livenessProber) probe(ctx context.Context, hostname string) livenessProbeResult {
 	now := time.Now().UTC()
-	reqCtx, cancel := context.WithTimeout(ctx, livenessProbeTimeout)
-	defer cancel()
 
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, p.baseURL+"/", nil)
+	target, err := url.Parse(p.baseURL)
 	if err != nil {
 		return livenessProbeResult{reason: "probe_build_error", checkedAt: now}
 	}
-	req.Host = hostname
+	target.Path = "/"
+	target.RawQuery = ""
 
-	resp, err := p.client.Do(req)
-	if err != nil {
-		reason := "dial_error"
-		if errors.Is(err, context.DeadlineExceeded) {
-			reason = "timeout"
+	for hop := 0; hop <= livenessProbeMaxRedirects; hop++ {
+		reqCtx, cancel := context.WithTimeout(ctx, livenessProbeTimeout)
+		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, target.String(), nil)
+		if err != nil {
+			cancel()
+			return livenessProbeResult{reason: "probe_build_error", checkedAt: now}
 		}
-		return livenessProbeResult{reason: reason, checkedAt: now}
-	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		req.Host = hostname
 
-	reason := ""
-	if resp.StatusCode >= 400 {
-		reason = fmt.Sprintf("status_%d", resp.StatusCode)
+		resp, err := p.client.Do(req)
+		cancel()
+		if err != nil {
+			reason := "dial_error"
+			if errors.Is(err, context.DeadlineExceeded) {
+				reason = "timeout"
+			}
+			return livenessProbeResult{reason: reason, checkedAt: now}
+		}
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+
+		if resp.StatusCode < 300 || resp.StatusCode >= 400 || hop == livenessProbeMaxRedirects {
+			return classifyLivenessResponse(resp.StatusCode, now)
+		}
+
+		nextTarget, follow := nextRedirectTarget(target, resp.Header.Get("Location"), hostname)
+		if !follow {
+			return classifyLivenessResponse(resp.StatusCode, now)
+		}
+		target = nextTarget
 	}
-	return livenessProbeResult{status: resp.StatusCode, reason: reason, checkedAt: now}
+
+	return livenessProbeResult{reason: "probe_build_error", checkedAt: now}
+}
+
+// classifyLivenessResponse turns a terminal HTTP status into the recorded
+// result: 4xx/5xx carries a status_<code> reason, anything else (2xx, or a
+// 3xx the caller decided not to chase further) is alive with an empty
+// reason.
+func classifyLivenessResponse(status int, checkedAt time.Time) livenessProbeResult {
+	reason := ""
+	if status >= 400 {
+		reason = fmt.Sprintf("status_%d", status)
+	}
+	return livenessProbeResult{status: status, reason: reason, checkedAt: checkedAt}
+}
+
+// nextRedirectTarget resolves a 3xx response's Location header against cur
+// and reports whether probe() should chase it. It refuses to follow onto a
+// different host than hostname -- the app's own primary hostname, i.e. what
+// the probe was actually asked to check -- so a redirect can never steer
+// the probe at a different app or an arbitrary external target. The
+// resolved URL always keeps cur's own host:port (the in-cluster ingress
+// Service): a scheme-upgrade redirect's Location names the tenant's PUBLIC
+// hostname, and dialing that would send the follow-up hop out over
+// external egress exactly like the DNS resolution this probe design avoids
+// on the first hop.
+func nextRedirectTarget(cur *url.URL, location string, hostname string) (*url.URL, bool) {
+	if location == "" {
+		return nil, false
+	}
+	loc, err := url.Parse(location)
+	if err != nil {
+		return nil, false
+	}
+	if h := loc.Hostname(); h != "" && h != hostname {
+		return nil, false
+	}
+
+	resolved := cur.ResolveReference(loc)
+	next := *cur
+	next.Scheme = resolved.Scheme
+	next.Path = resolved.Path
+	next.RawQuery = resolved.RawQuery
+	return &next, true
 }
 
 // livenessCandidate is one app eligible for a probe this tick: it has an

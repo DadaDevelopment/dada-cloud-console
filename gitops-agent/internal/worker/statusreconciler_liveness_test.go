@@ -195,6 +195,101 @@ func mustLivenessCheckedAt(t *testing.T, ctx context.Context, pool *pgxpool.Pool
 	return checkedAt
 }
 
+// TestReconcile_LivenessProbe_FollowsRedirectToDeadApp is the end-to-end
+// regression test for the prod incident this fix addresses: an ingress-style
+// same-host redirect on the first hop must be chased through to the app's
+// real terminal status, not recorded as the redirect itself. Before this
+// fix every probed app landed here with http_status=308 and an empty
+// reason -- read by the backend's live_urls aggregation as "healthy" -- no
+// matter what the app behind the redirect actually answered.
+func TestReconcile_LivenessProbe_FollowsRedirectToDeadApp(t *testing.T) {
+	pool := newOrphanGCTestPool(t)
+	ctx := context.Background()
+
+	projectID, envID := seedOrphanGCProjectEnv(t, ctx, pool, "liveness-redirect", "prod", "liveness-redirect-prod")
+	seedOrphanGCAppSnapshot(t, ctx, pool, projectID, envID, "profi", "Unknown")
+	seedLivenessActiveHostname(t, ctx, pool, envID, "profi", "profi.dada-tuda.ru")
+
+	hits := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		hits++
+		if req.Host != "profi.dada-tuda.ru" {
+			t.Errorf("probe Host header = %q, want profi.dada-tuda.ru", req.Host)
+		}
+		if req.URL.Path == "/" {
+			w.Header().Set("Location", "/")
+			w.WriteHeader(http.StatusPermanentRedirect)
+			return
+		}
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer upstream.Close()
+
+	client := fake.NewSimpleClientset(infraDeployment("profi-deploy", "liveness-redirect-prod"))
+	r := &StatusReconciler{
+		pool:   pool,
+		cfg:    &config.Config{LivenessProbeURL: upstream.URL, LivenessProbeMinInterval: 5 * time.Minute},
+		client: client,
+	}
+	r.reconcile(ctx)
+
+	status, reason, _, present := readLivenessFields(t, ctx, pool, projectID, envID, "profi")
+	if !present {
+		t.Fatalf("http_status not written after reconcile")
+	}
+	if status != http.StatusBadGateway {
+		t.Fatalf("http_status = %d, want 502 (the redirect must be chased through to the app's real answer)", status)
+	}
+	if reason != "status_502" {
+		t.Fatalf("http_reason = %q, want status_502", reason)
+	}
+	if hits < 2 {
+		t.Fatalf("upstream hit %d times, want at least 2 (initial request + at least one followed redirect)", hits)
+	}
+}
+
+// TestReconcile_LivenessProbe_OffHostRedirectStaysUnfollowed proves the
+// probe records an off-host redirect as-is (a 3xx it never chased) rather
+// than crashing or silently retargeting at whatever host the redirect names.
+func TestReconcile_LivenessProbe_OffHostRedirectStaysUnfollowed(t *testing.T) {
+	pool := newOrphanGCTestPool(t)
+	ctx := context.Background()
+
+	projectID, envID := seedOrphanGCProjectEnv(t, ctx, pool, "liveness-offhost", "prod", "liveness-offhost-prod")
+	seedOrphanGCAppSnapshot(t, ctx, pool, projectID, envID, "profi", "Unknown")
+	seedLivenessActiveHostname(t, ctx, pool, envID, "profi", "profi.dada-tuda.ru")
+
+	hits := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		hits++
+		w.Header().Set("Location", "https://not-the-probed-app.example.com/")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer upstream.Close()
+
+	client := fake.NewSimpleClientset(infraDeployment("profi-deploy", "liveness-offhost-prod"))
+	r := &StatusReconciler{
+		pool:   pool,
+		cfg:    &config.Config{LivenessProbeURL: upstream.URL, LivenessProbeMinInterval: 5 * time.Minute},
+		client: client,
+	}
+	r.reconcile(ctx)
+
+	status, reason, _, present := readLivenessFields(t, ctx, pool, projectID, envID, "profi")
+	if !present {
+		t.Fatalf("http_status not written after reconcile")
+	}
+	if status != http.StatusFound {
+		t.Fatalf("http_status = %d, want 302 (recorded as-is, never followed)", status)
+	}
+	if reason != "" {
+		t.Fatalf("http_reason = %q, want empty for an unfollowed 3xx", reason)
+	}
+	if hits != 1 {
+		t.Fatalf("upstream hit %d times, want exactly 1 -- an off-host redirect must never be chased", hits)
+	}
+}
+
 // TestReconcile_LivenessProbe_DisabledWithoutURL confirms the off switch: no
 // LivenessProbeURL means the reconciler never sends a probe and never writes
 // the http_* fields at all, even for an app with an active hostname.
