@@ -26,6 +26,14 @@ const dbArchivePlanTimeout = 15 * time.Second
 // back undecided -- see archiveChildRef.Unknown.
 var dbArchiveAPIProbeBudget = archiveProbeBudget{Probe: 4 * time.Second, Count: 4 * time.Second}
 
+// dbArchiveChildrenAPIBudget caps what all of a table's keys together may spend
+// inside one request. Without it the probes eat the whole plan budget and the
+// steps after them -- delete rules, the date histogram -- fail on an exhausted
+// context, which reads as "the database is unreachable" for a table whose only
+// problem is a slow foreign key. Keys left unasked when this runs out come back
+// undecided, which is the same answer as a key that ran out on its own.
+const dbArchiveChildrenAPIBudget = 6 * time.Second
+
 // dbArchiveWorkerProbeBudget is what the same key gets in the worker, before
 // anything has been exported. Nothing is waiting on it there but the run
 // itself, so the question is asked to completion and the answer is a verdict.
@@ -240,12 +248,14 @@ func (h *Handler) GetDatabaseArchivePlan(c *gin.Context) {
 	unresolved := []archiveChildRef{}
 	if cutoff != nil && len(children) > 0 {
 		if column, reason := pickCutoffColumn(cols); reason == "" {
-			children = archiveChildrenInWindow(ctx, conn, archiveRun{
+			cctx, ccancel := context.WithTimeout(ctx, dbArchiveChildrenAPIBudget)
+			children = archiveChildrenInWindow(cctx, conn, archiveRun{
 				Schema:       schema,
 				Table:        relname,
 				CutoffColumn: column.Name,
 				Cutoff:       *cutoff,
 			}, children, dbArchiveAPIProbeBudget)
+			ccancel()
 			unresolved = archiveChildrenUnknown(children)
 			children = archiveChildrenDecided(children)
 		}
