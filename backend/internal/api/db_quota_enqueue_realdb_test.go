@@ -198,3 +198,60 @@ func TestEnqueueDatabaseTier_TreatsProcessingAsInFlight(t *testing.T) {
 		t.Fatalf("a second tier flip was queued behind one already being processed: %s", again)
 	}
 }
+
+// TestEnqueueDatabaseTier_TreatsCommittedAsInFlight covers the status a
+// SetDatabaseTier operation lands in once it has actually been applied.
+// Committed was missing from the in-flight dedupe, so a database whose flip
+// reached Committed but had not yet shown up in resource_snapshots (the
+// reconciler's own view of the world) looked idle on the next tick and got
+// queued again - production has jira-app, nexus, keycloak, fin-core,
+// fonbet-db and mlflow-v2 each re-queued 7-17 times across 13h, several
+// pairs of Committed rows for the same resource and tier minutes apart
+// [live psql pg-shard-0-postgresql-0, 2026-08-15].
+func TestEnqueueDatabaseTier_TreatsCommittedAsInFlight(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping tier committed-in-flight integration test")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect to TEST_DATABASE_URL: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	suffix := uuid.NewString()[:8]
+	var projectID, envID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO projects (name, display_name) VALUES ($1, $1) RETURNING id`,
+		"db-tier-committed-test-"+suffix).Scan(&projectID); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+	t.Cleanup(func() { dropSeededProject(pool, projectID) })
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO environments (project_id, name, namespace, type) VALUES ($1, 'prod', $2, 'prod') RETURNING id`,
+		projectID, "ns-"+suffix).Scan(&envID); err != nil {
+		t.Fatalf("seed environment: %v", err)
+	}
+
+	h := &Handler{pool: pool}
+	name := "db-" + suffix
+	d := tieredDatabase{ProjectID: projectID, EnvironmentID: envID, Name: name, AppRef: name}
+
+	opID, err := h.enqueueDatabaseTier(ctx, d, "free")
+	if err != nil {
+		t.Fatalf("enqueue SetDatabaseTier: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE operations SET status = 'Committed' WHERE id = $1`, opID); err != nil {
+		t.Fatalf("commit the operation: %v", err)
+	}
+
+	again, err := h.enqueueDatabaseTier(ctx, d, "free")
+	if err != nil {
+		t.Fatalf("re-enqueue after commit: %v", err)
+	}
+	if again != uuid.Nil {
+		t.Fatalf("a second tier flip was queued behind one already committed: %s", again)
+	}
+}

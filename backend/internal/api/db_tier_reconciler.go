@@ -195,6 +195,14 @@ func (h *Handler) tieredDatabases(ctx context.Context) ([]tieredDatabase, error)
 // a database whose first one was being worked on right then, so the slower the
 // agent the deeper the queue [live psql, 2026-08-15].
 //
+// It must also include Committed. A flip that already landed does not show up
+// in resource_snapshots until the next sync, so on the reconciler's own view
+// of the world the database still looks untiered - without Committed here,
+// jira-app, nexus, keycloak, fin-core, fonbet-db and mlflow-v2 each got
+// re-queued 7-17 times over 13h in production, some pairs of Committed rows
+// for the same resource and tier only minutes apart [live psql
+// pg-shard-0-postgresql-0, 2026-08-15].
+//
 // The same statement backs off after a failure: a tier the agent already
 // rejected for this database is not re-queued for dbTierRetryAfter. A database
 // whose CR is not in git at all cannot be tiered by any number of retries, and
@@ -217,7 +225,7 @@ func (h *Handler) enqueueDatabaseTier(ctx context.Context, d tieredDatabase, tie
 		 WHERE NOT EXISTS (
 		   SELECT 1 FROM operations
 		   WHERE environment_id = $3 AND resource_kind = 'ServiceDatabaseV2' AND resource_name = $4::text
-		     AND action = 'SetDatabaseTier' AND status IN ('Created', 'Processing', 'Reconciling')
+		     AND action = 'SetDatabaseTier' AND status IN ('Created', 'Processing', 'Reconciling', 'Committed')
 		 )
 		 AND NOT EXISTS (
 		   SELECT 1 FROM operations
