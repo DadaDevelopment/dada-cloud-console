@@ -48,12 +48,8 @@ type envVar struct {
 // skipped: there is nothing to deploy, and their env is picked up by the deploy
 // that materializes them.
 func (h *Handler) queueEnvApply(c *gin.Context, claims *auth.Claims, projectID, envID uuid.UUID, appName string) (*models.Operation, bool) {
-	var image string
-	if err := h.pool.QueryRow(c.Request.Context(),
-		`SELECT COALESCE(summary_json->>'image', '') FROM resource_snapshots
-		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3`,
-		projectID, envID, appName,
-	).Scan(&image); err != nil || image == "" {
+	image, err := h.lastDeployedImage(c.Request.Context(), projectID, envID, appName)
+	if err != nil || image == "" {
 		return nil, false
 	}
 
@@ -75,6 +71,56 @@ func (h *Handler) queueEnvApply(c *gin.Context, claims *auth.Claims, projectID, 
 		return nil, false
 	}
 	return &op, true
+}
+
+// lastDeployedImage resolves the image an env-triggered re-deploy should
+// carry, preferring the deployments ledger over the resource_snapshots cache.
+//
+// Root cause of the megafactory incident (2026-08-13/14): queueEnvApply used
+// to read summary_json->>'image' off resource_snapshots, a row the gitops
+// reconciler updates asynchronously after a deploy lands. For megafactory
+// that row froze on an old digest after a successful manual deploy, and every
+// subsequent env-var save silently redeployed the STALE image over the
+// working one -- twice, across two separate visits, each time undoing the
+// user's own fix. deployments is written transactionally, once, by the code
+// paths that actually enact a deploy (build-agent's HandoffDeploy on a
+// successful build, and RollbackDeployment/PromoteDeployment) and NEVER by
+// queueEnvApply itself, so it cannot be poisoned by its own prior redeploys
+// the way the operations table (which every env-triggered redeploy also
+// inserts into) can. Its most recent row for (env, app) is therefore the
+// authoritative last-deployed image.
+//
+// Apps that have only ever been deployed through the direct-image paths
+// (UpdateAppImage, the CI deploy-hook) have no deployments row at all; for
+// those, resource_snapshots remains the only record available and behaves as
+// it always has. This is not a new risk -- it's the pre-existing behavior for
+// that class of app -- but it does mean an app that was ever redeployed
+// through the git/build flow always prefers that ledger over the cache, even
+// if a later direct-image deploy landed more recently outside it.
+func (h *Handler) lastDeployedImage(ctx context.Context, projectID, envID uuid.UUID, appName string) (string, error) {
+	var image string
+	err := h.pool.QueryRow(ctx,
+		`SELECT image_uri FROM deployments
+		 WHERE environment_id = $1 AND app_name = $2
+		 ORDER BY created_at DESC LIMIT 1`,
+		envID, appName,
+	).Scan(&image)
+	if err == nil {
+		return image, nil
+	}
+	if err != pgx.ErrNoRows {
+		return "", err
+	}
+
+	err = h.pool.QueryRow(ctx,
+		`SELECT COALESCE(summary_json->>'image', '') FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3`,
+		projectID, envID, appName,
+	).Scan(&image)
+	if err != nil {
+		return "", err
+	}
+	return image, nil
 }
 
 // ListEnvVars returns the env vars for an app. Secret values are never returned —
