@@ -53,6 +53,14 @@ type Config struct {
 // Each tool call self-proxies to backendURL/api/v1/... so all auth middleware
 // and handler logic runs unchanged. The inbound Authorization header is read
 // from each MCP request and forwarded to the self-proxy call.
+//
+// The transport runs stateless: the backend serves several replicas behind an
+// ingress with no session affinity, so a client's initialize and its follow-up
+// tools/list land on different pods and an in-memory session would answer
+// "session not found" (404) about half the time. Nothing here needs a session —
+// every tool is a stateless self-proxy call authorised by the request's own
+// bearer, and the server issues no server->client requests. The cost is that
+// GET (server-initiated SSE stream) now answers 405; no client uses it.
 func NewHandler(specBytes []byte, cfg Config) (http.Handler, error) {
 	spec, err := ParseSpec(specBytes)
 	if err != nil {
@@ -80,7 +88,10 @@ func NewHandler(specBytes []byte, cfg Config) (http.Handler, error) {
 	log.Printf("mcp: %d tools registered (basePath=%s, backend=%s); %d fallbacks",
 		len(tools), spec.BasePath, cfg.BackendURL, fallbacks)
 
-	mcpHandler := sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return srv }, nil)
+	mcpHandler := sdkmcp.NewStreamableHTTPHandler(
+		func(*http.Request) *sdkmcp.Server { return srv },
+		&sdkmcp.StreamableHTTPOptions{Stateless: true},
+	)
 
 	var transport http.Handler = bearerMiddleware(mcpHandler)
 	if cfg.RequireBearer {
