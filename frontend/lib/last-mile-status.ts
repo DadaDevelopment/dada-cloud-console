@@ -79,6 +79,35 @@ export function isDeadLastMile(status: number, reason: string): boolean {
  * worker answers says nothing about its health. Absence of data must never
  * render as a health verdict either way.
  */
+export interface WorkerNoHTTPNotice {
+  status: number;
+  checkedAt: string;
+}
+
+/**
+ * The other half of the worker case. `evaluateLastMile` stays silent for a
+ * worker on purpose -- its address answering 502 is not a health verdict --
+ * but silence alone leaves the user with a public link that fails and no
+ * word about why. Measured on production 2026-08-15, `fanvk` was a worker
+ * with a healthy pod (1/1, zero restarts, VK long-polling) still carrying
+ * the default hostname granted back when it served HTTP, and the console
+ * said nothing at all about the 502 behind that link.
+ *
+ * Returns a notice only when all three hold: the snapshot declares a worker,
+ * a probe actually ran, and the address answered something other than
+ * 2xx/3xx. A worker whose address serves (a custom domain the user attached
+ * on purpose, fronting something real) needs no explanation, and absence of
+ * probe data is never rendered as a verdict either way.
+ */
+export function evaluateWorkerNoHTTP(summary: LastMileSummary | null | undefined): WorkerNoHTTPNotice | null {
+  if (!summary) return null;
+  if (summary.worker !== true) return null;
+  if (summary.http_checked_at == null || summary.http_checked_at === "") return null;
+  if (summary.http_status == null) return null;
+  if (summary.http_status >= 200 && summary.http_status < 400) return null;
+  return { status: summary.http_status, checkedAt: summary.http_checked_at };
+}
+
 export function evaluateLastMile(summary: LastMileSummary | null | undefined): LastMileVerdict | null {
   if (!summary) return null;
   if (summary.worker === true) return null;

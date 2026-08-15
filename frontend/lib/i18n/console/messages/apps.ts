@@ -120,6 +120,19 @@ export const apps: Messages = {
     en: "This is what an ordinary visitor gets right now, opening the address -- independent of build status or pod state.",
   },
 
+  "apps.lastMile.workerStatusLabel": {
+    ru: "Адрес отвечает {code}: приложение работает как воркер и не обслуживает HTTP — проверено {ago}",
+    en: "The address returns {code}: this app runs as a worker and serves no HTTP — checked {ago}",
+  },
+  "apps.lastMile.workerUnreachableLabel": {
+    ru: "Адрес не отвечает: приложение работает как воркер и не обслуживает HTTP — проверено {ago}",
+    en: "The address is not responding: this app runs as a worker and serves no HTTP — checked {ago}",
+  },
+  "apps.lastMile.workerDesc": {
+    ru: "Сам процесс при этом может быть полностью жив — смотрите логи. Публичный адрес остался от прежней конфигурации, когда приложение обслуживало HTTP.",
+    en: "The process itself may be perfectly alive -- check the logs. The public address is left over from an earlier configuration, when the app still served HTTP.",
+  },
+
   "apps.deployDrift.title": { ru: "Под крутит не последний деплой", en: "The pod is running an older deployment" },
   "apps.deployDrift.desc": {
     ru: "В истории есть более новый деплой, который так и не заехал на под.",

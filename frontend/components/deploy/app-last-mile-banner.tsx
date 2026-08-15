@@ -1,8 +1,8 @@
 "use client";
 
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Info } from "lucide-react";
 import { useT } from "@/lib/i18n/console/context";
-import { evaluateLastMile, type LastMileSummary } from "@/lib/last-mile-status";
+import { evaluateLastMile, evaluateWorkerNoHTTP, type LastMileSummary } from "@/lib/last-mile-status";
 
 interface AppLastMileBannerProps {
   summary: LastMileSummary | null | undefined;
@@ -43,7 +43,25 @@ function localizedAgo(dateStr: string, t: ReturnType<typeof useT>["t"]): string 
  */
 export function AppLastMileBanner({ summary }: AppLastMileBannerProps) {
   const { t } = useT();
+  const workerNotice = evaluateWorkerNoHTTP(summary);
   const verdict = evaluateLastMile(summary);
+
+  if (workerNotice) {
+    const ago = localizedAgo(workerNotice.checkedAt, t);
+    const label = workerNotice.status > 0
+      ? t("apps.lastMile.workerStatusLabel", { code: workerNotice.status, ago })
+      : t("apps.lastMile.workerUnreachableLabel", { ago });
+    return (
+      <div className="mb-6 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 p-5 shadow-sm">
+        <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800 dark:text-slate-200">
+          <Info className="h-4 w-4 shrink-0" />
+          {label}
+        </p>
+        <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">{t("apps.lastMile.workerDesc")}</p>
+      </div>
+    );
+  }
+
   if (!verdict) return null;
 
   const ago = localizedAgo(verdict.checkedAt, t);

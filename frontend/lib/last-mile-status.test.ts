@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { evaluateLastMile, isDeadHTTPStatus, isDeadLastMile } from "./last-mile-status.ts";
+import { evaluateLastMile, evaluateWorkerNoHTTP, isDeadHTTPStatus, isDeadLastMile } from "./last-mile-status.ts";
 
 test("no verdict when the probe never ran", () => {
   assert.equal(evaluateLastMile(undefined), null);
@@ -130,4 +130,40 @@ test("isDeadLastMile: the reason names the author, the status alone does not", (
   assert.equal(isDeadLastMile(504, ""), true);
   assert.equal(isDeadLastMile(0, "app_status_0"), true);
   assert.equal(isDeadLastMile(404, "status_404"), false);
+});
+
+test("a worker whose leftover address answers an error gets an explanation, not silence (fanvk shape)", () => {
+  assert.deepEqual(
+    evaluateWorkerNoHTTP({
+      worker: true,
+      http_status: 502,
+      http_reason: "status_502",
+      http_checked_at: "2026-08-15T10:00:00Z",
+    }),
+    { status: 502, checkedAt: "2026-08-15T10:00:00Z" },
+  );
+  assert.deepEqual(
+    evaluateWorkerNoHTTP({
+      worker: true,
+      http_status: 0,
+      http_reason: "dial_error",
+      http_checked_at: "2026-08-15T10:00:00Z",
+    }),
+    { status: 0, checkedAt: "2026-08-15T10:00:00Z" },
+  );
+});
+
+test("nothing to explain when the app is not a worker, or its address serves, or no probe ran", () => {
+  assert.equal(evaluateWorkerNoHTTP(null), null);
+  assert.equal(evaluateWorkerNoHTTP({ http_status: 502, http_checked_at: "2026-08-15T10:00:00Z" }), null);
+  assert.equal(
+    evaluateWorkerNoHTTP({ worker: true, http_status: 200, http_checked_at: "2026-08-15T10:00:00Z" }),
+    null,
+  );
+  assert.equal(
+    evaluateWorkerNoHTTP({ worker: true, http_status: 308, http_checked_at: "2026-08-15T10:00:00Z" }),
+    null,
+  );
+  assert.equal(evaluateWorkerNoHTTP({ worker: true, http_status: 502 }), null);
+  assert.equal(evaluateWorkerNoHTTP({ worker: true, http_checked_at: "2026-08-15T10:00:00Z" }), null);
 });
