@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -51,6 +52,72 @@ const claimBatchSize = 10
 // these operations do (clone, patch, commit) is idempotent when repeated: a
 // patch that is already in place reports no change and commits nothing.
 const staleProcessingTimeout = 30 * time.Minute
+
+// held tracks the operations this process has claimed and not yet finished, so
+// a shutdown can hand them back instead of leaving them for the stale timeout.
+//
+// A claim takes a batch of up to claimBatchSize and the dispatcher works
+// through it one at a time [worker/dbwatcher.go poll], so a rollout that lands
+// mid-batch strands every operation still queued behind the current one --
+// none of them was ever started, and all of them wait out staleProcessingTimeout
+// before any worker looks at them again. Measured on prod: a user's
+// DeployImageVersion sat 31.2 minutes that way, and gitops-agent rolled 11
+// times in 7 hours [live psql + kubectl, 2026-08-14], so the window is hit
+// often rather than rarely.
+var held = struct {
+	sync.Mutex
+	ids map[uuid.UUID]struct{}
+}{ids: map[uuid.UUID]struct{}{}}
+
+func holdClaim(id uuid.UUID) {
+	held.Lock()
+	held.ids[id] = struct{}{}
+	held.Unlock()
+}
+
+func releaseClaim(id uuid.UUID) {
+	held.Lock()
+	delete(held.ids, id)
+	held.Unlock()
+}
+
+// ReleaseHeldClaims hands every operation this process still holds back to
+// Created, and returns how many rows it moved. Call it on SIGTERM, before the
+// process exits.
+//
+// The WHERE clause requires the row to still be Processing: an operation that
+// reached a terminal status while the release was in flight keeps its verdict,
+// and one another worker has already re-claimed is not stolen back.
+//
+// The operation currently being dispatched is released too. Re-running it is
+// the same retry the stale timeout already produces, only half an hour sooner,
+// and the git work these handlers do is idempotent when repeated -- a patch
+// already in place commits nothing.
+//
+// The caller must pass a context that is NOT the one the signal cancelled;
+// otherwise every statement here fails before touching the database.
+func ReleaseHeldClaims(ctx context.Context, pool *pgxpool.Pool) (int64, error) {
+	held.Lock()
+	ids := make([]uuid.UUID, 0, len(held.ids))
+	for id := range held.ids {
+		ids = append(ids, id)
+	}
+	held.ids = map[uuid.UUID]struct{}{}
+	held.Unlock()
+
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	tag, err := pool.Exec(ctx, `
+		UPDATE operations
+		SET    status = 'Created', updated_at = NOW()
+		WHERE  id = ANY($1) AND status = 'Processing'
+	`, ids)
+	if err != nil {
+		return 0, fmt.Errorf("release held claims: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
 
 // ClaimPending atomically claims up to claimBatchSize operations, marking them
 // Processing, and returns them. Uses SKIP LOCKED so multiple replicas can run
@@ -127,6 +194,9 @@ func ClaimPending(ctx context.Context, pool *pgxpool.Pool) ([]Operation, error) 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit claim tx: %w", err)
 	}
+	for _, op := range ops {
+		holdClaim(op.ID)
+	}
 	return ops, nil
 }
 
@@ -145,6 +215,7 @@ func MarkCommitted(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, sha, g
 	if err != nil {
 		return err
 	}
+	releaseClaim(id)
 	recordSuccessAudit(ctx, pool, id, sha)
 	return nil
 }
@@ -224,6 +295,7 @@ func MarkNoop(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, reason stri
 	if err != nil {
 		return err
 	}
+	releaseClaim(id)
 	recordNoopAudit(ctx, pool, id, reason)
 	return nil
 }
@@ -261,6 +333,7 @@ func MarkFailed(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, code, mes
 	if err != nil {
 		return err
 	}
+	releaseClaim(id)
 	recordFailureAudit(ctx, pool, id, code, message)
 	return nil
 }

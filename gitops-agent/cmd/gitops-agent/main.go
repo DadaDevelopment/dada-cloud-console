@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/dada-tuda/console/gitops-agent/internal/config"
 	"github.com/dada-tuda/console/gitops-agent/internal/db"
@@ -13,6 +14,7 @@ import (
 	"github.com/dada-tuda/console/gitops-agent/internal/renderer"
 	"github.com/dada-tuda/console/gitops-agent/internal/server"
 	"github.com/dada-tuda/console/gitops-agent/internal/worker"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -105,4 +107,28 @@ func main() {
 
 	<-ctx.Done()
 	log.Info().Msg("shutting down")
+	releaseClaimedOperations(pool)
 }
+
+// releaseClaimedOperations hands every operation this pod claimed and did not
+// finish back to the queue before the process exits. Without it a rollout
+// leaves them Processing until staleProcessingTimeout and the user watches a
+// deploy that no worker is running for half an hour (see db.ReleaseHeldClaims).
+// The signal context is already cancelled by the time this runs, so the release
+// gets a context of its own.
+func releaseClaimedOperations(pool *pgxpool.Pool) {
+	ctx, cancel := context.WithTimeout(context.Background(), releaseTimeout)
+	defer cancel()
+	released, err := db.ReleaseHeldClaims(ctx, pool)
+	if err != nil {
+		log.Error().Err(err).Msg("releasing claimed operations on shutdown")
+		return
+	}
+	if released > 0 {
+		log.Info().Int64("operations", released).Msg("released claimed operations back to the queue")
+	}
+}
+
+// releaseTimeout bounds the shutdown release so a wedged database cannot hold
+// the pod past its termination grace period.
+const releaseTimeout = 10 * time.Second

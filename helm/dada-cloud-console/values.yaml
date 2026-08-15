@@ -268,6 +268,11 @@ gitopsAgent:
     pullPolicy: IfNotPresent
   # webhookPort: when set, exposes a /webhook/github endpoint for push events
   webhookPort: 8090
+  # terminationGracePeriodSeconds: room for the agent to finish the operation in
+  # its hand and hand the rest of its claimed batch back to the queue on SIGTERM
+  # (db.ReleaseHeldClaims). Too short and the pod is killed mid-release, which is
+  # exactly the 30-minute stranding this replaces.
+  terminationGracePeriodSeconds: 60
   env:
     GITOPS_DEFAULT_BRANCH: "main"
     GITOPS_BOT_NAME: "DADA Platform Bot"

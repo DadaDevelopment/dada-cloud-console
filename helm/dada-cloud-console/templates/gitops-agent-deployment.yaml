@@ -21,6 +21,7 @@ spec:
         app.kubernetes.io/component: gitops-agent
     spec:
       serviceAccountName: {{ include "dada-cloud-console.fullname" . }}
+      terminationGracePeriodSeconds: {{ .Values.gitopsAgent.terminationGracePeriodSeconds | default 60 }}
       {{- with .Values.global.priorityClassName }}
       priorityClassName: {{ . }}
       {{- end }}
