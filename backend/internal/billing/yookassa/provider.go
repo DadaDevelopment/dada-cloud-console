@@ -2,6 +2,7 @@ package yookassa
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/dada-tuda/console/backend/internal/billing"
 	"github.com/dada-tuda/console/backend/internal/billing/pricing"
+	"github.com/dada-tuda/console/backend/internal/metrics"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -147,7 +149,18 @@ func (p *YooKassaProvider) receiptFor(plan pricing.Plan, amount Amount, customer
 // "canceled" before the error is returned, mirroring ChargeSaved. A row must
 // never sit in "pending" once its one and only path to becoming non-pending --
 // a webhook for a yk_payment_id that does not exist -- is already impossible.
-func (p *YooKassaProvider) Checkout(ctx context.Context, orgID string, plan pricing.Plan, customerEmail, createdBySub, projectID string, saveMethod bool) (paymentID, confirmationURL string, err error) {
+//
+// That same failure ALSO used to leave zero trace outside the payments table:
+// the only witness was a pod's stdout, gone the moment it restarted (the
+// 2026-08-14 incident this closes -- artempro2021@bk.ru's two failed
+// checkouts were only found a day later by manually scanning payments for
+// pending rows). The failure now writes a CreatePaymentFailed audit_events
+// row and bumps dada_payment_create_failures_total in the SAME database
+// transaction as the "canceled" update (see recordCheckoutFailureTx), so the
+// durable signal and the terminal row can never exist one without the other.
+// actorID is the caller's own users.id, matching every other audit row this
+// codebase writes for a user-initiated action.
+func (p *YooKassaProvider) Checkout(ctx context.Context, orgID string, plan pricing.Plan, customerEmail, createdBySub, projectID string, saveMethod bool, actorID uuid.UUID) (paymentID, confirmationURL string, err error) {
 	if err = p.requireReceiptEmail(customerEmail); err != nil {
 		return "", "", err
 	}
@@ -184,10 +197,10 @@ func (p *YooKassaProvider) Checkout(ctx context.Context, orgID string, plan pric
 
 	payment, err := p.Client.CreatePayment(ctx, id.String(), req)
 	if err != nil {
-		if _, uerr := p.Pool.Exec(ctx, `
-			UPDATE payments SET status = 'canceled', updated_at = $1 WHERE id = $2
-		`, time.Now().UTC(), id); uerr != nil {
-			return "", "", fmt.Errorf("yookassa: create payment: %w (also failed to mark canceled: %v)", err, uerr)
+		errorClass := classifyPaymentError(err)
+		metrics.RecordPaymentCreateFailure(errorClass)
+		if uerr := p.recordCheckoutFailureTx(ctx, id, actorID, orgID, plan.Key, amountValue, errorClass, err); uerr != nil {
+			return "", "", fmt.Errorf("yookassa: create payment: %w (also failed to mark canceled/audit: %v)", err, uerr)
 		}
 		return "", "", fmt.Errorf("yookassa: create payment: %w", err)
 	}
@@ -200,6 +213,76 @@ func (p *YooKassaProvider) Checkout(ctx context.Context, orgID string, plan pric
 	}
 
 	return id.String(), payment.Confirmation.URL, nil
+}
+
+// classifyPaymentError turns a CreatePayment failure into a bounded label
+// class, used both as audit metadata and as the dada_payment_create_failures_total
+// label. Never the raw error string: that would blow up metric cardinality
+// and put caller-controlled text straight into the audit trail.
+func classifyPaymentError(err error) string {
+	var apiErr *Error
+	if errors.As(err, &apiErr) {
+		switch apiErr.Code {
+		case "invalid_request", "not_supported", "invalid_credentials", "forbidden", "internal_server_error":
+			return "yk_" + apiErr.Code
+		}
+		if apiErr.Code != "" {
+			return "yk_other"
+		}
+		return "yk_unexpected_status"
+	}
+	return "transport"
+}
+
+// recordCheckoutFailureTx marks the pending payments row canceled and writes
+// its CreatePaymentFailed audit_events row in the SAME transaction, so the
+// durable "this happened" signal and the terminal payments row can never
+// exist one without the other -- the exact split that let the 2026-08-14
+// incident go unnoticed for a day (the row eventually turned up canceled,
+// but nothing said why or that it had happened at all).
+//
+// project_id is deliberately left NULL on the audit row rather than parsed
+// from the caller-supplied projectID: a bad or stale project reference must
+// never fail the FK and roll back the "canceled" mark this same transaction
+// exists to guarantee. actor_id carries no such risk -- it is always the
+// authenticated caller's own users.id, which by construction already exists.
+func (p *YooKassaProvider) recordCheckoutFailureTx(ctx context.Context, id, actorID uuid.UUID, orgID, plan, amountValue, errorClass string, createErr error) error {
+	tx, err := p.Pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	now := time.Now().UTC()
+	if _, err := tx.Exec(ctx, `
+		UPDATE payments SET status = 'canceled', updated_at = $1 WHERE id = $2
+	`, now, id); err != nil {
+		return fmt.Errorf("mark canceled: %w", err)
+	}
+
+	meta, merr := json.Marshal(map[string]string{
+		"payment_id":   id.String(),
+		"plan":         plan,
+		"amount_value": amountValue,
+		"currency":     "RUB",
+		"error_class":  errorClass,
+		"error":        createErr.Error(),
+	})
+	if merr != nil {
+		meta = []byte(`{}`)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO audit_events (actor_id, action, resource_kind, resource_name, outcome, metadata)
+		VALUES ($1, 'CreatePaymentFailed', 'Payment', $2, 'failure', $3)
+	`, actorID, orgID, meta); err != nil {
+		return fmt.Errorf("insert audit row: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	return nil
 }
 
 // WebhookResult is what ProcessWebhook found and did. OrgID/Plan/AmountValue/

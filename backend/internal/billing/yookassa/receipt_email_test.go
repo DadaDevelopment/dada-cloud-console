@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 // forbiddenServer fails the test if any request reaches YooKassa. A refusal
@@ -30,7 +32,7 @@ func forbiddenServer(t *testing.T) *Client {
 func TestCheckout_NoEmailOnFiscalShop_RefusesBeforeAnySideEffect(t *testing.T) {
 	p := NewProvider(nil, forbiddenServer(t), "https://console.example/return", true, 1, 0)
 
-	_, _, err := p.Checkout(context.Background(), "org-test", startupPlan(), "", "sub-test", "", false)
+	_, _, err := p.Checkout(context.Background(), "org-test", startupPlan(), "", "sub-test", "", false, uuid.Nil)
 
 	if !errors.Is(err, ErrReceiptEmailRequired) {
 		t.Fatalf("Checkout error = %v, want ErrReceiptEmailRequired", err)

@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/billing/pricing"
+	"github.com/dada-tuda/console/backend/internal/metrics"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func testProviderPool(t *testing.T) *pgxpool.Pool {
@@ -217,7 +219,7 @@ func TestCheckout_InsertsPendingRowThenStoresYkPaymentID(t *testing.T) {
 	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false, 1, 0)
 	plan := pricing.Plan{Key: "startup", Name: "Startup", PriceRUB: 990}
 
-	paymentID, confirmationURL, err := p.Checkout(context.Background(), orgID, plan, "buyer@example.com", "sub-checkout", uuid.NewString(), false)
+	paymentID, confirmationURL, err := p.Checkout(context.Background(), orgID, plan, "buyer@example.com", "sub-checkout", uuid.NewString(), false, uuid.Nil)
 	if err != nil {
 		t.Fatalf("Checkout: %v", err)
 	}
@@ -267,7 +269,7 @@ func TestCheckout_ProviderCreateFails_MarksRowCanceledInsteadOfLeavingBarePendin
 	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false, 1, 0)
 	plan := pricing.Plan{Key: "startup", Name: "Startup", PriceRUB: 990}
 
-	paymentID, confirmationURL, err := p.Checkout(context.Background(), orgID, plan, "buyer@example.com", "sub-checkout-fail", uuid.NewString(), false)
+	paymentID, confirmationURL, err := p.Checkout(context.Background(), orgID, plan, "buyer@example.com", "sub-checkout-fail", uuid.NewString(), false, uuid.Nil)
 	if err == nil {
 		t.Fatal("Checkout returned no error for a declined create call")
 	}
@@ -302,6 +304,88 @@ func TestCheckout_ProviderCreateFails_MarksRowCanceledInsteadOfLeavingBarePendin
 	}
 	if storedConfirmationURL != "" {
 		t.Fatalf("confirmation_url=%q want empty; YooKassa never created this payment", storedConfirmationURL)
+	}
+}
+
+// TestCheckout_ProviderCreateFails_LeavesAuditTrailAndBumpsMetric pins the
+// observability half of P0-PAY-CHECKOUT (sess-0815b): the row is now marked
+// canceled (previous test), but before this test that terminal row was the
+// ONLY trace a failed checkout ever left -- no audit_events row, no metric,
+// nothing an operator could alert on. artempro2021@bk.ru's 2026-08-14 failed
+// checkouts were found a day later by hand-scanning the payments table.
+// This asserts the audit row lands in the SAME transaction as the canceled
+// mark (both present or, on any DB failure, neither -- checked here as "both
+// present, since the happy path of the tx must commit both together") and
+// that the Prometheus counter moves.
+func TestCheckout_ProviderCreateFails_LeavesAuditTrailAndBumpsMetric(t *testing.T) {
+	pool := testProviderPool(t)
+	orgID := "org-checkout-audit-" + uuid.NewString()[:8]
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM payments WHERE org_id = $1`, orgID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM audit_events WHERE resource_kind = 'Payment' AND resource_name = $1`, orgID)
+	})
+
+	before := testutil.ToFloat64(metrics.PaymentCreateFailuresCollectorForTest("yk_invalid_request"))
+
+	client := declineServer(t)
+	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false, 1, 0)
+	plan := pricing.Plan{Key: "startup", Name: "Startup", PriceRUB: 990}
+
+	_, _, err := p.Checkout(context.Background(), orgID, plan, "buyer@example.com", "sub-checkout-audit", uuid.NewString(), false, uuid.Nil)
+	if err == nil {
+		t.Fatal("Checkout returned no error for a declined create call")
+	}
+
+	var paymentRowID, status string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT id::text, status FROM payments WHERE org_id = $1`, orgID,
+	).Scan(&paymentRowID, &status); err != nil {
+		t.Fatalf("read failed checkout row: %v", err)
+	}
+	if status != "canceled" {
+		t.Fatalf("status=%q want canceled", status)
+	}
+
+	var count int
+	var action, outcome, actorID string
+	var metadata []byte
+	err = pool.QueryRow(context.Background(), `
+		SELECT count(*), max(action), max(outcome), max(actor_id::text), max(metadata::text)
+		FROM audit_events WHERE resource_kind = 'Payment' AND resource_name = $1
+	`, orgID).Scan(&count, &action, &outcome, &actorID, &metadata)
+	if err != nil {
+		t.Fatalf("read audit_events row: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("audit_events rows for org=%d, want exactly 1 -- the failed checkout left no durable trail outside the payments table", count)
+	}
+	if action != "CreatePaymentFailed" {
+		t.Fatalf("action=%q want CreatePaymentFailed", action)
+	}
+	if outcome != "failure" {
+		t.Fatalf("outcome=%q want failure", outcome)
+	}
+	if actorID != uuid.Nil.String() {
+		t.Fatalf("actor_id=%q want %q", actorID, uuid.Nil.String())
+	}
+
+	var meta map[string]string
+	if err := json.Unmarshal(metadata, &meta); err != nil {
+		t.Fatalf("unmarshal audit metadata: %v", err)
+	}
+	if meta["payment_id"] != paymentRowID {
+		t.Fatalf("metadata payment_id=%q want %q (the canceled payments row)", meta["payment_id"], paymentRowID)
+	}
+	if meta["plan"] != "startup" {
+		t.Fatalf("metadata plan=%q want startup", meta["plan"])
+	}
+	if meta["error_class"] == "" {
+		t.Fatal("metadata missing error_class")
+	}
+
+	after := testutil.ToFloat64(metrics.PaymentCreateFailuresCollectorForTest(meta["error_class"]))
+	if after <= before {
+		t.Fatalf("dada_payment_create_failures_total{error_class=%q} did not increase: before=%v after=%v", meta["error_class"], before, after)
 	}
 }
 

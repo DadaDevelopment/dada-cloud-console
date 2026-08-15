@@ -93,6 +93,25 @@ spec:
               platform rather than a customer to invoice — decide deliberately whether to keep
               carrying it. The per-hour evidence is in app_usage; the same numbers per client are
               on /admin/costs.
+        - alert: DadaPaymentCreateFailing
+          expr: sum by (error_class) (increase(dada_payment_create_failures_total[30m])) > 0
+          for: 5m
+          # A counter, not a gauge like the rules above it: increase() over a fixed
+          # window dips back to zero as soon as failures stop landing in it, then
+          # crosses again on the next one, same shape as AIModelGroupRefused below.
+          # One payer failing twice in 3 seconds (2026-08-14) is one incident, not two.
+          keep_firing_for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "YooKassa checkout failing (error_class {{`{{ $labels.error_class }}`}})"
+            description: >-
+              {{`{{ $value | printf "%.0f" }}`}} checkout(s) failed creating a YooKassa payment
+              in the last 30m (error_class={{`{{ $labels.error_class }}`}}). The payments row is
+              marked canceled automatically, so the customer sees no confirmation and may retry
+              or give up silently -- a real payer's two failed checkouts on 2026-08-14 were only
+              found a day later by hand-scanning the payments table. Read the CreatePaymentFailed
+              rows in audit_events for the failing org(s) and reach out.
     - name: dada-cloud-console.ai
       rules:
         # On 2026-08-04 the shared OpenRouter account ran out of credit. The

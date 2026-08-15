@@ -113,7 +113,7 @@ func (h *Handler) BillingCheckout(c *gin.Context) {
 		return
 	}
 
-	paymentID, confirmationURL, err := h.yookassa.Checkout(c.Request.Context(), orgID, *plan, claims.Email, claims.Subject, projectID.String(), body.Autopay)
+	paymentID, confirmationURL, err := h.yookassa.Checkout(c.Request.Context(), orgID, *plan, claims.Email, claims.Subject, projectID.String(), body.Autopay, claims.UserID)
 	if err != nil {
 		log.Printf("payments: checkout failed org=%s plan=%s: %v", orgID, body.Plan, err)
 		if errors.Is(err, yookassa.ErrReceiptEmailRequired) {
