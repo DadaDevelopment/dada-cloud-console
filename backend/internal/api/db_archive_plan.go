@@ -238,6 +238,25 @@ func (h *Handler) GetDatabaseArchivePlan(c *gin.Context) {
 		return
 	}
 
+	guards, err := archiveDeleteGuards(ctx, conn, schema, relname)
+	if err != nil {
+		respondError(c, http.StatusServiceUnavailable, "cannot read the table's delete rules right now")
+		return
+	}
+	if len(guards) > 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"table":           schema + "." + relname,
+			"archivable":      false,
+			"reason":          archiveDeleteGuardsReason(schema, relname, guards),
+			"blockedByGuards": guards,
+			"columns":         cols,
+			"totalRows":       totalRows,
+			"totalBytes":      totalBytes,
+			"totalBytesHuman": humanBytes(totalBytes),
+		})
+		return
+	}
+
 	column, reason := pickCutoffColumn(cols)
 	if reason != "" {
 		vias, viaErr := archiveViaCandidates(ctx, conn, schema, relname)

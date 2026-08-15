@@ -138,6 +138,15 @@ func (h *Handler) StartDatabaseArchive(c *gin.Context) {
 		respondError(c, http.StatusConflict, archiveChildrenReason(schema, relname, children))
 		return
 	}
+	guards, err := archiveDeleteGuards(ctx, conn, schema, relname)
+	if err != nil {
+		respondError(c, http.StatusServiceUnavailable, "cannot read the table's delete rules right now")
+		return
+	}
+	if len(guards) > 0 {
+		respondError(c, http.StatusConflict, archiveDeleteGuardsReason(schema, relname, guards))
+		return
+	}
 	via, columnName, reason := resolveArchiveCutoff(ctx, conn, schema, relname, cols, req.Via)
 	if reason != "" {
 		respondError(c, http.StatusBadRequest, reason)
