@@ -351,13 +351,66 @@ func clearURLProbeAlert(ctx context.Context, pool *pgxpool.Pool, namespace, appN
 	}
 }
 
+// recordURLHTTPSeen remembers that this app answered HTTP at least once.
+// The row is never deleted, which is the whole point: app_url_alerts rows are
+// dropped on every passing probe, so they cannot carry the one fact that
+// separates "this web app broke" from "this was never a web app".
+func recordURLHTTPSeen(ctx context.Context, pool *pgxpool.Pool, namespace, appName string) {
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO app_url_http_seen (namespace, app_name, first_seen_at, last_seen_at)
+		 VALUES ($1, $2, now(), now())
+		 ON CONFLICT (namespace, app_name) DO UPDATE SET last_seen_at = now()`,
+		namespace, appName); err != nil {
+		log.Printf("app-url: record http-seen for %s/%s failed: %v", namespace, appName, err)
+	}
+}
+
+// hasServedHTTP reports whether this app has ever answered an HTTP probe.
+// A database error is reported as true so that a failing lookup degrades into
+// the old, louder behaviour rather than silently disarming every alert.
+func hasServedHTTP(ctx context.Context, pool *pgxpool.Pool, namespace, appName string) bool {
+	var seen bool
+	if err := pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM app_url_http_seen WHERE namespace = $1 AND app_name = $2)`,
+		namespace, appName).Scan(&seen); err != nil {
+		log.Printf("app-url: http-seen lookup for %s/%s failed: %v", namespace, appName, err)
+		return true
+	}
+	return seen
+}
+
 // recordProbeResult persists one probe outcome: a pass clears any existing
 // alert row, a failure claims the next consecutive-failure count and logs
 // once, at the moment the alert actually arms, so the operator log carries
 // one line per genuinely new outage rather than one line per tick for the
 // lifetime of a broken app.
+//
+// A failure on an app that has never once answered HTTP is not an outage at
+// all and raises nothing. Measured 2026-08-15 on prod: of the nine live
+// app_url_alerts rows, four were healthy long-poll bots and binary-protocol
+// services that publish no HTTP port and never intended to -- telemost-bot
+// (our own, 5864 consecutive failures), oxygen (an MTProto proxy this file's
+// own header already admits is not broken), and both copies of a user's
+// telegram bot, which sat red in his console for days before he deleted his
+// projects. The port they are probed on was never declared by anyone: apps.go
+// substitutes defaultPortForFramework when the user leaves it blank, and
+// servesHTTP then hands out a public hostname on that guess. A dial that is
+// refused on a guessed port, on a pod that is Ready, is evidence the app is a
+// worker -- not evidence that anything is wrong with it. Any existing alert
+// row for such an app is deleted, so the four false banners clear themselves
+// on the first tick after this ships rather than needing a manual sweep.
+//
+// The gap this deliberately accepts: a real web app that was broken from its
+// very first probe never arms this alert. That case is a deploy-time failure,
+// already carried by the build result and the crash banner, and is not the
+// silent-502-months-later outage this watcher exists to catch.
 func (w *appURLWatcher) recordProbeResult(ctx context.Context, namespace, appName string, healthy bool, reason, detail string) {
 	if healthy {
+		recordURLHTTPSeen(ctx, w.h.pool, namespace, appName)
+		clearURLProbeAlert(ctx, w.h.pool, namespace, appName)
+		return
+	}
+	if !hasServedHTTP(ctx, w.h.pool, namespace, appName) {
 		clearURLProbeAlert(ctx, w.h.pool, namespace, appName)
 		return
 	}
