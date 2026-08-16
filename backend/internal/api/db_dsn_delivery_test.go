@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/dada-tuda/console/backend/internal/cloudtask"
 	"github.com/dada-tuda/console/backend/internal/config"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // fakeDBCredsResolver lets the delivery tests control what dbcreds.Resolve
@@ -111,8 +113,8 @@ func TestSeedDatabaseDSNIfAbsent_NeverOverwritesAnExistingValue(t *testing.T) {
 		t.Fatalf("read back env var: %v", err)
 	}
 	outcome, reason, _ := lastAuditRow(t, pool, projectID, auditActionSeedDatabaseDSN)
-	if outcome != auditOutcomeSuccess || reason != "already_set" {
-		t.Fatalf("audit row = (%q, %q), want (success, already_set)", outcome, reason)
+	if outcome != auditOutcomeSuccess || reason != "user_modified" {
+		t.Fatalf("audit row = (%q, %q), want (success, user_modified)", outcome, reason)
 	}
 }
 
@@ -200,4 +202,181 @@ func TestAttemptDatabaseDSNDelivery_ReadySeedsTheEnvVar(t *testing.T) {
 	if !set {
 		t.Fatalf("DATABASE_URL was not seeded after a successful delivery attempt")
 	}
+}
+
+// TestSeedDatabaseDSN_RefreshesOnlyThePlatformsOwnStaleValue pins the rule that
+// decides whether the platform may rewrite a DATABASE_URL it wrote earlier.
+//
+// The 2026-08-15 measurement behind it: the credentials endpoint had started
+// handing out db.pv.dada-tuda.ru with sslmode=require, while both live user
+// apps still carried the pre-flag pg-router string with no sslmode. The stored
+// value has to move for those, and must not move for anything the user touched.
+func TestSeedDatabaseDSN_RefreshesOnlyThePlatformsOwnStaleValue(t *testing.T) {
+	const freshDSN = "postgresql://svc-app:pw123@db.pv.dada-tuda.ru:5432/appdb?sslmode=require"
+
+	cases := []struct {
+		name       string
+		existing   string
+		wantWrite  bool
+		wantReason string
+	}{
+		{
+			name:       "no value yet is seeded",
+			existing:   "",
+			wantWrite:  true,
+			wantReason: "seeded",
+		},
+		{
+			name:       "our own pre-TLS string is refreshed",
+			existing:   "postgresql://svc-app:pw123@pg-router.databases.svc.cluster.local:5432/appdb",
+			wantWrite:  true,
+			wantReason: "refreshed_stale_platform_dsn",
+		},
+		{
+			name:       "our own shard-era string is refreshed",
+			existing:   "postgresql://svc-app:pw123@pg-shard-0-postgresql.databases.svc.cluster.local:5432/appdb?sslmode=disable",
+			wantWrite:  true,
+			wantReason: "refreshed_stale_platform_dsn",
+		},
+		{
+			name:       "identical value is left alone",
+			existing:   freshDSN,
+			wantWrite:  false,
+			wantReason: "already_current",
+		},
+		{
+			name:       "different password means the user edited it",
+			existing:   "postgresql://svc-app:their-own-pw@pg-router.databases.svc.cluster.local:5432/appdb",
+			wantWrite:  false,
+			wantReason: "user_modified",
+		},
+		{
+			name:       "different database means it is not this database",
+			existing:   "postgresql://svc-app:pw123@pg-router.databases.svc.cluster.local:5432/some-other-db",
+			wantWrite:  false,
+			wantReason: "user_modified",
+		},
+		{
+			name:       "a host we never issued is never rewritten",
+			existing:   "postgresql://svc-app:pw123@db.neon.tech:5432/appdb?sslmode=require",
+			wantWrite:  false,
+			wantReason: "user_modified",
+		},
+		{
+			name:       "free text the user pasted is never rewritten",
+			existing:   "postgresql://user-typed-this",
+			wantWrite:  false,
+			wantReason: "user_modified",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pool := testOptimisticPool(t)
+			h := &Handler{pool: pool, cfg: &config.Config{GitopsEncryptionKey: installTestKey}}
+			userID := seedUser(t, pool)
+			projectID, envID := seedOptimisticFixture(t, pool)
+			seedApp(t, pool, projectID, envID, "megafactory")
+
+			if tc.existing != "" {
+				if err := h.seedEnvVar(context.Background(), envID, "megafactory", "DATABASE_URL", tc.existing, userID); err != nil {
+					t.Fatalf("seedEnvVar (existing value): %v", err)
+				}
+			}
+
+			wrote, err := h.seedDatabaseDSNIfAbsent(context.Background(), projectID, envID, "pg", "megafactory", freshDSN, userID, "reveal")
+			if err != nil {
+				t.Fatalf("seedDatabaseDSNIfAbsent: %v", err)
+			}
+			if wrote != tc.wantWrite {
+				t.Fatalf("wrote = %v, want %v", wrote, tc.wantWrite)
+			}
+
+			outcome, reason, _ := lastAuditRow(t, pool, projectID, auditActionSeedDatabaseDSN)
+			if outcome != auditOutcomeSuccess {
+				t.Fatalf("audit outcome = %q, want success", outcome)
+			}
+			if reason != tc.wantReason {
+				t.Fatalf("audit reason = %q, want %q", reason, tc.wantReason)
+			}
+
+			stored, found, err := h.appEnvVarValue(context.Background(), envID, "megafactory", "DATABASE_URL")
+			if err != nil {
+				t.Fatalf("read back DATABASE_URL: %v", err)
+			}
+			if !found {
+				if tc.existing != "" || tc.wantWrite {
+					t.Fatalf("DATABASE_URL vanished")
+				}
+				return
+			}
+			want := tc.existing
+			if tc.wantWrite {
+				want = freshDSN
+			}
+			if stored != want {
+				t.Fatalf("stored DATABASE_URL = %q, want %q", stored, want)
+			}
+		})
+	}
+}
+
+// TestSeedDatabaseDSN_AuditNeverCarriesThePassword guards the audit metadata
+// added alongside the refresh: it records which host the value moved from and
+// to, and a DSN password must never ride along into audit_events.
+func TestSeedDatabaseDSN_AuditNeverCarriesThePassword(t *testing.T) {
+	pool := testOptimisticPool(t)
+	h := &Handler{pool: pool, cfg: &config.Config{GitopsEncryptionKey: installTestKey}}
+	userID := seedUser(t, pool)
+	projectID, envID := seedOptimisticFixture(t, pool)
+	seedApp(t, pool, projectID, envID, "megafactory")
+
+	const secret = "sup3r-s3cret-pw"
+	if err := h.seedEnvVar(context.Background(), envID, "megafactory", "DATABASE_URL",
+		"postgresql://svc-app:"+secret+"@pg-router.databases.svc.cluster.local:5432/appdb", userID); err != nil {
+		t.Fatalf("seedEnvVar: %v", err)
+	}
+
+	wrote, err := h.seedDatabaseDSNIfAbsent(context.Background(), projectID, envID, "pg", "megafactory",
+		"postgresql://svc-app:"+secret+"@db.pv.dada-tuda.ru:5432/appdb?sslmode=require", userID, "reveal")
+	if err != nil {
+		t.Fatalf("seedDatabaseDSNIfAbsent: %v", err)
+	}
+	if !wrote {
+		t.Fatalf("stale platform DSN was not refreshed")
+	}
+
+	meta := lastAuditMetadata(t, pool, projectID, auditActionSeedDatabaseDSN)
+	if len(meta) == 0 {
+		t.Fatalf("audit row carried no metadata")
+	}
+	if strings.Contains(meta, secret) {
+		t.Fatalf("audit metadata leaked the DSN password: %s", meta)
+	}
+	for _, want := range []string{"pg-router.databases.svc.cluster.local", "db.pv.dada-tuda.ru"} {
+		if !strings.Contains(meta, want) {
+			t.Fatalf("audit metadata missing %q: %s", want, meta)
+		}
+	}
+}
+
+// lastAuditMetadata returns the newest audit row's metadata for action as JSON
+// text, so a test can assert on what the row does and does not carry.
+func lastAuditMetadata(t *testing.T, pool *pgxpool.Pool, projectID uuid.UUID, action string) string {
+	t.Helper()
+	var meta map[string]any
+	err := pool.QueryRow(context.Background(),
+		`SELECT metadata FROM audit_events
+		  WHERE project_id = $1 AND action = $2
+		  ORDER BY created_at DESC LIMIT 1`,
+		projectID, action,
+	).Scan(&meta)
+	if err != nil {
+		t.Fatalf("expected a %s audit row, got error: %v", action, err)
+	}
+	raw, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatalf("marshal audit metadata: %v", err)
+	}
+	return string(raw)
 }
