@@ -794,6 +794,14 @@ export const apps: Messages = {
     ru: "Не удалось исправить переменную окружения",
     en: "Failed to fix the environment variable",
   },
+  "apps.alerts.crash.cause.missingEnvVar": {
+    ru: "Приложению не хватает переменной окружения {key} — оно ищет её при старте и не находит. Это не ошибка в коде и не сбой платформы: добавьте переменную в настройках, приложение перезапустится само.",
+    en: "The app is missing the {key} environment variable — it looks for it at startup and finds nothing. Neither a bug in your code nor a platform failure: add the variable in the settings and the app will restart on its own.",
+  },
+  "apps.alerts.crash.cause.missingEnvVar.cta": {
+    ru: "Добавить переменную {key}",
+    en: "Add the {key} variable",
+  },
   "apps.alerts.crash.cause.line": { ru: "Из логов:", en: "From the logs:" },
   "apps.alerts.crash.cta": { ru: "Смотреть логи", en: "View logs" },
   "apps.alerts.crash.diagnose": { ru: "Разобраться", en: "Diagnose" },

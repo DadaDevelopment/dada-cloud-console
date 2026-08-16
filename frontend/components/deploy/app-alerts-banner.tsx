@@ -320,6 +320,7 @@ interface AppAlertsBannerProps {
   logsHref: string;
   storageHref: string;
   startCommandHref: string;
+  envVarsHref: string;
   projectId: string;
   envId: string;
   appName: string;
@@ -333,7 +334,7 @@ interface AppAlertsBannerProps {
  * a follow-up autofix action once a diagnosis names a fixable cause.
  * Renders nothing when `alerts` is empty or absent.
  */
-export function AppAlertsBanner({ alerts, logsHref, storageHref, startCommandHref, projectId, envId, appName }: AppAlertsBannerProps) {
+export function AppAlertsBanner({ alerts, logsHref, storageHref, startCommandHref, envVarsHref, projectId, envId, appName }: AppAlertsBannerProps) {
   const { t } = useT();
   const [diagnose, setDiagnose] = useState<DiagnoseState>({ status: "idle" });
   const [autofix, setAutofix] = useState<AutofixState>({ status: "idle" });
@@ -425,7 +426,15 @@ export function AppAlertsBanner({ alerts, logsHref, storageHref, startCommandHre
                       />
                     </>
                   )}
-                  {alert.cause_line && alert.cause_kind !== "bad_connection_string" && alert.cause_kind !== "ssl_not_supported" && (
+                  {alert.cause_kind === "missing_env_var" && (
+                    <p className="text-xs font-semibold text-red-800 dark:text-red-200">
+                      {t("apps.alerts.crash.cause.missingEnvVar", { key: alert.cause_line ?? "" })}
+                    </p>
+                  )}
+                  {alert.cause_line &&
+                    alert.cause_kind !== "bad_connection_string" &&
+                    alert.cause_kind !== "ssl_not_supported" &&
+                    alert.cause_kind !== "missing_env_var" && (
                     <div className="overflow-x-auto rounded-md bg-red-100/70 dark:bg-red-950/60 px-2.5 py-1.5">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-red-500 dark:text-red-400">
                         {t("apps.alerts.crash.cause.line")}
@@ -453,6 +462,14 @@ export function AppAlertsBanner({ alerts, logsHref, storageHref, startCommandHre
                 >
                   {t("apps.alerts.crash.cta")}
                 </Link>
+                {alert.cause_kind === "missing_env_var" && (
+                  <Link
+                    href={envVarsHref}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-red-700 dark:text-red-300 underline underline-offset-2 hover:text-red-800 dark:hover:text-red-200"
+                  >
+                    {t("apps.alerts.crash.cause.missingEnvVar.cta", { key: alert.cause_line ?? "" })}
+                  </Link>
+                )}
                 {alert.cause_kind === "app_needs_args" && (
                   <Link
                     href={startCommandHref}

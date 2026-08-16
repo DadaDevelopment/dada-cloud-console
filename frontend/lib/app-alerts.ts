@@ -38,9 +38,13 @@ export type AppAlertType = "crash" | "volume" | "url";
  * bare-host case this DSN can carry a real password, so the backend never
  * writes the value into cause/cause_line at all — the console reveals the
  * current value itself, on demand, right before writing the fix back (see
- * AppAlertsBanner's SSL repair block). Missing or empty means the backend
- * could not classify it — the console must not guess "your code" in that
- * case.
+ * AppAlertsBanner's SSL repair block). `"missing_env_var"` means the app
+ * asked for an environment variable that is not set on it (see the backend's
+ * notify.ClassifyMissingEnvVar) — neutral again: the code is fine, the
+ * platform is fine, one input is absent. `cause_line` holds ONLY the bare key
+ * name, and there is no value to show by construction. Missing or empty means
+ * the backend could not classify it — the console must not guess "your code"
+ * in that case.
  */
 export type AppAlertCauseKind =
   | "app_code"
@@ -50,7 +54,8 @@ export type AppAlertCauseKind =
   | "resource_limit"
   | "app_needs_args"
   | "bad_connection_string"
-  | "ssl_not_supported";
+  | "ssl_not_supported"
+  | "missing_env_var";
 
 export interface AppAlert {
   type: AppAlertType;

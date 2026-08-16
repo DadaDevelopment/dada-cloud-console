@@ -686,6 +686,10 @@ func (w *appHealthWatcher) maybeCauseRefresh(ctx context.Context, alert appHealt
 			causeKind = notify.CauseKindSSLNotSupported
 			cause = sslNotSupportedCrashText(sslKey)
 			causeLine = sslKey
+		} else if envKey, ok := notify.ClassifyMissingEnvVar(logExcerpt, env); ok {
+			causeKind = notify.CauseKindMissingEnvVar
+			cause = missingEnvVarCrashText(envKey)
+			causeLine = envKey
 		}
 	}
 	return logExcerpt, cause, causeLine, causeKind, true
@@ -705,6 +709,18 @@ func (w *appHealthWatcher) maybeCauseRefresh(ctx context.Context, alert appHealt
 // before it writes the fix back.
 func sslNotSupportedCrashText(key string) string {
 	return key + " требует SSL-соединение, а база данных его не поддерживает. Первое, что стоит попробовать — дописать sslmode=disable в конец строки подключения. Если ошибка вернётся, SSL включён в самом коде приложения (ssl: true при создании клиента базы) — убирать надо там."
+}
+
+// missingEnvVarCrashText composes the owner-facing sentence for
+// notify.CauseKindMissingEnvVar, naming the exact variable the app asked for
+// and did not get. Worded like resourceLimitCrashText and needsArgsCrashText:
+// neither "your code is broken" nor "we are broken", because neither is true
+// -- the app is missing one input, and supplying it is a form the console
+// already has. causeLine carries the bare key so the banner can link to the
+// env-var editor with the name already in hand; no value is ever involved,
+// since by construction there is none.
+func missingEnvVarCrashText(key string) string {
+	return "Приложение не запускается, потому что не задана переменная окружения " + key + ". Это не ошибка в коде и не сбой платформы — добавьте переменную в настройках приложения, и оно поднимется само."
 }
 
 // connStringCrashText composes the owner-facing sentence for
