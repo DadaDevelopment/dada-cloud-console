@@ -652,13 +652,27 @@ func pythonTracebackException(excerpt string) string {
 }
 
 // ExtractCauseLine picks the single most telling line out of a crashed
-// container's log excerpt. A Python traceback is read by its own format
-// first (pythonTracebackException), because that finds the real exception
-// even when its type is absent from the signature tables; everything else
-// falls back to the LAST line containing one of the known error signatures
-// (crashLineSignaturePatterns), since a stack dump lists causes top to bottom
-// and the final matching line is usually the one closest to the failure. The
-// bare traceback header is never a valid answer in either path.
+// container's log excerpt. It must agree with ClassifyCrashCause: whatever
+// signature that function matched to produce cause_kind is the evidence the
+// owner needs to see under it, so the LAST line containing one of the known
+// error signatures (crashLineSignaturePatterns) is tried first, exactly the
+// same table ClassifyCrashCause itself walks. A stack dump lists causes top
+// to bottom, so the final matching line is usually the one closest to the
+// failure.
+//
+// Only when NO known signature appears anywhere in the excerpt does this
+// fall back to reading a Python traceback by its own format
+// (pythonTracebackException): that finds the real exception even when its
+// type is absent from the signature tables, but it has no way to know which
+// line, if any, backs a verdict cause_kind already committed to — P1 live
+// case was fonbet-value's cause_kind=db_read_only (matched by
+// dbReadOnlyCrashSignatures on an inner psycopg line) paired with a
+// cause_line from a LATER, unrelated unindented line in the same chained
+// SQLAlchemy traceback, because the traceback-shape heuristic only looks at
+// the shape of the last line, not whether it says anything about the
+// signature that actually fired. Signature-first fixes the general class:
+// whichever table entry proved the verdict is also what selects the line.
+// The bare traceback header is never a valid answer in either path.
 //
 // Returns "" when nothing matches — this must never guess or fall back to an
 // arbitrary line, because a wrong "cause" shown next to a crash is worse than
@@ -669,21 +683,22 @@ func ExtractCauseLine(excerpt string) string {
 	if excerpt == "" {
 		return ""
 	}
-	best := pythonTracebackException(excerpt)
-	if best == "" {
-		patterns := crashLineSignaturePatterns()
-		for _, line := range strings.Split(excerpt, "\n") {
-			trimmed := strings.TrimSpace(line)
-			if trimmed == "" || strings.Contains(trimmed, pythonTracebackHeader) {
-				continue
-			}
-			for _, p := range patterns {
-				if strings.Contains(trimmed, p) {
-					best = trimmed
-					break
-				}
+	best := ""
+	patterns := crashLineSignaturePatterns()
+	for _, line := range strings.Split(excerpt, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.Contains(trimmed, pythonTracebackHeader) {
+			continue
+		}
+		for _, p := range patterns {
+			if strings.Contains(trimmed, p) {
+				best = trimmed
+				break
 			}
 		}
+	}
+	if best == "" {
+		best = pythonTracebackException(excerpt)
 	}
 	if best == "" {
 		return ""

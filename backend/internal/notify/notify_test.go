@@ -231,6 +231,24 @@ func TestExtractCauseLine(t *testing.T) {
 			excerpt: "",
 			want:    "",
 		},
+		{
+			name: "H08: chained sqlalchemy traceback picks the signature line, not the trailing decoy",
+			excerpt: "Traceback (most recent call last):\n" +
+				"  File \"/app/db.py\", line 12, in write\n" +
+				"    cur.execute(query)\n" +
+				"psycopg.errors.ReadOnlySqlTransaction: cannot execute INSERT in a read-only transaction\n" +
+				"\n" +
+				"The above exception was the direct cause of the following exception:\n" +
+				"\n" +
+				"Traceback (most recent call last):\n" +
+				"  File \"/app/db.py\", line 40, in write\n" +
+				"    raise RuntimeError(\"db write failed\") from exc\n" +
+				"RuntimeError: db write failed\n" +
+				"[SQL: INSERT INTO events (id) VALUES (%(id)s)]\n" +
+				"[parameters: {'id': 501}]\n" +
+				"(Background on this error at: https://sqlalche.me/e/20/2j85)",
+			want: "psycopg.errors.ReadOnlySqlTransaction: cannot execute INSERT in a read-only transaction",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -238,6 +256,54 @@ func TestExtractCauseLine(t *testing.T) {
 				t.Fatalf("ExtractCauseLine(%q) = %q, want %q", tt.excerpt, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestExtractCauseLineAgreesWithClassifyCrashCause is the direct regression
+// test for H08: a cause_line that does not contain the signature which
+// produced cause_kind is worse than no cause_line at all, because the owner
+// sees a verdict with unrelated "evidence" under it. Live case was
+// fonbet-value: cause_kind=db_read_only (matched on an inner psycopg line of
+// a chained SQLAlchemy traceback) paired with a cause_line pulled from a
+// later, unrelated line by the old python-traceback-shape-first heuristic.
+// The second half of this test is the other pole: an unlisted exception type
+// with no matching signature must still fall back to the python traceback
+// shape and return a meaningful line, not empty -- the signature-first
+// change must not regress that path.
+func TestExtractCauseLineAgreesWithClassifyCrashCause(t *testing.T) {
+	excerpt := "Traceback (most recent call last):\n" +
+		"  File \"/app/db.py\", line 12, in write\n" +
+		"    cur.execute(query)\n" +
+		"psycopg.errors.ReadOnlySqlTransaction: cannot execute INSERT in a read-only transaction\n" +
+		"\n" +
+		"The above exception was the direct cause of the following exception:\n" +
+		"\n" +
+		"Traceback (most recent call last):\n" +
+		"  File \"/app/db.py\", line 40, in write\n" +
+		"    raise RuntimeError(\"db write failed\") from exc\n" +
+		"RuntimeError: db write failed\n" +
+		"[SQL: INSERT INTO events (id) VALUES (%(id)s)]\n" +
+		"[parameters: {'id': 501}]\n" +
+		"(Background on this error at: https://sqlalche.me/e/20/2j85)"
+
+	kind, _ := ClassifyCrashCause(excerpt)
+	if kind != CauseKindDBReadOnly {
+		t.Fatalf("test setup broken: expected cause_kind=%s, got %q", CauseKindDBReadOnly, kind)
+	}
+	line := ExtractCauseLine(excerpt)
+	if !strings.Contains(line, "ReadOnlySqlTransaction") && !strings.Contains(line, "read-only transaction") {
+		t.Fatalf("cause_line %q does not contain the signature that produced cause_kind=%s", line, kind)
+	}
+
+	plain := "loading model\nTraceback (most recent call last):\n  File \"/app/infer.py\", line 41, in <module>\n    load_model()\nRuntimeError: no objects found under 's3://models/buffalo_l' - check MODEL_S3_URI"
+	plainKind, _ := ClassifyCrashCause(plain)
+	if plainKind != CauseKindAppCode {
+		t.Fatalf("test setup broken: expected cause_kind=%s (matched on the bare traceback header, since RuntimeError itself is not in any signature table), got %q", CauseKindAppCode, plainKind)
+	}
+	plainLine := ExtractCauseLine(plain)
+	want := "RuntimeError: no objects found under 's3://models/buffalo_l' - check MODEL_S3_URI"
+	if plainLine != want {
+		t.Fatalf("fallback regressed: ExtractCauseLine(unlisted exception) = %q, want %q", plainLine, want)
 	}
 }
 
