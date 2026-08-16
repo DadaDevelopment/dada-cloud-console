@@ -16,6 +16,40 @@ import { trackUxEvent } from "@/lib/ux-telemetry";
 import { formatCommitLabel, resolveCommit } from "@/lib/build-commit";
 import { trackBuildStart } from "@/lib/build-watch";
 import { buildFailureDetail } from "@/lib/build-failure";
+import { getAppAlerts, type AppAlert } from "@/lib/app-alerts";
+
+/**
+ * Maps a crash alert's `cause_kind` to the message key this panel is allowed
+ * to show. Mirrors `crashCauseKey` in app-alerts-banner.tsx: `cause` itself
+ * is backend Russian prose that exists only as a "we recognised this" flag
+ * (see app-alerts.ts's doc comment on AppAlert) and must never be printed
+ * verbatim, so every kind renders through a console-owned translation
+ * instead. `bad_connection_string` and `ssl_not_supported` are deliberately
+ * left out: their real message needs the live DSN/key repair affordance
+ * that only the app page's alerts banner builds, which is exactly why this
+ * panel links there rather than duplicating it. An unmapped or missing kind
+ * returns null so the panel names no cause rather than guessing one.
+ */
+function buildCrashCauseKey(kind?: AppAlert["cause_kind"]): string | null {
+  switch (kind) {
+    case "app_code":
+      return "apps.alerts.crash.cause.appCode";
+    case "platform_network":
+      return "apps.alerts.crash.cause.platformNetwork";
+    case "platform_storage":
+      return "apps.alerts.crash.cause.platformStorage";
+    case "platform_registry":
+      return "apps.alerts.crash.cause.platformRegistry";
+    case "resource_limit":
+      return "apps.alerts.crash.cause.resourceLimit";
+    case "app_needs_args":
+      return "apps.alerts.crash.cause.needsArgs";
+    case "missing_env_var":
+      return "apps.alerts.crash.cause.missingEnvVar";
+    default:
+      return null;
+  }
+}
 
 const PYTHON_BOT_DOCKERFILE = `FROM python:3.12-slim
 WORKDIR /app
@@ -43,8 +77,11 @@ export default function BuildDetailPage() {
   const [rebuilding, setRebuilding] = useState(false);
   const [appUrl, setAppUrl] = useState<string | null>(null);
   const [appReady, setAppReady] = useState(false);
+  const [appCrashing, setAppCrashing] = useState(false);
+  const [crashAlert, setCrashAlert] = useState<AppAlert | null>(null);
   const successViewedRef = useRef(false);
   const readyCtaViewedRef = useRef(false);
+  const crashViewedRef = useRef(false);
   const appUrlPollsRef = useRef(0);
 
   const canDeploy = canMutate(role);
@@ -99,6 +136,16 @@ export default function BuildDetailPage() {
    * crashing app cannot poll forever. A failure here must never surface as
    * an error -- the build itself succeeded -- so the catch is silent and the
    * panel just falls back to its URL-less layout.
+   *
+   * The same read also carries the app's crash signal (phase collapsed to
+   * `"CrashLoop"` by the reconciler, or a `type: "crash"` alert in
+   * summary_json.alerts -- see getAppAlerts). Crash state is re-derived from
+   * every read instead of being latched on first sight: a container that
+   * restarts into a healthy run must be able to clear the panel, otherwise
+   * the page keeps telling the owner their working app is broken until they
+   * reload by hand. Only `ready` stops the poll; a crashing app keeps
+   * reading until the existing cap, which is what it did before this panel
+   * existed.
    */
   useEffect(() => {
     if (build?.status !== "success") return;
@@ -115,7 +162,12 @@ export default function BuildDetailPage() {
           const found = (data.apps ?? []).find((a) => a.name === appName);
           const summary = found?.summary_json as { url?: string } | undefined;
           if (summary?.url) setAppUrl(summary.url);
-          setAppReady((found?.phase ?? "").toLowerCase() === "ready");
+          const phase = (found?.phase ?? "").toLowerCase();
+          const crash = getAppAlerts(found).find((a) => a.type === "crash") ?? null;
+          const crashing = phase === "crashloop" || crash !== null;
+          setCrashAlert(crashing ? crash : null);
+          setAppCrashing(crashing);
+          setAppReady(!crashing && phase === "ready");
         })
         .catch(() => {});
     };
@@ -126,6 +178,20 @@ export default function BuildDetailPage() {
       clearInterval(timer);
     };
   }, [build?.status, envId, projectId, appName, appReady]);
+
+  /**
+   * Reports one `view` event for the crash panel, guarded the same way as
+   * `build_success_cta:panel` so the poll's re-renders cannot inflate it.
+   * Exists so this surface's appearance -- and its show->click conversion
+   * to the app page / runtime logs -- is measurable at all; before this it
+   * was invisible (see the sevarateambot incident this fix responds to).
+   */
+  useEffect(() => {
+    if (!appCrashing) return;
+    if (crashViewedRef.current) return;
+    crashViewedRef.current = true;
+    trackUxEvent("view", "build_crash_panel:panel");
+  }, [appCrashing]);
 
   /**
    * Same gate as `app-latest-build-card.tsx`: a build can succeed while the
@@ -254,7 +320,41 @@ export default function BuildDetailPage() {
             <div className="mb-4 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">{error}</div>
           )}
 
-          {build.status === "success" && (
+          {build.status === "success" && appCrashing && (
+            <div className="mb-4 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
+              <p className="font-medium">{t("apps.builds.crash.heading")}</p>
+              {(() => {
+                const causeKey = buildCrashCauseKey(crashAlert?.cause_kind);
+                if (!causeKey) return null;
+                return (
+                  <p className="mt-1">
+                    {t(
+                      causeKey,
+                      crashAlert?.cause_kind === "missing_env_var" ? { key: crashAlert?.cause_line ?? "" } : undefined
+                    )}
+                  </p>
+                );
+              })()}
+              <div className="mt-3 flex flex-wrap gap-3">
+                <Link
+                  href={`/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}`}
+                  data-ux="build_crash_panel:open_app"
+                  className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-700"
+                >
+                  {t("apps.builds.crash.openApp")}
+                </Link>
+                <Link
+                  href={`/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}#logs`}
+                  data-ux="build_crash_panel:open_logs"
+                  className="rounded-lg border border-amber-300 dark:border-amber-800 px-4 py-2 text-sm font-medium text-amber-800 dark:text-amber-300 transition-colors hover:bg-amber-100 dark:hover:bg-amber-900/40"
+                >
+                  {t("apps.builds.crash.viewLogs")}
+                </Link>
+              </div>
+            </div>
+          )}
+
+          {build.status === "success" && !appCrashing && (
             <div className="mb-4 flex items-center justify-between gap-4 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/40 px-4 py-3 text-sm text-green-700 dark:text-green-300">
               <div className="min-w-0">
                 <p className="font-medium">{t("apps.builds.success.heading")}</p>

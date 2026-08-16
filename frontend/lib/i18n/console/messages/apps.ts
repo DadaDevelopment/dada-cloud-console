@@ -292,6 +292,12 @@ export const apps: Messages = {
   "apps.builds.success.heading": { ru: "Сборка готова", en: "Build ready" },
   "apps.builds.success.openApp": { ru: "Открыть приложение", en: "Open application" },
   "apps.builds.success.notReady": { ru: "Приложение ещё запускается, ссылка появится, когда оно поднимется", en: "App is still starting, the link will appear once it is up" },
+  "apps.builds.crash.heading": {
+    ru: "Сборка прошла успешно, но приложение не запускается",
+    en: "The build succeeded, but the application is not starting",
+  },
+  "apps.builds.crash.openApp": { ru: "Открыть приложение", en: "Open application" },
+  "apps.builds.crash.viewLogs": { ru: "Логи приложения", en: "View runtime logs" },
   "apps.builds.rebuild": { ru: "Пересобрать", en: "Rebuild" },
   "apps.builds.rebuilding": { ru: "Запуск…", en: "Rebuilding…" },
   "apps.builds.error.rebuild": { ru: "Не удалось запустить пересборку", en: "Failed to start rebuild" },
