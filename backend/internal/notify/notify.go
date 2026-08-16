@@ -324,6 +324,7 @@ const (
 	CauseKindPlatformRegistry = "platform_registry"
 	CauseKindResourceLimit    = "resource_limit"
 	CauseKindNeedsArgs        = "app_needs_args"
+	CauseKindDBReadOnly       = "db_read_only"
 )
 
 // needsArgsCrashText is the cause_kind=CauseKindNeedsArgs verdict: the
@@ -373,6 +374,32 @@ const resourceLimitCrashText = "Контейнер был остановлен �
 // broken by accident" precision for the case where the fault genuinely is
 // ours.
 const registryCrashText = "Контейнер не запускался вообще: платформа не смогла скачать образ приложения из реестра. Это не ошибка в вашем коде — сбой на нашей стороне, повторный деплой обычно чинит его."
+
+// dbReadOnlyCrashText is the cause_kind=CauseKindDBReadOnly verdict shown
+// when the app's own database server refuses a write because it is in
+// read-only mode. Worded like resourceLimitCrashText and needsArgsCrashText:
+// states the capacity fact plainly and leads with the most common cause
+// (our own free-tier quota enforcement flips default_transaction_read_only
+// on once a database crosses its plan's storage limit) without claiming
+// certainty, because a user-set read-only role or a replica connection
+// endpoint produces the exact same server refusal and this text must stay
+// true for both.
+const dbReadOnlyCrashText = "База данных приложения отказывает в записи, потому что работает в режиме только для чтения. Чаще всего так происходит, когда база превысила лимит места, выделенный по тарифу, и платформа переводит её в read-only, пока место не освободится. Два пути: освободить место в базе или перейти на тариф с большим лимитом."
+
+// dbReadOnlyCrashSignatures are lines a Postgres server itself prints when it
+// refuses a write inside a read-only transaction. Held to the same bar as
+// platformCrashSignatures: every pattern here must be impossible for an
+// ordinary application to print by accident -- these are the server's own
+// error class names and error-message wording (psycopg's
+// ReadOnlySqlTransaction, the SQLSTATE 25006 text), not anything an app's own
+// code could coincidentally log.
+var dbReadOnlyCrashSignatures = []string{
+	"cannot execute INSERT in a read-only transaction",
+	"cannot execute UPDATE in a read-only transaction",
+	"cannot execute DELETE in a read-only transaction",
+	"cannot execute SELECT FOR UPDATE in a read-only transaction",
+	"ReadOnlySqlTransaction",
+}
 
 // crashLogSignature is one entry in the ordered pattern table ClassifyCrashLog
 // walks: pattern is matched with strings.Contains against the log excerpt,
@@ -445,14 +472,24 @@ var nodeCrashSignatures = []crashLogSignature{
 // platformCrashSignatures is checked FIRST, ahead of the app_code language
 // tables, so a platform failure (network, storage) wrapped in a user-language
 // traceback is never labelled as the owner's own code -- see
-// platformCrashSignatures for why that ordering matters. Everything the
-// language tables recognize is app_code. Returns ("", "") when nothing
-// recognizable matched, so callers can omit the line entirely rather than
-// show a wrong guess.
+// platformCrashSignatures for why that ordering matters.
+// dbReadOnlyCrashSignatures is checked next, before needsArgsCrashSignatures
+// and the language tables,
+// for the identical reason: a Postgres read-only refusal surfaces INSIDE a
+// driver's own traceback (psycopg wraps it in a normal Python exception), so
+// checking the language tables first would misattribute a platform-caused
+// database refusal to the owner's code. Everything the language tables
+// recognize is app_code. Returns ("", "") when nothing recognizable matched,
+// so callers can omit the line entirely rather than show a wrong guess.
 func ClassifyCrashCause(excerpt string) (kind, text string) {
 	for _, sig := range platformCrashSignatures {
 		if strings.Contains(excerpt, sig.pattern) {
 			return sig.kind, sig.text
+		}
+	}
+	for _, pattern := range dbReadOnlyCrashSignatures {
+		if strings.Contains(excerpt, pattern) {
+			return CauseKindDBReadOnly, dbReadOnlyCrashText
 		}
 	}
 	for _, pattern := range needsArgsCrashSignatures {
@@ -524,18 +561,20 @@ func ClassifyCrashCauseWithReason(reason, excerpt string) (kind, text string) {
 const causeLineMaxRunes = 300
 
 // crashLineSignaturePatterns flattens platformCrashSignatures,
-// pythonCrashSignatures and nodeCrashSignatures plus the bare "panic:" match
-// ClassifyCrashCause also checks, so ExtractCauseLine walks the exact same
-// signature set ClassifyCrashCause does instead of maintaining a second copy
-// that could silently drift out of sync with it. Without the platform
-// patterns here, a platform_network/platform_storage failure would classify
+// dbReadOnlyCrashSignatures, pythonCrashSignatures and nodeCrashSignatures
+// plus the bare "panic:" match ClassifyCrashCause also checks, so
+// ExtractCauseLine walks the exact same signature set ClassifyCrashCause does
+// instead of maintaining a second copy that could silently drift out of sync
+// with it. Without the platform patterns here, a
+// platform_network/platform_storage/db_read_only failure would classify
 // correctly but still show no cause_line -- the console banner would state a
 // cause with no evidence line under it.
 func crashLineSignaturePatterns() []string {
-	patterns := make([]string, 0, len(platformCrashSignatures)+len(needsArgsCrashSignatures)+len(pythonCrashSignatures)+len(nodeCrashSignatures)+1)
+	patterns := make([]string, 0, len(platformCrashSignatures)+len(dbReadOnlyCrashSignatures)+len(needsArgsCrashSignatures)+len(pythonCrashSignatures)+len(nodeCrashSignatures)+1)
 	for _, sig := range platformCrashSignatures {
 		patterns = append(patterns, sig.pattern)
 	}
+	patterns = append(patterns, dbReadOnlyCrashSignatures...)
 	patterns = append(patterns, needsArgsCrashSignatures...)
 	for _, sig := range pythonCrashSignatures {
 		patterns = append(patterns, sig.pattern)

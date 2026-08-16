@@ -752,6 +752,18 @@ export const apps: Messages = {
     en: "The program exited right after start: it expects command-line arguments (a CLI script), and the platform starts an app without any. Neither a platform failure nor a bug in your code — set a start command with the arguments it needs in the app's settings.",
   },
   "apps.alerts.crash.cause.needsArgs.cta": { ru: "Задать команду запуска", en: "Set a start command" },
+  "apps.alerts.crash.cause.dbReadOnly": {
+    ru: "База данных переведена в режим только для чтения, поэтому запись падает с ошибкой. Обычно это происходит, когда база превышает лимит места по тарифу. Освободите место в базе или перейдите на тариф с большим лимитом — это предложение, а не поломка с вашей стороны.",
+    en: "The database was switched to read-only mode, so writes fail. This usually happens when the database goes over the plan's storage limit. Free up space in the database or move to a plan with more room - this is a way out, not something broken on your end.",
+  },
+  "apps.alerts.crash.cause.dbReadOnly.databasesCta": {
+    ru: "Открыть базы данных проекта",
+    en: "Open the project's databases",
+  },
+  "apps.alerts.crash.cause.dbReadOnly.upgradeCta": {
+    ru: "Сменить тариф",
+    en: "Change plan",
+  },
   "apps.alerts.crash.cause.badConn": {
     ru: "{key} = {value} — это имя хоста без схемы, приложение не может подключиться. Нужна полная строка подключения.",
     en: "{key} = {value} — this is a bare host name with no scheme, the app cannot connect. It needs the full connection string.",

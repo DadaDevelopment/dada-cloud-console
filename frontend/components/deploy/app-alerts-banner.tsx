@@ -42,6 +42,10 @@ function crashTextKey(reason?: string): string {
  * absent kind returns null so the banner prints no verdict line at all,
  * rather than defaulting to "your code" without the backend having said so.
  *
+ * `db_read_only` also renders with the neutral styling: it names our own
+ * quota enforcement (a managed database put into read-only mode after
+ * crossing the plan's storage limit) as the cause, never the app's code.
+ *
  * `bad_connection_string` deliberately returns null here too, even though it
  * IS a recognized kind: its message names a live env var key and value the
  * backend only knows at alert time, which a static translation key cannot
@@ -63,6 +67,8 @@ function crashCauseKey(kind?: string): string | null {
       return "apps.alerts.crash.cause.resourceLimit";
     case "app_needs_args":
       return "apps.alerts.crash.cause.needsArgs";
+    case "db_read_only":
+      return "apps.alerts.crash.cause.dbReadOnly";
     default:
       return null;
   }
@@ -564,7 +570,8 @@ export function AppAlertsBanner({ alerts, logsHref, storageHref, startCommandHre
                     alert.cause_kind === "platform_storage" ||
                     alert.cause_kind === "platform_registry" ||
                     alert.cause_kind === "app_needs_args" ||
-                    alert.cause_kind === "resource_limit" ? (
+                    alert.cause_kind === "resource_limit" ||
+                    alert.cause_kind === "db_read_only" ? (
                       <p className="text-xs font-semibold text-red-800 dark:text-red-200">
                         {t(crashCauseKey(alert.cause_kind)!)}
                       </p>
@@ -662,6 +669,22 @@ export function AppAlertsBanner({ alerts, logsHref, storageHref, startCommandHre
                   >
                     {t("apps.alerts.crash.cause.needsArgs.cta")}
                   </Link>
+                )}
+                {alert.cause_kind === "db_read_only" && (
+                  <>
+                    <Link
+                      href={`/projects/${projectId}/databases${envId ? `?envId=${envId}` : ""}`}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-red-700 dark:text-red-300 underline underline-offset-2 hover:text-red-800 dark:hover:text-red-200"
+                    >
+                      {t("apps.alerts.crash.cause.dbReadOnly.databasesCta")}
+                    </Link>
+                    <Link
+                      href={`/projects/${projectId}/billing`}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-red-700 dark:text-red-300 underline underline-offset-2 hover:text-red-800 dark:hover:text-red-200"
+                    >
+                      {t("apps.alerts.crash.cause.dbReadOnly.upgradeCta")}
+                    </Link>
+                  </>
                 )}
               </div>
               <CrashPullRequests projectId={projectId} envId={envId} appName={appName} />

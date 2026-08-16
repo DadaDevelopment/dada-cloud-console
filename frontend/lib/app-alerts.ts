@@ -42,9 +42,13 @@ export type AppAlertType = "crash" | "volume" | "url";
  * asked for an environment variable that is not set on it (see the backend's
  * notify.ClassifyMissingEnvVar) — neutral again: the code is fine, the
  * platform is fine, one input is absent. `cause_line` holds ONLY the bare key
- * name, and there is no value to show by construction. Missing or empty means
- * the backend could not classify it — the console must not guess "your code"
- * in that case.
+ * name, and there is no value to show by construction. `"db_read_only"` means
+ * the database refused a write because the connection is read-only (see the
+ * backend's notify.CauseKindDBReadOnly) — neutral and, in the common case,
+ * ours: plan-limit enforcement flips the app's Postgres role to
+ * `default_transaction_read_only`, so the app code is untouched and correct.
+ * Missing or empty means the backend could not classify it — the console must
+ * not guess "your code" in that case.
  */
 export type AppAlertCauseKind =
   | "app_code"
@@ -55,7 +59,8 @@ export type AppAlertCauseKind =
   | "app_needs_args"
   | "bad_connection_string"
   | "ssl_not_supported"
-  | "missing_env_var";
+  | "missing_env_var"
+  | "db_read_only";
 
 export interface AppAlert {
   type: AppAlertType;
