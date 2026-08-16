@@ -692,6 +692,49 @@ func (w *appHealthWatcher) maybeCauseRefresh(ctx context.Context, alert appHealt
 			causeLine = envKey
 		}
 	}
+	return causeRefreshOutcome(logExcerpt, cause, causeLine, causeKind)
+}
+
+// causeRefreshOutcome is maybeCauseRefresh's pure tail: it decides whether a
+// tick that DID read the log (the caller already skipped the cheap-skip
+// branch above) is allowed to report refreshed=true and let
+// touchAppHealthAlertSeen clear a previously-stored cause.
+//
+// logExcerpt=="" happens two different ways and they must not be treated
+// alike. tailLog (see its doc comment) collapses every kube GetLogs failure
+// to "" -- a pod that just restarted and has not written a previous-container
+// log yet, a transient API hiccup, a container that raced ahead of the
+// watcher's read -- indistinguishably from "this container genuinely never
+// printed anything". A flapping pod (CrashLoopBackOff <-> Error on the same
+// underlying crash) hits the first case constantly: reason changes tick to
+// tick even though the failure did not, maybeCauseRefresh's cheap-skip check
+// (prevReason == alert.Reason) never fires, tailLog is called again, and if
+// it lands on a freshly-restarted pod the log is empty though the crash --
+// and its cause -- has not gone anywhere. Reporting refreshed=true here would
+// make touchAppHealthAlertSeen NULL out a diagnosis that is still correct,
+// which is exactly the live bug, observed end to end on 2026-08-16: the app
+// envprobe0816 went from a named cause_kind=missing_env_var / cause_line=
+// PROBE_API_TOKEN at 10:46:42Z to cause_kind=NULL at 10:52:50Z while the pod
+// kept crashing on that very same missing variable. Whether a real user has
+// lost a diagnosis this way is NOT established: the rows that look like it
+// (bruzas-85-prod/sevarateambot, sevarabot-prod/sevarateambot) carry
+// last_seen_at at the epoch, which is what a deleted app leaves behind, not
+// what a wiped diagnosis looks like.
+//
+// causeKind != "" is the escape hatch that keeps a REAL reason change able to
+// overwrite a stale cause: OOMKilled and ImagePullBackOff/ErrImagePull are
+// classified from the kube-reported reason alone (see
+// ClassifyCrashCauseWithReason), with no log needed, so logExcerpt=="" for
+// those two is not evidence of anything -- causeKind is non-empty regardless
+// and the caller proceeds to clear/overwrite as before. Only the combination
+// of "log came back empty" AND "nothing classified" is downgraded to
+// refreshed=false; a non-empty log that genuinely matches no known signature
+// still reports refreshed=true; touchAppHealthAlertSeen clears the row, same
+// as before this fix.
+func causeRefreshOutcome(logExcerpt, cause, causeLine, causeKind string) (string, string, string, string, bool) {
+	if logExcerpt == "" && causeKind == "" {
+		return "", "", "", "", false
+	}
 	return logExcerpt, cause, causeLine, causeKind, true
 }
 
