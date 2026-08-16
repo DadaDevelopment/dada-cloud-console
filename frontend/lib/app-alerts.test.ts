@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { getOperationalAppAlerts, parseBadConnCauseLine, suggestSSLModeDisable, type AppAlert } from "./app-alerts.ts";
+import {
+  getOperationalAppAlerts,
+  missingEnvVarKey,
+  parseBadConnCauseLine,
+  suggestSSLModeDisable,
+  type AppAlert,
+} from "./app-alerts.ts";
 
 const alerts: AppAlert[] = [
   { type: "crash", detected_at: "2026-08-04T00:00:00Z" },
@@ -59,4 +65,22 @@ test("suggestSSLModeDisable is idempotent when sslmode=disable is already set", 
 test("suggestSSLModeDisable detects an existing sslmode case-insensitively and leaves it alone", () => {
   const dsn = "postgresql://svc:pw@host:5432/db?SSLMode=require";
   assert.equal(suggestSSLModeDisable(dsn), dsn);
+});
+
+test("missingEnvVarKey recovers the key from the live sevarateambot crash", () => {
+  assert.equal(missingEnvVarKey("TELEGRAM_API_TOKEN"), "TELEGRAM_API_TOKEN");
+});
+
+test("missingEnvVarKey tolerates surrounding whitespace", () => {
+  assert.equal(missingEnvVarKey("  STRIPE_SECRET_KEY\n"), "STRIPE_SECRET_KEY");
+});
+
+test("missingEnvVarKey refuses anything that is not a bare env var name", () => {
+  assert.equal(missingEnvVarKey(undefined), null);
+  assert.equal(missingEnvVarKey(""), null);
+  assert.equal(missingEnvVarKey("   "), null);
+  assert.equal(missingEnvVarKey("Не найден TELEGRAM_API_TOKEN в переменных окружения"), null);
+  assert.equal(missingEnvVarKey("TELEGRAM_API_TOKEN=abc"), null);
+  assert.equal(missingEnvVarKey("telegram_api_token"), null);
+  assert.equal(missingEnvVarKey("9LIVES"), null);
 });

@@ -6,7 +6,12 @@ import { timeAgo } from "@/lib/format";
 import { useT } from "@/lib/i18n/console/context";
 import { Spinner } from "@/components/ui/spinner";
 import { diagnoseApi, cloudTasksApi, databasesApi, envVarsApi } from "@/lib/api";
-import { parseBadConnCauseLine, suggestSSLModeDisable, type AppAlert } from "@/lib/app-alerts";
+import {
+  missingEnvVarKey,
+  parseBadConnCauseLine,
+  suggestSSLModeDisable,
+  type AppAlert,
+} from "@/lib/app-alerts";
 import type { AppDiagnosis, ResourceSnapshot } from "@/lib/types";
 
 /**
@@ -315,6 +320,178 @@ function SslRepair({
   );
 }
 
+type MissingEnvRepairState =
+  | { status: "idle" }
+  | { status: "pending" }
+  | { status: "error"; message: string }
+  | { status: "done" };
+
+/**
+ * The inline fix for a `missing_env_var` alert: the app told us in its own
+ * crash log which variable it wants, and `causeLine` carries that key, so the
+ * banner asks for the one thing the platform cannot know — the value — right
+ * where the failure is stated, instead of sending the owner off to find the
+ * settings tab and retype the name from memory.
+ *
+ * There is no one-click button here, unlike the `bad_connection_string` and
+ * `ssl_not_supported` repairs: those two recover the value from something the
+ * platform already holds (a managed database's DSN, the current env var), and
+ * a bot token or API key exists only in the owner's head. Asking is the whole
+ * interaction.
+ *
+ * The value is written with `is_secret: true` and `scope: "runtime"` through
+ * the same SetEnvVar handle the manual editor uses; that endpoint queues the
+ * env-apply operation itself (see the backend's queueEnvApply), so a
+ * successful save is also the redeploy — nothing else has to be clicked. The
+ * value is held in component state only until the request resolves and is
+ * never echoed back into the DOM after the save.
+ */
+function MissingEnvVarRepair({
+  projectId,
+  envId,
+  appName,
+  causeLine,
+}: {
+  projectId: string;
+  envId: string;
+  appName: string;
+  causeLine?: string;
+}) {
+  const { t } = useT();
+  const [value, setValue] = useState("");
+  const [repair, setRepair] = useState<MissingEnvRepairState>({ status: "idle" });
+  const key = missingEnvVarKey(causeLine);
+
+  if (!key) return null;
+
+  async function handleSave() {
+    if (!value.trim()) return;
+    setRepair({ status: "pending" });
+    try {
+      await envVarsApi.upsert(projectId, envId, appName, key!, {
+        value,
+        is_secret: true,
+        scope: "runtime",
+      });
+      setValue("");
+      setRepair({ status: "done" });
+    } catch (err) {
+      setRepair({
+        status: "error",
+        message: err instanceof Error ? err.message : t("apps.alerts.crash.cause.missingEnvVar.repair.error"),
+      });
+    }
+  }
+
+  if (repair.status === "done") {
+    return (
+      <p className="text-xs font-semibold text-red-800 dark:text-red-200">
+        {t("apps.alerts.crash.cause.missingEnvVar.repair.done", { key })}
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <label htmlFor={`missing-env-${key}`} className="font-mono text-xs font-semibold text-red-800 dark:text-red-200">
+          {key}
+        </label>
+        <input
+          id={`missing-env-${key}`}
+          type="password"
+          autoComplete="off"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") handleSave();
+          }}
+          placeholder={t("apps.alerts.crash.cause.missingEnvVar.repair.placeholder")}
+          className="min-w-0 flex-1 rounded-md border border-red-300 dark:border-red-800 bg-white dark:bg-gray-900 px-2.5 py-1.5 text-xs text-gray-900 dark:text-gray-100 placeholder:text-gray-400"
+        />
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={repair.status === "pending" || !value.trim()}
+          className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+        >
+          {repair.status === "pending" && <Spinner size="sm" />}
+          {t("apps.alerts.crash.cause.missingEnvVar.repair.cta")}
+        </button>
+      </div>
+      {repair.status === "error" && <p className="text-xs text-red-600 dark:text-red-400">{repair.message}</p>}
+    </div>
+  );
+}
+
+/**
+ * Surfaces pull requests the platform's own agent opened for this app while
+ * the owner was not looking. Autofix runs as a cloud task: it clones the
+ * repo, commits a fix and opens a PR, and until now the only place that PR
+ * ever appeared was the transient success state of the button that started
+ * it — so an owner who closed the tab, or whose fix was triggered from
+ * somewhere other than this banner, never learned a PR existed at all.
+ *
+ * Live case: a user's bot had a PR waiting on GitHub from 2026-07-24,
+ * open and unread, while they deleted their projects and left. Nothing in
+ * the console ever mentioned it.
+ *
+ * Renders nothing at all when the list is empty, still loading, or fails to
+ * load: this is an extra channel for something that was already lost, never
+ * an error the owner has to deal with on top of a crash.
+ */
+function CrashPullRequests({
+  projectId,
+  envId,
+  appName,
+}: {
+  projectId: string;
+  envId: string;
+  appName: string;
+}) {
+  const { t } = useT();
+  const [prs, setPrs] = useState<{ id: string; url: string }[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    cloudTasksApi
+      .list(projectId, envId, appName)
+      .then((res) => {
+        if (cancelled) return;
+        setPrs(
+          res.cloud_tasks
+            .filter((task) => !!task.pr_url)
+            .map((task) => ({ id: task.id, url: task.pr_url! })),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setPrs([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, envId, appName]);
+
+  if (prs.length === 0) return null;
+
+  return (
+    <div className="mt-2 space-y-1">
+      <p className="text-xs font-semibold text-red-800 dark:text-red-200">{t("apps.alerts.crash.openPrs")}</p>
+      {prs.map((pr) => (
+        <a
+          key={pr.id}
+          href={pr.url}
+          target="_blank"
+          rel="noreferrer"
+          className="block break-all text-xs font-semibold text-red-700 dark:text-red-300 underline underline-offset-2 hover:text-red-800 dark:hover:text-red-200"
+        >
+          {pr.url}
+        </a>
+      ))}
+    </div>
+  );
+}
+
 interface AppAlertsBannerProps {
   alerts: AppAlert[];
   logsHref: string;
@@ -427,9 +604,17 @@ export function AppAlertsBanner({ alerts, logsHref, storageHref, startCommandHre
                     </>
                   )}
                   {alert.cause_kind === "missing_env_var" && (
-                    <p className="text-xs font-semibold text-red-800 dark:text-red-200">
-                      {t("apps.alerts.crash.cause.missingEnvVar", { key: alert.cause_line ?? "" })}
-                    </p>
+                    <>
+                      <p className="text-xs font-semibold text-red-800 dark:text-red-200">
+                        {t("apps.alerts.crash.cause.missingEnvVar", { key: alert.cause_line ?? "" })}
+                      </p>
+                      <MissingEnvVarRepair
+                        projectId={projectId}
+                        envId={envId}
+                        appName={appName}
+                        causeLine={alert.cause_line}
+                      />
+                    </>
                   )}
                   {alert.cause_line &&
                     alert.cause_kind !== "bad_connection_string" &&
@@ -467,7 +652,7 @@ export function AppAlertsBanner({ alerts, logsHref, storageHref, startCommandHre
                     href={envVarsHref}
                     className="inline-flex items-center gap-1 text-xs font-semibold text-red-700 dark:text-red-300 underline underline-offset-2 hover:text-red-800 dark:hover:text-red-200"
                   >
-                    {t("apps.alerts.crash.cause.missingEnvVar.cta", { key: alert.cause_line ?? "" })}
+                    {t("apps.alerts.crash.cause.missingEnvVar.settings")}
                   </Link>
                 )}
                 {alert.cause_kind === "app_needs_args" && (
@@ -479,6 +664,7 @@ export function AppAlertsBanner({ alerts, logsHref, storageHref, startCommandHre
                   </Link>
                 )}
               </div>
+              <CrashPullRequests projectId={projectId} envId={envId} appName={appName} />
             </div>
 
             {diagnose.status === "error" && (

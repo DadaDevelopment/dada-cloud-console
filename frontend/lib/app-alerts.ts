@@ -117,6 +117,28 @@ export function parseBadConnCauseLine(causeLine?: string): { key: string; value:
 }
 
 /**
+ * Recovers the environment variable name from a `missing_env_var` alert's
+ * `cause_line`, which holds the bare key and nothing else (see
+ * AppAlertCauseKind's doc comment).
+ *
+ * The banner offers an inline input that writes this key straight back as an
+ * env var, so the key has to survive that round trip: it is validated here
+ * against the same shape the backend classifier only ever emits (upper-case
+ * ASCII, digits and underscores, starting with a letter). Anything else — an
+ * empty line, a raw log line that reached this field through a future backend
+ * change, a lower-case name — returns null, and the banner falls back to
+ * stating the cause without offering a form. Writing an env var is a real
+ * side effect on a running app; refusing to guess the target is cheaper than
+ * creating a variable nobody asked for.
+ */
+export function missingEnvVarKey(causeLine?: string): string | null {
+  const key = causeLine?.trim();
+  if (!key) return null;
+  if (!/^[A-Z][A-Z0-9_]*$/.test(key)) return null;
+  return key;
+}
+
+/**
  * True when dsn's query string already sets an "sslmode" parameter
  * (case-insensitively). Mirrors the backend's notify.hasSSLModeParam
  * exactly — see connstring_cause.go's doc comment on connStringHasSchemePrefix

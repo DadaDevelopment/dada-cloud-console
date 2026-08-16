@@ -804,9 +804,29 @@ export const apps: Messages = {
     ru: "Приложению не хватает переменной окружения {key} — оно ищет её при старте и не находит. Это не ошибка в коде и не сбой платформы: добавьте переменную в настройках, приложение перезапустится само.",
     en: "The app is missing the {key} environment variable — it looks for it at startup and finds nothing. Neither a bug in your code nor a platform failure: add the variable in the settings and the app will restart on its own.",
   },
-  "apps.alerts.crash.cause.missingEnvVar.cta": {
-    ru: "Добавить переменную {key}",
-    en: "Add the {key} variable",
+  "apps.alerts.crash.cause.missingEnvVar.repair.cta": {
+    ru: "Сохранить и перезапустить",
+    en: "Save and restart",
+  },
+  "apps.alerts.crash.cause.missingEnvVar.repair.placeholder": {
+    ru: "Значение переменной",
+    en: "Variable value",
+  },
+  "apps.alerts.crash.cause.missingEnvVar.repair.done": {
+    ru: "Переменная {key} сохранена, приложение перезапускается.",
+    en: "The {key} variable is saved, the app is restarting.",
+  },
+  "apps.alerts.crash.cause.missingEnvVar.repair.error": {
+    ru: "Не удалось сохранить переменную",
+    en: "Could not save the variable",
+  },
+  "apps.alerts.crash.cause.missingEnvVar.settings": {
+    ru: "Все переменные окружения",
+    en: "All environment variables",
+  },
+  "apps.alerts.crash.openPrs": {
+    ru: "Платформа уже открыла пул-реквест с исправлением:",
+    en: "The platform already opened a pull request with a fix:",
   },
   "apps.alerts.crash.cause.line": { ru: "Из логов:", en: "From the logs:" },
   "apps.alerts.crash.cta": { ru: "Смотреть логи", en: "View logs" },
