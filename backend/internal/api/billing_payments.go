@@ -128,6 +128,11 @@ func (h *Handler) BillingCheckout(c *gin.Context) {
 				"для оплаты нужен подтверждённый e-mail: на него придёт кассовый чек")
 			return
 		}
+		if errors.Is(err, yookassa.ErrRecurringNotSupported) {
+			respondErrorCode(c, http.StatusUnprocessableEntity, "recurring_not_supported",
+				"автосписание сейчас недоступно: снимите галочку «продлевать автоматически» и повторите оплату")
+			return
+		}
 		respondError(c, http.StatusInternalServerError, "failed to start checkout")
 		return
 	}

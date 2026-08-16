@@ -79,7 +79,16 @@ export default function BillingPage() {
   const [notConfiguredPlan, setNotConfiguredPlan] = useState<BillingPlanKey | null>(null);
   const [checkoutUrl, setCheckoutUrl] = useState<{ plan: BillingPlanKey; url: string } | null>(null);
   const [loadedAtMs] = useState(() => Date.now());
-  const [autopayConsent, setAutopayConsent] = useState(true);
+  /**
+   * Defaults to unchecked: this flag becomes YooKassa's SavePaymentMethod on
+   * checkout (backend/internal/billing/yookassa/provider.go), and this
+   * merchant account cannot do recurring charges at all -- YooKassa answers
+   * with 403 "This store can't make recurring payments" (error_class
+   * yk_forbidden). A pre-checked box turned every checkout into a doomed
+   * request unless the payer noticed and unticked it themselves. Confirmed
+   * live 2026-08-15 21:45 UTC against artempro2021@bk.ru's payment row.
+   */
+  const [autopayConsent, setAutopayConsent] = useState(false);
   const [autopayBusy, setAutopayBusy] = useState(false);
   const [autopayError, setAutopayError] = useState<string | null>(null);
   const [detachBusy, setDetachBusy] = useState(false);
@@ -151,8 +160,11 @@ export default function BillingPage() {
       window.location.assign(resp.confirmation_url);
     } catch (err) {
       const status = (err as { status?: number } | undefined)?.status;
+      const code = (err as { code?: string } | undefined)?.code;
       if (status === 409) {
         setNotConfiguredPlan(plan);
+      } else if (status === 422 && code === "recurring_not_supported") {
+        setCheckoutError({ plan, message: t("billing.checkoutErrorRecurringNotSupported") });
       } else {
         setCheckoutError({ plan, message: err instanceof Error ? err.message : t("billing.checkoutError") });
       }

@@ -135,4 +135,8 @@ export const billing: Messages = {
     ru: "Карта сохранится у ЮKassa, списание — за сутки до конца оплаченного периода. Отключить можно в любой момент на этой странице.",
     en: "The card is stored by YooKassa and charged a day before the paid period ends. You can turn this off any time on this page.",
   },
+  "billing.checkoutErrorRecurringNotSupported": {
+    ru: "Автосписание сейчас недоступно. Снимите галочку «продлевать автоматически» и повторите оплату — она пройдёт.",
+    en: "Automatic renewal is not available right now. Untick \"renew automatically\" and try again - the payment will go through.",
+  },
 };

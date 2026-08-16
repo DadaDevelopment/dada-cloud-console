@@ -94,6 +94,16 @@ func NewProvider(pool *pgxpool.Pool, client *Client, returnURL string, sendRecei
 // caller is owed that verdict before any money flow is attempted.
 var ErrReceiptEmailRequired = errors.New("yookassa: fiscal receipt requires a customer email")
 
+// ErrRecurringNotSupported reports a payer who ticked the "renew
+// automatically" box against a merchant account YooKassa has not enabled for
+// recurring charges. YooKassa answers CreatePayment with 403 "This store
+// can't make recurring payments" (error_class yk_forbidden, confirmed live
+// 2026-08-15 21:45 UTC) -- the same request without SavePaymentMethod
+// succeeds. The caller is owed that distinction so it can tell the payer to
+// untick the box and retry, rather than leaving them stuck on a generic
+// "checkout failed".
+var ErrRecurringNotSupported = errors.New("yookassa: merchant account cannot save payment method for recurring charges")
+
 // requireReceiptEmail refuses a charge that fiscalization makes impossible.
 // With SendReceipt on, an empty email is not a missing nicety: the shop rejects
 // the whole payment, and finding that out from a 400 after a pending row exists
@@ -201,6 +211,9 @@ func (p *YooKassaProvider) Checkout(ctx context.Context, orgID string, plan pric
 		metrics.RecordPaymentCreateFailure(errorClass)
 		if uerr := p.recordCheckoutFailureTx(ctx, id, actorID, orgID, plan.Key, amountValue, errorClass, err); uerr != nil {
 			return "", "", fmt.Errorf("yookassa: create payment: %w (also failed to mark canceled/audit: %v)", err, uerr)
+		}
+		if saveMethod && errorClass == "yk_forbidden" {
+			return "", "", fmt.Errorf("yookassa: create payment: %w: %w", ErrRecurringNotSupported, err)
 		}
 		return "", "", fmt.Errorf("yookassa: create payment: %w", err)
 	}
