@@ -140,6 +140,22 @@ export const apps: Messages = {
   },
   "apps.deployDrift.viewDeployments": { ru: "Смотреть деплои", en: "View deployments" },
 
+  "apps.currentDeploy.deployed": {
+    ru: "Раскатано: {image}",
+    en: "Deployed: {image}",
+  },
+  "apps.currentDeploy.deployedAgo": { ru: "раскатано {ago}", en: "deployed {ago}" },
+  "apps.currentDeploy.pending": {
+    ru: "Раскатка образа {image}",
+    en: "Deploying {image}",
+  },
+  "apps.currentDeploy.pendingAgo": { ru: "начато {ago}", en: "started {ago}" },
+
+  "apps.detail.notice.imageQueued": { ru: "Деплой образа поставлен в очередь", en: "Image deploy queued" },
+  "apps.detail.notice.rollbackQueued": { ru: "Откат приложения поставлен в очередь", en: "Rollback queued" },
+  "apps.detail.notice.restartQueued": { ru: "Перезапуск приложения поставлен в очередь", en: "Restart queued" },
+  "apps.detail.notice.viewOperation": { ru: "Смотреть операцию", en: "View operation" },
+
   "apps.liveBanner.title": { ru: "Приложение развёрнуто", en: "App is live" },
   "apps.liveBanner.desc": {
     ru: "Адрес уже работает и открыт всем в интернете.",
@@ -453,9 +469,11 @@ export const apps: Messages = {
     en: "No builds yet. Connect a repository and trigger a build.",
   },
   "apps.deployments.badge.current": { ru: "Текущий", en: "Current" },
+  "apps.deployments.badge.pending": { ru: "Раскатывается", en: "Deploying" },
   "apps.deployments.promote": { ru: "Продвинуть в prod", en: "Promote to prod" },
   "apps.deployments.promoting": { ru: "Продвижение…", en: "Promoting…" },
   "apps.deployments.rollback": { ru: "Откатить на эту версию", en: "Rollback to this" },
+  "apps.deployments.redeploy": { ru: "Раскатать заново", en: "Redeploy" },
   "apps.deployments.rollingBack": { ru: "Откат…", en: "Rolling back…" },
   "apps.deployments.cancelBuild": { ru: "Отменить", en: "Cancel" },
   "apps.deployments.cancelingBuild": { ru: "Отмена…", en: "Canceling…" },

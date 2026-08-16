@@ -16,6 +16,7 @@ import { formatCommitLabel, resolveCommit } from "@/lib/build-commit";
 import { BuildProvenance, buildTriggerLabel } from "@/components/deploy/build-provenance";
 import { trackBuildStart } from "@/lib/build-watch";
 import { StarterNextStep } from "@/components/deploy/starter-next-step";
+import { isNewestDeployment, isPendingDeployment } from "@/lib/current-deployment";
 
 /**
  * A single row in the unified deploy feed. Either a build attempt (every
@@ -209,25 +210,46 @@ export default function AppDeploymentsPage() {
     }
   }
 
-  function DeployActions({ dep }: { dep: Deployment }) {
+  /**
+   * `dep.is_current` lags reality: it flips only once the reconciler has
+   * observed the new image running (resource_snapshots), which trails an
+   * accepted deploy op by up to a few minutes. During that window, without
+   * `isNewest`, the newest deployment -- the one the platform is actively
+   * rolling out right now -- read as an ordinary older version with a
+   * "Rollback to this" button. That is the megafactory shape: the automatic
+   * post-build deploy landed, is_current had not caught up yet, and the user
+   * read "Rollback to this" on the freshest row and clicked it, redeploying
+   * the exact image that was already on its way. `isNewest` names that row
+   * honestly as a redeploy instead of a rollback -- the actual server call is
+   * unchanged (still the rollback endpoint), only the label stops lying
+   * about direction.
+   */
+  function DeployActions({ dep, isNewest }: { dep: Deployment; isNewest: boolean }) {
     if (!canDeploy) return null;
-    return dep.is_current ? (
-      <button
-        onClick={() => handleDeployAction(dep.id, "promote")}
-        data-ux="app_deploy_feed:promote"
-        disabled={actionId === dep.id}
-        className="rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
-      >
-        {actionId === dep.id ? t("apps.deployments.promoting") : t("apps.deployments.promote")}
-      </button>
-    ) : (
+    if (dep.is_current) {
+      return (
+        <button
+          onClick={() => handleDeployAction(dep.id, "promote")}
+          data-ux="app_deploy_feed:promote"
+          disabled={actionId === dep.id}
+          className="rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+        >
+          {actionId === dep.id ? t("apps.deployments.promoting") : t("apps.deployments.promote")}
+        </button>
+      );
+    }
+    return (
       <button
         onClick={() => handleDeployAction(dep.id, "rollback")}
         data-ux="app_deploy_feed:rollback"
         disabled={actionId === dep.id}
         className="rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
       >
-        {actionId === dep.id ? t("apps.deployments.rollingBack") : t("apps.deployments.rollback")}
+        {actionId === dep.id
+          ? t("apps.deployments.rollingBack")
+          : isNewest
+            ? t("apps.deployments.redeploy")
+            : t("apps.deployments.rollback")}
       </button>
     );
   }
@@ -236,6 +258,16 @@ export default function AppDeploymentsPage() {
     return (
       <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700 dark:bg-green-950/40 dark:text-green-300">
         {t("apps.deployments.badge.current")}
+      </span>
+    );
+  }
+
+  /** The newest deployment before `is_current` has caught up to it -- see DeployActions' doc comment. */
+  function PendingBadge() {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
+        <Spinner size="sm" className="h-3 w-3" />
+        {t("apps.deployments.badge.pending")}
       </span>
     );
   }
@@ -317,6 +349,8 @@ export default function AppDeploymentsPage() {
                   const b = row.build;
                   const dep = row.dep;
                   const isCurrent = dep?.is_current ?? false;
+                  const isNewest = dep ? isNewestDeployment(dep.id, deployments) : false;
+                  const isPending = dep ? isPendingDeployment(dep.id, deployments) : false;
                   const image = dep?.image_uri ?? b.image_uri;
                   const resolved = resolveCommit(b);
                   return (
@@ -333,6 +367,7 @@ export default function AppDeploymentsPage() {
                       >
                         <div className="flex flex-wrap items-center gap-2">
                           {isCurrent && <CurrentBadge />}
+                          {isPending && <PendingBadge />}
                           <BuildStatusBadge status={b.status} />
                           {resolved.kind === "sha" ? (
                             <>
@@ -376,7 +411,7 @@ export default function AppDeploymentsPage() {
                             {actionId === b.id ? t("apps.deployments.autofixing") : t("apps.deployments.autofix")}
                           </button>
                         )}
-                        {dep && <DeployActions dep={dep} />}
+                        {dep && <DeployActions dep={dep} isNewest={isNewest} />}
                         <Link
                           href={`/projects/${projectId}/apps/${appName}/builds/${b.id}${envId ? `?envId=${envId}` : ""}`}
                           data-ux="app_deploy_feed:build_logs"
@@ -391,6 +426,8 @@ export default function AppDeploymentsPage() {
 
                 const dep = row.dep;
                 const depResolved = resolveCommit(dep);
+                const isNewest = isNewestDeployment(dep.id, deployments);
+                const isPending = isPendingDeployment(dep.id, deployments);
                 return (
                   <div
                     key={dep.id}
@@ -401,6 +438,7 @@ export default function AppDeploymentsPage() {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         {dep.is_current && <CurrentBadge />}
+                        {isPending && <PendingBadge />}
                         <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                           {buildTriggerLabel(dep.trigger, null, t)}
                         </span>
@@ -420,7 +458,7 @@ export default function AppDeploymentsPage() {
                       <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">{timeAgo(dep.created_at)}</p>
                     </div>
                     <div className="flex shrink-0 items-center gap-2 pl-4">
-                      <DeployActions dep={dep} />
+                      <DeployActions dep={dep} isNewest={isNewest} />
                     </div>
                   </div>
                 );

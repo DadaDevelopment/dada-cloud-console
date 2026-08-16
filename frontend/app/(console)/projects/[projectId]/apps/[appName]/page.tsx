@@ -26,6 +26,7 @@ import { AppLiveBanner } from "@/components/deploy/app-live-banner";
 import { AppLastMileBanner } from "@/components/deploy/app-last-mile-banner";
 import { AppDeployDriftBanner } from "@/components/deploy/app-deploy-drift-banner";
 import { AppLatestBuildCard } from "@/components/deploy/app-latest-build-card";
+import { AppCurrentDeployCard } from "@/components/deploy/app-current-deploy-card";
 import { getAppNextSteps } from "@/lib/app-next-step";
 import { useT } from "@/lib/i18n/console/context";
 import { GOAL_DEPLOY_SUCCESS, reachGoal } from "@/lib/metrika";
@@ -89,6 +90,8 @@ export default function AppDetailPage() {
 
   const [sourceDownloadBusy, setSourceDownloadBusy] = useState(false);
   const [sourceDownloadError, setSourceDownloadError] = useState<string | null>(null);
+
+  const [deployNotice, setDeployNotice] = useState<{ text: string; opId?: string } | null>(null);
 
   const deployGoalFiredRef = useRef(false);
 
@@ -182,8 +185,7 @@ export default function AppDetailPage() {
       const result = await appsApi.updateImage(projectId, envId, appName, newImage);
       setIsImageModalOpen(false);
       setNewImage("");
-      const opId = result.operation?.id;
-      router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
+      setDeployNotice({ text: t("apps.detail.notice.imageQueued"), opId: result.operation?.id });
     } catch (err) {
       setImageSubmitError(err instanceof Error ? err.message : t("apps.error.updateImage"));
     } finally {
@@ -195,8 +197,7 @@ export default function AppDetailPage() {
     if (!window.confirm(t("apps.rollback.confirm"))) return;
     try {
       const result = await appsApi.rollback(projectId, envId, appName);
-      const opId = result.operation?.id;
-      router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
+      setDeployNotice({ text: t("apps.detail.notice.rollbackQueued"), opId: result.operation?.id });
     } catch (err) {
       window.alert(err instanceof Error ? err.message : t("apps.rollback.error"));
     }
@@ -206,8 +207,7 @@ export default function AppDetailPage() {
     if (!window.confirm(t("apps.restart.confirm"))) return;
     try {
       const result = await appsApi.restart(projectId, envId, appName);
-      const opId = result.operation?.id;
-      router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
+      setDeployNotice({ text: t("apps.detail.notice.restartQueued"), opId: result.operation?.id });
     } catch (err) {
       window.alert(err instanceof Error ? err.message : t("apps.restart.error"));
     }
@@ -459,6 +459,18 @@ export default function AppDetailPage() {
         </div>
       </div>
 
+      {deployNotice && (
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/40 px-4 py-3 text-sm text-green-700 dark:text-green-300">
+          <span>{deployNotice.text}</span>
+          <Link
+            href={`/projects/${projectId}/operations${deployNotice.opId ? `?highlight=${deployNotice.opId}` : ""}`}
+            className="shrink-0 font-medium underline underline-offset-2"
+          >
+            {t("apps.detail.notice.viewOperation")}
+          </Link>
+        </div>
+      )}
+
       <AppAlertsBanner
         alerts={alerts}
         logsHref={`/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}#logs`}
@@ -473,6 +485,13 @@ export default function AppDetailPage() {
       {!isResource && (
         <AppLastMileBanner
           summary={{ http_status: summary.http_status, http_reason: summary.http_reason, http_checked_at: summary.http_checked_at, worker: summary.worker }}
+        />
+      )}
+
+      {!isResource && (
+        <AppCurrentDeployCard
+          deployments={deployments}
+          deploymentsHref={`/projects/${projectId}/apps/${appName}/deployments${envId ? `?envId=${envId}` : ""}`}
         />
       )}
 
