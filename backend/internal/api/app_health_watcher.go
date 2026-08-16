@@ -476,12 +476,43 @@ func detectPodAlertAt(pod *corev1.Pod, now time.Time, window time.Duration) (app
 // (namespace, app_name) key and so to a single email. reason/detail are
 // persisted alongside the cooldown timestamp (P1-ALERTS-IN-UI) so the console
 // can read back "what was detected" without a live cluster scan.
+//
+// The second WHERE branch is the catch-up slot, and it exists because the
+// cooldown is a clock while the diagnosis is a discovery, and the two do not
+// arrive in order. Live case that forced it: bruzas.85's sevarateambot
+// crashlooped at 2026-08-15 21:03Z, the email went out five minutes later
+// while cause/cause_line/cause_kind were still empty, and the cause
+// (missing_env_var / TELEGRAM_API_TOKEN) only landed in the row the next day
+// at 15:02Z. The owner had read "your container is down, exit=1" with no
+// reason, and the 24h window meant the product physically could not tell him
+// the reason until the evening — 18 hours of a live user down while the
+// platform knew exactly why.
+//
+// So the transition "last email went out with no named cause, and a cause is
+// now on record" opens exactly one extra send. It is one, not a reset: the
+// claim stamps last_sent_cause_kind from the row's current cause_kind, which
+// makes the branch false forever after for that diagnosis. An app whose cause
+// has not changed still sees only the plain cooldown branch and stays silent.
+// The read is of the row's OWN cause_kind rather than a parameter on purpose —
+// touchAppHealthAlertSeen runs earlier in the same tick and is what makes the
+// stored cause current, including the sticky case where this tick skipped the
+// log read entirely and the Go-side cause is "".
+//
+// A NULL last_sent_cause_kind on a row written before this column existed
+// reads as "sent without a cause", which is true for the row that motivated
+// the change and at worst grants one truthful email to an app that is still
+// failing right now — claim is only ever reached from a live detection, so
+// rows for long-dead apps never qualify.
 func claimAppHealthAlertSlot(ctx context.Context, pool *pgxpool.Pool, namespace, appName, reason, detail string, cooldown time.Duration) bool {
 	ct, err := pool.Exec(ctx,
 		`INSERT INTO app_health_alerts (namespace, app_name, last_sent_at, reason, detail)
 		 VALUES ($1, $2, now(), $3, $4)
-		 ON CONFLICT (namespace, app_name) DO UPDATE SET last_sent_at = now(), reason = $3, detail = $4
-		 WHERE app_health_alerts.last_sent_at <= now() - make_interval(secs => $5)`,
+		 ON CONFLICT (namespace, app_name) DO UPDATE SET
+		     last_sent_at = now(), reason = $3, detail = $4,
+		     last_sent_cause_kind = NULLIF(app_health_alerts.cause_kind, '')
+		 WHERE app_health_alerts.last_sent_at <= now() - make_interval(secs => $5)
+		    OR (app_health_alerts.last_sent_cause_kind IS NULL
+		        AND COALESCE(app_health_alerts.cause_kind, '') <> '')`,
 		namespace, appName, reason, detail, cooldown.Seconds())
 	if err != nil {
 		log.Printf("app-health: cooldown claim for %s/%s failed: %v", namespace, appName, err)
@@ -602,6 +633,24 @@ func touchAppHealthAlertSeen(ctx context.Context, pool *pgxpool.Pool, namespace,
 	if err != nil {
 		log.Printf("app-health: touch-seen for %s/%s failed: %v", namespace, appName, err)
 	}
+}
+
+// storedAlertCause reads the crash explanation already on record for
+// (namespace, appName). maybeCauseRefresh deliberately returns "" for the
+// cause on every tick that skipped the log read (the stored cause is still
+// current, so there is nothing to re-derive), which is the normal state of a
+// long crashloop — and it is exactly that state a catch-up send lands in.
+// Without this read the catch-up email, whose entire reason to exist is that
+// the first one had no diagnosis, would go out with no diagnosis either.
+// Returns "" on any error: a missing explanation must never block the alert.
+func storedAlertCause(ctx context.Context, pool *pgxpool.Pool, namespace, appName string) string {
+	var cause string
+	if err := pool.QueryRow(ctx,
+		`SELECT COALESCE(cause, '') FROM app_health_alerts WHERE namespace = $1 AND app_name = $2`,
+		namespace, appName).Scan(&cause); err != nil {
+		return ""
+	}
+	return cause
 }
 
 // currentAlertCauseState reads back the reason and whether a non-empty cause
@@ -837,6 +886,10 @@ func (w *appHealthWatcher) maybeNotify(ctx context.Context, projectID uuid.UUID,
 
 	if !claimAppHealthAlertSlot(ctx, w.h.pool, alert.Namespace, alert.AppName, alert.Reason, detail, appHealthAlertCooldown) {
 		return
+	}
+
+	if cause == "" {
+		cause = storedAlertCause(ctx, w.h.pool, alert.Namespace, alert.AppName)
 	}
 
 	if logExcerpt == "" {
