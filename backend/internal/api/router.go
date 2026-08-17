@@ -696,6 +696,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 			api.GET("/admin/costs", h.GetAdminCosts)
 			api.GET("/admin/ai-gateway/usage", h.GetAIGatewayUsage)
 			api.GET("/admin/growth/campaigns", h.GetGrowthCampaigns)
+			api.GET("/admin/funnel", h.GetAdminFunnel)
 			api.GET("/admin/db-shards", h.GetAdminDBShards)
 			api.GET("/admin/db-moves", h.ListAdminDBMoves)
 			api.POST("/admin/db-moves", h.StartAdminDBMove)

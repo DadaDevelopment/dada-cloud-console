@@ -7,10 +7,11 @@ import { useT } from "@/lib/i18n/console/context";
  * platform-admin can hop between them without going back through the account
  * menu each time.
  */
-export type AdminTab = "overview" | "costs" | "db-shards" | "ai-gateway" | "audit" | "feedback" | "approvals";
+export type AdminTab = "overview" | "costs" | "db-shards" | "ai-gateway" | "audit" | "feedback" | "approvals" | "funnel";
 
 const TABS: { id: AdminTab; href: string; labelKey: string }[] = [
   { id: "overview", href: "/admin", labelKey: "adminOverview.crumb.overview" },
+  { id: "funnel", href: "/admin/funnel", labelKey: "adminFunnel.crumb.funnel" },
   { id: "costs", href: "/admin/costs", labelKey: "adminCosts.crumb.costs" },
   { id: "db-shards", href: "/admin/db-shards", labelKey: "adminDbShards.crumb.dbShards" },
   { id: "ai-gateway", href: "/admin/ai-gateway", labelKey: "aiGateway.crumb.aiGateway" },

@@ -67,6 +67,7 @@ import type {
   AdminOverviewResponse,
   AdminCostsResponse,
   AdminDBShardsResponse,
+  AdminFunnelResponse,
   AIGatewayUsageResponse,
   AppState,
   AppServerState,
@@ -1341,6 +1342,12 @@ export const adminApi = {
   getAIGatewayUsage: (days: 7 | 30 = 7) =>
     apiFetch<AIGatewayUsageResponse>(`/api/v1/admin/ai-gateway/usage?days=${days}`),
   getDBShards: () => apiFetch<AdminDBShardsResponse>(`/api/v1/admin/db-shards`),
+  getFunnel: (params: { window?: string; excludeKinds?: string[] } = {}) => {
+    const q = new URLSearchParams();
+    q.set("window", params.window ?? "30d");
+    if (params.excludeKinds?.length) q.set("exclude_kind", params.excludeKinds.join(","));
+    return apiFetch<AdminFunnelResponse>(`/api/v1/admin/funnel?${q.toString()}`);
+  },
 };
 
 // Vercel-flow API clients -------------------------------------------------------
