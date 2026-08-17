@@ -15,13 +15,18 @@
 -- they stay NULL rather than guessed into 'password'.
 ALTER TABLE users ADD COLUMN signup_channel varchar(32);
 
+-- signup_channel is appended AFTER account_kind, not inserted before it:
+-- Postgres's CREATE OR REPLACE VIEW only allows adding columns at the end of
+-- the output list -- inserting one earlier renames the existing column at
+-- that position instead, which errors 42P16 ("cannot change name of view
+-- column"). Migration 132 first shipped with signup_channel ahead of
+-- account_kind and broke exactly this way, red in CI on every build since.
 CREATE OR REPLACE VIEW user_accounts AS
 SELECT
     u.id,
     u.email,
     u.username,
     u.created_at,
-    u.signup_channel,
     CASE
         WHEN u.id = '00000000-0000-0000-0000-000000000000'::uuid THEN 'platform'
         WHEN u.username LIKE 'service-account-%'    THEN 'synthetic'
@@ -33,7 +38,8 @@ SELECT
         WHEN u.email    LIKE '%@sp2-verify.%'       THEN 'synthetic'
         WHEN u.email    LIKE '%@dada-tuda.ru'       THEN 'internal'
         ELSE 'customer'
-    END AS account_kind
+    END AS account_kind,
+    u.signup_channel
 FROM users u;
 
 GRANT SELECT ON user_accounts TO dada;
