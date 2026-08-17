@@ -1327,6 +1327,28 @@ export interface AdminOverviewDayPoint {
   new_apps: number;
 }
 
+export interface AdminOverviewFunnelStage {
+  key: string;
+  label: string;
+  count: number;
+}
+
+/**
+ * Keycloak-side registration funnel: goal-reach counts from the dedicated
+ * id.dada-tuda.ru Metrika counter, between "opened the form" and "submitted
+ * / hit an error", plus registered which is the real user_accounts count for
+ * the same window. Available is false when METRIKA_OAUTH_TOKEN is unset or
+ * the Stat API call failed -- Note carries the reason, Stages are still
+ * present (zeroed) so the UI can render the shape without a null check.
+ */
+export interface AdminOverviewRegistrationFunnel {
+  available: boolean;
+  days: number;
+  registered: number;
+  stages: AdminOverviewFunnelStage[];
+  note?: string;
+}
+
 export interface AdminOverviewResponse {
   users: AdminOverviewUsers;
   projects: AdminOverviewProjects;
@@ -1343,6 +1365,7 @@ export interface AdminOverviewResponse {
   live_urls?: AdminOverviewLiveUrls;
   dynamics: AdminOverviewDayPoint[];
   dynamics_days: number;
+  registration_funnel?: AdminOverviewRegistrationFunnel;
 }
 
 export interface AdminCostResource {
@@ -1428,6 +1451,26 @@ export interface AdminDBShard {
 export interface AdminDBShardsResponse {
   shards: AdminDBShard[];
   window_days: number;
+}
+
+export interface AdminFunnelCohortCount {
+  account_kind: string;
+  count: number;
+}
+
+export interface AdminFunnelResponse {
+  window: string;
+  excluded_kinds: string[] | null;
+  signups: number;
+  app_up: number;
+  db_up: number;
+  vm_up: number;
+  box_up: number;
+  s3_up: number;
+  model_up: number;
+  paid: number;
+  paid_note?: string;
+  cohort_counts: AdminFunnelCohortCount[];
 }
 
 export interface AdminCostsResponse {

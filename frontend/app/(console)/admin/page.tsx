@@ -156,6 +156,27 @@ export default function AdminOverviewPage() {
     }],
   };
 
+  const funnel = data?.registration_funnel;
+  const funnelStages = funnel?.stages ?? [];
+  const registrationFunnelOption: EChartsOption = {
+    tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+    xAxis: { type: "value" },
+    yAxis: {
+      type: "category",
+      data: funnelStages.map((s) => s.label).reverse(),
+      axisLabel: { width: 150, overflow: "truncate" },
+    },
+    series: [{
+      type: "bar",
+      data: funnelStages.map((s, i) => ({
+        value: s.count,
+        itemStyle: { color: s.key === "kc_register_error" ? "#ef4444" : "#3b82f6" },
+      })).reverse(),
+      label: { show: true, position: "right" },
+      barMaxWidth: 28,
+    }],
+  };
+
   const notReadyColumns: Column<AdminOverviewResponse["not_ready"][number]>[] = [
     { key: "name", header: t("adminOverview.notReady.col.name"), render: (r) => <span className="font-mono text-xs text-gray-900 dark:text-gray-100">{r.name}</span> },
     { key: "project", header: t("adminOverview.notReady.col.project"), render: (r) => <span className="text-gray-700 dark:text-gray-200">{r.project_name}</span> },
@@ -367,6 +388,45 @@ export default function AdminOverviewPage() {
         <Card>
           <CardHeader className="p-4 pb-2"><CardTitle className="text-sm">{t("adminOverview.chart.newApps")}</CardTitle></CardHeader>
           <CardContent className="p-4 pt-0"><EChart option={newAppsOption} height={200} /></CardContent>
+        </Card>
+      </div>
+
+      <div className="mb-6 grid grid-cols-1 gap-4">
+        <Card>
+          <CardHeader className="p-4 pb-2">
+            <CardTitle className="text-sm">Регистрация в Keycloak: открыл форму → зарегистрировался</CardTitle>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Данные по этапам — из отдельного счётчика Метрики на id.dada-tuda.ru (не общий счётчик консоли), окно{" "}
+              {funnel?.days ?? DYNAMICS_DAYS} дн. «Зарегистрировано» — реальные строки в базе за то же окно, не сэмпл Метрики.
+            </p>
+          </CardHeader>
+          <CardContent className="p-4 pt-0">
+            {!isLoading && funnel && !funnel.available ? (
+              <p className="text-sm text-amber-600 dark:text-amber-400">{funnel.note || "Метрика недоступна"}</p>
+            ) : (
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div className="md:col-span-2">
+                  <EChart option={registrationFunnelOption} height={240} />
+                </div>
+                <div className="flex flex-col justify-center gap-3 border-t border-gray-100 dark:border-gray-800/60 pt-3 md:border-t-0 md:border-l md:pl-4 md:pt-0">
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Зарегистрировано (БД)</p>
+                    <p className="text-2xl font-semibold text-gray-900 dark:text-gray-100">{funnel?.registered ?? "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Открыли форму (Метрика)</p>
+                    <p className="text-lg font-medium text-gray-700 dark:text-gray-300">{funnel?.stages[0]?.count ?? "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Ошибка при регистрации</p>
+                    <p className="text-lg font-medium text-red-600 dark:text-red-400">
+                      {funnel?.stages[funnel.stages.length - 1]?.count ?? "—"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </CardContent>
         </Card>
       </div>
 
