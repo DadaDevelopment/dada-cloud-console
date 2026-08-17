@@ -1382,7 +1382,6 @@ export interface AdminOverviewResponse {
   live_urls?: AdminOverviewLiveUrls;
   dynamics: AdminOverviewDayPoint[];
   dynamics_days: number;
-  registration_funnel?: AdminOverviewRegistrationFunnel;
 }
 
 export interface AdminCostResource {
@@ -1488,6 +1487,7 @@ export interface AdminFunnelResponse {
   paid: number;
   paid_note?: string;
   cohort_counts: AdminFunnelCohortCount[];
+  registration_funnel: AdminOverviewRegistrationFunnel;
 }
 
 export interface AdminCostsResponse {

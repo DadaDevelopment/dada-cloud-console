@@ -167,9 +167,10 @@ func (h *Handler) overviewRegistrationChannels(ctx context.Context, days int) ([
 }
 
 // metrikaStatTotals is the subset of the Stat API's response this needs: the
-// grand totals row, in the same order as the requested metrics.
+// grand totals, one number per requested metric, same order as the metrics
+// list -- the Stat API's "totals" field is a flat array, not per-row nested.
 type metrikaStatTotals struct {
-	Totals [][]float64 `json:"totals"`
+	Totals []float64 `json:"totals"`
 }
 
 // fetchMetrikaGoalReaches asks the Yandex Metrika Stat API how many times
@@ -213,5 +214,5 @@ func fetchMetrikaGoalReaches(ctx context.Context, oauthToken string, counterID, 
 	if len(parsed.Totals) == 0 {
 		return nil, fmt.Errorf("empty totals")
 	}
-	return parsed.Totals[0], nil
+	return parsed.Totals, nil
 }

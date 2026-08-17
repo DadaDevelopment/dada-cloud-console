@@ -23,18 +23,27 @@ type adminFunnelCohortCount struct {
 }
 
 type adminFunnelResponse struct {
-	Window        string                   `json:"window"`
-	ExcludedKinds []string                 `json:"excluded_kinds"`
-	Signups       int                      `json:"signups"`
-	AppUp         int                      `json:"app_up"`
-	DBUp          int                      `json:"db_up"`
-	VMUp          int                      `json:"vm_up"`
-	BoxUp         int                      `json:"box_up"`
-	S3Up          int                      `json:"s3_up"`
-	ModelUp       int                      `json:"model_up"`
-	Paid          int                      `json:"paid"`
-	PaidNote      string                   `json:"paid_note,omitempty"`
-	CohortCounts  []adminFunnelCohortCount `json:"cohort_counts"`
+	Window             string                     `json:"window"`
+	ExcludedKinds      []string                   `json:"excluded_kinds"`
+	Signups            int                        `json:"signups"`
+	AppUp              int                        `json:"app_up"`
+	DBUp               int                        `json:"db_up"`
+	VMUp               int                        `json:"vm_up"`
+	BoxUp              int                        `json:"box_up"`
+	S3Up               int                        `json:"s3_up"`
+	ModelUp            int                        `json:"model_up"`
+	Paid               int                        `json:"paid"`
+	PaidNote           string                     `json:"paid_note,omitempty"`
+	CohortCounts       []adminFunnelCohortCount   `json:"cohort_counts"`
+	RegistrationFunnel overviewRegistrationFunnel `json:"registration_funnel"`
+}
+
+// funnelWindowDays maps the UI's fixed window choices to a day count for the
+// Keycloak/Metrika registration leg, which speaks days rather than a Postgres
+// interval literal. "all" has no true bound; 3650 (10y) is a stand-in that
+// comfortably covers the product's entire lifetime.
+var funnelWindowDays = map[string]int{
+	"7d": 7, "30d": 30, "90d": 90, "all": 3650,
 }
 
 // GetAdminFunnel returns product-adoption funnel counts (signup -> App/DB/VM/
@@ -154,6 +163,8 @@ func (h *Handler) GetAdminFunnel(c *gin.Context) {
 		}
 		resp.CohortCounts = append(resp.CohortCounts, cc)
 	}
+
+	resp.RegistrationFunnel = h.overviewRegistrationFunnel(c.Request.Context(), funnelWindowDays[window])
 
 	c.JSON(http.StatusOK, resp)
 }

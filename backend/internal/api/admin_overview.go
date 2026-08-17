@@ -440,8 +440,6 @@ func (h *Handler) GetAdminOverview(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "failed to aggregate live URL health")
 		return
 	}
-	registrationFunnel := h.overviewRegistrationFunnel(ctx, days)
-
 	c.JSON(http.StatusOK, gin.H{
 		"users":               users,
 		"projects":            projects,
@@ -458,7 +456,6 @@ func (h *Handler) GetAdminOverview(c *gin.Context) {
 		"dynamics":            dynamics,
 		"dynamics_days":       days,
 		"live_urls":           liveURLs,
-		"registration_funnel": registrationFunnel,
 	})
 }
 
