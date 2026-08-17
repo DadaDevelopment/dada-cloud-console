@@ -168,7 +168,7 @@ export default function AdminOverviewPage() {
     },
     series: [{
       type: "bar",
-      data: funnelStages.map((s, i) => ({
+      data: funnelStages.map((s) => ({
         value: s.count,
         itemStyle: { color: s.key === "kc_register_error" ? "#ef4444" : "#3b82f6" },
       })).reverse(),
