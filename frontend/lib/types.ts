@@ -1334,18 +1334,35 @@ export interface AdminOverviewFunnelStage {
 }
 
 /**
+ * One signup door (users.signup_channel: "password" or a Keycloak broker
+ * alias like "yandex"/"google"/"github") and how many rows landed through it
+ * in the window.
+ */
+export interface AdminOverviewChannelCount {
+  channel: string;
+  count: number;
+}
+
+/**
  * Keycloak-side registration funnel: goal-reach counts from the dedicated
  * id.dada-tuda.ru Metrika counter, between "opened the form" and "submitted
  * / hit an error", plus registered which is the real user_accounts count for
  * the same window. Available is false when METRIKA_OAUTH_TOKEN is unset or
  * the Stat API call failed -- Note carries the reason, Stages are still
  * present (zeroed) so the UI can render the shape without a null check.
+ *
+ * Stages only sees the email/password form: a brokered (identity-provider)
+ * signup redirects off that form's DOM before any goal fires, so it's
+ * invisible there by construction. Channels is the Postgres-side view that
+ * sees every door regardless of how the row was born, closing that gap --
+ * rows older than the signup_channel column are simply absent from it.
  */
 export interface AdminOverviewRegistrationFunnel {
   available: boolean;
   days: number;
   registered: number;
   stages: AdminOverviewFunnelStage[];
+  channels: AdminOverviewChannelCount[];
   note?: string;
 }
 

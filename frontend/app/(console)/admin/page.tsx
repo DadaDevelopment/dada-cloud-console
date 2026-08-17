@@ -158,6 +158,25 @@ export default function AdminOverviewPage() {
 
   const funnel = data?.registration_funnel;
   const funnelStages = funnel?.stages ?? [];
+  const funnelChannels = funnel?.channels ?? [];
+  const channelLabel = (channel: string) =>
+    channel === "password" ? "Email/пароль" : channel === "yandex" ? "Яндекс" : channel === "google" ? "Google" : channel === "github" ? "GitHub" : channel;
+  const channelsTotal = funnelChannels.reduce((sum, c) => sum + c.count, 0);
+  const channelsOption: EChartsOption = {
+    tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+    xAxis: { type: "value" },
+    yAxis: {
+      type: "category",
+      data: funnelChannels.map((c) => channelLabel(c.channel)).reverse(),
+    },
+    series: [{
+      type: "bar",
+      data: funnelChannels.map((c) => c.count).reverse(),
+      label: { show: true, position: "right" },
+      barMaxWidth: 28,
+      itemStyle: { color: "#f59e0b" },
+    }],
+  };
   const registrationFunnelOption: EChartsOption = {
     tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
     xAxis: { type: "value" },
@@ -398,6 +417,8 @@ export default function AdminOverviewPage() {
             <p className="text-xs text-gray-500 dark:text-gray-400">
               Данные по этапам — из отдельного счётчика Метрики на id.dada-tuda.ru (не общий счётчик консоли), окно{" "}
               {funnel?.days ?? DYNAMICS_DAYS} дн. «Зарегистрировано» — реальные строки в базе за то же окно, не сэмпл Метрики.
+              Этапы видят только форму email/пароль — вход через Яндекс/Google/GitHub уходит на сторону провайдера и
+              минует эту форму, поэтому его считает блок «По каналу» ниже, а не этапы.
             </p>
           </CardHeader>
           <CardContent className="p-4 pt-0">
@@ -423,6 +444,38 @@ export default function AdminOverviewPage() {
                       {funnel?.stages[funnel.stages.length - 1]?.count ?? "—"}
                     </p>
                   </div>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="p-4 pb-2">
+            <CardTitle className="text-sm">Регистрация по каналу: пароль vs провайдер</CardTitle>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Реальные строки БД за окно {funnel?.days ?? DYNAMICS_DAYS} дн., по тому, как родился аккаунт —
+              email/пароль или брокер (Яндекс и т.п. не требуют подтверждения почты, конверсия там обычно выше).
+              Аккаунты, заведённые до этой метки, в разбивку не попадают — их канал не записан.
+            </p>
+          </CardHeader>
+          <CardContent className="p-4 pt-0">
+            {!isLoading && funnelChannels.length === 0 ? (
+              <p className="text-sm text-gray-400 dark:text-gray-500">Нет данных за окно — либо ещё не было регистраций, либо все они старше метки канала.</p>
+            ) : (
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div className="md:col-span-2">
+                  <EChart option={channelsOption} height={Math.max(120, funnelChannels.length * 60)} />
+                </div>
+                <div className="flex flex-col justify-center gap-3 border-t border-gray-100 dark:border-gray-800/60 pt-3 md:border-t-0 md:border-l md:pl-4 md:pt-0">
+                  {funnelChannels.map((c) => (
+                    <div key={c.channel}>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{channelLabel(c.channel)}</p>
+                      <p className="text-lg font-medium text-gray-700 dark:text-gray-300">
+                        {c.count} <span className="text-xs text-gray-400 dark:text-gray-500">({channelsTotal > 0 ? Math.round((c.count / channelsTotal) * 100) : 0}%)</span>
+                      </p>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}

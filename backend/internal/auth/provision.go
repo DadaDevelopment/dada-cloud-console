@@ -121,6 +121,12 @@ func nullableAttr(s string) any {
 // SignupAttribution). It is only ever consulted on the INSERT branch of
 // upsertBySub — a returning identity ignores whatever attr the caller passes,
 // because its channel was already decided the first time it showed up.
+//
+// signup_channel is derived from kc.IdentityProvider the same way: 'password'
+// for the classic email/password form, or the Keycloak broker alias (yandex,
+// google, github, ...) for a brokered signup — provider-agnostic, never
+// hardcoded to one IdP — and, like the attribution columns, only ever written
+// on the INSERT branch.
 func ResolveUser(ctx context.Context, db querier, kc *KeycloakClaims, allowSignup bool, attr SignupAttribution) (id uuid.UUID, created bool, err error) {
 	if kc == nil || kc.Subject == "" {
 		return uuid.Nil, false, fmt.Errorf("keycloak claims missing subject")
@@ -158,11 +164,16 @@ func ResolveUser(ctx context.Context, db querier, kc *KeycloakClaims, allowSignu
 	// fortnight. Attaching the row to the INSERT branch here makes that
 	// unrepresentable for any future caller, and the FK to users(id) is
 	// satisfied because foreign keys are checked after the statement completes.
+	signupChannel := kc.IdentityProvider
+	if signupChannel == "" {
+		signupChannel = "password"
+	}
+
 	const upsertBySub = `
 		WITH upserted AS (
 		    INSERT INTO users (keycloak_sub, username, email, display_name, password_hash,
-		        signup_source, signup_medium, signup_campaign, signup_referrer)
-		    VALUES ($1, $2, $3, $4, '', $5, $6, $7, $8)
+		        signup_source, signup_medium, signup_campaign, signup_referrer, signup_channel)
+		    VALUES ($1, $2, $3, $4, '', $5, $6, $7, $8, $9)
 		    ON CONFLICT (keycloak_sub) DO UPDATE
 		        SET email = EXCLUDED.email,
 		            display_name = EXCLUDED.display_name,
@@ -185,7 +196,7 @@ func ResolveUser(ctx context.Context, db querier, kc *KeycloakClaims, allowSignu
 	cleanAttr := sanitizeSignupAttribution(attr)
 	err = db.QueryRow(ctx, upsertBySub, kc.Subject, username, email, displayName,
 		nullableAttr(cleanAttr.Source), nullableAttr(cleanAttr.Medium),
-		nullableAttr(cleanAttr.Campaign), nullableAttr(cleanAttr.Referrer),
+		nullableAttr(cleanAttr.Campaign), nullableAttr(cleanAttr.Referrer), signupChannel,
 	).Scan(&id, &created)
 	if err == nil {
 		return id, created, nil

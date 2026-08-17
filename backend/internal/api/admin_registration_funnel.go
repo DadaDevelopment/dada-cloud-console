@@ -45,6 +45,14 @@ type overviewFunnelStage struct {
 	Count int    `json:"count"`
 }
 
+// overviewChannelCount is one signup door (users.signup_channel: 'password'
+// or a Keycloak broker alias) and how many rows landed through it in the
+// window.
+type overviewChannelCount struct {
+	Channel string `json:"channel"`
+	Count   int    `json:"count"`
+}
+
 // overviewRegistrationFunnel is the Keycloak-side counterpart to
 // overviewDynamics.Signups: everything between "opened the registration form"
 // and "became a row in user_accounts". Registered comes straight from
@@ -54,12 +62,24 @@ type overviewFunnelStage struct {
 // see frontend/lib/metrika.ts. A Metrika outage must never break the rest of
 // the admin overview, so this never returns an error: Available=false plus
 // Note is the failure signal.
+//
+// Stages is structurally blind to identity-provider (Yandex/google/github)
+// signups: a brokered login redirects off the registration form's DOM before
+// any reachGoal call fires, so it never touches those goals. Channels closes
+// that gap from Postgres, which sees every door regardless of how the row
+// was born -- and per argo-infra yandex-idp.yaml, Yandex has been the ONLY
+// open signup door since 2026-08-13, so Channels is usually where most of
+// Registered actually lives even though Stages' funnel is nearly empty for
+// them. Rows older than migration 132 have signup_channel = NULL and are
+// dropped from Channels (their door was never recorded), so Channels can
+// legitimately sum to less than Registered.
 type overviewRegistrationFunnel struct {
-	Available  bool                  `json:"available"`
-	Days       int                   `json:"days"`
-	Registered int                   `json:"registered"`
-	Stages     []overviewFunnelStage `json:"stages"`
-	Note       string                `json:"note,omitempty"`
+	Available  bool                   `json:"available"`
+	Days       int                    `json:"days"`
+	Registered int                    `json:"registered"`
+	Stages     []overviewFunnelStage  `json:"stages"`
+	Channels   []overviewChannelCount `json:"channels"`
+	Note       string                 `json:"note,omitempty"`
 }
 
 func (h *Handler) overviewRegistrationFunnel(ctx context.Context, days int) overviewRegistrationFunnel {
@@ -76,6 +96,9 @@ func (h *Handler) overviewRegistrationFunnel(ctx context.Context, days int) over
 
 	if registered, err := h.overviewRegisteredCount(ctx, days); err == nil {
 		out.Registered = registered
+	}
+	if channels, err := h.overviewRegistrationChannels(ctx, days); err == nil {
+		out.Channels = channels
 	}
 
 	if h.cfg.MetrikaOAuthToken == "" {
@@ -110,6 +133,37 @@ func (h *Handler) overviewRegisteredCount(ctx context.Context, days int) (int, e
 		strconv.Itoa(days), overviewCustomerKind,
 	).Scan(&n)
 	return n, err
+}
+
+// overviewRegistrationChannels breaks overviewRegisteredCount down by
+// users.signup_channel for the same window, so "Yandex signups skip email
+// verification and convert higher" is a number, not a guess. NULL channels
+// (rows born before migration 132) are excluded rather than lumped into
+// 'password', since their door was never recorded.
+func (h *Handler) overviewRegistrationChannels(ctx context.Context, days int) ([]overviewChannelCount, error) {
+	rows, err := h.pool.Query(ctx, `
+		SELECT signup_channel, count(*) FROM user_accounts
+		WHERE created_at >= now() - ($1 || ' days')::interval
+		    AND account_kind = $2
+		    AND signup_channel IS NOT NULL
+		GROUP BY signup_channel
+		ORDER BY count(*) DESC`,
+		strconv.Itoa(days), overviewCustomerKind,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []overviewChannelCount
+	for rows.Next() {
+		var c overviewChannelCount
+		if err := rows.Scan(&c.Channel, &c.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 // metrikaStatTotals is the subset of the Stat API's response this needs: the

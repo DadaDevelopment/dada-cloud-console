@@ -41,6 +41,14 @@ type KeycloakClaims struct {
 	// SessionID is the Keycloak SSO session id (sid). Not used for authz — it
 	// only lets the audit trail tell two visits apart when a user re-logs in.
 	SessionID string
+
+	// IdentityProvider is the Keycloak broker alias ("yandex", "google",
+	// "github") this login went through, empty for the classic
+	// email/password flow. Requires the identity-provider session-note
+	// mapper on the dada-console client (argo-infra iam-token-mappers.yaml);
+	// empty on any deployment without that mapper, which just reads as
+	// "password" downstream — never a hard failure.
+	IdentityProvider string
 }
 
 // rawKeycloakClaims mirrors the JSON shape of a Keycloak access token. Only the
@@ -60,6 +68,7 @@ type rawKeycloakClaims struct {
 	ResourceAccess map[string]struct {
 		Roles []string `json:"roles"`
 	} `json:"resource_access"`
+	IdentityProvider string `json:"identity_provider"`
 }
 
 // jwk is a single RSA key from a JWKS document.
@@ -197,6 +206,7 @@ func (v *KeycloakVerifier) Verify(ctx context.Context, rawToken string) (*Keyclo
 		Azp:                   rc.Azp,
 		ResourceAccessClients: clients,
 		SessionID:             rc.SessionID,
+		IdentityProvider:      rc.IdentityProvider,
 	}, nil
 }
 
