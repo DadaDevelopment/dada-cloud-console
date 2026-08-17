@@ -43,6 +43,7 @@ export const CONSOLE_ROUTES: readonly string[] = [
   "/admin/costs",
   "/admin/db-shards",
   "/admin/feedback",
+  "/admin/funnel",
   "/ai-studio",
   "/billing/return",
   "/deploy",

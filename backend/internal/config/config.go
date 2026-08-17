@@ -638,6 +638,30 @@ type Config struct {
 	YooKassaPartnerClientID     string // YOOKASSA_PARTNER_CLIENT_ID
 	YooKassaPartnerClientSecret string // YOOKASSA_PARTNER_CLIENT_SECRET
 
+	// T-Bank Business invoice payments (B2B "pay by bank transfer" method).
+	// Empty TBankBusinessToken/TBankAccountNumber means the invoice method is
+	// unconfigured: CreateInvoice returns 409 payments_not_configured and the
+	// statement-reconcile ticker never starts, the same degrade-off shape as
+	// YooKassa above.
+	TBankBusinessToken          string        // TBANK_BUSINESS_TOKEN
+	TBankAccountNumber          string        // TBANK_ACCOUNT_NUMBER
+	TBankSandbox                bool          // TBANK_SANDBOX (default false)
+	TBankStatementPollInterval  time.Duration // TBANK_STATEMENT_POLL_INTERVAL_SECONDS (default 15m)
+
+	// Platform requisites printed on every generated invoice (payer sees these
+	// as who they are paying). No defensible hardcoded value for any of
+	// these -- they are the operator's own legal entity details -- so every
+	// one is blank until set in the environment.
+	PlatformINN          string // PLATFORM_INN
+	PlatformKPP          string // PLATFORM_KPP
+	PlatformOGRN         string // PLATFORM_OGRN
+	PlatformName         string // PLATFORM_NAME
+	PlatformLegalAddress string // PLATFORM_LEGAL_ADDRESS
+	PlatformBankAccount  string // PLATFORM_BANK_ACCOUNT
+	PlatformBankBIC      string // PLATFORM_BANK_BIC
+	PlatformBankName     string // PLATFORM_BANK_NAME
+	PlatformCorrAccount  string // PLATFORM_CORR_ACCOUNT
+
 	// Dada Box runtime (ADR-019). ONE switch turns the whole feature on:
 	// BoxLocalRoot empty means every box verb answers 503 with a reason, the same
 	// way Portainer, Kanister and the S3 resolvers degrade when unconfigured.
@@ -905,6 +929,21 @@ func Load() (*Config, error) {
 		YooKassaTaxSystemCode:       getEnvInt("YOOKASSA_TAX_SYSTEM_CODE", 0),
 		YooKassaPartnerClientID:     getEnv("YOOKASSA_PARTNER_CLIENT_ID", ""),
 		YooKassaPartnerClientSecret: getEnv("YOOKASSA_PARTNER_CLIENT_SECRET", ""),
+
+		TBankBusinessToken:         getEnv("TBANK_BUSINESS_TOKEN", ""),
+		TBankAccountNumber:         getEnv("TBANK_ACCOUNT_NUMBER", ""),
+		TBankSandbox:               getEnv("TBANK_SANDBOX", "false") == "true",
+		TBankStatementPollInterval: time.Duration(getEnvInt64("TBANK_STATEMENT_POLL_INTERVAL_SECONDS", 900)) * time.Second,
+
+		PlatformINN:          getEnv("PLATFORM_INN", ""),
+		PlatformKPP:          getEnv("PLATFORM_KPP", ""),
+		PlatformOGRN:         getEnv("PLATFORM_OGRN", ""),
+		PlatformName:         getEnv("PLATFORM_NAME", ""),
+		PlatformLegalAddress: getEnv("PLATFORM_LEGAL_ADDRESS", ""),
+		PlatformBankAccount:  getEnv("PLATFORM_BANK_ACCOUNT", ""),
+		PlatformBankBIC:      getEnv("PLATFORM_BANK_BIC", ""),
+		PlatformBankName:     getEnv("PLATFORM_BANK_NAME", ""),
+		PlatformCorrAccount:  getEnv("PLATFORM_CORR_ACCOUNT", ""),
 
 		DemoAppTTLHours: getEnvIntAllowZero("DEMO_APP_TTL_HOURS", 24),
 

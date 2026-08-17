@@ -14,6 +14,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/billing"
 	"github.com/dada-tuda/console/backend/internal/billing/costengine"
 	"github.com/dada-tuda/console/backend/internal/billing/pricing"
+	"github.com/dada-tuda/console/backend/internal/billing/tbank"
 	"github.com/dada-tuda/console/backend/internal/billing/yookassa"
 	"github.com/dada-tuda/console/backend/internal/buildagent"
 	"github.com/dada-tuda/console/backend/internal/cache"
@@ -149,6 +150,8 @@ type Handler struct {
 	yookassa *yookassa.YooKassaProvider
 
 	yookassaOAuth *yookassa.OAuthClient
+
+	tbank *tbank.Provider
 
 	optionalAuth func(c *gin.Context) (*auth.Claims, bool)
 
@@ -317,6 +320,11 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 		h.yookassa = yookassa.NewProvider(pool, ykClient, cfg.YooKassaReturnURL, cfg.YooKassaSendReceipt, cfg.YooKassaVatCode, cfg.YooKassaTaxSystemCode)
 	}
 	h.yookassaOAuth = yookassa.NewOAuthClient()
+
+	if cfg.TBankBusinessToken != "" && cfg.TBankAccountNumber != "" {
+		tbankClient := tbank.New(cfg.TBankBusinessToken, cfg.TBankSandbox)
+		h.tbank = tbank.NewProvider(pool, tbankClient, cfg.TBankAccountNumber)
+	}
 
 	h.billingMarkup = pricing.MarkupDefault
 	h.billingMargin = cfg.BillingMargin

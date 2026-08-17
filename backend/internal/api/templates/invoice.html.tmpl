@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Счет {{.InvoiceNumber}}</title>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #111; margin: 40px; }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  .muted { color: #555; margin-bottom: 24px; }
+  table { border-collapse: collapse; width: 100%; margin-bottom: 24px; }
+  td, th { border: 1px solid #ccc; padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #f4f4f4; width: 220px; }
+  .amount { font-size: 16px; font-weight: bold; }
+  .print-hint { margin-top: 32px; color: #777; font-size: 12px; }
+  @media print {
+    .print-hint { display: none; }
+  }
+</style>
+</head>
+<body>
+  <h1>Счет на оплату {{.InvoiceNumber}}</h1>
+  <div class="muted">от {{.IssuedAt}}</div>
+
+  <table>
+    <tr><th>Получатель</th><td>{{.PlatformName}}</td></tr>
+    <tr><th>ИНН</th><td>{{.PlatformINN}}</td></tr>
+    <tr><th>КПП</th><td>{{.PlatformKPP}}</td></tr>
+    <tr><th>ОГРН</th><td>{{.PlatformOGRN}}</td></tr>
+    <tr><th>Юридический адрес</th><td>{{.PlatformAddress}}</td></tr>
+    <tr><th>Расчетный счет</th><td>{{.PlatformBankAccount}}</td></tr>
+    <tr><th>Банк</th><td>{{.PlatformBankName}}</td></tr>
+    <tr><th>БИК</th><td>{{.PlatformBankBIC}}</td></tr>
+    <tr><th>Корр. счет</th><td>{{.PlatformCorrAccount}}</td></tr>
+  </table>
+
+  <table>
+    <tr><th>Плательщик</th><td>{{.PayerOrgName}}</td></tr>
+    <tr><th>ИНН</th><td>{{.PayerINN}}</td></tr>
+    <tr><th>КПП</th><td>{{.PayerKPP}}</td></tr>
+    <tr><th>Адрес</th><td>{{.PayerAddress}}</td></tr>
+  </table>
+
+  <table>
+    <tr><th>Назначение платежа</th><td>Оплата тарифа "{{.Plan}}" по счету {{.InvoiceNumber}}</td></tr>
+    <tr><th>Сумма к оплате</th><td class="amount">{{.AmountValue}} руб.</td></tr>
+  </table>
+
+  <div class="print-hint">Чтобы сохранить счет в PDF, используйте печать страницы (Ctrl+P) и выберите "Сохранить как PDF".</div>
+</body>
+</html>

@@ -15,6 +15,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/billing"
 	"github.com/dada-tuda/console/backend/internal/billing/costengine"
 	"github.com/dada-tuda/console/backend/internal/billing/pricing"
+	"github.com/dada-tuda/console/backend/internal/billing/tbank"
 	"github.com/dada-tuda/console/backend/internal/config"
 	"github.com/dada-tuda/console/backend/internal/db"
 	"github.com/dada-tuda/console/backend/internal/metrics"
@@ -258,6 +259,35 @@ func main() {
 		log.Info().Bool("reactivation", cfg.ReactivationCampaignEnabled).
 			Bool("reactivation_fix_wave", cfg.ReactivationFixWaveEnabled).
 			Msg("billing autopay, plan-expiry and quota-grace sweepers started")
+
+		if cfg.TBankBusinessToken != "" && cfg.TBankAccountNumber != "" {
+			tbankClient := tbank.New(cfg.TBankBusinessToken, cfg.TBankSandbox)
+			tbankProvider := tbank.NewProvider(pool, tbankClient, cfg.TBankAccountNumber)
+			tbankProvider.Notifier = notify.New(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPFrom)
+			tbankProvider.AuditEmail = cfg.AuditNotifyEmail
+			go func() {
+				ticker := time.NewTicker(cfg.TBankStatementPollInterval)
+				defer ticker.Stop()
+				if matched, err := tbankProvider.Reconcile(meterCtx); err != nil {
+					log.Error().Err(err).Msg("tbank: initial statement reconcile failed")
+				} else if matched > 0 {
+					log.Info().Int("matched", matched).Msg("tbank: initial statement reconcile matched invoices")
+				}
+				for {
+					select {
+					case <-meterCtx.Done():
+						return
+					case <-ticker.C:
+						if matched, err := tbankProvider.Reconcile(meterCtx); err != nil {
+							log.Error().Err(err).Msg("tbank: statement reconcile failed")
+						} else if matched > 0 {
+							log.Info().Int("matched", matched).Msg("tbank: statement reconcile matched invoices")
+						}
+					}
+				}
+			}()
+			log.Info().Dur("interval", cfg.TBankStatementPollInterval).Msg("tbank invoice reconcile started")
+		}
 	}
 
 	<-quit

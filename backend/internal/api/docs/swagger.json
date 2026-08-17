@@ -801,6 +801,39 @@
                 }
             }
         },
+        "/admin/funnel": {
+            "get": {
+                "description": "Signup -\u003e resource-kind adoption -\u003e paid counts for a signup window, excluding chosen account_kind cohorts.",
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Product adoption funnel",
+                "operationId": "getAdminFunnel",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "default": "30d",
+                        "description": "7d|30d|90d|all",
+                        "name": "window",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "comma-separated account_kind values to hide",
+                        "name": "exclude_kind",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.adminFunnelResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/growth/campaigns": {
             "get": {
                 "security": [
@@ -1859,6 +1892,77 @@
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/billing/invoice/{paymentId}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Renders a printable HTML page for one invoice payment. Requires membership in the org that owns the payment.",
+                "produces": [
+                    "text/html"
+                ],
+                "tags": [
+                    "billing"
+                ],
+                "summary": "Get a printable invoice",
+                "operationId": "getInvoice",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Payment UUID",
+                        "name": "paymentId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "HTML page",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -4918,6 +5022,111 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/billing/invoice": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Validates the payer's INN and creates a pending invoice payment for the requested plan. Returns the invoice number and the printable invoice URL. Requires write role on the project.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "billing"
+                ],
+                "summary": "Start a plan invoice payment",
+                "operationId": "createInvoice",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Plan key and payer requisites",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -20555,6 +20764,64 @@
                     "type": "string"
                 },
                 "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.adminFunnelCohortCount": {
+            "type": "object",
+            "properties": {
+                "account_kind": {
+                    "type": "string"
+                },
+                "count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.adminFunnelResponse": {
+            "type": "object",
+            "properties": {
+                "app_up": {
+                    "type": "integer"
+                },
+                "box_up": {
+                    "type": "integer"
+                },
+                "cohort_counts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.adminFunnelCohortCount"
+                    }
+                },
+                "db_up": {
+                    "type": "integer"
+                },
+                "excluded_kinds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "model_up": {
+                    "type": "integer"
+                },
+                "paid": {
+                    "type": "integer"
+                },
+                "paid_note": {
+                    "type": "string"
+                },
+                "s3_up": {
+                    "type": "integer"
+                },
+                "signups": {
+                    "type": "integer"
+                },
+                "vm_up": {
+                    "type": "integer"
+                },
+                "window": {
                     "type": "string"
                 }
             }

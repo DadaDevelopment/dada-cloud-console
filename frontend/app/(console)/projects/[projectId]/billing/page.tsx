@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { billingApi } from "@/lib/api";
-import type { BillingAccount, BillingUsage, ConsumptionResponse, BillingPlan, BillingPlanKey, Payment, PaymentStatus } from "@/lib/api";
+import type { BillingAccount, BillingUsage, ConsumptionResponse, BillingPlan, BillingPlanKey, Payment, PaymentStatus, CreateInvoiceRequest } from "@/lib/api";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { ConsumptionBreakdown } from "@/components/billing/consumption-breakdown";
@@ -94,6 +94,19 @@ export default function BillingPage() {
   const [detachBusy, setDetachBusy] = useState(false);
   const [detachError, setDetachError] = useState<string | null>(null);
 
+  const [paymentMethod, setPaymentMethod] = useState<"card" | "invoice">("card");
+  const [invoicePlanKeyOverride, setInvoicePlanKeyOverride] = useState<BillingPlanKey | null>(null);
+  const [invoiceForm, setInvoiceForm] = useState({
+    payer_inn: "",
+    payer_kpp: "",
+    payer_org_name: "",
+    payer_legal_address: "",
+    email: "",
+  });
+  const [invoiceBusy, setInvoiceBusy] = useState(false);
+  const [invoiceError, setInvoiceError] = useState<string | null>(null);
+  const [invoiceResult, setInvoiceResult] = useState<{ paymentId: string; invoiceNumber: string } | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -170,6 +183,44 @@ export default function BillingPage() {
       }
     } finally {
       setCheckoutingPlan(null);
+    }
+  }
+
+  async function handleCreateInvoice(plan: BillingPlanKey) {
+    setInvoiceError(null);
+    setInvoiceResult(null);
+    setInvoiceBusy(true);
+    try {
+      const body: CreateInvoiceRequest = { plan, ...invoiceForm };
+      const resp = await billingApi.createInvoice(projectId, body);
+      setInvoiceResult({ paymentId: resp.payment_id, invoiceNumber: resp.invoice_number });
+      setPayments((prev) => [
+        {
+          id: resp.payment_id,
+          plan,
+          amount_value: plans.find((p) => p.key === plan)?.price_rub ?? 0,
+          currency: "RUB",
+          status: "pending",
+          payment_method: "invoice",
+          invoice_number: resp.invoice_number,
+          created_at: new Date().toISOString(),
+          paid_at: null,
+        },
+        ...prev,
+      ]);
+      billingApi.openInvoice(resp.payment_id).catch(() => {});
+    } catch (err) {
+      const status = (err as { status?: number } | undefined)?.status;
+      const code = (err as { code?: string } | undefined)?.code;
+      if (status === 409) {
+        setInvoiceError(t("billing.notConfigured"));
+      } else if (status === 400 && code === "invalid_inn") {
+        setInvoiceError(t("billing.invoice.invalidInn"));
+      } else {
+        setInvoiceError(err instanceof Error ? err.message : t("billing.invoice.error"));
+      }
+    } finally {
+      setInvoiceBusy(false);
     }
   }
 
@@ -314,6 +365,7 @@ export default function BillingPage() {
   const upgradeCandidates = plans
     .filter((p) => PLAN_ORDER.indexOf(p.key) > currentIdx && p.price_rub !== null && p.price_rub > 0)
     .sort((a, b) => PLAN_ORDER.indexOf(a.key) - PLAN_ORDER.indexOf(b.key));
+  const invoicePlanKey = invoicePlanKeyOverride ?? upgradeCandidates[0]?.key ?? account.plan;
 
   return (
     <div>
@@ -600,6 +652,134 @@ export default function BillingPage() {
 
       </div>
 
+      {upgradeCandidates.length > 0 && (
+        <div className="mt-8 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
+          <h2 className="mb-4 text-sm font-semibold text-gray-900 dark:text-gray-100">{t("billing.invoice.title")}</h2>
+
+          <div className="mb-4 inline-flex rounded-lg border border-gray-200 dark:border-gray-800 p-0.5">
+            <button
+              type="button"
+              onClick={() => setPaymentMethod("card")}
+              className={clsx(
+                "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                paymentMethod === "card"
+                  ? "bg-blue-600 text-white"
+                  : "text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100",
+              )}
+            >
+              {t("billing.invoice.methodCard")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setPaymentMethod("invoice")}
+              data-ux="billing_invoice:method_select"
+              className={clsx(
+                "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                paymentMethod === "invoice"
+                  ? "bg-blue-600 text-white"
+                  : "text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100",
+              )}
+            >
+              {t("billing.invoice.methodInvoice")}
+            </button>
+          </div>
+
+          {paymentMethod === "card" ? (
+            <p className="text-sm text-gray-400 dark:text-gray-500">{t("billing.invoice.cardHint")}</p>
+          ) : (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleCreateInvoice(invoicePlanKey);
+              }}
+              className="space-y-3"
+            >
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">{t("billing.invoice.plan")}</label>
+                <select
+                  value={invoicePlanKey}
+                  onChange={(e) => setInvoicePlanKeyOverride(e.target.value as BillingPlanKey)}
+                  className="w-full rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                >
+                  {upgradeCandidates.map((p) => (
+                    <option key={p.key} value={p.key}>
+                      {p.name} — {(p.price_rub ?? 0).toLocaleString("ru")} {t("billing.currency.rub")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">{t("billing.invoice.inn")}</label>
+                  <input
+                    required
+                    value={invoiceForm.payer_inn}
+                    onChange={(e) => setInvoiceForm((f) => ({ ...f, payer_inn: e.target.value }))}
+                    className="w-full rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">{t("billing.invoice.kpp")}</label>
+                  <input
+                    value={invoiceForm.payer_kpp}
+                    onChange={(e) => setInvoiceForm((f) => ({ ...f, payer_kpp: e.target.value }))}
+                    className="w-full rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">{t("billing.invoice.orgName")}</label>
+                <input
+                  required
+                  value={invoiceForm.payer_org_name}
+                  onChange={(e) => setInvoiceForm((f) => ({ ...f, payer_org_name: e.target.value }))}
+                  className="w-full rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">{t("billing.invoice.legalAddress")}</label>
+                <input
+                  required
+                  value={invoiceForm.payer_legal_address}
+                  onChange={(e) => setInvoiceForm((f) => ({ ...f, payer_legal_address: e.target.value }))}
+                  className="w-full rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">{t("billing.invoice.email")}</label>
+                <input
+                  type="email"
+                  value={invoiceForm.email}
+                  onChange={(e) => setInvoiceForm((f) => ({ ...f, email: e.target.value }))}
+                  className="w-full rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={invoiceBusy}
+                data-ux="billing_invoice:submit"
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
+              >
+                {invoiceBusy ? t("billing.invoice.creating") : t("billing.invoice.create")}
+              </button>
+              {invoiceError && <p className="text-xs text-red-600 dark:text-red-400">{invoiceError}</p>}
+              {invoiceResult && (
+                <p className="text-xs text-green-700 dark:text-green-400">
+                  {t("billing.invoice.created", { number: invoiceResult.invoiceNumber })}{" "}
+                  <button
+                    type="button"
+                    onClick={() => billingApi.openInvoice(invoiceResult.paymentId)}
+                    className="font-semibold underline"
+                  >
+                    {t("billing.invoice.open")}
+                  </button>
+                </p>
+              )}
+            </form>
+          )}
+        </div>
+      )}
+
       <div className="mt-8 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
         <h2 className="mb-4 text-sm font-semibold text-gray-900 dark:text-gray-100">{t("billing.paymentsTitle")}</h2>
         {payments.length === 0 ? (
@@ -613,17 +793,31 @@ export default function BillingPage() {
                   <span className="text-gray-400 dark:text-gray-500">
                     {p.amount_value.toLocaleString("ru")} {p.currency}
                   </span>
+                  {p.payment_method === "invoice" && p.invoice_number && (
+                    <span className="text-xs text-gray-400 dark:text-gray-500">{p.invoice_number}</span>
+                  )}
                 </div>
                 <div className="flex items-center gap-3">
-                  {resumablePaymentUrl(p) && (
-                    <a
-                      href={resumablePaymentUrl(p) as string}
-                      onClick={() => trackUxEvent("click", "payment_resume")}
-                      data-ux="billing_payments:resume"
+                  {p.payment_method === "invoice" ? (
+                    <button
+                      type="button"
+                      onClick={() => billingApi.openInvoice(p.id)}
+                      data-ux="billing_payments:open_invoice"
                       className="text-xs font-semibold text-blue-600 hover:underline dark:text-blue-400"
                     >
-                      {t("billing.payments.resume")}
-                    </a>
+                      {t("billing.invoice.open")}
+                    </button>
+                  ) : (
+                    resumablePaymentUrl(p) && (
+                      <a
+                        href={resumablePaymentUrl(p) as string}
+                        onClick={() => trackUxEvent("click", "payment_resume")}
+                        data-ux="billing_payments:resume"
+                        className="text-xs font-semibold text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        {t("billing.payments.resume")}
+                      </a>
+                    )
                   )}
                   <span className={clsx("rounded-full px-3 py-1 text-xs font-medium", statusTone(p.status))}>
                     {t(`billing.status.${p.status}`)}

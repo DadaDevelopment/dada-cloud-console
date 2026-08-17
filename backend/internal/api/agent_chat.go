@@ -883,6 +883,7 @@ var agentChatConsoleRoutes = []string{
 	"/admin/costs",
 	"/admin/db-shards",
 	"/admin/feedback",
+	"/admin/funnel",
 	"/ai-studio",
 	"/deploy",
 	"/projects",

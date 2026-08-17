@@ -101,6 +101,44 @@ definitions:
       updated_at:
         type: string
     type: object
+  api.adminFunnelCohortCount:
+    properties:
+      account_kind:
+        type: string
+      count:
+        type: integer
+    type: object
+  api.adminFunnelResponse:
+    properties:
+      app_up:
+        type: integer
+      box_up:
+        type: integer
+      cohort_counts:
+        items:
+          $ref: '#/definitions/api.adminFunnelCohortCount'
+        type: array
+      db_up:
+        type: integer
+      excluded_kinds:
+        items:
+          type: string
+        type: array
+      model_up:
+        type: integer
+      paid:
+        type: integer
+      paid_note:
+        type: string
+      s3_up:
+        type: integer
+      signups:
+        type: integer
+      vm_up:
+        type: integer
+      window:
+        type: string
+    type: object
   api.agentChatClearContextRequest:
     properties:
       envId:
@@ -1982,6 +2020,29 @@ paths:
       summary: Resolve a feedback ticket (platform-admin only)
       tags:
       - admin
+  /admin/funnel:
+    get:
+      description: Signup -> resource-kind adoption -> paid counts for a signup window,
+        excluding chosen account_kind cohorts.
+      operationId: getAdminFunnel
+      parameters:
+      - default: 30d
+        description: 7d|30d|90d|all
+        in: query
+        name: window
+        type: string
+      - description: comma-separated account_kind values to hide
+        in: query
+        name: exclude_kind
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.adminFunnelResponse'
+      summary: Product adoption funnel
+      tags:
+      - admin
   /admin/growth/campaigns:
     get:
       description: Sent/opened/clicked/redeemed/converted per campaign, variant and
@@ -2738,6 +2799,53 @@ paths:
       security:
       - BearerAuth: []
       summary: Get account spend summary (informational)
+      tags:
+      - billing
+  /billing/invoice/{paymentId}:
+    get:
+      description: Renders a printable HTML page for one invoice payment. Requires
+        membership in the org that owns the payment.
+      operationId: getInvoice
+      parameters:
+      - description: Payment UUID
+        in: path
+        name: paymentId
+        required: true
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: HTML page
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get a printable invoice
       tags:
       - billing
   /billing/plans:
@@ -4835,6 +4943,77 @@ paths:
       security:
       - BearerAuth: []
       summary: Get project consumption (informational money-equivalent)
+      tags:
+      - billing
+  /projects/{projectId}/billing/invoice:
+    post:
+      consumes:
+      - application/json
+      description: Validates the payer's INN and creates a pending invoice payment
+        for the requested plan. Returns the invoice number and the printable invoice
+        URL. Requires write role on the project.
+      operationId: createInvoice
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Plan key and payer requisites
+        in: body
+        name: body
+        required: true
+        schema:
+          additionalProperties:
+            type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Start a plan invoice payment
       tags:
       - billing
   /projects/{projectId}/billing/payment-method:

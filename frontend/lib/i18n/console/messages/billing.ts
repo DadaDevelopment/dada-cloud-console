@@ -86,6 +86,26 @@ export const billing: Messages = {
   "billing.method.nextCharge": { ru: "Следующее списание {date}, {amount} ₽", en: "Next charge {date}, {amount} ₽" },
   "billing.payments.resume": { ru: "Продолжить оплату", en: "Continue payment" },
 
+  "billing.invoice.title": { ru: "Оплата счётом", en: "Pay by invoice" },
+  "billing.invoice.methodCard": { ru: "Картой", en: "Card" },
+  "billing.invoice.methodInvoice": { ru: "Счёт для юрлица", en: "Invoice for a legal entity" },
+  "billing.invoice.cardHint": {
+    ru: "Оплата картой доступна выше, в карточках тарифов.",
+    en: "Card payment is available above, in the plan cards.",
+  },
+  "billing.invoice.plan": { ru: "Тариф", en: "Plan" },
+  "billing.invoice.inn": { ru: "ИНН", en: "Tax ID (INN)" },
+  "billing.invoice.kpp": { ru: "КПП", en: "KPP" },
+  "billing.invoice.orgName": { ru: "Название организации", en: "Organization name" },
+  "billing.invoice.legalAddress": { ru: "Юридический адрес", en: "Legal address" },
+  "billing.invoice.email": { ru: "Email для счёта", en: "Email for the invoice" },
+  "billing.invoice.create": { ru: "Выставить счёт", en: "Generate invoice" },
+  "billing.invoice.creating": { ru: "Выставляем счёт...", en: "Generating..." },
+  "billing.invoice.created": { ru: "Счёт {number} выставлен.", en: "Invoice {number} generated." },
+  "billing.invoice.open": { ru: "Открыть счёт", en: "Open invoice" },
+  "billing.invoice.invalidInn": { ru: "Некорректный ИНН", en: "Invalid tax ID (INN)" },
+  "billing.invoice.error": { ru: "Не удалось выставить счёт", en: "Could not generate the invoice" },
+
   "billing.orgScope": {
     ru: "План действует на всю организацию — на все её проекты.",
     en: "The plan applies to your whole organization - all of its projects.",

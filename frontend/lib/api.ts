@@ -1936,12 +1936,16 @@ export interface RecommendPlanResponse {
 
 export type PaymentStatus = "pending" | "succeeded" | "canceled";
 
+export type PaymentMethod = "card" | "invoice";
+
 export interface Payment {
   id: string;
   plan: BillingPlanKey;
   amount_value: number;
   currency: string;
   status: PaymentStatus;
+  payment_method: PaymentMethod;
+  invoice_number?: string;
   created_at: string;
   paid_at: string | null;
   /**
@@ -1955,6 +1959,21 @@ export interface Payment {
 export interface CheckoutResponse {
   payment_id: string;
   confirmation_url: string;
+}
+
+export interface CreateInvoiceRequest {
+  plan: BillingPlanKey;
+  payer_inn: string;
+  payer_kpp?: string;
+  payer_org_name: string;
+  payer_legal_address: string;
+  email?: string;
+}
+
+export interface CreateInvoiceResponse {
+  payment_id: string;
+  invoice_number: string;
+  invoice_url: string;
 }
 
 export const billingApi = {
@@ -1981,6 +2000,25 @@ export const billingApi = {
 
   payments: (projectId: string) =>
     apiFetch<{ payments: Payment[] }>(`/api/v1/projects/${projectId}/billing/payments`),
+
+  createInvoice: (projectId: string, body: CreateInvoiceRequest) =>
+    apiFetch<CreateInvoiceResponse>(`/api/v1/projects/${projectId}/billing/invoice`, {
+      method: "POST",
+      body,
+    }),
+
+  /**
+   * Opens a paid-for invoice's printable page in a new tab. Plain navigation
+   * cannot carry the Authorization header, so the HTML is fetched as a blob
+   * and handed to the browser as an object URL, the same pattern used for
+   * authenticated file downloads elsewhere in this client.
+   */
+  openInvoice: async (paymentId: string) => {
+    const blob = await fetchAuthedBlob(`/api/v1/billing/invoice/${paymentId}`);
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  },
 
   getAccount: (projectId: string) =>
     apiFetch<BillingAccount>(`/api/v1/projects/${projectId}/billing/account`),

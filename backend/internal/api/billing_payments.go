@@ -29,6 +29,8 @@ type paymentResponse struct {
 	AmountValue     string     `json:"amount_value"`
 	Currency        string     `json:"currency"`
 	Status          string     `json:"status"`
+	PaymentMethod   string     `json:"payment_method"`
+	InvoiceNumber   string     `json:"invoice_number,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
 	PaidAt          *time.Time `json:"paid_at,omitempty"`
 	ConfirmationURL string     `json:"confirmation_url,omitempty"`
@@ -316,7 +318,7 @@ func (h *Handler) GetBillingPayments(c *gin.Context) {
 	}
 
 	rows, err := h.pool.Query(c.Request.Context(), `
-		SELECT id, plan, amount_value::text, currency, status, created_at, paid_at,
+		SELECT id, plan, amount_value::text, currency, status, payment_method, coalesce(invoice_number, ''), created_at, paid_at,
 		       CASE WHEN status = 'pending' THEN COALESCE(confirmation_url, '') ELSE '' END
 		FROM payments WHERE org_id = $1 ORDER BY created_at DESC LIMIT 20
 	`, orgID)
@@ -329,7 +331,7 @@ func (h *Handler) GetBillingPayments(c *gin.Context) {
 	payments := make([]paymentResponse, 0)
 	for rows.Next() {
 		var p paymentResponse
-		if err := rows.Scan(&p.ID, &p.Plan, &p.AmountValue, &p.Currency, &p.Status, &p.CreatedAt, &p.PaidAt, &p.ConfirmationURL); err != nil {
+		if err := rows.Scan(&p.ID, &p.Plan, &p.AmountValue, &p.Currency, &p.Status, &p.PaymentMethod, &p.InvoiceNumber, &p.CreatedAt, &p.PaidAt, &p.ConfirmationURL); err != nil {
 			respondError(c, http.StatusInternalServerError, "failed to read payments")
 			return
 		}
