@@ -146,9 +146,6 @@ backend:
     KEYCLOAK_TOKEN_URL: "https://id.dada-tuda.ru/realms/master/protocol/openid-connect/token"
     CLOUD_AGENT_CLIENT_ID: "dada-cloud-backend"
     CLOUD_TASK_CALLBACK_URL: "https://console.dada-tuda.ru/api/v1/webhooks/dadagent"
-    # METRIKA_OAUTH_TOKEN intentionally NOT wired: the metrika-instrumentor skill
-    # resolves the Metrika OAuth token itself inside the agent workspace, so the
-    # backend resolver no longer reads it. Leave unset.
     # SMTP relay for outbound mail (non-secret half; SMTP_PASS is in
     # backend.secret below). Also used for the new-signup owner notification.
     SMTP_HOST: ""
@@ -214,6 +211,16 @@ backend:
     # YooKassa Partners OAuth client secret (payments slice 2). Empty (with
     # empty YOOKASSA_PARTNER_CLIENT_ID) disables connect outright.
     YOOKASSA_PARTNER_CLIENT_SECRET: ""
+    # Yandex Metrika Stat API OAuth token (scope metrika:read), used by
+    # overviewRegistrationFunnel to pull kc_register_* goal reaches for the
+    # admin registration-funnel card. Empty disables just that card (Note:
+    # "METRIKA_OAUTH_TOKEN не настроен"), nothing else. In prod this is
+    # patched out-of-git into Secret dada-cloud-console-backend, duplicated
+    # from the platform's yandex-metrica-credentials Secret (crossplane-system,
+    # key "token") -- same token the yandexMetrika Crossplane composition uses,
+    # just copied across the namespace boundary since a Secret can't be read
+    # cross-namespace directly.
+    METRIKA_OAUTH_TOKEN: ""
   persistence:
     enabled: true
     size: 5Gi
