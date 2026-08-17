@@ -16,6 +16,7 @@ import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
 import { useT } from "@/lib/i18n/console/context";
 import { UpgradeDialog } from "@/components/billing/upgrade-dialog";
+import { trackUxEvent } from "@/lib/ux-telemetry";
 
 type AppServerMode = "terraform" | "manual";
 
@@ -116,6 +117,10 @@ export default function AppServersPage() {
     void loadServers();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadServers closes over stable projectId for this fetch-on-mount pattern.
   }, [projectId]);
+
+  useEffect(() => {
+    if (isModalOpen) trackUxEvent("view", "create_vm_modal:opened");
+  }, [isModalOpen]);
 
   function handleFormChange(field: Exclude<keyof CreateAppServerForm, "mode">, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }));

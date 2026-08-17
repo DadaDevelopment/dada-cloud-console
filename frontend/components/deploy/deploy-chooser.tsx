@@ -56,6 +56,10 @@ export function DeployChooser({
     setKind(defaultKind);
   }
 
+  useEffect(() => {
+    if (open) trackUxEvent("view", "create_app_modal:opened");
+  }, [open]);
+
   const openedDefaultRef = useRef<DeployKind | null>(null);
   useEffect(() => {
     if (!open) {

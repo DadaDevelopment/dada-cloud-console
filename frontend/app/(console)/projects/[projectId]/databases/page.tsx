@@ -18,6 +18,7 @@ import { Database } from "lucide-react";
 import { useT } from "@/lib/i18n/console/context";
 import { isSettling } from "@/lib/phase";
 import { UpgradeDialog } from "@/components/billing/upgrade-dialog";
+import { trackUxEvent } from "@/lib/ux-telemetry";
 
 interface CreateDbForm {
   name: string;
@@ -80,6 +81,7 @@ export default function DatabasesPage() {
   const [apps, setApps] = useState<ResourceSnapshot[]>([]);
 
   function openCreateModal() {
+    trackUxEvent("view", "create_db_modal:opened");
     if (selectedEnvId) {
       appsApi
         .list(projectId, selectedEnvId)

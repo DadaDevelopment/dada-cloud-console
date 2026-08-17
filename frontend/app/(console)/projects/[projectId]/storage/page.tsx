@@ -114,6 +114,10 @@ export default function StoragePage() {
     }
   }, [buckets]);
 
+  useEffect(() => {
+    if (isModalOpen) trackUxEvent("view", "create_s3_modal:opened");
+  }, [isModalOpen]);
+
   function handleFormChange(field: keyof CreateBucketForm, value: string | boolean) {
     setForm((prev) => ({ ...prev, [field]: value }));
   }

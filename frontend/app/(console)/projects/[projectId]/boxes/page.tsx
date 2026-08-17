@@ -14,6 +14,7 @@ import { canMutate } from "@/lib/rbac";
 import { timeUntil } from "@/lib/format";
 import { Boxes as BoxesIcon } from "lucide-react";
 import { useT } from "@/lib/i18n/console/context";
+import { trackUxEvent } from "@/lib/ux-telemetry";
 
 const TTL_CHOICES = [3600, 14400, 43200];
 
@@ -91,6 +92,10 @@ export default function BoxesPage() {
   useEffect(() => {
     load();
   }, [load, refreshTick]);
+
+  useEffect(() => {
+    if (isModalOpen) trackUxEvent("view", "create_box_modal:opened");
+  }, [isModalOpen]);
 
   useEffect(() => {
     const settling = boxes.some((b) => b.status === "Booting" || b.status === "Deleting" || b.status === "Waking");

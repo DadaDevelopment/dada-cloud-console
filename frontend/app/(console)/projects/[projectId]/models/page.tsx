@@ -21,6 +21,7 @@ import { isSettling } from "@/lib/phase";
 import { timeAgo } from "@/lib/format";
 import { PhaseBadge } from "@/components/ui/phase-badge";
 import { useT } from "@/lib/i18n/console/context";
+import { trackUxEvent } from "@/lib/ux-telemetry";
 
 const MODEL_TYPES: AIModelType[] = [
   "sklearn", "xgboost", "lightgbm",
@@ -99,6 +100,10 @@ export default function ModelsPage() {
   useEffect(() => {
     quotasApi.get(projectId).then(setQuotas).catch(() => setQuotas(null));
   }, [projectId]);
+
+  useEffect(() => {
+    if (isModalOpen) trackUxEvent("view", "create_model_modal:opened");
+  }, [isModalOpen]);
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
