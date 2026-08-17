@@ -643,10 +643,10 @@ type Config struct {
 	// unconfigured: CreateInvoice returns 409 payments_not_configured and the
 	// statement-reconcile ticker never starts, the same degrade-off shape as
 	// YooKassa above.
-	TBankBusinessToken          string        // TBANK_BUSINESS_TOKEN
-	TBankAccountNumber          string        // TBANK_ACCOUNT_NUMBER
-	TBankSandbox                bool          // TBANK_SANDBOX (default false)
-	TBankStatementPollInterval  time.Duration // TBANK_STATEMENT_POLL_INTERVAL_SECONDS (default 15m)
+	TBankBusinessToken         string        // TBANK_BUSINESS_TOKEN
+	TBankAccountNumber         string        // TBANK_ACCOUNT_NUMBER
+	TBankSandbox               bool          // TBANK_SANDBOX (default false)
+	TBankStatementPollInterval time.Duration // TBANK_STATEMENT_POLL_INTERVAL_SECONDS (default 15m)
 
 	// Platform requisites printed on every generated invoice (payer sees these
 	// as who they are paying). No defensible hardcoded value for any of
