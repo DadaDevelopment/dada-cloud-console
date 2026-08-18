@@ -117,8 +117,9 @@ var funnelWindowDays = map[string]int{
 	"7d": 7, "30d": 30, "90d": 90, "all": 3650,
 }
 
-// GetAdminFunnel returns product-adoption funnel counts (signup -> App/DB/VM/
-// Box/S3/Model up -> paid) for a signup window and account_kind cohort.
+// GetAdminFunnel returns the live Metrika channel leg, Keycloak registration
+// leg, and product-adoption counts (signup -> App/DB/VM/Box/S3/Model -> paid)
+// for one window and account_kind cohort.
 //
 // Resource "up" is computed per resource kind, not per row, because the
 // ground-truth signal differs by kind: App/DB/S3 use resource_snapshots.phase
@@ -135,8 +136,8 @@ var funnelWindowDays = map[string]int{
 // field at checkout (yookassa.Checkout enforces it via requireReceiptEmail).
 //
 // @ID          getAdminFunnel
-// @Summary     Product adoption funnel
-// @Description Signup -> resource-kind adoption -> paid counts for a signup window, excluding chosen account_kind cohorts.
+// @Summary     Full acquisition and product funnel
+// @Description Metrika traffic sources, Keycloak registration steps, and resource-kind adoption -> paid counts for a window. account_kind filters apply to the DB-backed product leg only.
 // @Tags        admin
 // @Param       window query string false "7d|30d|90d|all" default(30d)
 // @Param       exclude_kind query string false "comma-separated account_kind values to hide"

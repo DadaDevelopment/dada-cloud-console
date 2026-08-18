@@ -188,7 +188,7 @@ func fetchMetrikaGoalReaches(ctx context.Context, oauthToken string, counterID, 
 	q.Set("date1", strconv.Itoa(days)+"daysAgo")
 	q.Set("date2", "today")
 
-	endpoint := "https://api-metrika.yandex.net/stat/v1/data?" + q.Encode()
+	endpoint := metrikaStatAPIURL + "?" + q.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
