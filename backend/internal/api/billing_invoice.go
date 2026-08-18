@@ -2,11 +2,10 @@ package api
 
 import (
 	"bytes"
+	"embed"
 	"errors"
 	"html/template"
 	"net/http"
-	"path/filepath"
-	"runtime"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
@@ -17,15 +16,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// invoiceTemplatePath resolves templates/invoice.html.tmpl relative to this
-// source file rather than the process's working directory, so the handler
-// keeps working regardless of where the binary is launched from.
-func invoiceTemplatePath() string {
-	_, thisFile, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(thisFile), "templates", "invoice.html.tmpl")
-}
+//go:embed templates/invoice.html.tmpl
+var invoiceTemplateFS embed.FS
 
-var invoiceTemplate = template.Must(template.ParseFiles(invoiceTemplatePath()))
+var invoiceTemplate = template.Must(template.ParseFS(invoiceTemplateFS, "templates/invoice.html.tmpl"))
 
 // invoiceViewData feeds templates/invoice.html.tmpl.
 type invoiceViewData struct {
