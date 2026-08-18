@@ -1474,6 +1474,24 @@ export interface AdminFunnelCohortCount {
   count: number;
 }
 
+export interface AdminFunnelChannel {
+  source: string;
+  visits: number;
+  users: number;
+  register_opened: number;
+  signup_started: number;
+  registration_complete: number;
+  deploy_success: number;
+}
+
+export interface AdminFunnelChannelReport {
+  available: boolean;
+  days: number;
+  channels: AdminFunnelChannel[];
+  totals: AdminFunnelChannel;
+  note?: string;
+}
+
 export interface AdminFunnelResponse {
   window: string;
   excluded_kinds: string[] | null;
@@ -1487,6 +1505,7 @@ export interface AdminFunnelResponse {
   paid: number;
   paid_note?: string;
   cohort_counts: AdminFunnelCohortCount[];
+  channel_funnel: AdminFunnelChannelReport;
   registration_funnel: AdminOverviewRegistrationFunnel;
 }
 

@@ -34,10 +34,22 @@ export const adminFunnel: Messages = {
     ru: "Модель считается по факту наличия строки (фаза не доходит до Ready). VM/Box считаются по признаку «когда-либо был доступен», а не по текущему статусу.",
     en: "Model counts row presence only (its phase never reaches Ready). VM/Box count \"ever became reachable\", not current status.",
   },
-  "adminFunnel.metrikaGap.title": { ru: "Канальная воронка не здесь", en: "Channel funnel not here" },
-  "adminFunnel.metrikaGap.body": {
-    ru: "Верх воронки по каналам (Метрика) не подключён к бэкенду живым запросом — нужна отдельная интеграция с Reporting API. Здесь только продуктовая часть на реальных данных БД.",
-    en: "Channel-based top-of-funnel (Metrika) has no live backend query yet — needs a separate Reporting API integration. This page is the DB-backed product part only.",
+  "adminFunnel.channel.title": { ru: "Канальная воронка: лендинг → регистрация", en: "Channel funnel: landing → signup" },
+  "adminFunnel.channel.body": {
+    ru: "Живой Reporting API Яндекс.Метрики. Источник — классификация визита Метрикой, не UTM-идентификатор пользователя.",
+    en: "Live Yandex.Metrika Reporting API. Source is Metrika visit classification, not a UTM user identifier.",
+  },
+  "adminFunnel.channel.unavailable": { ru: "Метрика временно недоступна", en: "Metrika is temporarily unavailable" },
+  "adminFunnel.channel.source": { ru: "Источник", en: "Source" },
+  "adminFunnel.channel.visits": { ru: "Визиты", en: "Visits" },
+  "adminFunnel.channel.register": { ru: "Открыли /register", en: "Opened /register" },
+  "adminFunnel.channel.started": { ru: "Выбрали способ", en: "Chose a method" },
+  "adminFunnel.channel.complete": { ru: "Регистрация завершена", en: "Registration complete" },
+  "adminFunnel.channel.deploy": { ru: "Успешный деплой", en: "Successful deploy" },
+  "adminFunnel.channel.total": { ru: "Все источники", en: "All sources" },
+  "adminFunnel.channel.note": {
+    ru: "«Успешный деплой» — отдельное действие авторизованных пользователей в том же окне; он не считается конверсией из регистрации.",
+    en: "“Successful deploy” is a separate action by authenticated users in the same window; it is not treated as signup conversion.",
   },
 
   "adminFunnel.cohort.label": { ru: "Когорта", en: "Cohort" },

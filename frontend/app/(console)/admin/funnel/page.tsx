@@ -33,6 +33,18 @@ function channelLabel(channel: string): string {
   return channel;
 }
 
+function trafficSourceLabel(source: string): string {
+  const labels: Record<string, string> = {
+    "Direct traffic": "Прямой",
+    "Internal traffic": "Внутренний",
+    "Search engine traffic": "Поиск",
+    "Link traffic": "Ссылки",
+    "Messenger traffic": "Мессенджеры",
+    "Recommendation system traffic": "Рекомендации",
+  };
+  return labels[source] ?? source;
+}
+
 /** Shared bar-row visual so the Keycloak leg and the product-adoption leg
  * read as one funnel, not two different chart styles bolted together. */
 function BarRows({ rows, labelWidth = "w-16" }: { rows: Row[]; labelWidth?: string }) {
@@ -127,6 +139,8 @@ export default function AdminFunnelPage() {
     label: `${channelLabel(c.channel)}${channelsTotal > 0 ? ` (${Math.round((c.count / channelsTotal) * 100)}%)` : ""}`,
     count: c.count,
   }));
+  const trafficReport = data?.channel_funnel;
+  const trafficRows = trafficReport ? [...trafficReport.channels, trafficReport.totals] : [];
 
   return (
     <div>
@@ -150,9 +164,47 @@ export default function AdminFunnelPage() {
         <div className="mb-6 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-400">{error}</div>
       )}
 
-      <div className="mb-6 rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/40 px-4 py-3">
-        <p className="text-sm font-medium text-blue-900 dark:text-blue-300">{t("adminFunnel.metrikaGap.title")}</p>
-        <p className="mt-1 text-xs text-blue-800/80 dark:text-blue-400/80">{t("adminFunnel.metrikaGap.body")}</p>
+      <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
+        <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t("adminFunnel.channel.title")}</h2>
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("adminFunnel.channel.body")}</p>
+        {loading ? (
+          <div className="flex h-36 items-center justify-center"><Spinner size="md" /></div>
+        ) : !trafficReport?.available ? (
+          <p className="mt-3 text-sm text-amber-600 dark:text-amber-400">{trafficReport?.note || t("adminFunnel.channel.unavailable")}</p>
+        ) : (
+          <>
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full min-w-[760px] text-sm">
+                <thead className="border-b border-gray-200 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:text-gray-400">
+                  <tr>
+                    <th className="px-2 py-2">{t("adminFunnel.channel.source")}</th>
+                    <th className="px-2 py-2 text-right">{t("adminFunnel.channel.visits")}</th>
+                    <th className="px-2 py-2 text-right">{t("adminFunnel.channel.register")}</th>
+                    <th className="px-2 py-2 text-right">{t("adminFunnel.channel.started")}</th>
+                    <th className="px-2 py-2 text-right">{t("adminFunnel.channel.complete")}</th>
+                    <th className="px-2 py-2 text-right">{t("adminFunnel.channel.deploy")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trafficRows.map((row, index) => {
+                    const total = index === trafficRows.length - 1;
+                    return (
+                      <tr key={`${row.source}-${index}`} className={total ? "border-t border-gray-200 font-semibold text-gray-900 dark:border-gray-700 dark:text-gray-100" : "border-t border-gray-100 text-gray-700 dark:border-gray-800 dark:text-gray-300"}>
+                        <td className="px-2 py-2">{total ? t("adminFunnel.channel.total") : trafficSourceLabel(row.source)}</td>
+                        <td className="px-2 py-2 text-right tabular-nums">{row.visits}</td>
+                        <td className="px-2 py-2 text-right tabular-nums">{row.register_opened}</td>
+                        <td className="px-2 py-2 text-right tabular-nums">{row.signup_started}</td>
+                        <td className="px-2 py-2 text-right tabular-nums">{row.registration_complete}</td>
+                        <td className="px-2 py-2 text-right tabular-nums">{row.deploy_success}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">{t("adminFunnel.channel.note")}</p>
+          </>
+        )}
       </div>
 
       <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
