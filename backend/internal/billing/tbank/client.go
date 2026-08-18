@@ -94,7 +94,7 @@ func (e *Error) Error() string {
 // (inclusive), both formatted as YYYY-MM-DD per the T-Bank Business API.
 func (c *Client) Statement(ctx context.Context, accountNumber string, from, to time.Time) ([]StatementOperation, error) {
 	url := fmt.Sprintf("%s/statement?accountNumber=%s&from=%s&to=%s",
-		c.baseURL(), accountNumber, from.UTC().Format("2006-01-02"), to.UTC().Format("2006-01-02"))
+		c.baseURL(), accountNumber, from.UTC().Format(time.RFC3339), to.UTC().Format(time.RFC3339))
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("tbank: build statement request: %w", err)
