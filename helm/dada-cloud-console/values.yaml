@@ -46,14 +46,6 @@ global:
     elasticsearchApiKey: ""
     opencostUrl: "http://opencost.opencost.svc.cluster.local:9003"
 
-# Fully-loaded consumption pricing knobs (backend billing_fullcost.go). Tunable
-# without a rebuild: edit here (gitops) or kubectl patch the config configmap +
-# rollout. margin = profit multiplier after infra-overhead loading; minUtilization
-# = user-share floor that caps the per-type overhead factor at 1/min.
-billing:
-  margin: "1.4"
-  minUtilization: "0.30"
-
 # Redis-backed fail-open cache-aside for read-heavy endpoints (backend
 # internal/cache). When enabled the backend gets REDIS_ADDR pointed at the
 # in-chart redis Service; when disabled the cache is a no-op passthrough.
@@ -87,6 +79,7 @@ backend:
   env:
     APP_ENV: production
     PORT: "8080"
+    PRICING_MARKUP: "1.5"
     ARGO_CLUSTER_NAME: ""
     # Custom-domain DNS targets handed to users when they attach a hostname.
     # A-record for apex domains -> public ingress LB IP; CNAME for subdomains ->

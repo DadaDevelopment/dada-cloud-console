@@ -22,7 +22,7 @@ func TestCostRub_Table(t *testing.T) {
 			PerGBRAM:     10,
 			PerGBStorage: 2,
 		},
-		billingMarkup: 2.7,
+		billingMarkup: 1.5,
 	}
 	cases := []struct {
 		name    string
@@ -32,12 +32,12 @@ func TestCostRub_Table(t *testing.T) {
 		want    float64
 	}{
 		{"all nil is zero", nil, nil, nil, 0},
-		{"cpu only", fptr(2), nil, nil, round2(2 * 100 * 2.7)},
-		{"ram only", nil, fptr(4), nil, round2(4 * 10 * 2.7)},
-		{"storage only", nil, nil, fptr(50), round2(50 * 2 * 2.7)},
-		{"cpu+ram (app)", fptr(1.5), fptr(3), nil, round2((1.5*100 + 3*10) * 2.7)},
-		{"all three", fptr(2), fptr(4), fptr(10), round2((2*100 + 4*10 + 10*2) * 2.7)},
-		{"fractional rounds 2dp", fptr(0.333), nil, nil, round2(0.333 * 100 * 2.7)},
+		{"cpu only", fptr(2), nil, nil, round2(2 * 100 * 1.5)},
+		{"ram only", nil, fptr(4), nil, round2(4 * 10 * 1.5)},
+		{"storage only", nil, nil, fptr(50), round2(50 * 2 * 1.5)},
+		{"cpu+ram (app)", fptr(1.5), fptr(3), nil, round2((1.5*100 + 3*10) * 1.5)},
+		{"all three", fptr(2), fptr(4), fptr(10), round2((2*100 + 4*10 + 10*2) * 1.5)},
+		{"fractional rounds 2dp", fptr(0.333), nil, nil, round2(0.333 * 100 * 1.5)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -52,7 +52,7 @@ func TestCostRub_Table(t *testing.T) {
 // TestCostRub_ZeroUnitCost proves the informational surface degrades to 0 when
 // unit cost failed to load (never a fatal / never a nonzero fabricated bill).
 func TestCostRub_ZeroUnitCost(t *testing.T) {
-	h := &Handler{billingMarkup: 2.7}
+	h := &Handler{billingMarkup: 1.5}
 	if got := h.costRub(fptr(5), fptr(5), fptr(5)); got != 0 {
 		t.Fatalf("expected 0 with zero unit cost, got %v", got)
 	}

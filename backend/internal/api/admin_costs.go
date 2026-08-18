@@ -10,7 +10,6 @@ import (
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/beget"
-	"github.com/dada-tuda/console/backend/internal/billing/pricing"
 	"github.com/dada-tuda/console/backend/internal/cache"
 	"github.com/dada-tuda/console/backend/internal/opencost"
 	"github.com/gin-gonic/gin"
@@ -300,22 +299,17 @@ func (h *Handler) buildAdminCostSummary(ctx context.Context, days int) adminCost
 		acc.add(clientID, clientName, projectID, projectName, resourceName, kind, a, scale)
 	}
 
-	revWindowScale := float64(days) / billingMonthDays
-	snap := h.billingSnapshot()
-	for key, alloc := range snap.appCost {
-		ns, app := key, ""
-		if i := strings.IndexByte(key, '/'); i >= 0 {
-			ns, app = key[:i], key[i+1:]
+	h.splitSharedDatabaseCost(ctx, acc, projByID, h.cfg.PricingMarkup)
+	for _, cl := range acc.clients {
+		for i := range cl.Projects {
+			for j := range cl.Projects[i].Resources {
+				r := &cl.Projects[i].Resources[j]
+				if r.Kind != agentResourceKind {
+					r.Revenue = round2(r.TotalCost * h.cfg.PricingMarkup)
+				}
+			}
 		}
-		if app == "" {
-			continue
-		}
-		clientID, clientName, projectID, projectName := adminCostOwnerOf(ns, nsMap)
-		r := acc.ensureResource(clientID, clientName, projectID, projectName, app, "app")
-		r.Revenue += round2(snap.pricing.price(alloc.CPUCost, alloc.RAMCost, alloc.PVCost) * revWindowScale)
 	}
-
-	h.splitSharedDatabaseCost(ctx, acc, projByID)
 	h.injectAgentTokenRows(ctx, acc, days)
 
 	customers := make([]*adminCostClient, 0, len(acc.clients))
@@ -436,11 +430,7 @@ func (acc *adminCostsAccumulator) add(clientID, clientName, projectID, projectNa
 
 // rollupClient rounds every resource, then rolls each project's resources into
 // its project subtotal and each project into the client subtotal, computing
-// margins at all three levels. Resources of kind agentResourceKind are priced and
-// rendered like any other row but are deliberately left OUT of the project and
-// client subtotals: agent tokens are Anthropic API spend, not the Beget hardware
-// bill the summary reconciles against, so folding them in would break the
-// hardware reconciliation. Projects are sorted by cost, resources by cost.
+// margins at all three levels. Projects are sorted by cost, resources by cost.
 func rollupClient(cl *adminCostClient) {
 	for i := range cl.Projects {
 		p := &cl.Projects[i]
@@ -452,9 +442,6 @@ func rollupClient(cl *adminCostClient) {
 			r.Revenue = round2(r.Revenue)
 			r.Margin = round2(r.Revenue - r.TotalCost)
 			r.MarginPct = marginPct(r.Revenue, r.TotalCost)
-			if r.Kind == agentResourceKind {
-				continue
-			}
 			p.Cost += r.TotalCost
 			p.Revenue += r.Revenue
 		}
@@ -770,7 +757,7 @@ func (h *Handler) adminCostDBSizes(ctx context.Context) (map[string]float64, flo
 // system/WAL remainder -- and any owner-less database's share -- stays on
 // platform. Best-effort: any missing input (no platform pool, no sizes, DB list
 // error) leaves the cost where it was rather than failing the whole summary.
-func (h *Handler) splitSharedDatabaseCost(ctx context.Context, acc *adminCostsAccumulator, projByID map[string]adminCostOwner) {
+func (h *Handler) splitSharedDatabaseCost(ctx context.Context, acc *adminCostsAccumulator, projByID map[string]adminCostOwner, markup float64) {
 	platform := acc.clients[platformClientID]
 	if platform == nil {
 		return
@@ -824,6 +811,7 @@ func (h *Handler) splitSharedDatabaseCost(ctx context.Context, acc *adminCostsAc
 		r.CPUCost += round2(poolCPU * frac)
 		r.RAMCost += round2(poolRAM * frac)
 		r.PVCost += round2(poolPV * frac)
+		r.Revenue += sharedDatabaseRevenue(pool*frac, markup)
 		moved += round2(pool * frac)
 	}
 	if moved <= 0 {
@@ -843,6 +831,13 @@ func (h *Handler) splitSharedDatabaseCost(ctx context.Context, acc *adminCostsAc
 	}
 }
 
+func sharedDatabaseRevenue(cost, markup float64) float64 {
+	if cost <= 0 || markup <= 0 {
+		return 0
+	}
+	return round2(cost * markup)
+}
+
 // safeRatio returns a/b, or 0 when b is non-positive, for apportioning a moved
 // cost across its cpu/ram/pv components without risking a divide-by-zero.
 func safeRatio(a, b float64) float64 {
@@ -859,6 +854,7 @@ type adminCostAgentProject struct {
 	projectID, projectName string
 	ownerID, ownerName     string
 	costUSD                float64
+	billedUSD              float64
 }
 
 // adminCostAgentTokens sums the agent_token_usage ledger per project over
@@ -872,13 +868,14 @@ func (h *Handler) adminCostAgentTokens(ctx context.Context, from, to time.Time) 
 	rows, err := h.pool.Query(ctx, `
 		SELECT atu.project_id::text, COALESCE(p.display_name, ''),
 		       COALESCE(u.id::text, ''), COALESCE(NULLIF(u.email, ''), NULLIF(u.display_name, ''), ''),
-		       COALESCE(SUM(atu.cost_usd), 0)::float8
+		       COALESCE(SUM(atu.cost_usd), 0)::float8,
+		       COALESCE(SUM(CASE WHEN atu.source = $3 THEN atu.billed_usd ELSE atu.cost_usd * $4 END), 0)::float8
 		FROM agent_token_usage atu
 		LEFT JOIN projects p ON p.id = atu.project_id
 		LEFT JOIN users u    ON u.id = p.owner_id
 		WHERE atu.project_id IS NOT NULL AND atu.created_at >= $1 AND atu.created_at < $2
 		GROUP BY atu.project_id, p.display_name, u.id, u.email, u.display_name`,
-		from, to,
+		from, to, agentTokenSourceGateway, h.cfg.PricingMarkup,
 	)
 	if err != nil {
 		return nil, err
@@ -887,7 +884,7 @@ func (h *Handler) adminCostAgentTokens(ctx context.Context, from, to time.Time) 
 	out := []adminCostAgentProject{}
 	for rows.Next() {
 		var ap adminCostAgentProject
-		if err := rows.Scan(&ap.projectID, &ap.projectName, &ap.ownerID, &ap.ownerName, &ap.costUSD); err != nil {
+		if err := rows.Scan(&ap.projectID, &ap.projectName, &ap.ownerID, &ap.ownerName, &ap.costUSD, &ap.billedUSD); err != nil {
 			return nil, err
 		}
 		out = append(out, ap)
@@ -913,7 +910,6 @@ func (h *Handler) injectAgentTokenRows(ctx context.Context, acc *adminCostsAccum
 		return
 	}
 	usdToRUB := h.cfg.AgentTokenUSDToRUB
-	markup := h.cfg.AgentTokenMarkup
 	for _, ap := range projs {
 		clientID, clientName := ap.ownerID, ap.ownerName
 		switch {
@@ -928,6 +924,6 @@ func (h *Handler) injectAgentTokenRows(ctx context.Context, acc *adminCostsAccum
 		}
 		r := acc.ensureResource(clientID, clientName, ap.projectID, projectName, agentResourceKind, agentResourceKind)
 		r.TotalCost += round2(ap.costUSD * usdToRUB)
-		r.Revenue += round2(pricing.AgentTokenRevenueRUB(ap.costUSD, usdToRUB, markup))
+		r.Revenue += round2(ap.billedUSD * usdToRUB)
 	}
 }

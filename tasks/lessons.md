@@ -1,5 +1,12 @@
 # Lessons
 
+- Если пользователь вводит реквизит-идентификатор организации (ИНН), сначала
+  проверяй возможность подтянуть связанные поля из официального реестра. Не
+  заставляй вручную заполнять КПП, полное наименование и юридический адрес,
+  когда выбор компании может заполнить их одним действием.
+
+- For a data dashboard, a deployed image, Ready pod, and HTML 200 do not prove the feature: verify the authenticated data endpoint and the rendered populated state before calling it live.
+
 - Use Codex Preview for project runs and visual checks; do not hardcode IDE-specific run tooling.
 - When renaming a UI action, verify both its label and destination: project details/settings and the deployed project's UI are separate actions and must have separate links and copy.
 - When the user points at git watcher / gitops-agent sync, verify the repo-local agent in the current workspace first; do not cross over to similarly named infra repos.
@@ -861,3 +868,21 @@ PR-превью. Признак, который я обязан был пров�
     но не проверил простейшее: прочитает ли воркер ИМЕННО тот коммит, который я
     только что запушил. Перед прод-операцией доказывать надо не только «что
     сделает код», но и «на каких входных данных он это сделает».
+## 2026-08-18 — Funnel completeness
+
+Do not ship a dashboard with a text disclaimer in place of a requested primary data source. If the required channel leg needs a live Metrika API integration, wire it before calling the dashboard complete; do not present the remaining gap as a finished result.
+## 2026-08-18 — A multiplier is not a margin, and a screen must not join incompatible economics
+
+Mistake: treated the agent `x2.7` setting as an isolated tariff knob and changed
+only that path after the owner objected. The dashboard was already mixing
+provider cost, modelled infrastructure pricing and stored routed-call charges:
+`MarkupDefault=2.7`, `BILLING_MARGIN=1.4`, agent markup, and routing markup
+were independent. That made individual rows look arithmetically valid while the
+tree had no single economic meaning.
+
+Rule: when an owner changes a cost-plus rule, inventory every resource pricing
+path before editing a default. Define one canonical multiplier and one
+cost/revenue contract; distinguish markup (`price / cost - 1`) from gross margin
+(`(price - cost) / price`). Do not re-price rows that already carry an
+authoritative billed amount, and do not present modelled price as collected
+revenue.

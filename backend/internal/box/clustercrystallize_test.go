@@ -163,6 +163,9 @@ func newTestCrystallizer(t *testing.T, cs *fake.Clientset, shell *fakeShell) *Cl
 		DiskGB:       10,
 		ReadyTimeout: 2 * time.Second,
 		SeedTimeout:  2 * time.Second,
+		probePublic: func(domain, path string, budget, interval time.Duration) HTTPProbeResult {
+			return HTTPProbeResult{URL: "https://" + domain + path, Host: domain, Status: 200, OK: true}
+		},
 	}
 }
 

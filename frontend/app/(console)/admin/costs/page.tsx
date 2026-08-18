@@ -88,10 +88,17 @@ export default function AdminCostsPage() {
   const currency = data?.currency;
 
   const recon = useMemo(() => {
-    const clientsSum = (data?.clients ?? []).reduce((s, c) => s + c.cost, 0);
-    const platformCost = data?.platform?.cost ?? 0;
+    const agentCost = (client: AdminCostClient) => client.projects.reduce(
+      (clientSum, project) => clientSum + project.resources.reduce(
+        (projectSum, resource) => projectSum + (resource.kind === "agent" ? resource.total_cost : 0),
+        0,
+      ),
+      0,
+    );
+    const clientsSum = (data?.clients ?? []).reduce((sum, client) => sum + client.cost - agentCost(client), 0);
+    const platformCost = (data?.platform?.cost ?? 0) - (data?.platform ? agentCost(data.platform) : 0);
     const unalloc = data?.unallocated?.total_cost ?? 0;
-    const total = data?.total_cost ?? clientsSum + platformCost + unalloc;
+    const total = clientsSum + platformCost + unalloc;
     const hardware = data?.hardware_total_cost ?? 0;
     const delta = total - hardware;
     return { clientsSum, platformCost, unalloc, total, hardware, delta, reconciled: Math.abs(delta) < 1 };

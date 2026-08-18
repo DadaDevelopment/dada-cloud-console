@@ -36,12 +36,12 @@ func TestAgentTokenCostUSD(t *testing.T) {
 }
 
 func TestAgentTokenRevenueRUB(t *testing.T) {
-	got := AgentTokenRevenueRUB(1.0, 80.0, 2.7)
-	want := 216.0
+	got := AgentTokenRevenueRUB(1.0, 80.0, 1.5)
+	want := 120.0
 	if !approxEqual(got, want) {
-		t.Fatalf("AgentTokenRevenueRUB(1, 80, 2.7)=%v want %v", got, want)
+		t.Fatalf("AgentTokenRevenueRUB(1, 80, 1.5)=%v want %v", got, want)
 	}
-	if got := AgentTokenRevenueRUB(0, 80.0, 2.7); !approxEqual(got, 0) {
+	if got := AgentTokenRevenueRUB(0, 80.0, 1.5); !approxEqual(got, 0) {
 		t.Fatalf("AgentTokenRevenueRUB(0, ...)=%v want 0", got)
 	}
 }

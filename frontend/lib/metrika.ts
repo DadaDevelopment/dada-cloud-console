@@ -35,6 +35,36 @@ export function ctaSource(href: string): string {
  * No-op for Metrika when the counter has not loaded (ad blockers, SSR, local
  * dev) so a missing counter can never break a CTA click.
  */
+/**
+ * Binds the authenticated user's internal id to THIS counter's Metrika
+ * session (`ym setUserID` + `userParams`), so pre-login and post-login
+ * visits stitch by UserID instead of by utm_source string matching.
+ *
+ * `dada_uid` is already published to the fleet-wide cookie by publishUid()
+ * for OTHER same-domain frontends to read via the `ya-metrika-inject`
+ * snippet; this console owns its own counter instance directly and must
+ * call `ym` itself rather than rely on that snippet, which never runs here.
+ *
+ * Pass null on logout to stop attributing further hits to the departed user.
+ */
+type MetrikaCallFn = (id: number, action: string, ...rest: unknown[]) => void;
+
+export function bindMetrikaUserID(uid: string | null | undefined) {
+  if (typeof window === "undefined") return;
+  const ym = (window as unknown as { ym?: MetrikaCallFn }).ym;
+  if (typeof ym !== "function") return;
+  try {
+    if (uid) {
+      ym(YM_ID, "setUserID", uid);
+      ym(YM_ID, "userParams", { UserID: uid });
+    } else {
+      ym(YM_ID, "setUserID", null);
+    }
+  } catch {
+    return;
+  }
+}
+
 export function reachGoal(goal: string, params?: Record<string, string>) {
   if (typeof window === "undefined") return;
   trackUxEvent("goal", goal, params ?? {});

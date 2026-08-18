@@ -62,6 +62,7 @@ type ClusterCrystallizer struct {
 	DiskGB       int
 	ReadyTimeout time.Duration
 	SeedTimeout  time.Duration
+	probePublic  func(domain, path string, budget, interval time.Duration) HTTPProbeResult
 }
 
 // podShell is the one thing this file needs from a runtime: a shell inside a
@@ -399,7 +400,11 @@ func (c *ClusterCrystallizer) CrystallizeWithReport(ctx context.Context, inst *I
 	if len(after) > 0 {
 		rep.ProbeInternal = c.probeInside(ctx, target, after[0], opts.Domain, opts.ProbePath)
 	}
-	rep.Probe = awaitHTTPS(opts.Domain, opts.ProbePath, crystalPublicProbeBudget, crystalPublicProbeInterval)
+	publicProbe := c.probePublic
+	if publicProbe == nil {
+		publicProbe = awaitHTTPS
+	}
+	rep.Probe = publicProbe(opts.Domain, opts.ProbePath, crystalPublicProbeBudget, crystalPublicProbeInterval)
 	if rep.Probe.OK {
 		rep.Carry["address"] = CarryRecreated
 	} else {

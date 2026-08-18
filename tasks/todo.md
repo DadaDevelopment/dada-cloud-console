@@ -20,6 +20,40 @@ configuration change, including removal, is authoritative.
 
 ---
 
+# Economics audit — agent runs and managed database margin (2026-08-18)
+
+- [x] Trace the values from the economics table back to the ledger, OpenCost and billing configuration.
+- [x] Establish whether 60%, 63% and 70% are arithmetic errors or the configured price model.
+- [x] Correct the managed-database revenue omission in the admin economics tree and lock the calculation with a regression test.
+- [x] Record why the agent row is excluded from parent totals: the parent reconciles only Beget hardware, while the row is external provider spend.
+- [x] Record the accounting distinction between actual provider cost, modelled infrastructure revenue and received payment.
+- [x] Set the agent and platform-routing cost-plus multiplier to 1.5: 100 RUB cost bills 150 RUB.
+
+## Review — Economics audit
+
+- `fonbet-db` had a real revenue omission: it received a size-weighted share of the shared PostgreSQL cost but no matching modelled price. The admin tree now uses the same pricing function as the customer-facing database consumption view.
+- Agent cost is ledger provider cost converted at 80 RUB/USD; its displayed 63% follows the legacy ×2.7 cost-plus configuration. It is not included in the parent hardware subtotal by design, so the tree is not additive across that row. Gateway rows now also carry `billed_usd`; moving all agent revenue to that newer contract requires an explicit tariff/migration decision because historical cloud-task rows use the legacy model.
+- Application 70% is not a configured margin: it is the outcome of dynamic shared-infrastructure loading plus `BILLING_MARGIN=1.4`, measured against separately normalized hardware cost.
+- `AGENT_TOKEN_MARKUP` and `AI_ROUTING_MARKUP` are explicitly set to 1.5 in the Helm release and default to 1.5 in the backend, so both the legacy token line and newly routed calls use the same rule.
+
+## Reopened — Unified resource economics (2026-08-18)
+
+- [x] Inventory all active resource-pricing paths and classify each amount as actual cost, authoritative charge, or modelled price.
+- [x] Replace independent ×2.7/×1.4/agent/gateway multipliers with one explicit 1.5 cost-plus multiplier for new pricing.
+- [x] Make admin economics use authoritative `billed_usd` where it exists and label any remaining estimate as modelled rather than revenue.
+- [x] Ensure every resource row, project total and platform total is additive on the same cost/revenue basis.
+- [x] Add regression coverage and render the Helm release with the unified configuration.
+
+### Review — Unified resource economics
+
+- `PRICING_MARKUP=1.5` is now the runtime input for application, database, DNS, agent and platform-routing prices. `pricing.MarkupDefault=1.5` is the matching source for plans and Dada Boxes.
+- The OpenCost dynamic overhead uplift and its separate `BILLING_MARGIN` input were removed. `/admin/costs` prices every non-agent resource from its own allocated cost, then includes agent resources in project/client totals.
+- Agent ledger rows from the gateway use their recorded `billed_usd`; legacy cloud-task rows use the common 1.5 multiplier. This prevents a BYOK or non-opted-in gateway row from being turned into revenue by a later dashboard read.
+- Verification: selected Go pricing/API tests pass, changed frontend page lint passes, Helm renders only `PRICING_MARKUP: "1.5"`, and `git diff --check` is clean. Deployment and live response verification remain pending.
+
+
+---
+
 # VM App-Settings parity + full custom-domain wiring
 
 **Goal:** the console App Settings page is k8s-only. For a VM (compose) environment it shows the wrong surface (empty helm config, ungated k8s mutations). Make every tab VM-aware and wire custom domains end-to-end for VM.
@@ -522,3 +556,68 @@ Funnel reads from `GET /api/v1/admin/growth/campaigns`.
   поправил: sshd на внешних IP нод отвечает, ключ прокинут при создании кластера
 - через сутки после раскатки померить `box_usage`: доля `suspended_disk` должна упасть в ноль
   для новых боксов (у них нет припаркованного тома)
+# Admin funnel production acceptance (2026-08-18)
+
+- [x] Deploy funnel navigation and unified registration/product funnel
+- [x] Restore backend rollout health after invoice-template crashloop
+- [x] Reproduce `/api/v1/admin/funnel?window=30d` 500 from production logs
+- [x] Fix the authoritative SQL/schema failure and add regression coverage
+- [x] Add live Yandex Metrika Reporting API channel funnel to `/admin/funnel`; remove the placeholder disclaimer
+- [ ] Build, test, push, deploy, and verify the authenticated funnel response in production
+
+## Review
+
+- Pending production API acceptance; page HTML and pod readiness are not sufficient.
+
+## B2B invoice: автозаполнение реквизитов по ИНН — 2026-08-18
+
+- [x] Серверный прокси DaData: поиск действующих компаний по частичному ИНН,
+      ключ остаётся только в `DADATA_API_KEY` на сервере.
+- [x] Invoice UI: доступный список подсказок, выбор заполняет ИНН, КПП,
+      полное наименование и юридический адрес.
+- [x] Тесты клиента, Go/TypeScript build.
+- [ ] Ручная проверка сценария с ключом в проде.
+
+## Review
+
+- `DADATA_API_KEY` остаётся только в серверном окружении. Без него форма
+  сохраняет ручной ввод и не передаёт ключ в браузер.
+- Поиск ограничен действующими организациями; пользователь выбирает вариант
+  клавиатурой или мышью, после чего заполняются ИНН, КПП, наименование и адрес.
+- Production acceptance ждёт отдельного ключа DaData в секрете окружения.
+
+---
+
+# Retire verified legacy database copies (2026-08-18)
+
+- [x] Map every `--moved-to-shard-0` and `--retired-2026-08-10` database to
+      its intended live replacement; leave any unmapped database untouched.
+- [x] Prove the replacement has a current successful logical backup, has live
+      consumers routed to it, and prove the old copy has no non-admin sessions.
+- [x] Drop only the verified old copies; do not touch `odds-research` or
+      unrelated ownerless databases.
+- [x] Re-measure both shards and record the removed names, reclaimed space,
+      backup evidence, and deferred rows.
+
+## Review
+
+- `cloud-console`, `codex-lb`, `fanbot`, `fin-core`, and `keycloak` each had
+      a fresh `Ready` logical backup in S3, and PostgreSQL 17 `pg_restore --list`
+      parsed all five archives. Their active router entries target shard-0;
+      no old database name was referenced by live workload configuration,
+      ConfigMap, Secret, router, or `pg_stat_activity`.
+- The five `*--moved-to-shard-0` copies had already been removed from shard-1.
+      Removed the two remaining shard-0 rollback copies:
+      `mydatabase--retired-2026-08-10` (122 MB, replacement `fin-core`) and
+      `codexlb--retired-2026-08-10` (62 MB, replacement `codex-lb`).
+- Removed the stale `ServiceDatabaseV2/mydatabase` snapshot (last synced on
+      2026-08-09, absent from the live cluster), which was causing a daily
+      backup attempt against the already-retired name. Kept historical move
+      and backup records as audit evidence.
+- Fixed the shard screen to use a shard's newest complete metric sample, so a
+      dropped database disappears on the next collection instead of lingering
+      for the full seven-day growth window. Removed the seven already-dead
+      names from historic size/table/index/statement/advisory measurements so
+      the current deployment no longer renders them either. Regression test
+      passes; `ff0d1662` is pushed, but the self-hosted console has no linked
+      automatic build and therefore has not yet rolled out the durable fix.

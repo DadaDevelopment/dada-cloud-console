@@ -72,7 +72,7 @@ func (h *Handler) aiBilledUSD(ctx context.Context, projectID uuid.UUID, keyOwner
 	if h.aiRoutingMode(ctx, projectID) != aiRoutingModePlatform {
 		return 0
 	}
-	markup := h.cfg.AIRoutingMarkup
+	markup := h.cfg.PricingMarkup
 	if markup <= 0 {
 		markup = 1
 	}

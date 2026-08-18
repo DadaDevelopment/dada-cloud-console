@@ -15,7 +15,7 @@ import (
 
 // overagePlans gives the free plan a footprint so it has a real allowance.
 // Priced against overageUnit below, free costs 100 RUB of cluster and lists at
-// 100 * 2.7 = 270 RUB, which is the figure the gate measures against. The
+// 100 * 1.5 = 150 RUB, which is the figure the gate measures against. The
 // production plans.yaml works the same way; the numbers are round here so a
 // failure names the branch rather than a rounding difference.
 func overagePlans() []pricing.Plan {

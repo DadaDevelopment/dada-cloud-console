@@ -142,7 +142,7 @@ func TestAppMeterNamespacesSorted(t *testing.T) {
 // must sum back to the monthly figure, not to some independently invented one.
 func TestAppUsageCostRubDividesMonthlyPrice(t *testing.T) {
 	h := &Handler{billingUnit: costengine.UnitCost{PerVCPU: 744, PerGBRAM: 74.4, PerGBStorage: 7.44}}
-	p := consumptionPricing{fCPU: 1, fRAM: 1, fPV: 1, margin: 1}
+	p := consumptionPricing{markup: 1}
 
 	if got := h.appUsageCostRub(1, 0, 0, p, 744); got != 1 {
 		t.Fatalf("one vCPU-hour in a 744h month: want 1, got %v", got)
@@ -155,18 +155,15 @@ func TestAppUsageCostRubDividesMonthlyPrice(t *testing.T) {
 	}
 }
 
-// TestAppUsageCostRubAppliesOverheadAndMargin proves the ledger prices through
-// the SAME overhead factors and margin as the console's monthly estimate rather
-// than at raw cluster cost.
-func TestAppUsageCostRubAppliesOverheadAndMargin(t *testing.T) {
+func TestAppUsageCostRubAppliesCommonMarkup(t *testing.T) {
 	h := &Handler{billingUnit: costengine.UnitCost{PerVCPU: 744}}
-	plain := consumptionPricing{fCPU: 1, fRAM: 1, fPV: 1, margin: 1}
-	loaded := consumptionPricing{fCPU: 2, fRAM: 1, fPV: 1, margin: 1.4}
+	plain := consumptionPricing{markup: 1}
+	markedUp := consumptionPricing{markup: 1.5}
 
 	base := h.appUsageCostRub(1, 0, 0, plain, 744)
-	got := h.appUsageCostRub(1, 0, 0, loaded, 744)
-	if want := base * 2 * 1.4; got != want {
-		t.Fatalf("overhead+margin: want %v, got %v", want, got)
+	got := h.appUsageCostRub(1, 0, 0, markedUp, 744)
+	if want := base * 1.5; got != want {
+		t.Fatalf("common markup: want %v, got %v", want, got)
 	}
 }
 

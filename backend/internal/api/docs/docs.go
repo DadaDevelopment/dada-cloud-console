@@ -810,11 +810,11 @@ const docTemplate = `{
         },
         "/admin/funnel": {
             "get": {
-                "description": "Signup -\u003e resource-kind adoption -\u003e paid counts for a signup window, excluding chosen account_kind cohorts.",
+                "description": "Metrika traffic sources, Keycloak registration steps, and resource-kind adoption -\u003e paid counts for a window. account_kind filters apply to the DB-backed product leg only.",
                 "tags": [
                     "admin"
                 ],
-                "summary": "Product adoption funnel",
+                "summary": "Full acquisition and product funnel",
                 "operationId": "getAdminFunnel",
                 "parameters": [
                     {
@@ -4975,6 +4975,103 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/billing/company-suggestions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns active organisations matching a partial or full INN. Requires write role on the project.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "billing"
+                ],
+                "summary": "Suggest payer organisations by INN",
+                "operationId": "suggestInvoiceCompanies",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "At least three INN digits",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -20775,6 +20872,55 @@ const docTemplate = `{
                 }
             }
         },
+        "api.adminFunnelChannel": {
+            "type": "object",
+            "properties": {
+                "deploy_success": {
+                    "type": "integer"
+                },
+                "register_opened": {
+                    "type": "integer"
+                },
+                "registration_complete": {
+                    "type": "integer"
+                },
+                "signup_started": {
+                    "type": "integer"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "users": {
+                    "type": "integer"
+                },
+                "visits": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.adminFunnelChannelReport": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean"
+                },
+                "channels": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.adminFunnelChannel"
+                    }
+                },
+                "days": {
+                    "type": "integer"
+                },
+                "note": {
+                    "type": "string"
+                },
+                "totals": {
+                    "$ref": "#/definitions/api.adminFunnelChannel"
+                }
+            }
+        },
         "api.adminFunnelCohortCount": {
             "type": "object",
             "properties": {
@@ -20794,6 +20940,9 @@ const docTemplate = `{
                 },
                 "box_up": {
                     "type": "integer"
+                },
+                "channel_funnel": {
+                    "$ref": "#/definitions/api.adminFunnelChannelReport"
                 },
                 "cohort_counts": {
                     "type": "array",
@@ -20818,6 +20967,9 @@ const docTemplate = `{
                 },
                 "paid_note": {
                     "type": "string"
+                },
+                "registration_funnel": {
+                    "$ref": "#/definitions/api.overviewRegistrationFunnel"
                 },
                 "s3_up": {
                     "type": "integer"
@@ -22142,8 +22294,7 @@ const docTemplate = `{
                 "metrics": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "number",
-                        "format": "float64"
+                        "type": "number"
                     }
                 },
                 "source": {
@@ -22257,6 +22408,60 @@ const docTemplate = `{
                 },
                 "target": {
                     "type": "string"
+                }
+            }
+        },
+        "api.overviewChannelCount": {
+            "type": "object",
+            "properties": {
+                "channel": {
+                    "type": "string"
+                },
+                "count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.overviewFunnelStage": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.overviewRegistrationFunnel": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean"
+                },
+                "channels": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.overviewChannelCount"
+                    }
+                },
+                "days": {
+                    "type": "integer"
+                },
+                "note": {
+                    "type": "string"
+                },
+                "registered": {
+                    "type": "integer"
+                },
+                "stages": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.overviewFunnelStage"
+                    }
                 }
             }
         },
@@ -22685,8 +22890,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "durationMs": {
-                    "type": "integer",
-                    "format": "int64"
+                    "type": "integer"
                 },
                 "error": {
                     "type": "string"

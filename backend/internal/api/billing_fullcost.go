@@ -9,25 +9,9 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// Fully-loaded consumption pricing.
-//
-// Users must cover not just the bare cost of their own workloads but our shared
-// infra overhead (platform namespaces + idle capacity). That overhead is loaded
-// onto each user resource through a DYNAMIC per-type factor derived from live
-// OpenCost data, then a profit margin is applied on top:
-//
-//	price_T = raw_cost_T * overhead_factor_T * margin      (T in cpu, ram, pv)
-//
-// overhead_factor_T = 1 / max(userShare_T, minUtilization)
-//
-// userShare_T = (cost of USER namespaces for type T) / (whole-cluster cost for
-// type T). The minUtilization floor (BILLING_MIN_UTILIZATION, default 0.30) caps
-// the factor at 1/minUtil (~3.33x) so early-stage bills do not explode to the
-// raw 30-40x infra:user ratio; it converges to the true ratio as adoption grows.
-// The denominator is the whole cluster, not the user head-count, so the factor
-// is stable. The margin (BILLING_MARGIN, default 1.4) is the profit lever applied
-// after overhead loading. Both are config (h.billingMinUtil / h.billingMargin),
-// tunable via env without a rebuild.
+// Consumption pricing applies the one platform-wide cost-plus multiplier to the
+// allocated resource cost. Shared and idle infrastructure remains platform cost;
+// it is not reintroduced as an invisible resource-specific uplift.
 //
 // billingCostWindow is the OpenCost window used for consumption pricing. A short
 // duration form is used deliberately: a calendar-month RFC3339 range
@@ -72,19 +56,16 @@ type billingFootprint struct {
 // and timing out.
 const billingSnapshotTTL = 4 * time.Minute
 
-// consumptionPricing carries the per-type overhead factors (>=1) and the profit
-// margin used to turn a raw OpenCost allocation into a customer-facing price.
+// consumptionPricing turns an allocated OpenCost amount into its customer-facing
+// cost-plus price.
 type consumptionPricing struct {
-	fCPU, fRAM, fPV float64
-	margin          float64
+	markup float64
 }
 
-// price applies the per-type overhead factors and the margin to a resource's raw
-// OpenCost per-type costs, rounded to two decimals. Negative inputs (OpenCost
-// emits small negative cost adjustments on sparse data) are clamped to zero.
+// price applies the common markup once to a resource's raw allocated cost,
+// rounded to two decimals. Negative inputs are clamped to zero.
 func (p consumptionPricing) price(cpuCost, ramCost, pvCost float64) float64 {
-	loaded := nonNeg(cpuCost)*p.fCPU + nonNeg(ramCost)*p.fRAM + nonNeg(pvCost)*p.fPV
-	return round2(loaded * p.margin)
+	return round2((nonNeg(cpuCost) + nonNeg(ramCost) + nonNeg(pvCost)) * p.markup)
 }
 
 // nonNeg clamps a cost to zero. OpenCost can report small negative costs from
@@ -113,7 +94,7 @@ type billingCostSnapshot struct {
 // rather than erroring.
 func (h *Handler) emptySnapshot() *billingCostSnapshot {
 	return &billingCostSnapshot{
-		pricing: consumptionPricing{fCPU: 1, fRAM: 1, fPV: 1, margin: h.billingMargin},
+		pricing: consumptionPricing{markup: h.billingMargin},
 		appCost: map[string]opencost.Allocation{},
 	}
 }
@@ -164,39 +145,21 @@ func (h *Handler) warmBillingSnapshot(ctx context.Context, client *opencost.Clie
 var appLabelKeys = []string{"dada_io_app", "app_kubernetes_io_instance", "app_kubernetes_io_name"}
 
 // buildBillingSnapshot issues ONE cluster-wide OpenCost pod query and, from it,
-// derives everything: per-type overhead factors (whole-cluster vs user-namespace
-// split), per-app cost indexed by every candidate app label, and the shared
-// Postgres/PowerDNS pod costs. Costs are scaled to a monthly run-rate.
+// derives everything: per-app cost indexed by every candidate app label, and
+// the shared Postgres/PowerDNS pod costs. Costs are scaled to a monthly run-rate.
 func (h *Handler) buildBillingSnapshot(ctx context.Context, client *opencost.Client) (*billingCostSnapshot, error) {
-	userNS, err := h.userNamespaces(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	pods, err := client.Compute(ctx, billingCostWindow, "pod", "")
 	if err != nil {
 		return nil, err
 	}
 
-	var userCPU, userRAM, userPV, totCPU, totRAM, totPV float64
 	appCost := make(map[string]opencost.Allocation)
 	snap := &billingCostSnapshot{appCost: appCost, builtAt: time.Now()}
 
 	for _, a := range pods {
 		ns := a.Properties.Namespace
 		if ns == "" || strings.HasPrefix(ns, "__") {
-			totCPU += nonNeg(a.CPUCost)
-			totRAM += nonNeg(a.RAMCost)
-			totPV += nonNeg(a.PVCost)
 			continue
-		}
-		totCPU += nonNeg(a.CPUCost)
-		totRAM += nonNeg(a.RAMCost)
-		totPV += nonNeg(a.PVCost)
-		if userNS[ns] {
-			userCPU += nonNeg(a.CPUCost)
-			userRAM += nonNeg(a.RAMCost)
-			userPV += nonNeg(a.PVCost)
 		}
 
 		scaled := scaleAlloc(a, billingMonthlyScale)
@@ -219,12 +182,7 @@ func (h *Handler) buildBillingSnapshot(ctx context.Context, client *opencost.Cli
 		}
 	}
 
-	snap.pricing = consumptionPricing{
-		fCPU:   overheadFactor(userCPU, totCPU, h.billingMinUtil),
-		fRAM:   overheadFactor(userRAM, totRAM, h.billingMinUtil),
-		fPV:    overheadFactor(userPV, totPV, h.billingMinUtil),
-		margin: h.billingMargin,
-	}
+	snap.pricing = consumptionPricing{markup: h.billingMargin}
 	return snap, nil
 }
 
@@ -256,20 +214,6 @@ func (h *Handler) estimateCost(fp billingFootprint, p consumptionPricing) float6
 	ramRaw := fp.ramGB * h.billingUnit.PerGBRAM
 	pvRaw := fp.storageGB * h.billingUnit.PerGBStorage
 	return p.price(cpuRaw, ramRaw, pvRaw)
-}
-
-// overheadFactor returns 1 / max(userCost/total, minUtil): how much each raw
-// user unit must scale up to also carry the shared infra overhead, bounded by
-// the minUtil floor. Falls back to 1 when the total is zero.
-func overheadFactor(userCost, total, minUtil float64) float64 {
-	if total <= 0 {
-		return 1
-	}
-	share := userCost / total
-	if share < minUtil {
-		share = minUtil
-	}
-	return 1 / share
 }
 
 // userNamespaces returns the set of k8s environment namespaces that belong to

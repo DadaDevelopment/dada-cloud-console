@@ -357,7 +357,7 @@ func (h *Handler) PaymentsStatus(c *gin.Context) {
 		envID, appName,
 	).Scan(&accountID, &expiresAt, &status, &webhookIDsRaw, &webhookNote, &connectedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		c.JSON(http.StatusOK, paymentsStatusResponse{Status: "disconnected", Webhooks: []paymentWebhookEntry{}})
+		respondNotFound(c)
 		return
 	}
 	if err != nil {

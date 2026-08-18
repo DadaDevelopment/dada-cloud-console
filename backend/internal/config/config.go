@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/dada-tuda/console/backend/internal/billing/pricing"
 )
 
 // Config holds all application configuration loaded from environment variables.
@@ -264,12 +266,9 @@ type Config struct {
 	// OpenSearch query.
 	CacheLogsTTL time.Duration
 
-	// Fully-loaded consumption pricing knobs (billing_fullcost.go). BillingMargin
-	// is the profit multiplier applied after infra-overhead loading (default 1.4);
-	// BillingMinUtilization floors the per-type user share so the overhead factor
-	// tops out at 1/min (default 0.30 -> 3.33x). Tunable without a rebuild.
-	BillingMargin         float64 // BILLING_MARGIN
-	BillingMinUtilization float64 // BILLING_MIN_UTILIZATION
+	// PricingMarkup is the one cost-plus multiplier for every metered resource.
+	// A value of 1.5 means that 100 RUB of allocated cost is charged at 150 RUB.
+	PricingMarkup float64 // PRICING_MARKUP
 
 	// HardwareMonthlyCostRUB is the real monthly hosting bill (all Beget nodes
 	// backing the cluster), used by the god-admin cost drilldown as the ground
@@ -282,15 +281,13 @@ type Config struct {
 	HardwareMonthlyCostRUB float64 // HARDWARE_MONTHLY_COST_RUB
 
 	// AgentTokenUSDToRUB converts the USD provider cost frozen in the
-	// agent_token_usage ledger into rubles at invoice/read time, and
-	// AgentTokenMarkup is the cost-plus multiplier billed on top (owner ask B:
-	// tariff agent runs, cost-plus x2.7). Both are applied at read time so the
+	// agent_token_usage ledger into rubles at invoice/read time. The common
+	// PricingMarkup is applied at read time so the
 	// stored ledger stays a pure provider-cost record and re-pricing history
 	// needs no migration. The FX default is a deliberately conservative lower
 	// bound so users are never over-converted; operators raise it toward the
 	// live rate via env. See internal/billing/pricing/agent_tokens.go.
 	AgentTokenUSDToRUB float64 // AGENT_TOKEN_USD_RUB_RATE
-	AgentTokenMarkup   float64 // AGENT_TOKEN_MARKUP
 
 	// BegetK8SToken authenticates the read-only Beget managed-Kubernetes
 	// billing client (internal/beget) against api.beget.com. Same bearer JWT
@@ -607,13 +604,6 @@ type Config struct {
 	// origin).
 	AIGatewayPublicURL string // AI_GATEWAY_PUBLIC_URL
 
-	// AIRoutingMarkup is the multiplier applied to a routed call's provider cost
-	// to get what the customer is billed when the project runs on the platform's
-	// own provider key. 1.0 means routing is passed through at cost. Pricing
-	// lives here and never in the gateway: the gateway routes, the platform
-	// decides what a route is worth (ADR-015).
-	AIRoutingMarkup float64 // AI_ROUTING_MARKUP
-
 	// YooKassa (payments slice 1, own shop/keys, no multi-tenant OAuth). Empty
 	// YooKassaShopID/YooKassaSecretKey means payments are unconfigured and
 	// checkout returns 409 payments_not_configured instead of attempting a call.
@@ -647,6 +637,11 @@ type Config struct {
 	TBankAccountNumber         string        // TBANK_ACCOUNT_NUMBER
 	TBankSandbox               bool          // TBANK_SANDBOX (default false)
 	TBankStatementPollInterval time.Duration // TBANK_STATEMENT_POLL_INTERVAL_SECONDS (default 15m)
+
+	// DaData resolves payer requisites from an INN while a customer creates an
+	// invoice. The key never reaches the browser: it is used only by the
+	// authenticated backend proxy. Empty means the invoice form remains manual.
+	DaDataAPIKey string // DADATA_API_KEY
 
 	// Platform requisites printed on every generated invoice (payer sees these
 	// as who they are paying). No defensible hardcoded value for any of
@@ -830,11 +825,9 @@ func Load() (*Config, error) {
 		CostWarmTimeout:             time.Duration(getEnvInt64("COST_WARM_TIMEOUT_SECONDS", 240)) * time.Second,
 		CacheMetricsTTL:             time.Duration(getEnvInt64("CACHE_METRICS_TTL_SECONDS", 20)) * time.Second,
 		CacheLogsTTL:                time.Duration(getEnvInt64("CACHE_LOGS_TTL_SECONDS", 10)) * time.Second,
-		BillingMargin:               getEnvFloat("BILLING_MARGIN", 1.4),
-		BillingMinUtilization:       getEnvFloat("BILLING_MIN_UTILIZATION", 0.30),
+		PricingMarkup:               getEnvFloat("PRICING_MARKUP", pricing.MarkupDefault),
 		HardwareMonthlyCostRUB:      getEnvFloat("HARDWARE_MONTHLY_COST_RUB", 0),
 		AgentTokenUSDToRUB:          getEnvFloat("AGENT_TOKEN_USD_RUB_RATE", 80.0),
-		AgentTokenMarkup:            getEnvFloat("AGENT_TOKEN_MARKUP", 2.7),
 		BegetK8SToken:               getEnv("BEGET_K8S_TOKEN", ""),
 		BegetK8SClusterSlug:         getEnv("BEGET_K8S_CLUSTER_SLUG", ""),
 		UserMetricsQueryURL:         getEnv("USER_METRICS_QUERY_URL", ""),
@@ -920,7 +913,6 @@ func Load() (*Config, error) {
 		BoxDefaultSpendCapRub:       getEnvFloat("BOX_DEFAULT_SPEND_CAP_RUB", 500),
 		PublicBaseURL:               getEnv("PUBLIC_BASE_URL", "https://console.dada-tuda.ru"),
 		AIGatewayPublicURL:          getEnv("AI_GATEWAY_PUBLIC_URL", "https://ai.dada-tuda.ru/v1"),
-		AIRoutingMarkup:             getEnvFloat("AI_ROUTING_MARKUP", 1.3),
 		YooKassaShopID:              getEnv("YOOKASSA_SHOP_ID", ""),
 		YooKassaSecretKey:           getEnv("YOOKASSA_SECRET_KEY", ""),
 		YooKassaReturnURL:           getEnv("YOOKASSA_RETURN_URL", "https://console.dada-tuda.ru/billing/return"),
@@ -934,6 +926,7 @@ func Load() (*Config, error) {
 		TBankAccountNumber:         getEnv("TBANK_ACCOUNT_NUMBER", ""),
 		TBankSandbox:               getEnv("TBANK_SANDBOX", "false") == "true",
 		TBankStatementPollInterval: time.Duration(getEnvInt64("TBANK_STATEMENT_POLL_INTERVAL_SECONDS", 900)) * time.Second,
+		DaDataAPIKey:               getEnv("DADATA_API_KEY", ""),
 
 		PlatformINN:          getEnv("PLATFORM_INN", ""),
 		PlatformKPP:          getEnv("PLATFORM_KPP", ""),

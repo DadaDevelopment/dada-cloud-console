@@ -87,7 +87,7 @@ func (h *Handler) GetAIRoutingMode(c *gin.Context) {
 
 	c.JSON(http.StatusOK, aiRoutingResponse{
 		Mode:   h.aiRoutingMode(c.Request.Context(), projectID),
-		Markup: h.cfg.AIRoutingMarkup,
+		Markup: h.cfg.PricingMarkup,
 	})
 }
 
@@ -174,7 +174,7 @@ func (h *Handler) SetAIRoutingMode(c *gin.Context) {
 		return
 	}
 
-	audit(auditOutcomeSuccess, map[string]any{"mode": req.Mode, "markup": h.cfg.AIRoutingMarkup})
+	audit(auditOutcomeSuccess, map[string]any{"mode": req.Mode, "markup": h.cfg.PricingMarkup})
 
-	c.JSON(http.StatusOK, aiRoutingResponse{Mode: req.Mode, Markup: h.cfg.AIRoutingMarkup})
+	c.JSON(http.StatusOK, aiRoutingResponse{Mode: req.Mode, Markup: h.cfg.PricingMarkup})
 }

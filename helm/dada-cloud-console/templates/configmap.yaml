@@ -25,8 +25,6 @@ data:
 {{- with .Values.redis.costSlowWarmIntervalSeconds }}
   COST_SLOW_WARM_INTERVAL_SECONDS: {{ . | quote }}
 {{- end }}
-  BILLING_MARGIN: {{ .Values.billing.margin | default "1.4" | quote }}
-  BILLING_MIN_UTILIZATION: {{ .Values.billing.minUtilization | default "0.30" | quote }}
   CROSSPLANE_SECRET_NAMESPACE: {{ .Values.rbac.crossplaneSecretNamespace | default "crossplane-system" | quote }}
   DB_BACKUP_NAMESPACE: {{ .Values.rbac.dbBackupNamespace | default "databases" | quote }}
 {{- range $key, $value := .Values.backend.env }}

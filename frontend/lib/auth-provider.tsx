@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import type { User } from "./types";
 import { setTokenGetter } from "./api";
 import { publishUid } from "./uid-cookie";
+import { bindMetrikaUserID } from "./metrika";
 import { fetchWithRetry, loadWithFallback, scheduleTimeout, type AuthErrorCode } from "./auth-retry";
 
 export type { AuthErrorCode } from "./auth-retry";
@@ -86,6 +87,7 @@ function LocalAuthProvider({ children }: { children: React.ReactNode }) {
   // hydration, login, logout, and cross-tab storage events.
   useEffect(() => {
     publishUid(auth.user?.id ?? null);
+    bindMetrikaUserID(auth.user?.id ?? null);
   }, [auth.user?.id]);
 
   function login(newToken?: string, newUser?: User) {
@@ -180,6 +182,7 @@ async function loadOidcProvider(): Promise<React.ComponentType<{ children: React
      */
     useEffect(() => {
       publishUid(sso.principal?.sub ?? null);
+      bindMetrikaUserID(sso.principal?.sub ?? null);
     }, [sso.principal?.sub]);
 
     const isLoading =

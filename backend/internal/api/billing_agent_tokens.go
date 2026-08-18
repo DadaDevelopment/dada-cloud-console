@@ -6,7 +6,6 @@ import (
 	"math"
 	"time"
 
-	"github.com/dada-tuda/console/backend/internal/billing/pricing"
 	"github.com/gin-gonic/gin"
 )
 
@@ -16,6 +15,7 @@ import (
 type agentTokenBill struct {
 	TotalTokens int64   `json:"tokens"`
 	CostUSD     float64 `json:"costUSD"`
+	BilledUSD   float64
 	RevenueRUB  float64 `json:"amount"`
 }
 
@@ -29,15 +29,16 @@ type agentTokenBill struct {
 func (h *Handler) agentTokenBillForOrg(ctx context.Context, orgID string, from, to time.Time) (agentTokenBill, error) {
 	var bill agentTokenBill
 	err := h.pool.QueryRow(ctx,
-		`SELECT COALESCE(SUM(cost_usd), 0)::float8, COALESCE(SUM(total_tokens), 0)
+		`SELECT COALESCE(SUM(cost_usd), 0)::float8, COALESCE(SUM(total_tokens), 0),
+		        COALESCE(SUM(CASE WHEN source = $4 THEN billed_usd ELSE cost_usd * $5 END), 0)::float8
 		   FROM agent_token_usage
 		  WHERE org_id = $1 AND created_at >= $2 AND created_at < $3`,
-		orgID, from, to,
-	).Scan(&bill.CostUSD, &bill.TotalTokens)
+		orgID, from, to, agentTokenSourceGateway, h.cfg.PricingMarkup,
+	).Scan(&bill.CostUSD, &bill.TotalTokens, &bill.BilledUSD)
 	if err != nil {
 		return agentTokenBill{}, err
 	}
-	bill.RevenueRUB = pricing.AgentTokenRevenueRUB(bill.CostUSD, h.cfg.AgentTokenUSDToRUB, h.cfg.AgentTokenMarkup)
+	bill.RevenueRUB = round2(bill.BilledUSD * h.cfg.AgentTokenUSDToRUB)
 	return bill, nil
 }
 
@@ -47,15 +48,16 @@ func (h *Handler) agentTokenBillForOrg(ctx context.Context, orgID string, from, 
 func (h *Handler) agentTokenBillAll(ctx context.Context, from, to time.Time) (agentTokenBill, error) {
 	var bill agentTokenBill
 	err := h.pool.QueryRow(ctx,
-		`SELECT COALESCE(SUM(cost_usd), 0)::float8, COALESCE(SUM(total_tokens), 0)
+		`SELECT COALESCE(SUM(cost_usd), 0)::float8, COALESCE(SUM(total_tokens), 0),
+		        COALESCE(SUM(CASE WHEN source = $3 THEN billed_usd ELSE cost_usd * $4 END), 0)::float8
 		   FROM agent_token_usage
 		  WHERE created_at >= $1 AND created_at < $2`,
-		from, to,
-	).Scan(&bill.CostUSD, &bill.TotalTokens)
+		from, to, agentTokenSourceGateway, h.cfg.PricingMarkup,
+	).Scan(&bill.CostUSD, &bill.TotalTokens, &bill.BilledUSD)
 	if err != nil {
 		return agentTokenBill{}, err
 	}
-	bill.RevenueRUB = pricing.AgentTokenRevenueRUB(bill.CostUSD, h.cfg.AgentTokenUSDToRUB, h.cfg.AgentTokenMarkup)
+	bill.RevenueRUB = round2(bill.BilledUSD * h.cfg.AgentTokenUSDToRUB)
 	return bill, nil
 }
 
@@ -89,7 +91,7 @@ func (h *Handler) adminAgentTokenEconomics(ctx context.Context, days int) gin.H 
 		"revenue_rub": round2(bill.RevenueRUB),
 		"margin_rub":  round2(bill.RevenueRUB - costRUB),
 		"usd_rub":     h.cfg.AgentTokenUSDToRUB,
-		"markup":      h.cfg.AgentTokenMarkup,
+		"markup":      h.cfg.PricingMarkup,
 	}
 }
 

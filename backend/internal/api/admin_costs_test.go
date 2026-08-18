@@ -87,6 +87,12 @@ func TestEnsureResourceJoinsRevenueOntoCostNode(t *testing.T) {
 	}
 }
 
+func TestSharedDatabaseRevenueUsesCommonMarkup(t *testing.T) {
+	if got := sharedDatabaseRevenue(100, 1.5); got != 150 {
+		t.Fatalf("database revenue = %v, want 150", got)
+	}
+}
+
 // TestAdminCostOwnerOfRouting locks the client-vs-platform routing: only a
 // project owned by a real user is a billable client; owner-less projects and
 // infra namespaces both fall into the single platform own-infrastructure bucket.
@@ -144,12 +150,7 @@ func TestPlatformCostOnly(t *testing.T) {
 	}
 }
 
-// TestRollupClientExcludesAgentFromSubtotals proves the per-project agent-tasks
-// line is priced and rendered (its own cost/revenue/margin are computed) but is
-// kept OUT of the project and client subtotals -- agent tokens are Anthropic API
-// spend, not the Beget hardware bill the summary reconciles against, so folding
-// them into the hardware rollup would break reconciliation.
-func TestRollupClientExcludesAgentFromSubtotals(t *testing.T) {
+func TestRollupClientIncludesAgentInSubtotals(t *testing.T) {
 	cl := &adminCostClient{
 		ClientID: "u-1", ClientName: "acme@example.com",
 		Projects: []adminCostProject{{
@@ -163,11 +164,11 @@ func TestRollupClientExcludesAgentFromSubtotals(t *testing.T) {
 	rollupClient(cl)
 
 	p := cl.Projects[0]
-	if p.Cost != 100 || p.Revenue != 150 {
-		t.Fatalf("project subtotal must count hardware only, not the agent row: got cost %v revenue %v, want 100/150", p.Cost, p.Revenue)
+	if p.Cost != 130 || p.Revenue != 230 {
+		t.Fatalf("project subtotal must include every resource: got cost %v revenue %v, want 130/230", p.Cost, p.Revenue)
 	}
-	if cl.Cost != 100 || cl.Revenue != 150 {
-		t.Fatalf("client subtotal must count hardware only: got cost %v revenue %v, want 100/150", cl.Cost, cl.Revenue)
+	if cl.Cost != 130 || cl.Revenue != 230 {
+		t.Fatalf("client subtotal must include every resource: got cost %v revenue %v, want 130/230", cl.Cost, cl.Revenue)
 	}
 
 	var agent *adminCostResource

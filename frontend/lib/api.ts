@@ -1976,6 +1976,13 @@ export interface CreateInvoiceResponse {
   invoice_url: string;
 }
 
+export interface InvoiceCompanySuggestion {
+  inn: string;
+  kpp?: string;
+  name: string;
+  legal_address: string;
+}
+
 export const billingApi = {
   getPlans: () =>
     apiFetch<{ plans: BillingPlan[] }>("/api/v1/billing/plans"),
@@ -2006,6 +2013,11 @@ export const billingApi = {
       method: "POST",
       body,
     }),
+
+  suggestInvoiceCompanies: (projectId: string, inn: string) =>
+    apiFetch<{ suggestions: InvoiceCompanySuggestion[] }>(
+      `/api/v1/projects/${projectId}/billing/company-suggestions?q=${encodeURIComponent(inn)}`,
+    ),
 
   /**
    * Opens a paid-for invoice's printable page in a new tab. Plain navigation

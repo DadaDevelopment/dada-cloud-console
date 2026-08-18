@@ -49,7 +49,7 @@ func seedAIRoutingProject(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 
 func TestAIKeyOwnerFor(t *testing.T) {
 	pool := testAIRoutingPool(t)
-	h := &Handler{pool: pool, cfg: &config.Config{AIRoutingMarkup: 1.3}}
+	h := &Handler{pool: pool, cfg: &config.Config{PricingMarkup: 1.5}}
 	ctx := context.Background()
 	projectID := seedAIRoutingProject(t, pool)
 
@@ -81,7 +81,7 @@ func TestAIKeyOwnerFor(t *testing.T) {
 
 func TestAIBilledUSD_OnlyBillsOptedInPlatformRouting(t *testing.T) {
 	pool := testAIRoutingPool(t)
-	h := &Handler{pool: pool, cfg: &config.Config{AIRoutingMarkup: 1.3}}
+	h := &Handler{pool: pool, cfg: &config.Config{PricingMarkup: 1.5}}
 	ctx := context.Background()
 	projectID := seedAIRoutingProject(t, pool)
 
@@ -98,8 +98,8 @@ func TestAIBilledUSD_OnlyBillsOptedInPlatformRouting(t *testing.T) {
 		t.Fatalf("opt into platform routing: %v", err)
 	}
 
-	if got := h.aiBilledUSD(ctx, projectID, aiKeyOwnerPlatform, 1.0); got != 1.3 {
-		t.Fatalf("opted-in platform call billed %v, want 1.3", got)
+	if got := h.aiBilledUSD(ctx, projectID, aiKeyOwnerPlatform, 1.0); got != 1.5 {
+		t.Fatalf("opted-in platform call billed %v, want 1.5", got)
 	}
 	if got := h.aiBilledUSD(ctx, projectID, aiKeyOwnerBYOK, 1.0); got != 0 {
 		t.Fatalf("call on the customer's own key billed %v, want 0", got)

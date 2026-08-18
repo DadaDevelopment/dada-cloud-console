@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { billingApi } from "@/lib/api";
-import type { BillingAccount, BillingUsage, ConsumptionResponse, BillingPlan, BillingPlanKey, Payment, PaymentStatus, CreateInvoiceRequest } from "@/lib/api";
+import type { BillingAccount, BillingUsage, ConsumptionResponse, BillingPlan, BillingPlanKey, Payment, PaymentStatus, CreateInvoiceRequest, InvoiceCompanySuggestion } from "@/lib/api";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { ConsumptionBreakdown } from "@/components/billing/consumption-breakdown";
@@ -106,6 +106,9 @@ export default function BillingPage() {
   const [invoiceBusy, setInvoiceBusy] = useState(false);
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
   const [invoiceResult, setInvoiceResult] = useState<{ paymentId: string; invoiceNumber: string } | null>(null);
+  const [companySuggestions, setCompanySuggestions] = useState<InvoiceCompanySuggestion[]>([]);
+  const [companyLookupBusy, setCompanyLookupBusy] = useState(false);
+  const [companyLookupError, setCompanyLookupError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -135,6 +138,49 @@ export default function BillingPage() {
       });
     return () => { cancelled = true; };
   }, [projectId]);
+
+  useEffect(() => {
+    const inn = invoiceForm.payer_inn.replace(/\D/g, "");
+    if (paymentMethod !== "invoice" || inn.length < 3) {
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setCompanyLookupBusy(true);
+      setCompanyLookupError(null);
+      billingApi
+        .suggestInvoiceCompanies(projectId, inn)
+        .then((response) => {
+          if (!cancelled) setCompanySuggestions(response.suggestions);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setCompanySuggestions([]);
+            setCompanyLookupError(t("billing.invoice.companyLookupUnavailable"));
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setCompanyLookupBusy(false);
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [invoiceForm.payer_inn, paymentMethod, projectId, t]);
+
+  function chooseInvoiceCompany(company: InvoiceCompanySuggestion) {
+    setInvoiceForm((form) => ({
+      ...form,
+      payer_inn: company.inn,
+      payer_kpp: company.kpp ?? "",
+      payer_org_name: company.name,
+      payer_legal_address: company.legal_address,
+    }));
+    setCompanySuggestions([]);
+    setCompanyLookupError(null);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -709,14 +755,66 @@ export default function BillingPage() {
                 </select>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
-                <div>
+                <div className="relative">
                   <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">{t("billing.invoice.inn")}</label>
                   <input
                     required
                     value={invoiceForm.payer_inn}
-                    onChange={(e) => setInvoiceForm((f) => ({ ...f, payer_inn: e.target.value }))}
+                    onChange={(e) => {
+                      const inn = e.target.value.replace(/\D/g, "").slice(0, 12);
+                      setInvoiceForm((f) => ({ ...f, payer_inn: inn }));
+                      if (inn.length < 3) {
+                        setCompanySuggestions([]);
+                        setCompanyLookupBusy(false);
+                        setCompanyLookupError(null);
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") setCompanySuggestions([]);
+                    }}
+                    inputMode="numeric"
+                    autoComplete="off"
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-haspopup="listbox"
+                    aria-controls="invoice-company-suggestions"
+                    aria-expanded={companySuggestions.length > 0}
                     className="w-full rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
                   />
+                  <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("billing.invoice.innHint")}</p>
+                  {companyLookupBusy && (
+                    <p className="mt-1 text-xs text-gray-400 dark:text-gray-500" role="status">{t("billing.invoice.companySearching")}</p>
+                  )}
+                  {companyLookupError && (
+                    <p className="mt-1 text-xs text-amber-700 dark:text-amber-400" role="status">{companyLookupError}</p>
+                  )}
+                  {companySuggestions.length > 0 && (
+                    <div
+                      id="invoice-company-suggestions"
+                      role="listbox"
+                      aria-label={t("billing.invoice.orgName")}
+                      className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+                    >
+                      {companySuggestions.map((company) => (
+                        <button
+                          key={`${company.inn}-${company.kpp ?? "main"}`}
+                          type="button"
+                          role="option"
+                          aria-selected={false}
+                          onClick={() => chooseInvoiceCompany(company)}
+                          className="block w-full px-3 py-2 text-left text-sm hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:hover:bg-gray-800 dark:focus:bg-gray-800"
+                        >
+                          <span className="block font-medium text-gray-900 dark:text-gray-100">{company.name}</span>
+                          <span className="block text-xs text-gray-500 dark:text-gray-400">
+                            {t("billing.invoice.companyMeta", {
+                              inn: company.inn,
+                              kpp: company.kpp ? ` · ${t("billing.invoice.kpp")} ${company.kpp}` : "",
+                            })}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">{t("billing.invoice.kpp")}</label>

@@ -9,7 +9,7 @@ import (
 
 // MarkupDefault is the multiplier applied to the internal per-unit cost to
 // derive the customer-facing (informational) price.
-const MarkupDefault = 2.7
+const MarkupDefault = 1.5
 
 const markupDefault = MarkupDefault
 
