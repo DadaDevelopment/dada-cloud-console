@@ -1,7 +1,14 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
@@ -22,6 +29,24 @@ type adminFunnelCohortCount struct {
 	Count       int    `json:"count"`
 }
 
+type adminFunnelChannel struct {
+	Source               string `json:"source"`
+	Visits               int    `json:"visits"`
+	Users                int    `json:"users"`
+	RegisterOpened       int    `json:"register_opened"`
+	SignupStarted        int    `json:"signup_started"`
+	RegistrationComplete int    `json:"registration_complete"`
+	DeploySuccess        int    `json:"deploy_success"`
+}
+
+type adminFunnelChannelReport struct {
+	Available bool                 `json:"available"`
+	Days      int                  `json:"days"`
+	Channels  []adminFunnelChannel `json:"channels"`
+	Totals    adminFunnelChannel   `json:"totals"`
+	Note      string               `json:"note,omitempty"`
+}
+
 type adminFunnelResponse struct {
 	Window             string                     `json:"window"`
 	ExcludedKinds      []string                   `json:"excluded_kinds"`
@@ -35,7 +60,53 @@ type adminFunnelResponse struct {
 	Paid               int                        `json:"paid"`
 	PaidNote           string                     `json:"paid_note,omitempty"`
 	CohortCounts       []adminFunnelCohortCount   `json:"cohort_counts"`
+	ChannelFunnel      adminFunnelChannelReport   `json:"channel_funnel"`
 	RegistrationFunnel overviewRegistrationFunnel `json:"registration_funnel"`
+}
+
+const cloudFunnelCounterID = 110158915
+
+const (
+	cloudGoalRegisterOpened       = 585010094
+	cloudGoalSignupStarted        = 593177849
+	cloudGoalRegistrationComplete = 586052031
+	cloudGoalDeploySuccess        = 585205874
+)
+
+var metrikaStatAPIURL = "https://api-metrika.yandex.net/stat/v1/data"
+
+func adminFunnelCountsQuery(sinceClause string) string {
+	return `
+		WITH scope AS (
+			SELECT u.id, u.email
+			FROM user_accounts u
+			WHERE ` + sinceClause + `
+			  AND ($1::text[] IS NULL OR u.account_kind <> ALL($1))
+		),
+		proj AS (
+			SELECT p.id, p.owner_id FROM projects p JOIN scope s ON s.id = p.owner_id
+		)
+		SELECT
+			(SELECT count(*) FROM scope),
+			(SELECT count(DISTINCT p.owner_id) FROM resource_snapshots rs JOIN proj p ON p.id = rs.project_id
+				WHERE rs.kind = 'App' AND rs.phase = 'Ready'),
+			(SELECT count(DISTINCT p.owner_id) FROM resource_snapshots rs JOIN proj p ON p.id = rs.project_id
+				WHERE rs.kind IN ('ServiceDatabase','ServiceDatabaseV2') AND rs.phase = 'Ready'),
+			(SELECT count(DISTINCT p.owner_id) FROM app_servers a JOIN proj p ON p.id = a.project_id
+				WHERE a.status = 'Ready' OR a.vm_ip <> ''),
+			(SELECT count(DISTINCT p.owner_id) FROM boxes b JOIN proj p ON p.id = b.project_id
+				WHERE b.ssh_host <> ''),
+			(SELECT count(DISTINCT p.owner_id) FROM resource_snapshots rs JOIN proj p ON p.id = rs.project_id
+				WHERE rs.kind = 'S3Bucket' AND rs.phase = 'Ready'),
+			(SELECT count(DISTINCT p.owner_id) FROM resource_snapshots rs JOIN proj p ON p.id = rs.project_id
+				WHERE rs.kind = 'AIModel'),
+			(SELECT count(DISTINCT s.id) FROM scope s JOIN payments pay ON lower(pay.customer_email) = lower(s.email)
+				WHERE pay.status = 'succeeded')
+	`
+}
+
+func adminFunnelCohortsQuery(sinceClause string) string {
+	return `SELECT u.account_kind, count(*) FROM user_accounts u WHERE ` + sinceClause + ` GROUP BY u.account_kind ORDER BY u.account_kind`
 }
 
 // funnelWindowDays maps the UI's fixed window choices to a day count for the
@@ -104,52 +175,25 @@ func (h *Handler) GetAdminFunnel(c *gin.Context) {
 		sinceClause = "u.created_at >= now() - interval '" + interval + "'"
 	}
 
-	query := `
-		WITH scope AS (
-			SELECT u.id, u.email
-			FROM users u
-			WHERE ` + sinceClause + `
-			  AND ($1::text[] IS NULL OR u.account_kind <> ALL($1))
-		),
-		proj AS (
-			SELECT p.id, p.owner_id FROM projects p JOIN scope s ON s.id = p.owner_id
-		)
-		SELECT
-			(SELECT count(*) FROM scope),
-			(SELECT count(DISTINCT p.owner_id) FROM resource_snapshots rs JOIN proj p ON p.id = rs.project_id
-				WHERE rs.kind = 'App' AND rs.phase = 'Ready'),
-			(SELECT count(DISTINCT p.owner_id) FROM resource_snapshots rs JOIN proj p ON p.id = rs.project_id
-				WHERE rs.kind IN ('ServiceDatabase','ServiceDatabaseV2') AND rs.phase = 'Ready'),
-			(SELECT count(DISTINCT p.owner_id) FROM app_servers a JOIN proj p ON p.id = a.project_id
-				WHERE a.status = 'Ready' OR a.vm_ip <> ''),
-			(SELECT count(DISTINCT p.owner_id) FROM boxes b JOIN proj p ON p.id = b.project_id
-				WHERE b.ssh_host <> ''),
-			(SELECT count(DISTINCT p.owner_id) FROM resource_snapshots rs JOIN proj p ON p.id = rs.project_id
-				WHERE rs.kind = 'S3Bucket' AND rs.phase = 'Ready'),
-			(SELECT count(DISTINCT p.owner_id) FROM resource_snapshots rs JOIN proj p ON p.id = rs.project_id
-				WHERE rs.kind = 'AIModel'),
-			(SELECT count(DISTINCT s.id) FROM scope s JOIN payments pay ON lower(pay.customer_email) = lower(s.email)
-				WHERE pay.status = 'succeeded')
-	`
-
 	var excludeArg interface{}
 	if len(excludeKinds) > 0 {
 		excludeArg = excludeKinds
 	}
 
 	resp := adminFunnelResponse{Window: window, ExcludedKinds: excludeKinds}
-	err := h.pool.QueryRow(c.Request.Context(), query, excludeArg).Scan(
+	err := h.pool.QueryRow(c.Request.Context(), adminFunnelCountsQuery(sinceClause), excludeArg).Scan(
 		&resp.Signups, &resp.AppUp, &resp.DBUp, &resp.VMUp, &resp.BoxUp, &resp.S3Up, &resp.ModelUp, &resp.Paid,
 	)
 	if err != nil {
+		log.Printf("admin funnel: read counts: %v", err)
 		respondError(c, http.StatusInternalServerError, "failed to read funnel")
 		return
 	}
 	resp.PaidNote = "AIModel counts row presence only, its phase never reaches Ready; VM/Box count ever-reachable, not current status."
 
-	cohortRows, err := h.pool.Query(c.Request.Context(),
-		`SELECT u.account_kind, count(*) FROM users u WHERE `+sinceClause+` GROUP BY u.account_kind ORDER BY u.account_kind`)
+	cohortRows, err := h.pool.Query(c.Request.Context(), adminFunnelCohortsQuery(sinceClause))
 	if err != nil {
+		log.Printf("admin funnel: read cohorts: %v", err)
 		respondError(c, http.StatusInternalServerError, "failed to read funnel cohorts")
 		return
 	}
@@ -165,6 +209,104 @@ func (h *Handler) GetAdminFunnel(c *gin.Context) {
 	}
 
 	resp.RegistrationFunnel = h.overviewRegistrationFunnel(c.Request.Context(), funnelWindowDays[window])
+	resp.ChannelFunnel = h.adminFunnelChannelReport(c.Request.Context(), funnelWindowDays[window])
 
 	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handler) adminFunnelChannelReport(ctx context.Context, days int) adminFunnelChannelReport {
+	out := adminFunnelChannelReport{Days: days}
+	if h.cfg.MetrikaOAuthToken == "" {
+		out.Note = "METRIKA_OAUTH_TOKEN не настроен"
+		return out
+	}
+
+	channels, totals, err := fetchMetrikaTrafficSourceFunnel(ctx, h.cfg.MetrikaOAuthToken, days)
+	if err != nil {
+		log.Printf("admin funnel: read Metrika channels: %v", err)
+		out.Note = "Yandex Metrika недоступна: " + err.Error()
+		return out
+	}
+
+	out.Available = true
+	out.Channels = channels
+	out.Totals = totals
+	return out
+}
+
+type metrikaTrafficSourceRow struct {
+	Dimensions []struct {
+		Name string `json:"name"`
+	} `json:"dimensions"`
+	Metrics []float64 `json:"metrics"`
+}
+
+type metrikaTrafficSourceReport struct {
+	Data   []metrikaTrafficSourceRow `json:"data"`
+	Totals []float64                 `json:"totals"`
+}
+
+func fetchMetrikaTrafficSourceFunnel(ctx context.Context, oauthToken string, days int) ([]adminFunnelChannel, adminFunnelChannel, error) {
+	metrics := []string{
+		"ym:s:visits",
+		"ym:s:users",
+		fmt.Sprintf("ym:s:goal%dreaches", cloudGoalRegisterOpened),
+		fmt.Sprintf("ym:s:goal%dreaches", cloudGoalSignupStarted),
+		fmt.Sprintf("ym:s:goal%dreaches", cloudGoalRegistrationComplete),
+		fmt.Sprintf("ym:s:goal%dreaches", cloudGoalDeploySuccess),
+	}
+	q := url.Values{}
+	q.Set("ids", strconv.Itoa(cloudFunnelCounterID))
+	q.Set("metrics", strings.Join(metrics, ","))
+	q.Set("dimensions", "ym:s:trafficSource")
+	q.Set("date1", strconv.Itoa(days)+"daysAgo")
+	q.Set("date2", "today")
+	q.Set("accuracy", "full")
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metrikaStatAPIURL+"?"+q.Encode(), nil)
+	if err != nil {
+		return nil, adminFunnelChannel{}, fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Authorization", "OAuth "+oauthToken)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := metrikaStatHTTPClient.Do(req)
+	if err != nil {
+		return nil, adminFunnelChannel{}, fmt.Errorf("request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode >= http.StatusBadRequest {
+		return nil, adminFunnelChannel{}, fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+
+	var parsed metrikaTrafficSourceReport
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, adminFunnelChannel{}, fmt.Errorf("decode: %w", err)
+	}
+
+	channels := make([]adminFunnelChannel, 0, len(parsed.Data))
+	for _, row := range parsed.Data {
+		if len(row.Dimensions) == 0 || len(row.Metrics) != len(metrics) {
+			return nil, adminFunnelChannel{}, fmt.Errorf("unexpected channel report row")
+		}
+		channels = append(channels, adminFunnelChannelFromMetrics(row.Dimensions[0].Name, row.Metrics))
+	}
+	if len(parsed.Totals) != len(metrics) {
+		return nil, adminFunnelChannel{}, fmt.Errorf("unexpected channel report totals")
+	}
+	return channels, adminFunnelChannelFromMetrics("Все источники", parsed.Totals), nil
+}
+
+func adminFunnelChannelFromMetrics(source string, metrics []float64) adminFunnelChannel {
+	return adminFunnelChannel{
+		Source:               source,
+		Visits:               int(metrics[0]),
+		Users:                int(metrics[1]),
+		RegisterOpened:       int(metrics[2]),
+		SignupStarted:        int(metrics[3]),
+		RegistrationComplete: int(metrics[4]),
+		DeploySuccess:        int(metrics[5]),
+	}
 }
