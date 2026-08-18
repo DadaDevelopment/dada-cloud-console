@@ -24,10 +24,11 @@ const defaultBaseURL = "https://business.tbank.ru/openapi/api/v1"
 const sandboxBaseURL = "https://business.tbank.ru/openapi/sandbox/api/v1"
 
 // SandboxToken is the fixed token T-Bank documents for the sandbox
-// environment. It authenticates against sandboxBaseURL only and carries no
-// access to a real account, so hardcoding it here is the same shape as any
-// other public sandbox credential.
-const SandboxToken = "t-bank-sandbox-token"
+// environment (business.tbank.ru/openapi/docs, "Авторизация" section:
+// "Bearer TBankSandboxToken"). It authenticates against sandboxBaseURL only
+// and carries no access to a real account, so hardcoding it here is the same
+// shape as any other public sandbox credential.
+const SandboxToken = "TBankSandboxToken"
 
 // Client is a T-Bank Business statement API client. Zero value is not
 // usable; use New.
