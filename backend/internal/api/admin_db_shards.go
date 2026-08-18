@@ -111,13 +111,26 @@ func (h *Handler) GetAdminDBShards(c *gin.Context) {
 	}
 
 	rows, err := h.pool.Query(ctx, `
-		WITH b AS (
-			SELECT shard, datname,
-			       MAX(collected_at) AS last_at,
-			       MIN(collected_at) AS first_at
+		WITH latest_shard_sample AS (
+			SELECT shard, MAX(collected_at) AS collected_at
 			  FROM db_stat_databases
 			 WHERE collected_at > $1
-			 GROUP BY shard, datname
+			 GROUP BY shard
+		), b AS (
+			SELECT d.shard, d.datname,
+			       l.collected_at AS last_at,
+			       MIN(d.collected_at) AS first_at
+			  FROM db_stat_databases d
+			  JOIN latest_shard_sample l
+			    ON l.shard = d.shard
+			 WHERE d.collected_at > $1
+			   AND EXISTS (
+			       SELECT 1 FROM db_stat_databases current_sample
+			        WHERE current_sample.shard = l.shard
+			          AND current_sample.datname = d.datname
+			          AND current_sample.collected_at = l.collected_at
+			   )
+			 GROUP BY d.shard, d.datname, l.collected_at
 		)
 		SELECT b.shard, b.datname, l.size_bytes, l.numbackends, l.collected_at,
 		       l.instance_start_at, f.size_bytes
