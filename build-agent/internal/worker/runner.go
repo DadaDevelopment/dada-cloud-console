@@ -772,9 +772,9 @@ func (r *Runner) handleBuildError(ctx context.Context, b *db.Build, repo *db.Rep
 	}
 	if isRetryable(err) {
 		reason := fmt.Sprintf("transient jenkins error, retrying: %v", err)
-		if retried, rerr := db.RequeueForRetry(ctx, r.pool, b.ID, reason, maxBuildAttempts); rerr == nil && retried {
-			llog.Warn().Err(err).Msg("build re-queued for retry (transient jenkins error)")
-			r.emit(ctx, b.ID, "retrying after transient error: "+err.Error())
+		if retried, retryAt, rerr := db.RequeueForRetry(ctx, r.pool, b.ID, reason, maxBuildAttempts); rerr == nil && retried {
+			llog.Warn().Err(err).Time("retry_after", retryAt).Msg("build re-queued for retry (transient jenkins error)")
+			r.emit(ctx, b.ID, fmt.Sprintf("сбой на нашей стороне; повторю сборку через %s: %v", retryDelayText(retryAt), err))
 			metrics.BuildTotal.WithLabelValues("retried").Inc()
 			return
 		}
@@ -809,6 +809,22 @@ func failureReason(err error) string {
 
 // failureReasonMaxLen bounds the one-line cause carried into the failure email.
 const failureReasonMaxLen = 200
+
+// retryDelayText renders how long a re-queued build waits before it runs
+// again, for the line the user reads in the live build log. The wait exists
+// so the retry does not land inside the same outage; saying "retrying" while
+// nothing appears to happen for a minute reads as a hung build, so the wait
+// is named rather than hidden.
+func retryDelayText(retryAt time.Time) string {
+	d := time.Until(retryAt).Round(time.Second)
+	if d < time.Second {
+		return "несколько секунд"
+	}
+	if d < time.Minute {
+		return fmt.Sprintf("%d с", int(d.Seconds()))
+	}
+	return fmt.Sprintf("%d мин", int(d.Round(time.Minute).Minutes()))
+}
 
 // maxBuildAttempts bounds automatic retries of a build that keeps hitting
 // transient failures.

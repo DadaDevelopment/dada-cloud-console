@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -240,6 +241,7 @@ func ClaimQueued(ctx context.Context, pool *pgxpool.Pool) (*Build, error) {
 		WHERE  id = (
 			SELECT id FROM builds
 			WHERE  status = 'queued'
+			  AND  (retry_after IS NULL OR retry_after <= NOW())
 			ORDER  BY created_at
 			LIMIT  1
 			FOR UPDATE SKIP LOCKED
@@ -283,16 +285,35 @@ func Transition(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, from, to 
 	return tag.RowsAffected() == 1, nil
 }
 
+// retryBackoffBaseSeconds and retryBackoffCapSeconds shape how long a
+// re-queued build waits before it can be claimed again: 30s after the first
+// transient failure, doubling per attempt, capped so the wait never outlives
+// the user's patience.
+//
+// Without a wait the three attempts a build is allowed were spent inside a
+// few seconds of one outage -- the retry was claimed on the very next drain
+// tick and hit the same dead ingress -- so the bound meant to survive a blip
+// instead guaranteed a red build for every user unlucky enough to push during
+// one. The delay is computed in SQL from the pre-increment attempt, in the
+// same statement that re-queues the row, so two workers racing the same build
+// cannot disagree about when it becomes claimable.
+const (
+	retryBackoffBaseSeconds = 30
+	retryBackoffCapSeconds  = 300
+)
+
 // RequeueForRetry sends an in-flight build back to the queue for another attempt
 // after a transient failure (Jenkins/ingress 503, timeout, external ABORTED),
 // recording the reason and bounding retries at maxAttempts. It clears the
 // started/finished timestamps and the Jenkins refs so the retry gets a fresh run
-// (and restart reconciliation does not re-attach to the dead run). Returns true
-// when the build was re-queued; false (with no error) when attempts are
-// exhausted or the row is no longer in-flight, so the caller can fail it with a
-// recorded reason instead.
-func RequeueForRetry(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, reason string, maxAttempts int) (bool, error) {
-	tag, err := pool.Exec(ctx, `
+// (and restart reconciliation does not re-attach to the dead run), and holds the
+// row back for a backoff (see retryBackoffBaseSeconds) so the retry does not
+// land inside the same outage. Returns true and the time the retry becomes
+// claimable; false (with no error) when attempts are exhausted or the row is no
+// longer in-flight, so the caller can fail it with a recorded reason instead.
+func RequeueForRetry(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, reason string, maxAttempts int) (bool, time.Time, error) {
+	var retryAt time.Time
+	err := pool.QueryRow(ctx, `
 		UPDATE builds
 		SET    status = 'queued',
 		       attempt = attempt + 1,
@@ -301,15 +322,20 @@ func RequeueForRetry(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, reas
 		       finished_at = NULL,
 		       jenkins_queue_id = NULL,
 		       jenkins_build_number = NULL,
+		       retry_after = NOW() + make_interval(secs => LEAST($4::int, $5::int << LEAST(attempt, 8))),
 		       updated_at = NOW()
 		WHERE  id = $1
 		  AND  status IN ('detecting','building','pushing')
 		  AND  attempt < $3
-	`, id, reason, maxAttempts)
+		RETURNING retry_after
+	`, id, reason, maxAttempts, retryBackoffCapSeconds, retryBackoffBaseSeconds).Scan(&retryAt)
 	if err != nil {
-		return false, fmt.Errorf("requeue for retry %s: %w", id, err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, time.Time{}, nil
+		}
+		return false, time.Time{}, fmt.Errorf("requeue for retry %s: %w", id, err)
 	}
-	return tag.RowsAffected() == 1, nil
+	return true, retryAt, nil
 }
 
 // buildFinishedAuditAction/Kind name the terminal-verdict audit row written by
@@ -538,6 +564,7 @@ func RetryPlatformFailedBuilds(ctx context.Context, pool *pgxpool.Pool, minAge, 
 			       error_message = 'platform failure; re-queued automatically after the platform recovered',
 			       started_at = NULL, finished_at = NULL,
 			       jenkins_queue_id = NULL, jenkins_build_number = NULL,
+			       retry_after = NULL,
 			       updated_at = NOW()
 			WHERE  id IN (SELECT id FROM candidates)
 			RETURNING id, git_repo_id, environment_id, app_name, branch, commit_sha, triggered_by, attempt
