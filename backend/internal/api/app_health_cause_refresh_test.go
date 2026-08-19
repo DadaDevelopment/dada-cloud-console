@@ -26,17 +26,43 @@ func TestCauseRefreshOutcomePreservesCauseOnEmptyLog(t *testing.T) {
 	}
 }
 
-// TestCauseRefreshOutcomeStillClearsOnGenuineNoCause proves the fix did not
-// break the case TestTouchAppHealthAlertSeenClearsStaleCauseWhenRefreshed
-// guards at the DB layer: a log WAS read this tick (non-empty) and simply
-// matched no known signature. That is real negative evidence -- the app
-// crashed, we looked, nothing recognizable was there -- so refreshed must
-// still come back true and let the stale cause from a previous, different
-// failure get cleared.
-func TestCauseRefreshOutcomeStillClearsOnGenuineNoCause(t *testing.T) {
-	_, _, _, _, refreshed := causeRefreshOutcome("some unrelated stdout line\n", "", "", "")
+// TestCauseRefreshOutcomePreservesCauseOnUnmatchedLog is RED-proof for the
+// second live sighting of the same class: gulyaev-ai-core (2026-08-19)
+// crashlooped 13 times on one unchanged ModuleNotFoundError, the platform had
+// already classified it as app_code and mailed the owner, yet the live
+// cause_kind column came back empty -- so frontend/lib/app-alerts.ts
+// crashCauseKey() returned null and the console banner showed "your app is
+// crashing" with no verdict and no lever.
+//
+// The mechanism the earlier fix missed: a non-empty log that matches no
+// signature is NOT negative evidence. tailLog reads only the last
+// appHealthLogTailLines lines of a single container instance, so the
+// diagnostic line drifts in and out of that window across restarts of an
+// identical crash, and a flapping reason defeats maybeCauseRefresh's
+// cheap-skip so the read happens every tick. Under the old rule each unlucky
+// window NULLed a correct diagnosis.
+//
+// On the old code this fails: refreshed comes back true with an empty
+// causeKind, which is exactly what touchAppHealthAlertSeen turns into
+// cause_kind = NULL.
+func TestCauseRefreshOutcomePreservesCauseOnUnmatchedLog(t *testing.T) {
+	_, _, _, causeKind, refreshed := causeRefreshOutcome("some unrelated stdout line\n", "", "", "")
+	if refreshed {
+		t.Fatalf("a non-empty log that classified nothing must report refreshed=false so the stored cause survives, got refreshed=true (causeKind=%q)", causeKind)
+	}
+}
+
+// TestCauseRefreshOutcomeClearsOnlyOnPositiveReclassification is the other
+// pole: a genuinely different failure DOES replace the old diagnosis, so the
+// guard above cannot freeze a stale cause forever once the app starts failing
+// for a new, recognizable reason.
+func TestCauseRefreshOutcomeClearsOnlyOnPositiveReclassification(t *testing.T) {
+	logExcerpt, cause, _, causeKind, refreshed := causeRefreshOutcome("Error: connect ECONNREFUSED\n", "cannot reach its database", "Error: connect ECONNREFUSED", "bad_connection_string")
 	if !refreshed {
-		t.Fatalf("a non-empty log that matched nothing must still report refreshed=true, got refreshed=false")
+		t.Fatalf("a positive new classification must report refreshed=true, got refreshed=false")
+	}
+	if causeKind != "bad_connection_string" || cause == "" || logExcerpt == "" {
+		t.Fatalf("expected the new verdict to pass through unchanged, got cause=%q causeKind=%q logExcerpt=%q", cause, causeKind, logExcerpt)
 	}
 }
 

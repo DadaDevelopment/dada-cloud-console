@@ -770,18 +770,28 @@ func (w *appHealthWatcher) maybeCauseRefresh(ctx context.Context, alert appHealt
 // last_seen_at at the epoch, which is what a deleted app leaves behind, not
 // what a wiped diagnosis looks like.
 //
-// causeKind != "" is the escape hatch that keeps a REAL reason change able to
-// overwrite a stale cause: OOMKilled and ImagePullBackOff/ErrImagePull are
-// classified from the kube-reported reason alone (see
-// ClassifyCrashCauseWithReason), with no log needed, so logExcerpt=="" for
-// those two is not evidence of anything -- causeKind is non-empty regardless
-// and the caller proceeds to clear/overwrite as before. Only the combination
-// of "log came back empty" AND "nothing classified" is downgraded to
-// refreshed=false; a non-empty log that genuinely matches no known signature
-// still reports refreshed=true; touchAppHealthAlertSeen clears the row, same
-// as before this fix.
+// A named cause is overwritten ONLY by a positive new classification, i.e.
+// causeKind != "". Everything else this tick counts as "no evidence", never
+// as "there is no cause anymore".
+//
+// The earlier revision also refreshed on a non-empty log that matched no
+// signature, treating that as real negative evidence. It is not. tailLog
+// reads only the last appHealthLogTailLines lines of one container instance,
+// so whether the diagnostic line sits inside that window varies from restart
+// to restart on an unchanged crash -- and maybeCauseRefresh's cheap-skip
+// cannot protect it, because a flapping reason (CrashLoopBackOff <-> Error)
+// defeats the skip and forces a fresh read every tick. Observed live twice:
+// envprobe0816 (2026-08-16) and gulyaev-ai-core (2026-08-19), the latter with
+// an unchanged ModuleNotFoundError in the log while cause_kind went empty and
+// the console banner lost its verdict line.
+//
+// A kube-authoritative reason (OOMKilled, ImagePullBackOff/ErrImagePull) is
+// classified from the reason alone by ClassifyCrashCauseWithReason with no log
+// at all, so it arrives with logExcerpt=="" and causeKind!="" -- and still
+// overwrites, which is the point: a genuinely different failure replaces the
+// old diagnosis, an unreadable tail does not erase it.
 func causeRefreshOutcome(logExcerpt, cause, causeLine, causeKind string) (string, string, string, string, bool) {
-	if logExcerpt == "" && causeKind == "" {
+	if causeKind == "" {
 		return "", "", "", "", false
 	}
 	return logExcerpt, cause, causeLine, causeKind, true
