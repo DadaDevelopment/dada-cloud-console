@@ -59,6 +59,10 @@ func (h *Handler) deliverDatabaseDSNAsync(ctx context.Context, projectID, envID 
 		}
 		if err != nil {
 			log.Printf("db-dsn-delivery: %s/%s: %v", dbName, appRef, err)
+			if errors.Is(err, crypto.ErrKeyMisconfigured) {
+				log.Printf("db-dsn-delivery: %s/%s: GITOPS_ENCRYPTION_KEY is unusable in this process, so no retry can ever succeed; stopping after one attempt (fix the Secret and restart the backend)", dbName, appRef)
+				return
+			}
 		}
 		if time.Now().After(deadline) {
 			log.Printf("db-dsn-delivery: gave up on %s/%s after %s; reveal-credentials remains available as a manual fallback", dbName, appRef, dbDSNDeliveryMaxWait)

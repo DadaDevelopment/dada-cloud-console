@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dada-tuda/console/backend/internal/cloudtask"
 	"github.com/dada-tuda/console/backend/internal/config"
@@ -379,4 +380,42 @@ func lastAuditMetadata(t *testing.T, pool *pgxpool.Pool, projectID uuid.UUID, ac
 		t.Fatalf("marshal audit metadata: %v", err)
 	}
 	return string(raw)
+}
+
+// TestDeliverDatabaseDSNAsync_StopsOnAPermanentlyBrokenKey pins the second half
+// of the 2026-08-19 outage. The GITOPS_ENCRYPTION_KEY Secret carried a trailing
+// newline, so every encrypt failed with "encoding/hex: invalid byte: U+000A" --
+// a verdict that cannot change on a retry. The loop retried it anyway, every ten
+// seconds for the full thirty-minute window, and wrote 172 identical failure
+// rows for one user's single database.
+func TestDeliverDatabaseDSNAsync_StopsOnAPermanentlyBrokenKey(t *testing.T) {
+	pool := testOptimisticPool(t)
+	creds := cloudtask.DBCredentials{Endpoint: "pg-router.databases.svc.cluster.local", Port: "5432", Username: "dada", Password: "s3cr3t"}
+	h := &Handler{pool: pool, cfg: &config.Config{GitopsEncryptionKey: installTestKey + "\n\n" + installTestKey}, dbcreds: fakeDBCredsResolver{creds: creds}}
+	userID := seedUser(t, pool)
+	projectID, envID := seedOptimisticFixture(t, pool)
+	seedApp(t, pool, projectID, envID, "megafactory")
+	seedServiceDatabaseSnapshot(t, h, projectID, envID, "pg", "megafactory", "ns-x", "megafactory")
+
+	returned := make(chan struct{})
+	go func() {
+		h.deliverDatabaseDSNAsync(context.Background(), projectID, envID, "pg", "megafactory", userID)
+		close(returned)
+	}()
+	select {
+	case <-returned:
+	case <-time.After(dbDSNDeliveryPollInterval + 5*time.Second):
+		t.Fatalf("deliverDatabaseDSNAsync kept retrying a key the process can never decode")
+	}
+
+	var attempts int
+	if err := h.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM audit_events WHERE project_id = $1 AND action = $2 AND outcome = 'failure'`,
+		projectID, auditActionSeedDatabaseDSN,
+	).Scan(&attempts); err != nil {
+		t.Fatalf("count failure audit rows: %v", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("failure audit rows = %d, want exactly 1 for a permanent config error", attempts)
+	}
 }
