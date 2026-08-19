@@ -457,6 +457,24 @@ func crDatabaseShard(cr *unstructured.Unstructured) string {
 	return shard
 }
 
+// crConsoleManaged reports whether a ServiceDatabaseV2 was authored by the
+// console rather than by a hand-written infra chart. Only the renderer stamps
+// projectLabel, so its presence is the one reliable signal that the CR lives in
+// a resources.values.yaml this agent can patch.
+//
+// The tier reconciler needs the distinction because the fields it flips are
+// only writable on a manifest the console owns. An infra chart declares the CR
+// as a Helm template whose name and spec are `{{ ... }}` expressions (n8n,
+// jira, nexus, powerdns) or as a `serviceDatabase:` toggle consumed by the
+// common subchart (reels, telemost-bot, user) — neither is a manifest that can
+// be patched by name, and neither is reachable from the app path the console
+// derives from its own project/env slugs. Enqueuing a tier flip for one of them
+// can only ever fail: on 2026-08-19 twelve did, on every console start, each
+// re-firing DadaOperationFailed.
+func crConsoleManaged(cr *unstructured.Unstructured) bool {
+	return cr.GetLabels()[projectLabel] != ""
+}
+
 func crDatabaseTier(cr *unstructured.Unstructured) string {
 	tier, found, err := unstructured.NestedString(cr.Object, "spec", "tier")
 	if err != nil || !found || tier == "" {
@@ -498,6 +516,7 @@ func (r *StatusReconciler) reconcileDatabases(ctx context.Context, owners map[uu
 		}
 		fields["tier"] = crDatabaseTier(cr)
 		fields["shard"] = crDatabaseShard(cr)
+		fields["console_managed"] = crConsoleManaged(cr)
 		patch, _ := json.Marshal(fields)
 		n, err := db.UpdateLiveStatus(ctx, r.pool, envID, "ServiceDatabaseV2", name, phase, patch)
 		if err != nil {

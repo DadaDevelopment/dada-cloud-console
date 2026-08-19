@@ -138,6 +138,7 @@ func (r *StatusReconciler) discover(ctx context.Context) {
 			if spec.kind == "ServiceDatabaseV2" {
 				fields["backup_last_at"] = backup.lastAt
 				fields["backup_count"] = backup.count
+				fields["console_managed"] = crConsoleManaged(o)
 			}
 			summary, _ := json.Marshal(fields)
 			env := target.EnvID

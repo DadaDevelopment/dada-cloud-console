@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 
@@ -53,7 +54,7 @@ func TestTierReconciler_NeverPutsPlatformDatabasesOnThePlanLadder(t *testing.T) 
 	}
 	r := &dbTierReconciler{h: h}
 
-	seed := func(org, dbName string) uuid.UUID {
+	seedWith := func(org, dbName string, consoleManaged bool) uuid.UUID {
 		var projectID, envID uuid.UUID
 		if err := pool.QueryRow(ctx,
 			`INSERT INTO projects (name, display_name, org_id) VALUES ($1, $1, $2) RETURNING id`,
@@ -69,14 +70,20 @@ func TestTierReconciler_NeverPutsPlatformDatabasesOnThePlanLadder(t *testing.T) 
 		if _, err := pool.Exec(ctx,
 			`INSERT INTO resource_snapshots (project_id, environment_id, kind, name, phase, summary_json)
 			 VALUES ($1, $2, 'ServiceDatabaseV2', $3, 'Ready', $4::jsonb)`,
-			projectID, envID, dbName, `{"tier":"unlimited","spec":{"appRef":"`+dbName+`"}}`); err != nil {
+			projectID, envID, dbName,
+			fmt.Sprintf(`{"tier":"unlimited","console_managed":%t,"spec":{"appRef":%q}}`, consoleManaged, dbName)); err != nil {
 			t.Fatalf("seed snapshot for %s: %v", dbName, err)
 		}
 		return envID
 	}
 
+	seed := func(org, dbName string) uuid.UUID { return seedWith(org, dbName, true) }
+
 	platformEnv := seed(platformOrg, "platform-"+suffix)
 	customerEnv := seed(customerOrg, "customer-"+suffix)
+	// An infra chart's database: same org, same plan, no console-authored
+	// manifest to patch. It must produce no operation at all.
+	infraEnv := seedWith(customerOrg, "infra-"+suffix, false)
 
 	r.tick(ctx)
 
@@ -96,5 +103,15 @@ func TestTierReconciler_NeverPutsPlatformDatabasesOnThePlanLadder(t *testing.T) 
 	}
 	if got, want := tierOf(customerEnv), databaseTierByPlan["startup"]; got != want {
 		t.Fatalf("customer database queued for tier %q, want %q", got, want)
+	}
+
+	var queued int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM operations WHERE environment_id = $1 AND action = 'SetDatabaseTier'`,
+		infraEnv).Scan(&queued); err != nil {
+		t.Fatalf("count queued tier operations for infra env: %v", err)
+	}
+	if queued != 0 {
+		t.Fatalf("infra database queued %d SetDatabaseTier operations, want 0: its CR is a helm template the agent cannot patch, so every one of them fails and re-fires DadaOperationFailed", queued)
 	}
 }

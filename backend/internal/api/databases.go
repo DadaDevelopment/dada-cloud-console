@@ -457,10 +457,11 @@ func (h *Handler) createManagedDatabase(ctx context.Context, actorID, projectID,
 	}
 
 	if err = seedOptimisticSnapshot(ctx, tx, projectID, envID, "ServiceDatabaseV2", req.Name, map[string]any{
-		"name":     req.Name,
-		"kind":     "ServiceDatabaseV2",
-		"app_ref":  appRef,
-		"database": req.Database,
+		"name":            req.Name,
+		"kind":            "ServiceDatabaseV2",
+		"app_ref":         appRef,
+		"database":        req.Database,
+		"console_managed": true,
 		"spec": map[string]any{
 			"appRef":   appRef,
 			"database": req.Database,

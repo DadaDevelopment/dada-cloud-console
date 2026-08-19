@@ -76,6 +76,34 @@ type tieredDatabase struct {
 	AppRef        string
 	Tier          string
 	OrgID         string
+	// ConsoleManaged is false for a ServiceDatabaseV2 the console did not
+	// author, and the sweep covers console-authored databases only.
+	//
+	// The tier is written by patching the CR's manifest in git, which the agent
+	// finds under <project>/<env>/apps/<app>/resources.values.yaml. That file only
+	// exists for databases the console rendered. A platform database declared by a
+	// hand-written infra chart is not reachable that way, and not patchable at all:
+	// its CR is either a Helm template whose name and spec are `{{ ... }}`
+	// expressions (n8n, jira, nexus, powerdns) or a `serviceDatabase:` values
+	// toggle consumed by the common subchart (reels, telemost-bot, user). There is
+	// no manifest to rewrite, and the project folder the chart lives in is not the
+	// project the console attributes the CR to — n8n runs in platform-prod but its
+	// chart is under projects/devtools.
+	//
+	// So the flip could never land, and the failure was not silent: 12 databases
+	// failed SetDatabaseTier on every console start, re-firing DadaOperationFailed
+	// each deploy [live psql pg-shard-0, 2026-08-19]. Nothing is lost by skipping
+	// them. They are infra-owned, unbilled, and every one of them sits at
+	// "unlimited" or "internal" — tiers databaseTierLimitBytes gives no limit, so
+	// the quota watcher already never measures them. Writing "internal" into their
+	// CRs would only restate a protection they already have.
+	//
+	// Ownership is read from the dada.io/project label the renderer stamps on every
+	// CR it writes, mirrored onto the snapshot by the gitops agent's status
+	// reconciler. A snapshot the reconciler has never touched carries no marker and
+	// is skipped: a tier flip deferred to the next tick costs nothing, an
+	// operation that cannot succeed costs an alert.
+	ConsoleManaged bool
 }
 
 // tick brings every database's tier in line with its plan once. Failures are
@@ -89,8 +117,12 @@ func (r *dbTierReconciler) tick(ctx context.Context) {
 	}
 
 	planTier := make(map[string]string)
-	var changed int
+	var changed, unmanaged int
 	for _, d := range dbs {
+		if !d.ConsoleManaged {
+			unmanaged++
+			continue
+		}
 		if d.Tier == dbTierInternal || d.OrgID == "" {
 			continue
 		}
@@ -110,7 +142,7 @@ func (r *dbTierReconciler) tick(ctx context.Context) {
 		}
 		r.retier(ctx, d, want, &changed)
 	}
-	log.Printf("db-tier: tick databases=%d retiered=%d", len(dbs), changed)
+	log.Printf("db-tier: tick databases=%d unmanaged=%d retiered=%d", len(dbs), unmanaged, changed)
 }
 
 // retier enqueues the tier flip unless the database already carries the tier or
@@ -167,14 +199,16 @@ func (h *Handler) tieredDatabases(ctx context.Context) ([]tieredDatabase, error)
 			return nil, err
 		}
 		var summary struct {
-			Tier string `json:"tier"`
-			Spec struct {
+			Tier           string `json:"tier"`
+			ConsoleManaged bool   `json:"console_managed"`
+			Spec           struct {
 				AppRef string `json:"appRef"`
 			} `json:"spec"`
 		}
 		if err := json.Unmarshal(summaryRaw, &summary); err != nil {
 			continue
 		}
+		d.ConsoleManaged = summary.ConsoleManaged
 		d.Tier = summary.Tier
 		if d.Tier == "" {
 			d.Tier = "unlimited"
