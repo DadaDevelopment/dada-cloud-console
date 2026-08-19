@@ -434,13 +434,25 @@ func (h *Handler) latestFailedBuildSummary(ctx context.Context, envID uuid.UUID,
 	return formatBuildFailureSummary(branch, commitSHA, commitMessage, finishedAt, reason, errorMessage), nil
 }
 
-// fetchAutofixLogs pulls the last hour of ERROR-level runtime logs for an app
-// to hand the auto-fix agent real crash context instead of just a build-fail
-// summary. Best-effort only: OpenSearch/Elasticsearch is a known recurring
-// outage point, and log context is a nice-to-have, not a blocker -- any
-// failure (no infra client configured, no k8s namespaces resolved, search
-// error) returns "" so the caller falls back to the existing build-fail
-// summary behavior.
+// Tuning knobs for fetchAutofixLogs' three-tier retry. autofixRecentWindow is
+// the tight window tried first, both with and without the ERROR level filter.
+// autofixFallbackWindow is the wide retry used once both recent-window
+// attempts come back empty (crash logged a while ago, log shipper lag, etc).
+// autofixLogSearchSize mirrors diagnoseLogSearchSize -- generous enough to
+// give the agent real context without flooding its prompt.
+const (
+	autofixRecentWindow   = time.Hour
+	autofixFallbackWindow = 24 * time.Hour
+	autofixLogSearchSize  = 50
+	autofixErrorLevel     = "ERROR"
+)
+
+// fetchAutofixLogs pulls recent runtime logs for an app to hand the auto-fix
+// agent real crash context instead of just a build-fail summary. Best-effort
+// only: OpenSearch/Elasticsearch is a known recurring outage point, and log
+// context is a nice-to-have, not a blocker -- any failure (no infra client
+// configured, no k8s namespaces resolved, search error) returns "" so the
+// caller falls back to the existing build-fail summary behavior.
 func (h *Handler) fetchAutofixLogs(ctx context.Context, projectID, envID uuid.UUID, appName string) string {
 	if h.infraLogsearch == nil {
 		return ""
@@ -453,18 +465,60 @@ func (h *Handler) fetchAutofixLogs(ctx context.Context, projectID, envID uuid.UU
 	if len(namespaces) == 0 {
 		return ""
 	}
+	entries, err := h.searchAutofixLogs(ctx, namespaces, appName)
+	if err != nil {
+		log.Printf("autofix: app %s (project %s): %v", appName, projectID, err)
+		return ""
+	}
+	return formatAutofixLogs(entries)
+}
+
+// searchAutofixLogs tries, in order: the tight recent window filtered to
+// ERROR level; the same window unfiltered (structured-log apps report an
+// error field, but a plain stdout stack trace from an uncaught Python/Node
+// exception carries no level field at all and would never match a level
+// filter -- see the fetchDiagnoseLogs path, which never filters by level, for
+// the sibling flow this mirrors); and finally the wide fallback window,
+// unfiltered. Each tier only runs once the previous one comes back with zero
+// hits, so a structured app with real ERROR entries never sees noisier
+// unfiltered results. Split out from fetchAutofixLogs so it is unit-testable
+// without a k8sAppNamespaces DB round-trip.
+func (h *Handler) searchAutofixLogs(ctx context.Context, namespaces []string, appName string) ([]logsearch.LogEntry, error) {
+	entries, err := h.searchAutofixWindow(ctx, namespaces, appName, autofixRecentWindow, autofixErrorLevel)
+	if err != nil {
+		return nil, fmt.Errorf("log search (recent window, ERROR level) failed: %w", err)
+	}
+	if len(entries) > 0 {
+		return entries, nil
+	}
+	entries, err = h.searchAutofixWindow(ctx, namespaces, appName, autofixRecentWindow, "")
+	if err != nil {
+		return nil, fmt.Errorf("log search (recent window, unfiltered) failed: %w", err)
+	}
+	if len(entries) > 0 {
+		return entries, nil
+	}
+	entries, err = h.searchAutofixWindow(ctx, namespaces, appName, autofixFallbackWindow, "")
+	if err != nil {
+		return nil, fmt.Errorf("log search (fallback window, unfiltered) failed: %w", err)
+	}
+	return entries, nil
+}
+
+// searchAutofixWindow runs one bounded k8s-scoped log search over the given
+// window, optionally filtered to a log level ("" means unfiltered).
+func (h *Handler) searchAutofixWindow(ctx context.Context, namespaces []string, appName string, window time.Duration, level string) ([]logsearch.LogEntry, error) {
 	res, err := h.infraLogsearch.Search(ctx, logsearch.SearchOpts{
 		KubeApp:        appName,
 		KubeNamespaces: namespaces,
-		Level:          "ERROR",
-		Since:          time.Now().Add(-time.Hour),
-		Size:           50,
+		Level:          level,
+		Since:          time.Now().Add(-window),
+		Size:           autofixLogSearchSize,
 	})
 	if err != nil {
-		log.Printf("autofix: app %s (project %s): log context search failed: %v", appName, projectID, err)
-		return ""
+		return nil, err
 	}
-	return formatAutofixLogs(res.Entries)
+	return res.Entries, nil
 }
 
 // formatAutofixLogs renders log entries newest-first into a plain-text block
