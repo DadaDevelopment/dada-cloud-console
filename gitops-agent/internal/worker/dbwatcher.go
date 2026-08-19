@@ -996,25 +996,52 @@ func (w *DBWatcher) doDeleteServiceDatabase(ctx context.Context, op db.Operation
 	return nil
 }
 
-func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
-	var p struct {
-		Name            string `json:"name"`
-		Image           string `json:"image"`
-		Framework       string `json:"framework"`
-		Port            int    `json:"port"`
-		Replicas        int    `json:"replicas"`
-		Profile         string `json:"profile"`
-		AppServerName   string `json:"app_server_name"`
-		DefaultHostname string `json:"default_hostname"`
-		WorkloadType    string `json:"workload_type"`
-		Volume          *struct {
-			Path         string `json:"path"`
-			Size         string `json:"size"`
-			StorageClass string `json:"storage_class"`
-			FSGroup      int64  `json:"fs_group"`
-		} `json:"volume"`
-		Worker bool `json:"worker"`
+// createAppPayload is the CreateApp operation payload. Named (not inline) so the
+// deploy path can replay it when an App snapshot is missing.
+type createAppPayload struct {
+	Name            string `json:"name"`
+	Image           string `json:"image"`
+	Framework       string `json:"framework"`
+	Port            int    `json:"port"`
+	Replicas        int    `json:"replicas"`
+	Profile         string `json:"profile"`
+	AppServerName   string `json:"app_server_name"`
+	DefaultHostname string `json:"default_hostname"`
+	WorkloadType    string `json:"workload_type"`
+	Volume          *struct {
+		Path         string `json:"path"`
+		Size         string `json:"size"`
+		StorageClass string `json:"storage_class"`
+		FSGroup      int64  `json:"fs_group"`
+	} `json:"volume"`
+	Worker bool `json:"worker"`
+}
+
+// appCreateSummary builds the App snapshot summary a CreateApp produces. Shared
+// with snapshot recovery so a replayed create yields the same shape as the
+// original.
+func appCreateSummary(p createAppPayload, argoName string) map[string]any {
+	summary := map[string]any{
+		"image": p.Image, "framework": p.Framework, "port": p.Port, "replicas": p.Replicas,
+		"profile": p.Profile, "status": "Pending", "argo_name": argoName,
 	}
+	if p.WorkloadType != "" {
+		summary["workload_type"] = p.WorkloadType
+	}
+	if p.Worker {
+		summary["worker"] = true
+	}
+	if p.Volume != nil && p.Volume.Path != "" {
+		summary["volume"] = map[string]any{
+			"path": p.Volume.Path, "size": p.Volume.Size, "storage_class": p.Volume.StorageClass,
+			"fs_group": p.Volume.FSGroup,
+		}
+	}
+	return summary
+}
+
+func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
+	var p createAppPayload
 	if err := json.Unmarshal(op.Payload, &p); err != nil {
 		return fmt.Errorf("parse payload: %w", err)
 	}
@@ -1162,32 +1189,21 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 		"[DADA Console] Create App %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
 		p.Name, op.ID, projectName, envName,
 	)
-	if err := w.commitFilesAndRecord(ctx, op, mgr, gitPath, files, commitMsg); err != nil {
+	// Snapshot BEFORE the push, like the compose sibling does. The push is the
+	// step that fails on a transient git-credential fault, and a snapshot written
+	// only after it left the app with no row at all: every later
+	// DeployImageVersion then died on "loading app snapshot: no rows in result
+	// set" and one blip bricked the app for good (2026-08-19). Written first, the
+	// next deploy re-renders and pushes the same files and the app heals itself.
+	summaryJSON, _ := json.Marshal(appCreateSummary(p, argoName))
+	if err := db.UpsertSnapshot(ctx, w.pool,
+		op.ProjectID, op.EnvironmentID,
+		"App", p.Name, "Pending", summaryJSON, time.Now(),
+	); err != nil {
 		return err
 	}
 
-	// Upsert snapshot so DeployImageVersion can re-render without reading git.
-	summary := map[string]any{
-		"image": p.Image, "framework": p.Framework, "port": p.Port, "replicas": p.Replicas,
-		"profile": p.Profile, "status": "Pending", "argo_name": argoName,
-	}
-	if p.WorkloadType != "" {
-		summary["workload_type"] = p.WorkloadType
-	}
-	if p.Worker {
-		summary["worker"] = true
-	}
-	if p.Volume != nil && p.Volume.Path != "" {
-		summary["volume"] = map[string]any{
-			"path": p.Volume.Path, "size": p.Volume.Size, "storage_class": p.Volume.StorageClass,
-			"fs_group": p.Volume.FSGroup,
-		}
-	}
-	summaryJSON, _ := json.Marshal(summary)
-	return db.UpsertSnapshot(ctx, w.pool,
-		op.ProjectID, op.EnvironmentID,
-		"App", p.Name, "Pending", summaryJSON, time.Now(),
-	)
+	return w.commitFilesAndRecord(ctx, op, mgr, gitPath, files, commitMsg)
 }
 
 // doDeleteApp removes an app's entire git folder in one commit: app.yaml,
@@ -1932,6 +1948,35 @@ func (w *DBWatcher) doImportComposeStack(ctx context.Context, op db.Operation) e
 //
 // This is the handler behind POST /api/v1/deploy (and PATCH .../image) for a
 // runtime=vm environment, so it is the seam a CI pipeline releases through.
+// loadComposeAppSummary is the compose twin of loadAppSummary: a VM app whose
+// snapshot is gone is rebuilt from its CreateApp payload rather than failing
+// every release from then on.
+func (w *DBWatcher) loadComposeAppSummary(ctx context.Context, op db.Operation, appName string) (map[string]any, error) {
+	var summaryRaw []byte
+	err := w.pool.QueryRow(ctx, `
+		SELECT summary_json FROM resource_snapshots
+		WHERE project_id=$1 AND environment_id=$2 AND kind='App' AND name=$3
+	`, op.ProjectID, op.EnvironmentID, appName).Scan(&summaryRaw)
+	switch {
+	case err == nil:
+		cur := map[string]any{}
+		_ = json.Unmarshal(summaryRaw, &cur)
+		return cur, nil
+	case !errors.Is(err, pgx.ErrNoRows):
+		return nil, fmt.Errorf("loading app snapshot: %w", err)
+	}
+
+	payload, cErr := w.createAppPayloadFor(ctx, op, appName)
+	if cErr != nil {
+		return nil, cErr
+	}
+	cur := map[string]any{}
+	_ = json.Unmarshal(composeAppSummary(composeDesiredFromCreate(payload, appName), nil), &cur)
+	log.Warn().Str("op", op.ID.String()).Str("app", appName).
+		Msg("compose app snapshot missing: rebuilt from its CreateApp operation")
+	return cur, nil
+}
+
 func (w *DBWatcher) updateComposeAppImage(ctx context.Context, op db.Operation, appName, image string) error {
 	superseded, err := w.supersededByLandedRelease(ctx, op, appName)
 	if err != nil {
@@ -1946,15 +1991,14 @@ func (w *DBWatcher) updateComposeAppImage(ctx context.Context, op db.Operation, 
 			image, superseded, appName))
 	}
 
-	var summaryRaw []byte
-	if err := w.pool.QueryRow(ctx, `
-		SELECT summary_json FROM resource_snapshots
-		WHERE project_id=$1 AND environment_id=$2 AND kind='App' AND name=$3
-	`, op.ProjectID, op.EnvironmentID, appName).Scan(&summaryRaw); err != nil {
-		return fmt.Errorf("loading app snapshot: %w", err)
+	cur, err := w.loadComposeAppSummary(ctx, op, appName)
+	if errors.Is(err, errAppDeleted) {
+		return db.MarkFailed(ctx, w.pool, op.ID, "APP_DELETED",
+			fmt.Sprintf("app %s was deleted; recreate it before deploying", appName))
 	}
-	cur := map[string]any{}
-	_ = json.Unmarshal(summaryRaw, &cur)
+	if err != nil {
+		return err
+	}
 	desired := composeDesiredMap(cur)
 	setComposeDesiredImage(desired, image)
 	cur["desired"] = desired
@@ -2139,6 +2183,96 @@ func deployPortAndWorker(cur map[string]any) (port float64, worker bool) {
 	return port, false
 }
 
+// loadAppSummary returns the App snapshot summary, rebuilding it from the app's
+// CreateApp operation when the row is missing.
+//
+// A CreateApp whose git push failed used to leave no snapshot at all, and every
+// later DeployImageVersion for that app failed with "loading app snapshot: no
+// rows in result set" forever -- one transient credential fault turned into a
+// permanently broken app that kept the DadaOperationFailed alert firing
+// (e117viteprobe, envprobe0816 on 2026-08-19). The CreateApp payload is still in
+// the operations table, so the deploy replays it instead of dying.
+func (w *DBWatcher) loadAppSummary(ctx context.Context, op db.Operation, appName, envName string) (map[string]any, error) {
+	var summaryRaw []byte
+	err := w.pool.QueryRow(ctx, `
+		SELECT summary_json FROM resource_snapshots
+		WHERE project_id=$1 AND environment_id=$2 AND kind='App' AND name=$3
+	`, op.ProjectID, op.EnvironmentID, appName).Scan(&summaryRaw)
+	switch {
+	case err == nil:
+		cur := map[string]any{}
+		_ = json.Unmarshal(summaryRaw, &cur)
+		return cur, nil
+	case !errors.Is(err, pgx.ErrNoRows):
+		return nil, fmt.Errorf("loading app snapshot: %w", err)
+	}
+
+	payload, cErr := w.createAppPayloadFor(ctx, op, appName)
+	if cErr != nil {
+		return nil, cErr
+	}
+	var p createAppPayload
+	if uErr := json.Unmarshal(payload, &p); uErr != nil {
+		return nil, fmt.Errorf("loading app snapshot: parsing CreateApp payload: %w", uErr)
+	}
+	if p.Replicas == 0 {
+		p.Replicas = 1
+	}
+	if p.Profile == "" {
+		p.Profile = w.appProfileFallback(ctx, op.EnvironmentID)
+	}
+	log.Warn().Str("op", op.ID.String()).Str("app", appName).
+		Msg("app snapshot missing: rebuilt from its CreateApp operation")
+	return appCreateSummary(p, renderer.ScopedArgoName(appName, envName, op.ProjectID.String())), nil
+}
+
+// errAppDeleted marks a deploy for an app that was deliberately deleted. The
+// snapshot is missing because the app is GONE, not because a create half-failed,
+// and a stale build pipeline releasing into that gap must not resurrect it
+// (envprobe0816: deleted 2026-08-16, still released to on 2026-08-19).
+var errAppDeleted = errors.New("app was deleted")
+
+// createAppPayloadFor returns the payload of the app's most recent CreateApp
+// operation, whatever its status: a create that failed at the push still carries
+// the app's desired spec. Returns errAppDeleted when a DeleteApp landed after
+// that create.
+func (w *DBWatcher) createAppPayloadFor(ctx context.Context, op db.Operation, appName string) ([]byte, error) {
+	var payload []byte
+	var createdAt time.Time
+	err := w.pool.QueryRow(ctx, `
+		SELECT payload, created_at FROM operations
+		WHERE  project_id = $1
+		  AND  environment_id IS NOT DISTINCT FROM $2
+		  AND  action = 'CreateApp'
+		  AND  COALESCE(payload->>'name', resource_name) = $3
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, op.ProjectID, op.EnvironmentID, appName).Scan(&payload, &createdAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("loading app snapshot: no snapshot and no CreateApp operation for app %q", appName)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("loading app snapshot: reading CreateApp operation: %w", err)
+	}
+
+	var deleted int
+	if err := w.pool.QueryRow(ctx, `
+		SELECT count(*) FROM operations
+		WHERE  project_id = $1
+		  AND  environment_id IS NOT DISTINCT FROM $2
+		  AND  action = 'DeleteApp'
+		  AND  COALESCE(payload->>'name', resource_name) = $3
+		  AND  status IN ('Committed', 'Ready')
+		  AND  created_at > $4
+	`, op.ProjectID, op.EnvironmentID, appName, createdAt).Scan(&deleted); err != nil {
+		return nil, fmt.Errorf("loading app snapshot: checking for a landed DeleteApp: %w", err)
+	}
+	if deleted > 0 {
+		return nil, fmt.Errorf("%w: %s", errAppDeleted, appName)
+	}
+	return payload, nil
+}
+
 func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) error {
 	var p struct {
 		AppName   string `json:"app_name"`
@@ -2163,15 +2297,14 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 		return fmt.Errorf("project/env lookup: %w", err)
 	}
 
-	var summaryRaw []byte
-	if err := w.pool.QueryRow(ctx, `
-		SELECT summary_json FROM resource_snapshots
-		WHERE project_id=$1 AND environment_id=$2 AND kind='App' AND name=$3
-	`, op.ProjectID, op.EnvironmentID, p.AppName).Scan(&summaryRaw); err != nil {
-		return fmt.Errorf("loading app snapshot: %w", err)
+	cur, err := w.loadAppSummary(ctx, op, p.AppName, envName)
+	if errors.Is(err, errAppDeleted) {
+		return db.MarkFailed(ctx, w.pool, op.ID, "APP_DELETED",
+			fmt.Sprintf("app %s was deleted; recreate it before deploying", p.AppName))
 	}
-	var cur map[string]any
-	_ = json.Unmarshal(summaryRaw, &cur)
+	if err != nil {
+		return err
+	}
 
 	portVal, workerVal := deployPortAndWorker(cur)
 	replicasVal, _ := cur["replicas"].(float64)
