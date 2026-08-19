@@ -40,7 +40,7 @@ func TestIngestSendsTheEnvelopeTheEndpointDeclares(t *testing.T) {
 
 	res, err := c.IngestTransactions(context.Background(), []Transaction{{
 		SourceIdentity: "payment:1",
-		OperationDate:  time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC),
+		OperationDate:  WallTime(time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)),
 		Direction:      DirectionCredit,
 		Amount:         "990.00",
 		Currency:       "RUB",
@@ -67,7 +67,7 @@ func TestIngestSendsTheEnvelopeTheEndpointDeclares(t *testing.T) {
 	if _, ok := got.Items[0]["project_id"]; ok {
 		t.Error("project_id was sent while unset; the endpoint forbids nulls it did not ask for")
 	}
-	if got.Items[0]["operation_date"] != "2026-07-25T12:00:00Z" {
+	if got.Items[0]["operation_date"] != "2026-07-25T12:00:00" {
 		t.Fatalf("operation_date = %v", got.Items[0]["operation_date"])
 	}
 }

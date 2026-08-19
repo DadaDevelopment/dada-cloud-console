@@ -103,6 +103,34 @@ integration is configured (`internal/api/fincore_sync.go`).
 Any of the first three empty switches the whole integration off:
 `fincore.New` returns nil and the syncer never starts.
 
+## Timestamps
+
+`operation_date` is sent as a naive local timestamp (`internal/fincore.WallTime`),
+not RFC3339. FinCore stores it in `sber_statements.operation_date`, a
+`TIMESTAMP WITHOUT TIME ZONE`, and hands the parsed value straight to asyncpg,
+so an offset-bearing value is refused by the driver and the whole batch returns
+`http 503: {"detail":"database_unavailable"}` -- a transport error that names
+the database while the real cause is one rejected parameter.
+
+## What the first production backfill did
+
+Run on 2026-08-19 against `dada_development`, confirmed in the
+`profi-backend-deploy` pod's own log:
+
+- `Client sync ... received=21 created=21 updated=0`
+- `Ingest ... received=1 created=1 updated=0 unchanged=0`
+- a replay came back `clients_updated=21`, `transactions_unchanged=1`
+
+The single transaction is `beget:2026-08`, DEBIT, **13194.00 RUB**
+(`cluster_d5c373` 12226.00 + `cluster_e7b608` 968.00) read live from the Beget
+API. No revenue was pushed: the only succeeded payment in production is the
+platform paying itself.
+
+FinCore stamps `company_id` from its own global `db_schema` setting rather than
+from the request's tenant, so these rows carry `company_id='profi'`. Tenant
+isolation still holds -- a service token that asks for a tenant it is not bound
+to resolves to nothing -- but the column does not name the tenant.
+
 ## SDK
 
 FinCore ships a generated Go SDK at `python.profi-ru/sdk/go` (module

@@ -118,8 +118,8 @@ func TestBegetBillIsADebitDatedToTheMonthItCovers(t *testing.T) {
 		t.Fatalf("source_identity = %q", tx.SourceIdentity)
 	}
 	want := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
-	if !tx.OperationDate.Equal(want) {
-		t.Fatalf("operation_date = %s, want the first day of the billed month", tx.OperationDate)
+	if !time.Time(tx.OperationDate).Equal(want) {
+		t.Fatalf("operation_date = %s, want the first day of the billed month", time.Time(tx.OperationDate))
 	}
 }
 

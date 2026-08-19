@@ -1,6 +1,10 @@
 package fincore
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
 // SourceSystem is what every row this package pushes carries in source_system.
 // FinCore namespaces the caller's idempotency key with it
@@ -52,6 +56,33 @@ type ClientsUpsertResult struct {
 
 // Transaction is one money fact handed to FinCore's ingest endpoint.
 //
+// WallTime is a timestamp serialised without a zone offset.
+//
+// FinCore stores an operation date in sber_statements.operation_date, a
+// TIMESTAMP WITHOUT TIME ZONE, and its ingest DTO hands whatever pydantic
+// parsed straight to asyncpg. An RFC3339 value carrying an offset therefore
+// reaches a naive column and the driver refuses it -- the whole batch comes
+// back as "http 503: database_unavailable". Emitting local wall-clock time
+// keeps the value the reader expects (Moscow business hours) and lands.
+type WallTime time.Time
+
+// MarshalJSON renders the instant as a naive local timestamp.
+func (t WallTime) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + time.Time(t).Format("2006-01-02T15:04:05") + `"`), nil
+}
+
+// UnmarshalJSON accepts a naive timestamp and, for tolerance, an RFC3339 one.
+func (t *WallTime) UnmarshalJSON(b []byte) error {
+	raw := strings.Trim(string(b), `"`)
+	for _, layout := range []string{"2006-01-02T15:04:05", time.RFC3339} {
+		if parsed, err := time.Parse(layout, raw); err == nil {
+			*t = WallTime(parsed)
+			return nil
+		}
+	}
+	return fmt.Errorf("fincore: cannot parse operation_date %q", raw)
+}
+
 // SourceIdentity is supplied by this side and is what makes a replayed
 // backfill harmless: FinCore upserts on (SourceSystem, SourceIdentity) instead
 // of minting its own key. It is NOT prefixed with the source system here --
@@ -62,7 +93,7 @@ type ClientsUpsertResult struct {
 type Transaction struct {
 	SourceIdentity string         `json:"source_identity"`
 	AccountNumber  string         `json:"account_number,omitempty"`
-	OperationDate  time.Time      `json:"operation_date"`
+	OperationDate  WallTime       `json:"operation_date"`
 	Direction      Direction      `json:"direction"`
 	Amount         string         `json:"amount"`
 	Currency       string         `json:"currency"`

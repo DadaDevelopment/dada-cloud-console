@@ -120,7 +120,7 @@ func TransactionFromPayment(p CloudPayment) Transaction {
 	tx := Transaction{
 		SourceIdentity: PaymentSourceIdentity(p.ID),
 		AccountNumber:  yookassaAccount,
-		OperationDate:  p.PaidAt,
+		OperationDate:  WallTime(p.PaidAt),
 		Direction:      DirectionCredit,
 		Amount:         p.Amount,
 		Currency:       currencyOrRUB(p.Currency),
@@ -180,7 +180,7 @@ func TransactionFromBegetBill(month time.Time, amountRUB float64, breakdown map[
 	return Transaction{
 		SourceIdentity: BegetSourceIdentity(month),
 		AccountNumber:  begetAccount,
-		OperationDate:  monthStart(month),
+		OperationDate:  WallTime(monthStart(month)),
 		Direction:      DirectionDebit,
 		Amount:         FormatAmount(amountRUB),
 		Currency:       "RUB",
