@@ -20,6 +20,7 @@ type appAlertRow struct {
 	CauseLine  string
 	CauseKind  string
 	Ratio      *float64
+	RatioKind  string
 	DetectedAt time.Time
 }
 
@@ -38,6 +39,7 @@ func groupAppAlerts(rows []appAlertRow) map[string][]models.AppAlert {
 			CauseLine:  r.CauseLine,
 			CauseKind:  r.CauseKind,
 			Ratio:      r.Ratio,
+			RatioKind:  r.RatioKind,
 			DetectedAt: r.DetectedAt,
 		})
 	}
@@ -124,7 +126,7 @@ func (h *Handler) loadAppAlerts(ctx context.Context, namespace string) (map[stri
 	}
 
 	vrows, err := h.pool.Query(ctx,
-		`SELECT app_name, ratio, COALESCE(last_seen_at, last_sent_at)
+		`SELECT app_name, ratio, ratio_kind, COALESCE(last_seen_at, last_sent_at)
 		 FROM app_volume_alerts
 		 WHERE namespace = $1 AND COALESCE(last_seen_at, last_sent_at) > now() - make_interval(secs => $2)`,
 		namespace, appVolumeAlertFreshWindow.Seconds())
@@ -134,7 +136,7 @@ func (h *Handler) loadAppAlerts(ctx context.Context, namespace string) (map[stri
 	for vrows.Next() {
 		var r appAlertRow
 		var ratio *float64
-		if scanErr := vrows.Scan(&r.AppName, &ratio, &r.DetectedAt); scanErr != nil {
+		if scanErr := vrows.Scan(&r.AppName, &ratio, &r.RatioKind, &r.DetectedAt); scanErr != nil {
 			vrows.Close()
 			return nil, scanErr
 		}

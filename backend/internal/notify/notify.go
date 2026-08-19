@@ -318,13 +318,14 @@ func ComposeReactivationFixHTML(planName, expires string, promoLink, pixelURL, h
 // and app_health_alerts.cause_kind). Empty/absent means unknown -- an app_code
 // signature carries no ambiguity so ClassifyCrashCause never returns "".
 const (
-	CauseKindAppCode          = "app_code"
-	CauseKindPlatformNetwork  = "platform_network"
-	CauseKindPlatformStorage  = "platform_storage"
-	CauseKindPlatformRegistry = "platform_registry"
-	CauseKindResourceLimit    = "resource_limit"
-	CauseKindNeedsArgs        = "app_needs_args"
-	CauseKindDBReadOnly       = "db_read_only"
+	CauseKindAppCode               = "app_code"
+	CauseKindPlatformNetwork       = "platform_network"
+	CauseKindPlatformStorage       = "platform_storage"
+	CauseKindPlatformStorageInodes = "platform_storage_inodes"
+	CauseKindPlatformRegistry      = "platform_registry"
+	CauseKindResourceLimit         = "resource_limit"
+	CauseKindNeedsArgs             = "app_needs_args"
+	CauseKindDBReadOnly            = "db_read_only"
 )
 
 // needsArgsCrashText is the cause_kind=CauseKindNeedsArgs verdict: the
@@ -451,6 +452,35 @@ func containsFold(excerpt, pattern string) bool {
 // infrastructure produces, never one an application can also print on its
 // own, because a false "it's the platform" is exactly as bad as a false
 // "it's your code".
+// enospcPattern is the OS error string an out-of-space write produces,
+// pulled out to a named constant so ClassifyCrashCauseWithVolume (below) can
+// recognize the exact same signature platformCrashSignatures matches,
+// instead of duplicating the literal and risking the two drifting apart.
+const enospcPattern = "no space left on device"
+
+// enospcBytesCrashText is the platformCrashSignatures entry for enospcPattern
+// -- pulled into a named constant (rather than left inline in the table
+// below) purely so ClassifyCrashCauseWithVolume can compare against it by
+// value to detect "this ENOSPC was classified by the bytes signature" before
+// deciding whether to replace it with enospcInodesCrashText.
+const enospcBytesCrashText = "Судя по логам, это похоже на нехватку места на томе нашей платформы, а не на ошибку в коде приложения."
+
+// enospcInodesCrashText is the cause_kind=CauseKindPlatformStorageInodes
+// verdict ClassifyCrashCauseWithVolume returns when the log carries the same
+// ENOSPC signature as enospcBytesCrashText, but the volume watcher's own
+// most recent measurement (see api.Handler.volumeInodesExhausted) says the
+// PVC crossed its threshold on inodes, not bytes. The two texts must
+// disagree on the one thing that matters to the owner: enospcBytesCrashText
+// implicitly points at "the volume needs to be bigger" (that IS the correct
+// fix for a byte-fill), while an inode-exhausted volume needs files deleted
+// or packed -- enlarging it changes nothing, because ext4 does not grow its
+// inode table on resize. Live case, 2026-08-19: fonbet-value ran at
+// inodes_free=0 while its byte ratio read 0.73, so the platform-storage text
+// that existed before this branch would have told a truthful-sounding lie:
+// "not enough room on the volume" when there plainly was room, measured in
+// bytes.
+const enospcInodesCrashText = "Судя по логам, на постоянном томе платформы закончились inode — лимит на количество файлов, отдельный от места в гигабайтах. Увеличение тома это НЕ исправит. Нужно удалить или упаковать (заархивировать) лишние мелкие файлы на томе."
+
 var platformCrashSignatures = []platformCrashSignature{
 	{
 		pattern: "No route to host",
@@ -458,9 +488,9 @@ var platformCrashSignatures = []platformCrashSignature{
 		text:    "Судя по логам, это похоже на сбой сети нашей платформы (нет маршрута до сервиса), а не на ошибку в коде приложения.",
 	},
 	{
-		pattern: "no space left on device",
+		pattern: enospcPattern,
 		kind:    CauseKindPlatformStorage,
-		text:    "Судя по логам, это похоже на нехватку места на томе нашей платформы, а не на ошибку в коде приложения.",
+		text:    enospcBytesCrashText,
 	},
 	{
 		pattern: "Input/output error",
@@ -570,6 +600,33 @@ func ClassifyCrashCauseWithReason(reason, excerpt string) (kind, text string) {
 		return CauseKindPlatformRegistry, registryCrashText
 	}
 	return ClassifyCrashCause(excerpt)
+}
+
+// ClassifyCrashCauseWithVolume is ClassifyCrashCauseWithReason plus one more
+// signal neither the log excerpt nor the kube reason can carry: whether the
+// app's own PVC was, per the volume watcher's most recent measurement,
+// exhausted on inodes rather than bytes (see
+// api.Handler.volumeInodesExhausted). ENOSPC ("no space left on device")
+// is the OS's one error string for both failure modes -- the kernel does
+// not distinguish "no bytes left" from "no inode entries left" in the
+// message it returns -- so the log excerpt alone can never tell the two
+// apart; only a live measurement of the PVC's own inode ratio can.
+//
+// The override fires ONLY when the underlying classification already landed
+// on exactly enospcBytesCrashText: an "Input/output error" ENOSPC-adjacent
+// signature is a different failure (a broken volume, not a fill ratio) and
+// must keep its own text regardless of inodesExhausted, and a
+// kube-authoritative reason (OOMKilled, ImagePullBackOff/ErrImagePull) or
+// any other classification is left untouched too. The comparison is by
+// value against enospcBytesCrashText rather than by re-testing the pattern,
+// so this stays a single call site instead of a second copy of
+// platformCrashSignatures' matching logic.
+func ClassifyCrashCauseWithVolume(reason, excerpt string, inodesExhausted bool) (kind, text string) {
+	kind, text = ClassifyCrashCauseWithReason(reason, excerpt)
+	if inodesExhausted && kind == CauseKindPlatformStorage && text == enospcBytesCrashText {
+		return CauseKindPlatformStorageInodes, enospcInodesCrashText
+	}
+	return kind, text
 }
 
 // causeLineMaxRunes bounds ExtractCauseLine's return value. Counted in runes,
@@ -789,6 +846,17 @@ func ComposeAppAlert(appName, reason, podName, logExcerpt, consoleLink, codeHint
 	return subject, b.String()
 }
 
+// VolumeRatioKindBytes and VolumeRatioKindInodes mirror api.ratioKindBytes /
+// api.ratioKindInodes literally. notify does not import api (api already
+// imports notify, and Go forbids the cycle), so the two string values are
+// deliberately duplicated here rather than shared -- the same tradeoff
+// ClassifyCrashCauseWithReason's doc comment makes for the "OOMKilled"
+// string.
+const (
+	VolumeRatioKindBytes  = "bytes"
+	VolumeRatioKindInodes = "inodes"
+)
+
 // ComposeVolumeAlert builds the subject and plaintext body for a volume-fill
 // alert: the owner's app is at or above appVolumeAlertThreshold on its
 // persistent volume and would otherwise fill silently until an out-of-space
@@ -796,8 +864,40 @@ func ComposeAppAlert(appName, reason, podName, logExcerpt, consoleLink, codeHint
 // CrashLooped for about a day before anyone noticed). declaredSize is the
 // app's declared volume size (e.g. "10Gi"), or "" when it could not be read;
 // consoleLink deep-links to the app's Storage settings tab.
-func ComposeVolumeAlert(appName string, ratio float64, declaredSize, consoleLink string) (subject, body string) {
+//
+// ratioKind ("bytes" or "inodes", see api.ratioKindBytes/ratioKindInodes)
+// picks which of two fill stories the body tells. The bytes story is the
+// original one: the volume's gigabytes are running out, and enlarging the
+// volume is a real fix. The inodes story exists because ext4 does not grow
+// its inode table when a volume is resized (see the backend's
+// volumeInodeQuery doc comment): telling an owner whose PVC is
+// inode-exhausted to "increase the volume" -- the bytes story's own advice
+// -- sends them toward a button that will not fix anything, so this case
+// gets its own wording naming the real lever (delete or pack the many small
+// files) and states outright that enlarging the volume will not help. Live
+// case, 2026-08-19: fonbet-value's PVC read inodes_free=0 at byte ratio
+// 0.73, and the only alert wording that existed before this branch would
+// have told the owner their disk had gigabytes to spare while telling them
+// nothing about the actual cause.
+func ComposeVolumeAlert(appName string, ratio float64, ratioKind, declaredSize, consoleLink string) (subject, body string) {
 	percent := ratio * 100
+	if ratioKind == VolumeRatioKindInodes {
+		subject = fmt.Sprintf("Dada Cloud: на томе приложения %s заканчиваются inode", appName)
+		var b strings.Builder
+		fmt.Fprintf(&b, "На постоянном томе приложения %s закончились (или почти закончились) inode: %.0f%% использовано.\n\n", appName, percent)
+		b.WriteString("Inode — это лимит на КОЛИЧЕСТВО файлов на томе, отдельный от лимита на гигабайты. Свободное место на диске может при этом быть — проблема не в объёме данных, а в числе отдельных файлов.\n\n")
+		if declaredSize != "" {
+			fmt.Fprintf(&b, "Объявленный размер тома: %s — увеличение тома в этом случае НЕ поможет, оно не добавляет inode.\n\n", declaredSize)
+		} else {
+			b.WriteString("Увеличение тома в этом случае НЕ поможет, оно не добавляет inode.\n\n")
+		}
+		b.WriteString("Если том заполнится по inode полностью, приложение не сможет создавать новые файлы и может перестать работать.\n\n")
+		fmt.Fprintf(&b, "Открыть хранилище в консоли: %s\n\n", consoleLink)
+		b.WriteString("Поможет удаление или упаковка (архивирование) лишних мелких файлов на томе — например, через экспорт тома и последующую очистку.\n\n")
+		b.WriteString("Это письмо приходит не чаще раза в 24 часа на приложение.\n")
+		return subject, b.String()
+	}
+
 	subject = fmt.Sprintf("Dada Cloud: том приложения %s заполнен на %.0f%%", appName, percent)
 	var b strings.Builder
 	fmt.Fprintf(&b, "Постоянный том приложения %s заполнен на %.0f%%.\n\n", appName, percent)

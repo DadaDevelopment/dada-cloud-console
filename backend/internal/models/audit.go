@@ -53,6 +53,13 @@ type ResourceSnapshot struct {
 // show WHY an app crashed, not just that it did. Both are best-effort and
 // omitted (empty) whenever the log read failed or no known signature
 // matched — the console must never show a guessed cause.
+//
+// RatioKind is only ever populated for Type == "volume": "bytes" or
+// "inodes", naming which dimension Ratio measures (see the backend's
+// app_volume_alerts.ratio_kind column and ratioKindBytes/ratioKindInodes).
+// Omitted on rows written before this field shipped, which the console reads
+// as "bytes" — the dimension every volume alert meant before inodes were
+// tracked at all.
 type AppAlert struct {
 	Type       string    `json:"type"` // "crash" or "volume"
 	Reason     string    `json:"reason,omitempty"`
@@ -61,5 +68,6 @@ type AppAlert struct {
 	CauseLine  string    `json:"cause_line,omitempty"`
 	CauseKind  string    `json:"cause_kind,omitempty"`
 	Ratio      *float64  `json:"ratio,omitempty"`
+	RatioKind  string    `json:"ratio_kind,omitempty"`
 	DetectedAt time.Time `json:"detected_at"`
 }

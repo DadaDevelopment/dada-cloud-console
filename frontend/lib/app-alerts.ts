@@ -47,6 +47,13 @@ export type AppAlertType = "crash" | "volume" | "url";
  * backend's notify.CauseKindDBReadOnly) — neutral and, in the common case,
  * ours: plan-limit enforcement flips the app's Postgres role to
  * `default_transaction_read_only`, so the app code is untouched and correct.
+ * `"platform_storage_inodes"` is `"platform_storage"`'s sibling for the OTHER
+ * way a volume runs out: the disk has free gigabytes but no free inodes (the
+ * per-file-count limit ext4 keeps separate from byte capacity — see the
+ * backend's notify.ComposeVolumeAlert doc comment). It must render as its own
+ * neutral platform-fault text, not the byte-storage text, because the byte
+ * text's fix ("enlarge the volume") does not work here: resizing a volume
+ * does not grow its inode table.
  * Missing or empty means the backend could not classify it — the console must
  * not guess "your code" in that case.
  */
@@ -54,6 +61,7 @@ export type AppAlertCauseKind =
   | "app_code"
   | "platform_network"
   | "platform_storage"
+  | "platform_storage_inodes"
   | "platform_registry"
   | "resource_limit"
   | "app_needs_args"
@@ -61,6 +69,16 @@ export type AppAlertCauseKind =
   | "ssl_not_supported"
   | "missing_env_var"
   | "db_read_only";
+
+/**
+ * `ratio_kind` names which dimension `ratio` measures for a `"volume"` alert:
+ * `"bytes"` (gigabytes used / gigabytes capacity, the original and only
+ * meaning before inode tracking shipped) or `"inodes"` (files used / files
+ * capacity — see the backend's app_volume_alerts.ratio_kind column). Absent
+ * on rows written before this field existed, which the console must read as
+ * `"bytes"`: that was every volume alert's meaning at the time.
+ */
+export type AppAlertRatioKind = "bytes" | "inodes";
 
 export interface AppAlert {
   type: AppAlertType;
@@ -70,6 +88,7 @@ export interface AppAlert {
   cause_line?: string;
   cause_kind?: AppAlertCauseKind;
   ratio?: number;
+  ratio_kind?: AppAlertRatioKind;
   detected_at: string;
 }
 

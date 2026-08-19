@@ -604,3 +604,71 @@ func TestClassifyCrashCauseEioCapitalized(t *testing.T) {
 		t.Fatalf("expected cause_kind %q, got %q", CauseKindPlatformStorage, kind)
 	}
 }
+
+// TestClassifyCrashCauseWithVolumeOverridesEnospcWhenInodesExhausted is the
+// end-to-end guarantee behind the fonbet-value fix: the SAME log line that
+// TestClassifyCrashCauseEnospc classifies as generic platform_storage must be
+// reclassified as platform_storage_inodes, with truthful inode wording, once
+// the caller reports the app's volume measured inode-exhausted (see
+// api.Handler.volumeInodesExhausted). Without inodesExhausted the verdict
+// must stay byte-storage -- most ENOSPC crashes really are about gigabytes.
+func TestClassifyCrashCauseWithVolumeOverridesEnospcWhenInodesExhausted(t *testing.T) {
+	excerpt := "OSError: [Errno 28] No space left on device"
+
+	kind, text := ClassifyCrashCauseWithVolume("Error", excerpt, true)
+	if kind != CauseKindPlatformStorageInodes {
+		t.Fatalf("expected cause_kind %q when inodes are exhausted, got %q", CauseKindPlatformStorageInodes, kind)
+	}
+	if !strings.Contains(text, "inode") {
+		t.Fatalf("expected inode text to actually mention inodes, got %q", text)
+	}
+	if !strings.Contains(text, "НЕ исправит") {
+		t.Fatalf("expected inode text to say enlarging the volume will not help, got %q", text)
+	}
+
+	kind, text = ClassifyCrashCauseWithVolume("Error", excerpt, false)
+	if kind != CauseKindPlatformStorage {
+		t.Fatalf("expected plain platform_storage when inodes are not exhausted, got %q", kind)
+	}
+	if strings.Contains(text, "inode") {
+		t.Fatalf("byte-storage text must not mention inodes, got %q", text)
+	}
+}
+
+// TestClassifyCrashCauseWithVolumeLeavesOtherCausesAlone locks the override
+// to the ENOSPC signature only: an inode-exhausted volume must not repaint an
+// unrelated crash (e.g. a kube-authoritative OOMKilled reason) as a storage
+// problem just because inodesExhausted happened to be true for that app.
+func TestClassifyCrashCauseWithVolumeLeavesOtherCausesAlone(t *testing.T) {
+	kind, _ := ClassifyCrashCauseWithVolume("OOMKilled", "some unrelated log line", true)
+	if kind != CauseKindResourceLimit {
+		t.Fatalf("expected OOMKilled to still win regardless of inodesExhausted, got %q", kind)
+	}
+}
+
+// TestComposeVolumeAlertInodesSaysEnlargingWontHelp is the email-side half of
+// the same guarantee: the inode branch must never suggest the byte fix.
+func TestComposeVolumeAlertInodesSaysEnlargingWontHelp(t *testing.T) {
+	subject, body := ComposeVolumeAlert("fonbet-value", 1.0, VolumeRatioKindInodes, "20Gi", "https://console.example/storage")
+	if !strings.Contains(subject, "inode") {
+		t.Fatalf("expected inode subject, got %q", subject)
+	}
+	if !strings.Contains(body, "НЕ поможет") {
+		t.Fatalf("expected body to say enlarging will not help, got %q", body)
+	}
+	if strings.Contains(body, "Увеличить том можно") {
+		t.Fatalf("inode body must not carry the bytes branch's enlarge-the-volume suggestion, got %q", body)
+	}
+}
+
+// TestComposeVolumeAlertBytesUnchanged pins the pre-existing bytes wording so
+// the new ratioKind branch cannot silently alter it.
+func TestComposeVolumeAlertBytesUnchanged(t *testing.T) {
+	subject, body := ComposeVolumeAlert("fonbet-value", 0.9, VolumeRatioKindBytes, "20Gi", "https://console.example/storage")
+	if strings.Contains(subject, "inode") || strings.Contains(body, "inode") {
+		t.Fatalf("bytes branch must not mention inodes, got subject=%q body=%q", subject, body)
+	}
+	if !strings.Contains(body, "Увеличить том можно") {
+		t.Fatalf("expected bytes body to keep offering the enlarge-the-volume fix, got %q", body)
+	}
+}

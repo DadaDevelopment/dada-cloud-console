@@ -761,6 +761,10 @@ export const apps: Messages = {
     ru: "Похоже на проблему с диском или томом на стороне Dada Cloud. Это не ошибка в вашем коде.",
     en: "Looks like a disk or volume problem on Dada Cloud's side. This is not a bug in your code.",
   },
+  "apps.alerts.crash.cause.platformStorageInodes": {
+    ru: "На постоянном томе приложения закончились inode — лимит на количество файлов, отдельный от места в гигабайтах. Это не ошибка в вашем коде. Увеличение тома это НЕ исправит — нужно удалить или упаковать лишние мелкие файлы.",
+    en: "The app's persistent volume ran out of inodes — the file-count limit, separate from gigabyte capacity. This is not a bug in your code. Enlarging the volume will NOT fix this — delete or pack the excess small files.",
+  },
   "apps.alerts.crash.cause.resourceLimit": {
     ru: "Контейнер был остановлен: приложение превысило лимит памяти, выделенный по тарифу. Это не ошибка в коде — нужен профиль с большим лимитом или меньше потребление памяти.",
     en: "The container was stopped: the app exceeded the memory limit included in its plan. This is not a bug in your code — it needs a bigger profile or lower memory usage.",
@@ -889,6 +893,10 @@ export const apps: Messages = {
   "apps.alerts.volume.text": {
     ru: "Диск заполнен на {percent}% — приложение упадёт при нехватке места",
     en: "Disk is {percent}% full — the app will crash once space runs out",
+  },
+  "apps.alerts.volume.text.inodes": {
+    ru: "На томе заканчиваются inode ({percent}% использовано) — лимит на количество файлов, не на гигабайты. Увеличение диска это не исправит.",
+    en: "The volume is running out of inodes ({percent}% used) — the file-count limit, not gigabytes. Enlarging the disk will not fix this.",
   },
   "apps.alerts.volume.cta": { ru: "Открыть Storage", en: "Open Storage" },
   "apps.alerts.chip.volume": { ru: "Диск", en: "Disk" },

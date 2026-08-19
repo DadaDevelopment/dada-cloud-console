@@ -61,6 +61,8 @@ function crashCauseKey(kind?: string): string | null {
       return "apps.alerts.crash.cause.platformNetwork";
     case "platform_storage":
       return "apps.alerts.crash.cause.platformStorage";
+    case "platform_storage_inodes":
+      return "apps.alerts.crash.cause.platformStorageInodes";
     case "platform_registry":
       return "apps.alerts.crash.cause.platformRegistry";
     case "resource_limit":
@@ -568,6 +570,7 @@ export function AppAlertsBanner({ alerts, logsHref, storageHref, startCommandHre
                     crashCauseKey(alert.cause_kind) &&
                     (alert.cause_kind === "platform_network" ||
                     alert.cause_kind === "platform_storage" ||
+                    alert.cause_kind === "platform_storage_inodes" ||
                     alert.cause_kind === "platform_registry" ||
                     alert.cause_kind === "app_needs_args" ||
                     alert.cause_kind === "resource_limit" ||
@@ -764,7 +767,7 @@ export function AppAlertsBanner({ alerts, logsHref, storageHref, startCommandHre
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="font-medium">
-                {t("apps.alerts.volume.text", {
+                {t(alert.ratio_kind === "inodes" ? "apps.alerts.volume.text.inodes" : "apps.alerts.volume.text", {
                   percent: alert.ratio != null ? Math.round(alert.ratio * 100) : "?",
                 })}
               </p>

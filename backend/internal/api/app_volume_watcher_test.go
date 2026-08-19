@@ -67,3 +67,57 @@ func TestOverThresholdEmptyOnNoMatches(t *testing.T) {
 		t.Fatalf("expected no matches, got %+v", out)
 	}
 }
+
+// TestHotVolumeSamplesBytesOnly is the pre-inode-tracking case: a PVC hot on
+// bytes with no inode signal at all is still reported, tagged bytes.
+func TestHotVolumeSamplesBytesOnly(t *testing.T) {
+	bytes := []volumeUsageSample{{Namespace: "acme-prod", PVCName: "hot-pvc", Ratio: 0.9}}
+	out := hotVolumeSamples(bytes, nil, appVolumeAlertThreshold)
+	if len(out) != 1 || out[0].Kind != ratioKindBytes || out[0].Ratio != 0.9 {
+		t.Fatalf("expected one bytes-tagged alert at 0.9, got %+v", out)
+	}
+}
+
+// TestHotVolumeSamplesInodesOnly is the fonbet-value bug this whole change
+// exists to fix: a PVC whose byte ratio never crosses threshold but whose
+// inode ratio does must still fire, tagged inodes so the owner isn't told to
+// enlarge a disk that has room.
+func TestHotVolumeSamplesInodesOnly(t *testing.T) {
+	bytes := []volumeUsageSample{{Namespace: "acme-prod", PVCName: "fonbet-value-pvc", Ratio: 0.73}}
+	inodes := []volumeUsageSample{{Namespace: "acme-prod", PVCName: "fonbet-value-pvc", Ratio: 1.0}}
+	out := hotVolumeSamples(bytes, inodes, appVolumeAlertThreshold)
+	if len(out) != 1 {
+		t.Fatalf("expected exactly one alert for the one hot pvc, got %+v", out)
+	}
+	if out[0].Kind != ratioKindInodes || out[0].Ratio != 1.0 {
+		t.Fatalf("expected inodes-tagged alert at ratio 1.0, got %+v", out[0])
+	}
+}
+
+// TestHotVolumeSamplesInodesOnlyNoByteSample covers a PVC that never shows up
+// in the byte-hot list at all (byte ratio far under threshold) but is
+// inode-hot: it must still be reported via the second loop in
+// hotVolumeSamples, not silently dropped because it was never "seen" by the
+// byte pass.
+func TestHotVolumeSamplesInodesOnlyNoByteSample(t *testing.T) {
+	bytes := []volumeUsageSample{{Namespace: "acme-prod", PVCName: "quiet-pvc", Ratio: 0.1}}
+	inodes := []volumeUsageSample{{Namespace: "acme-prod", PVCName: "quiet-pvc", Ratio: 0.99}}
+	out := hotVolumeSamples(bytes, inodes, appVolumeAlertThreshold)
+	if len(out) != 1 || out[0].Kind != ratioKindInodes {
+		t.Fatalf("expected one inodes-tagged alert for the inode-hot pvc, got %+v", out)
+	}
+}
+
+// TestHotVolumeSamplesBothHotPrioritizesInodes locks in the deliberate
+// asymmetry documented on hotVolumeSamples: when a PVC is hot on BOTH
+// dimensions, the alert must name inodes, never bytes, because "increase the
+// disk" is the wrong fix for inode exhaustion and offering it anyway would
+// send the owner down a dead end.
+func TestHotVolumeSamplesBothHotPrioritizesInodes(t *testing.T) {
+	bytes := []volumeUsageSample{{Namespace: "acme-prod", PVCName: "both-hot-pvc", Ratio: 0.92}}
+	inodes := []volumeUsageSample{{Namespace: "acme-prod", PVCName: "both-hot-pvc", Ratio: 0.97}}
+	out := hotVolumeSamples(bytes, inodes, appVolumeAlertThreshold)
+	if len(out) != 1 || out[0].Kind != ratioKindInodes || out[0].Ratio != 0.97 {
+		t.Fatalf("expected inodes to win with ratio 0.97, got %+v", out)
+	}
+}

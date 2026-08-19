@@ -721,7 +721,8 @@ func (w *appHealthWatcher) maybeCauseRefresh(ctx context.Context, alert appHealt
 		return "", "", "", "", false
 	}
 	logExcerpt = w.tailLog(ctx, alert)
-	causeKind, cause = notify.ClassifyCrashCauseWithReason(alert.Reason, logExcerpt)
+	inodesExhausted := w.h.volumeInodesExhausted(ctx, alert.Namespace, alert.AppName)
+	causeKind, cause = notify.ClassifyCrashCauseWithVolume(alert.Reason, logExcerpt, inodesExhausted)
 	if causeKind != notify.CauseKindResourceLimit && causeKind != notify.CauseKindPlatformRegistry {
 		causeLine = notify.ExtractCauseLine(logExcerpt)
 	}
