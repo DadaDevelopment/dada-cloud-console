@@ -756,6 +756,13 @@ type AcceptInviteIn struct {
 	Token           string                                 `json:"token"`
 }
 
+// AcceptInviteOut defines model for AcceptInviteOut.
+type AcceptInviteOut struct {
+	AlreadyMember   *bool `json:"already_member,omitempty"`
+	ExistingAccount *bool `json:"existing_account,omitempty"`
+	Ok              bool  `json:"ok"`
+}
+
 // AggregatedTotals defines model for AggregatedTotals.
 type AggregatedTotals struct {
 	ContractClientPrice  float32  `json:"contract_client_price"`
@@ -3648,7 +3655,10 @@ type ServiceTokenCreateIn struct {
 	// Name Кто это — «Мост Dada Cloud», «Импорт 1С»
 	Name string `json:"name"`
 
-	// Scopes Права токена. Допустимые значения: ingest:write, clients:read, clients:write, reports:read
+	// Role Роль, от имени которой действует токен — та же, что у людей: admin, owner, director, finance, lawyer, sales, staff, guest
+	Role *string `json:"role,omitempty"`
+
+	// Scopes Что токен может делать: read, write. read — методы GET/HEAD/OPTIONS, write — все остальные. Старые значения вида ingest:write принимаются как синонимы
 	Scopes []string `json:"scopes"`
 }
 
@@ -3659,6 +3669,7 @@ type ServiceTokenIssuedOut struct {
 	Id         int                          `json:"id"`
 	Name       string                       `json:"name"`
 	PublicId   string                       `json:"public_id"`
+	Role       *string                      `json:"role,omitempty"`
 	Scopes     []string                     `json:"scopes"`
 	TenantSlug string                       `json:"tenant_slug"`
 
@@ -3675,6 +3686,7 @@ type ServiceTokenOut struct {
 	Name       string                       `json:"name"`
 	PublicId   string                       `json:"public_id"`
 	RevokedAt  nullable.Nullable[time.Time] `json:"revoked_at,omitempty"`
+	Role       *string                      `json:"role,omitempty"`
 	Scopes     []string                     `json:"scopes"`
 	TenantSlug string                       `json:"tenant_slug"`
 }
@@ -39092,13 +39104,13 @@ type AcceptInviteResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *map[string]interface{}
+	JSON200 *AcceptInviteOut
 	// JSON422 the response for an HTTP 422 `application/json` response
 	JSON422 *HTTPValidationError
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r AcceptInviteResponse) GetJSON200() *map[string]interface{} {
+func (r AcceptInviteResponse) GetJSON200() *AcceptInviteOut {
 	return r.JSON200
 }
 
@@ -54976,7 +54988,7 @@ func ParseAcceptInviteResponse(rsp *http.Response) (*AcceptInviteResponse, error
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest map[string]interface{}
+		var dest AcceptInviteOut
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
