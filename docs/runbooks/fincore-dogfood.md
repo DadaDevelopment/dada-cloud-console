@@ -133,9 +133,34 @@ to resolves to nothing -- but the column does not name the tenant.
 
 ## SDK
 
-FinCore ships a generated Go SDK at `python.profi-ru/sdk/go` (module
-`github.com/dada-tuda/fincore-sdk-go`). It is not published yet — the repository
-does not exist on GitHub, so importing it here would break every build that
-cannot reach a local checkout. `internal/fincore/client.go` is a thin
-hand-written stand-in over the same two endpoints; swapping it for the SDK is a
-one-file change once the module is fetchable.
+FinCore's generated Go client is **vendored**, not imported: the module
+`github.com/dada-tuda/fincore-sdk-go` is not published, so a plain import would
+break every build that cannot reach a local checkout. The generated code lives
+in `backend/internal/fincore/client/client.gen.go` (oapi-codegen v2.8.0 from
+FinCore's `openapi.json`, contract 1.1.0) and is regenerated wholesale --
+`client/fincore.go` next to it is the only hand-written file there and holds the
+constructor that demands both `Authorization: Bearer` and `x-tenant-slug`.
+
+`internal/fincore/client.go` builds on it: base URL, paths, headers and typed
+response decoding are the SDK's.
+
+**The transaction batch is encoded by hand on purpose.** The generated
+`IngestTransactionIn` declares `operation_date` as `time.Time`, which marshals
+with a zone offset; the column behind it is `TIMESTAMP WITHOUT TIME ZONE`, so
+asyncpg refuses the value and the whole batch returns
+`http 503: database_unavailable` (see Timestamps above). Until the contract
+declares a naive type, the batch goes out through
+`IngestTransactionsWithBodyWithResponse` with our own `WallTime` marshalling.
+Everything else on the call is the SDK's.
+
+**The SDK drags gin 1.9.1 -> 1.10.1.** `oapi-codegen/runtime` requires
+`gin-gonic/gin v1.10.1` in its own `go.mod`, so minimal version selection bumps
+the console's HTTP framework even though the generated client never touches
+gin. Pinning lower would need an `exclude`. The bump is carried, not worked
+around: `go build ./...`, `go vet`, the full `go test ./...` and `-race` on
+`internal/fincore` are green, including `internal/api` and `internal/auth`,
+which are the two packages that actually use gin.
+
+**A 2xx without a JSON content type is still a success.** The SDK only fills its
+typed `JSON200` field when the response header says JSON; `internal/fincore`
+decodes the body itself in that case instead of reporting a failure.

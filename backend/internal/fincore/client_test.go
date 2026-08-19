@@ -29,6 +29,7 @@ func TestIngestSendsTheEnvelopeTheEndpointDeclares(t *testing.T) {
 		if err := json.Unmarshal(body, &got); err != nil {
 			t.Fatalf("request body is not the declared envelope: %v", err)
 		}
+		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"received":1,"created":1,"updated":0,"unchanged":0,"results":[]}`))
 	}))
 	defer srv.Close()
