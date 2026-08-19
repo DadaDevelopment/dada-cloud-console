@@ -410,14 +410,33 @@ type crashLogSignature struct {
 }
 
 // platformCrashSignature is one entry in platformCrashSignatures: pattern is
-// matched with strings.Contains, kind is the cause_kind value it proves, text
-// is the full Russian sentence shown to the owner (unlike crashLogSignature's
-// label, this is the whole message, not a parenthetical -- the platform text
-// makes an unambiguous, standalone claim about which side broke).
+// matched case-insensitively (see containsFold), kind is the cause_kind value
+// it proves, text is the full Russian sentence shown to the owner (unlike
+// crashLogSignature's label, this is the whole message, not a parenthetical --
+// the platform text makes an unambiguous, standalone claim about which side
+// broke).
+//
+// Case-insensitive matching is specific to this table and deliberate: every
+// pattern here is an operating-system error string, and the runtime that
+// surfaces it decides its capitalization. strerror(ENOSPC) is "No space left
+// on device", CPython and Node print it verbatim inside OSError/Error, while
+// Go's os package lowercases the same errno to "no space left on device".
+// A case-sensitive match therefore recognizes the failure in one language and
+// misses it in another, which is how a full volume went unnamed for five days
+// (see TestClassifyCrashCauseEnospcCapitalized). The language tables below
+// stay case-sensitive: their patterns are exception type names, where case is
+// part of the identifier.
 type platformCrashSignature struct {
 	pattern string
 	kind    string
 	text    string
+}
+
+// containsFold reports whether excerpt contains pattern, ignoring ASCII case.
+// Used only for platformCrashSignatures, whose patterns are OS error strings
+// whose capitalization varies by runtime.
+func containsFold(excerpt, pattern string) bool {
+	return strings.Contains(strings.ToLower(excerpt), strings.ToLower(pattern))
 }
 
 // platformCrashSignatures is checked BEFORE pythonCrashSignatures and
@@ -483,7 +502,7 @@ var nodeCrashSignatures = []crashLogSignature{
 // so callers can omit the line entirely rather than show a wrong guess.
 func ClassifyCrashCause(excerpt string) (kind, text string) {
 	for _, sig := range platformCrashSignatures {
-		if strings.Contains(excerpt, sig.pattern) {
+		if containsFold(excerpt, sig.pattern) {
 			return sig.kind, sig.text
 		}
 	}
@@ -569,21 +588,42 @@ const causeLineMaxRunes = 300
 // platform_network/platform_storage/db_read_only failure would classify
 // correctly but still show no cause_line -- the console banner would state a
 // cause with no evidence line under it.
-func crashLineSignaturePatterns() []string {
-	patterns := make([]string, 0, len(platformCrashSignatures)+len(dbReadOnlyCrashSignatures)+len(needsArgsCrashSignatures)+len(pythonCrashSignatures)+len(nodeCrashSignatures)+1)
+func crashLineSignaturePatterns() []crashLinePattern {
+	patterns := make([]crashLinePattern, 0, len(platformCrashSignatures)+len(dbReadOnlyCrashSignatures)+len(needsArgsCrashSignatures)+len(pythonCrashSignatures)+len(nodeCrashSignatures)+1)
 	for _, sig := range platformCrashSignatures {
-		patterns = append(patterns, sig.pattern)
+		patterns = append(patterns, crashLinePattern{pattern: sig.pattern, fold: true})
 	}
-	patterns = append(patterns, dbReadOnlyCrashSignatures...)
-	patterns = append(patterns, needsArgsCrashSignatures...)
+	for _, p := range dbReadOnlyCrashSignatures {
+		patterns = append(patterns, crashLinePattern{pattern: p})
+	}
+	for _, p := range needsArgsCrashSignatures {
+		patterns = append(patterns, crashLinePattern{pattern: p})
+	}
 	for _, sig := range pythonCrashSignatures {
-		patterns = append(patterns, sig.pattern)
+		patterns = append(patterns, crashLinePattern{pattern: sig.pattern})
 	}
 	for _, sig := range nodeCrashSignatures {
-		patterns = append(patterns, sig.pattern)
+		patterns = append(patterns, crashLinePattern{pattern: sig.pattern})
 	}
-	patterns = append(patterns, "panic:")
+	patterns = append(patterns, crashLinePattern{pattern: "panic:"})
 	return patterns
+}
+
+// crashLinePattern is one entry of the flattened table ExtractCauseLine walks.
+// fold mirrors how ClassifyCrashCause matched the same pattern, so the line
+// shown as evidence is selected by exactly the rule that produced the verdict
+// above it: platform patterns fold case, language patterns do not.
+type crashLinePattern struct {
+	pattern string
+	fold    bool
+}
+
+// matches reports whether the line contains this pattern, honoring fold.
+func (p crashLinePattern) matches(line string) bool {
+	if p.fold {
+		return containsFold(line, p.pattern)
+	}
+	return strings.Contains(line, p.pattern)
 }
 
 // pythonTracebackHeader is the first line CPython prints for an uncaught
@@ -691,7 +731,7 @@ func ExtractCauseLine(excerpt string) string {
 			continue
 		}
 		for _, p := range patterns {
-			if strings.Contains(trimmed, p) {
+			if p.matches(trimmed) {
 				best = trimmed
 				break
 			}

@@ -563,3 +563,44 @@ func TestComposeDatabaseArchiveDoneSeparatesAutomaticFromRequested(t *testing.T)
 		t.Fatal("an archive the platform started must not read like one the owner asked for")
 	}
 }
+
+// TestClassifyCrashCauseEnospcCapitalized pins the ENOSPC verdict against the
+// capitalization the C library — and therefore CPython, Node and Go's os
+// package — actually prints. strerror(ENOSPC) is "No space left on device"
+// with a capital N, so a case-sensitive strings.Contains against the
+// lowercase pattern matched nothing on the only shape this error takes in a
+// real container log.
+//
+// Live case 2026-08-19: fonbet-value (a 20Gi volume at 100%) crashlooped for
+// five days printing
+// "OSError: [Errno 28] No space left on device: '/data/raw_data/...'" and
+// carried cause_kind NULL the whole time, so the console banner — which
+// renders nothing when cause_kind is empty — stayed blank for the owner while
+// the one condition the platform can actually fix went unnamed.
+func TestClassifyCrashCauseEnospcCapitalized(t *testing.T) {
+	excerpt := "OSError: [Errno 28] No space left on device: " +
+		"'/data/raw_data/bodies/sha256/02/.02856a032fd267c3.json.gz.yl6nf1nn'"
+	kind, text := ClassifyCrashCause(excerpt)
+	if kind != CauseKindPlatformStorage {
+		t.Fatalf("expected cause_kind %q, got %q", CauseKindPlatformStorage, kind)
+	}
+	if strings.Contains(text, "это ошибка в коде приложения") {
+		t.Fatalf("platform_storage text must not blame the app's code, got %q", text)
+	}
+	if line := ExtractCauseLine(excerpt); !strings.Contains(line, "No space left on device") {
+		t.Fatalf("expected cause line to carry the ENOSPC evidence, got %q", line)
+	}
+}
+
+// TestClassifyCrashCauseEioCapitalized is the same guarantee for the volume's
+// other failure mode. "Input/output error" is already stored capitalized, so
+// this passes today; it is pinned so a future case-normalization of the
+// signature table cannot silently regress the EIO verdict that the 2026-07-21
+// incident added.
+func TestClassifyCrashCauseEioCapitalized(t *testing.T) {
+	excerpt := "OSError: [Errno 5] Input/output error"
+	kind, _ := ClassifyCrashCause(excerpt)
+	if kind != CauseKindPlatformStorage {
+		t.Fatalf("expected cause_kind %q, got %q", CauseKindPlatformStorage, kind)
+	}
+}
