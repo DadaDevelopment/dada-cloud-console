@@ -263,6 +263,27 @@ definitions:
       run_ref:
         type: string
     type: object
+  api.agentInstallTokenRequest:
+    properties:
+      installation_id:
+        type: string
+      project_id:
+        type: string
+      repo:
+        type: string
+    required:
+    - project_id
+    - repo
+    type: object
+  api.agentInstallTokenResponse:
+    properties:
+      expires_at:
+        type: string
+      repo:
+        type: string
+      token:
+        type: string
+    type: object
   api.aiRoutingResponse:
     properties:
       markup:
@@ -1071,6 +1092,7 @@ definitions:
     properties:
       metrics:
         additionalProperties:
+          format: float64
           type: number
         type: object
       source:
@@ -1459,6 +1481,7 @@ definitions:
   cloudtask.StepResult:
     properties:
       durationMs:
+        format: int64
         type: integer
       error:
         type: string
@@ -2662,6 +2685,69 @@ paths:
       security:
       - BearerAuth: []
       summary: '[service] List branches of a repo visible to a git installation'
+      tags:
+      - agent-git
+  /agent/git/install-token:
+    post:
+      consumes:
+      - application/json
+      description: 'Trusted-service endpoint (azp=dada-agent): returns a short-lived
+        GitHub App token scoped to one repository, so a run can be launched without
+        a human-pasted credential.'
+      operationId: agentMintInstallToken
+      parameters:
+      - description: project, repo, optional installation
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.agentInstallTokenRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.agentInstallTokenResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: '[service] Mint a repo-scoped git installation token'
       tags:
       - agent-git
   /agent/git/installations:

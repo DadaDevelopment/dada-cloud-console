@@ -3,8 +3,11 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/dada-tuda/console/backend/internal/buildagent"
+	gh "github.com/dada-tuda/console/backend/internal/github"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -224,4 +227,181 @@ func (h *Handler) resolveAgentInstallation(c *gin.Context) (int64, bool) {
 		return 0, false
 	}
 	return providerInstallID, true
+}
+
+// agentInstallTokenRequest asks for a GitHub credential for one repository of
+// one project. installation_id may be omitted when the project's org has a
+// single installation — the common case, and the hub should not have to carry an
+// id it never chose.
+type agentInstallTokenRequest struct {
+	ProjectID      string `json:"project_id" binding:"required"`
+	InstallationID string `json:"installation_id"`
+	Repo           string `json:"repo" binding:"required"`
+}
+
+type agentInstallTokenResponse struct {
+	Repo      string    `json:"repo"`
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// AgentMintInstallToken issues a short-lived GitHub App installation token for
+// one repository of one project. POST /api/v1/agent/git/install-token.
+//
+// This is the write counterpart of the read-only discovery above, and it exists
+// so the hub stops asking a human to paste a token into the launch dialog. The
+// token is narrowed to the single requested repository, so it is strictly weaker
+// than the installation-wide token the platform's own cloud-task dispatch
+// already hands the same caller.
+//
+// The repository is not checked against a table here: the narrowing is passed to
+// GitHub, which refuses (422) anything the installation does not contain. That
+// keeps one source of truth for "what this installation reaches" instead of a
+// local copy able to drift from it.
+//
+// @ID          agentMintInstallToken
+// @Summary     [service] Mint a repo-scoped git installation token
+// @Description Trusted-service endpoint (azp=dada-agent): returns a short-lived GitHub App token scoped to one repository, so a run can be launched without a human-pasted credential.
+// @Tags        agent-git
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       request body     agentInstallTokenRequest true "project, repo, optional installation"
+// @Success     200     {object} agentInstallTokenResponse
+// @Failure     400     {object} map[string]string
+// @Failure     401     {object} map[string]string
+// @Failure     403     {object} map[string]string
+// @Failure     404     {object} map[string]string
+// @Failure     502     {object} map[string]string
+// @Failure     503     {object} map[string]string
+// @Router      /agent/git/install-token [post]
+func (h *Handler) AgentMintInstallToken(c *gin.Context) {
+	h.agentMintInstallToken(c, h.agentVerifier)
+}
+
+// agentMintInstallToken carries the verifier as an argument so the auth gate can
+// be exercised without a live Keycloak, the same split the dadagent webhook uses.
+func (h *Handler) agentMintInstallToken(c *gin.Context, verifier tokenVerifier) {
+	if !h.agentAuthorize(c, verifier) {
+		return
+	}
+	if h.cfg.GithubAppID == "" || h.cfg.GithubAppPrivateKey == "" {
+		respondError(c, http.StatusServiceUnavailable, "git app not configured")
+		return
+	}
+
+	var req agentInstallTokenRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	projectID, err := uuid.Parse(req.ProjectID)
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "invalid project_id")
+		return
+	}
+	repoName, ok := repoScopeName(req.Repo)
+	if !ok {
+		respondError(c, http.StatusBadRequest, "repo must be owner/name")
+		return
+	}
+
+	providerInstallID, ok := h.agentInstallationFor(c, projectID, req.InstallationID)
+	if !ok {
+		return
+	}
+
+	token, expires, err := gh.MintInstallTokenForRepos(c.Request.Context(),
+		h.cfg.GithubAppID, h.cfg.GithubAppPrivateKey, providerInstallID, []string{repoName})
+	if err != nil {
+		respondError(c, http.StatusBadGateway, "failed to mint install token")
+		return
+	}
+
+	h.recordSystemAudit(c.Request.Context(), auditEntry{
+		ProjectID:    projectID,
+		Action:       "MintAgentInstallToken",
+		ResourceKind: "GitInstallToken",
+		ResourceName: req.Repo,
+		Outcome:      auditOutcomeSuccess,
+		Metadata:     map[string]any{"expires_at": expires},
+	})
+
+	c.JSON(http.StatusOK, agentInstallTokenResponse{Repo: req.Repo, Token: token, ExpiresAt: expires})
+}
+
+// repoScopeName splits owner/name and returns the name GitHub expects in the
+// token's repositories list. Unlike repoShortName it refuses anything that is
+// not exactly one slash instead of falling back to the input: a name this
+// function guessed wrong would be a token scoped to the wrong repository.
+func repoScopeName(full string) (string, bool) {
+	parts := strings.Split(strings.TrimSpace(full), "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", false
+	}
+	return parts[1], true
+}
+
+// agentInstallationFor resolves the installation to mint against. An explicit
+// id is checked against the project's org exactly like the read endpoints do.
+// When it is omitted the project's org must have exactly one installation:
+// picking one out of several would silently decide which account's credential
+// the run gets.
+func (h *Handler) agentInstallationFor(c *gin.Context, projectID uuid.UUID, installationID string) (int64, bool) {
+	ctx := c.Request.Context()
+	if installationID != "" {
+		installationUUID, err := uuid.Parse(installationID)
+		if err != nil {
+			respondError(c, http.StatusBadRequest, "invalid installation_id")
+			return 0, false
+		}
+		var providerInstallID int64
+		err = h.pool.QueryRow(ctx,
+			`SELECT i.installation_id FROM git_app_installations i
+			   JOIN projects p ON p.org_id = i.org_id
+			  WHERE i.id = $1 AND p.id = $2`,
+			installationUUID, projectID,
+		).Scan(&providerInstallID)
+		if err != nil {
+			respondNotFound(c)
+			return 0, false
+		}
+		return providerInstallID, true
+	}
+
+	rows, err := h.pool.Query(ctx,
+		`SELECT i.installation_id FROM git_app_installations i
+		   JOIN projects p ON p.org_id = i.org_id
+		  WHERE p.id = $1`,
+		projectID,
+	)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to query installations")
+		return 0, false
+	}
+	defer rows.Close()
+
+	var found []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to scan installation")
+			return 0, false
+		}
+		found = append(found, id)
+	}
+	if err := rows.Err(); err != nil {
+		respondError(c, http.StatusInternalServerError, "error reading installations")
+		return 0, false
+	}
+	switch len(found) {
+	case 0:
+		respondNotFound(c)
+		return 0, false
+	case 1:
+		return found[0], true
+	default:
+		respondError(c, http.StatusBadRequest, "project has several git installations: name installation_id")
+		return 0, false
+	}
 }

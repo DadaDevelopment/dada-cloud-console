@@ -243,6 +243,11 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		r.GET("/api/v1/agent/git/installations", h.AgentListGitInstallations)
 		r.GET("/api/v1/agent/git/repos", h.AgentListInstallationRepos)
 		r.GET("/api/v1/agent/git/branches", h.AgentListInstallationBranches)
+
+		// Repo-scoped install token, so a run starts without a human pasting a
+		// credential into the launch dialog. Weaker than the installation-wide
+		// token the cloud-task dispatch already hands this same caller.
+		r.POST("/api/v1/agent/git/install-token", h.AgentMintInstallToken)
 	} else {
 		log.Printf("cloud-task: dadagent webhook disabled (keycloak verifier: %v)", err)
 	}

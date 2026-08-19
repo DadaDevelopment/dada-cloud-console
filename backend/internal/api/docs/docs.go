@@ -1615,6 +1615,100 @@ const docTemplate = `{
                 }
             }
         },
+        "/agent/git/install-token": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Trusted-service endpoint (azp=dada-agent): returns a short-lived GitHub App token scoped to one repository, so a run can be launched without a human-pasted credential.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agent-git"
+                ],
+                "summary": "[service] Mint a repo-scoped git installation token",
+                "operationId": "agentMintInstallToken",
+                "parameters": [
+                    {
+                        "description": "project, repo, optional installation",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.agentInstallTokenRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.agentInstallTokenResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/agent/git/installations": {
             "get": {
                 "security": [
@@ -21120,6 +21214,38 @@ const docTemplate = `{
                 }
             }
         },
+        "api.agentInstallTokenRequest": {
+            "type": "object",
+            "required": [
+                "project_id",
+                "repo"
+            ],
+            "properties": {
+                "installation_id": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "repo": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.agentInstallTokenResponse": {
+            "type": "object",
+            "properties": {
+                "expires_at": {
+                    "type": "string"
+                },
+                "repo": {
+                    "type": "string"
+                },
+                "token": {
+                    "type": "string"
+                }
+            }
+        },
         "api.aiRoutingResponse": {
             "type": "object",
             "properties": {
@@ -22294,7 +22420,8 @@ const docTemplate = `{
                 "metrics": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "number"
+                        "type": "number",
+                        "format": "float64"
                     }
                 },
                 "source": {
@@ -22890,7 +23017,8 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "durationMs": {
-                    "type": "integer"
+                    "type": "integer",
+                    "format": "int64"
                 },
                 "error": {
                     "type": "string"
