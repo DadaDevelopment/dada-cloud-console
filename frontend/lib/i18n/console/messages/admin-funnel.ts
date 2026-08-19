@@ -47,6 +47,7 @@ export const adminFunnel: Messages = {
   "adminFunnel.channel.complete": { ru: "Регистрация завершена", en: "Registration complete" },
   "adminFunnel.channel.deploy": { ru: "Успешный деплой", en: "Successful deploy" },
   "adminFunnel.channel.total": { ru: "Все источники", en: "All sources" },
+  "adminFunnel.channel.table": { ru: "Показать таблицей", en: "Show as table" },
   "adminFunnel.channel.note": {
     ru: "«Успешный деплой» — отдельное действие авторизованных пользователей в том же окне; он не считается конверсией из регистрации.",
     en: "“Successful deploy” is a separate action by authenticated users in the same window; it is not treated as signup conversion.",

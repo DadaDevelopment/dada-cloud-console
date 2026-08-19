@@ -7,6 +7,7 @@ import { AdminTabs } from "@/components/console/admin-tabs";
 import { AuditFacetFilter, type FacetOption } from "@/components/console/audit-facet-filter";
 import { Spinner } from "@/components/ui/spinner";
 import { useT } from "@/lib/i18n/console/context";
+import { ChannelFunnelSankey } from "@/components/console/channel-funnel-sankey";
 
 const WINDOWS = ["7d", "30d", "90d", "all"] as const;
 
@@ -173,6 +174,24 @@ export default function AdminFunnelPage() {
           <p className="mt-3 text-sm text-amber-600 dark:text-amber-400">{trafficReport?.note || t("adminFunnel.channel.unavailable")}</p>
         ) : (
           <>
+            <div className="mt-5">
+              <ChannelFunnelSankey
+                channels={trafficReport.channels}
+                totals={trafficReport.totals}
+                sourceLabel={trafficSourceLabel}
+                stageLabels={[
+                  t("adminFunnel.channel.visits"),
+                  t("adminFunnel.channel.register"),
+                  t("adminFunnel.channel.started"),
+                  t("adminFunnel.channel.complete"),
+                  t("adminFunnel.channel.deploy"),
+                ]}
+              />
+            </div>
+            <details className="mt-5 group">
+              <summary className="cursor-pointer text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
+                {t("adminFunnel.channel.table")}
+              </summary>
             <div className="mt-4 overflow-x-auto">
               <table className="w-full min-w-[760px] text-sm">
                 <thead className="border-b border-gray-200 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:text-gray-400">
@@ -202,6 +221,7 @@ export default function AdminFunnelPage() {
                 </tbody>
               </table>
             </div>
+            </details>
             <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">{t("adminFunnel.channel.note")}</p>
           </>
         )}
