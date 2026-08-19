@@ -176,8 +176,8 @@ func Load() (*Config, error) {
 		DatabaseURL:        getEnv("DATABASE_URL", getEnv("DB_URL", "")),
 		DefaultRepoURL:     getEnv("GITOPS_DEFAULT_REPO_URL", ""),
 		DefaultBranch:      getEnv("GITOPS_DEFAULT_BRANCH", "main"),
-		DefaultUsername:    getEnv("GITOPS_DEFAULT_USERNAME", getEnv("GIT_USERNAME", "")),
-		DefaultToken:       getEnv("GITOPS_DEFAULT_TOKEN", getEnv("GIT_TOKEN", "")),
+		DefaultUsername:    getEnvTrimmed("GITOPS_DEFAULT_USERNAME", getEnvTrimmed("GIT_USERNAME", "")),
+		DefaultToken:       getEnvTrimmed("GITOPS_DEFAULT_TOKEN", getEnvTrimmed("GIT_TOKEN", "")),
 		RepoLocalPath:      getEnv("GITOPS_REPO_LOCAL_PATH", "/var/lib/gitops-repos"),
 		BotName:            getEnv("GITOPS_BOT_NAME", "DADA Platform Bot"),
 		BotEmail:           getEnv("GITOPS_BOT_EMAIL", "bot@dada-tuda.ru"),
@@ -188,7 +188,7 @@ func Load() (*Config, error) {
 		StatusReconcileEnabled:  getEnv("GITOPS_STATUS_RECONCILE_ENABLED", "true") == "true",
 		ClusterDiscoveryEnabled: getEnv("GITOPS_CLUSTER_DISCOVERY_ENABLED", "false") == "true",
 		WebhookPort:             getEnv("GITOPS_WEBHOOK_PORT", ""),
-		EncryptionKey:           getEnv("GITOPS_ENCRYPTION_KEY", ""),
+		EncryptionKey:           getEnvTrimmed("GITOPS_ENCRYPTION_KEY", ""),
 		ClusterLBIP:             getEnv("CLUSTER_LB_IP", "93.189.231.60"),
 		MLflowBaseURL:           getEnv("MLFLOW_BASE_URL", ""),
 		MLflowAuthHeader:        getEnv("MLFLOW_AUTH_HEADER", ""),
@@ -233,6 +233,17 @@ func splitList(v string) []string {
 		}
 	}
 	return out
+}
+
+// getEnvTrimmed reads an env var and strips surrounding whitespace. Credentials and
+// hex keys never legitimately carry a leading or trailing newline, and a stray one
+// (a `echo x | base64` when writing the Secret) otherwise reaches hex.DecodeString
+// or the git transport verbatim and breaks it at runtime.
+func getEnvTrimmed(key, def string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return def
 }
 
 func getEnv(key, def string) string {

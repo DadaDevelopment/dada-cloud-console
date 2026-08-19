@@ -5,12 +5,14 @@ import (
 	"crypto/cipher"
 	"encoding/hex"
 	"fmt"
+	"strings"
 )
 
 // DecryptToken decrypts an AES-GCM ciphertext produced by the backend.
 // keyHex is the hex-encoded 32-byte key from GITOPS_ENCRYPTION_KEY.
 // ciphertext is the raw bytes from the token_encrypted column: nonce || ciphertext.
 func DecryptToken(keyHex string, ciphertext []byte) (string, error) {
+	keyHex = strings.TrimSpace(keyHex)
 	if keyHex == "" {
 		return "", fmt.Errorf("encryption key not configured")
 	}

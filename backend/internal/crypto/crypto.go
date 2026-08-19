@@ -7,12 +7,14 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"strings"
 )
 
 // EncryptToken encrypts plaintext using AES-256-GCM.
 // keyHex is the hex-encoded 32-byte key from GITOPS_ENCRYPTION_KEY.
 // Output format: nonce(12) || aes-256-gcm(plaintext) — matches gitops-agent DecryptToken wire format.
 func EncryptToken(keyHex string, plaintext []byte) ([]byte, error) {
+	keyHex = strings.TrimSpace(keyHex)
 	if keyHex == "" {
 		return nil, fmt.Errorf("encryption key not configured")
 	}
@@ -47,6 +49,7 @@ func EncryptToken(keyHex string, plaintext []byte) ([]byte, error) {
 // keyHex is the hex-encoded 32-byte key from GITOPS_ENCRYPTION_KEY.
 // ciphertext is the raw bytes: nonce(12) || aes-256-gcm(plaintext).
 func DecryptToken(keyHex string, ciphertext []byte) ([]byte, error) {
+	keyHex = strings.TrimSpace(keyHex)
 	if keyHex == "" {
 		return nil, fmt.Errorf("encryption key not configured")
 	}

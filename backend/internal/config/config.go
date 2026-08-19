@@ -766,7 +766,7 @@ func Load() (*Config, error) {
 		MLflowBaseURL:               getEnv("MLFLOW_BASE_URL", ""),
 		MLflowAuthHeader:            getEnv("MLFLOW_AUTH_HEADER", ""),
 		InferenceMaxBodyBytes:       getEnvInt64("INFERENCE_MAX_BODY_BYTES", 10*1024*1024),
-		GitopsEncryptionKey:         getEnv("GITOPS_ENCRYPTION_KEY", ""),
+		GitopsEncryptionKey:         getEnvTrimmed("GITOPS_ENCRYPTION_KEY", ""),
 		InternalAuthToken:           getEnv("INTERNAL_AUTH_TOKEN", ""),
 		GitopsValuesTokenSecret:     getEnv("GITOPS_VALUES_TOKEN_SECRET", ""),
 		GitopsAgentWSURL:            getEnv("GITOPS_AGENT_WS_URL", ""),
@@ -1003,6 +1003,17 @@ func LoadGatewayEmbed() (*GatewayEmbedConfig, error) {
 		return nil, fmt.Errorf("GRAFANA_EMBED_INTERNAL_URL is required (internal Grafana svc base URL)")
 	}
 	return cfg, nil
+}
+
+// getEnvTrimmed reads an env var and strips surrounding whitespace. Hex keys never
+// legitimately carry a leading or trailing newline, and a stray one (a `echo x | base64`
+// when writing the Secret) otherwise reaches hex.DecodeString verbatim and breaks
+// every encrypt and decrypt at runtime.
+func getEnvTrimmed(key, defaultVal string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return defaultVal
 }
 
 func getEnv(key, defaultVal string) string {
