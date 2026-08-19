@@ -358,6 +358,10 @@ export const apps: Messages = {
     ru: "Сбой на нашей стороне, не в вашем коде — пересоберём сами, когда починим. Ждать не обязательно: «Пересобрать» работает всегда.",
     en: "This failed on our side, not in your code — we rebuild it ourselves once we have fixed it. No need to wait: Rebuild always works.",
   },
+  "apps.builds.fail.reason.appDeleted": {
+    ru: "Приложение удалили, пока шла сборка, поэтому её прервали.",
+    en: "The app was deleted while this build was running, so it was stopped.",
+  },
   "apps.builds.fail.reason.detailsLink": { ru: "подробнее", en: "details" },
 
   "apps.build.meta.builtAgo": { ru: "собрано {ago}", en: "built {ago}" },

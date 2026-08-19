@@ -56,5 +56,5 @@ export function buildFailureSummary(build: {
  * @param failReason - the build's `fail_reason`
  */
 export function isRepoFixable(failReason?: string | null): boolean {
-  return failReason !== "git_auth_failed" && failReason !== "platform_error";
+  return failReason !== "git_auth_failed" && failReason !== "platform_error" && failReason !== "app_deleted";
 }

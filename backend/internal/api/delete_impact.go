@@ -405,6 +405,11 @@ func (h *Handler) DeleteApp(c *gin.Context) {
 		return
 	}
 
+	if err := failInFlightBuilds(c.Request.Context(), tx, envID, appName); err != nil {
+		rejectErr(http.StatusInternalServerError, "build_fail_failed", "failed to close out in-flight builds")
+		return
+	}
+
 	if err := tx.Commit(c.Request.Context()); err != nil {
 		rejectErr(http.StatusInternalServerError, "operation_insert_failed", "failed to create operation")
 		return
@@ -457,6 +462,49 @@ func demoteAppHostnames(ctx context.Context, tx pgx.Tx, environmentID uuid.UUID,
 		        reattach_count = 0, operation_id = NULL, updated_at = now()
 		  WHERE environment_id = $1 AND app_name = $2 AND status IN ('active', 'pending')`,
 		environmentID, appName, hostnameReasonAppDeleted,
+	)
+	return err
+}
+
+// buildFailReasonAppDeleted is the builds.fail_reason code stamped by
+// failInFlightBuilds. It reuses the hostnameReasonAppDeleted spelling
+// ("app_deleted") so the two tables share one vocabulary word for "the app
+// this row belonged to was deleted out from under it", instead of inventing
+// a second name for the same fact.
+const buildFailReasonAppDeleted = "app_deleted"
+
+// failInFlightBuilds runs, in the caller's DeleteApp transaction, against
+// every builds row still non-terminal (queued/detecting/building/pushing)
+// for (environmentID, appName). It marks them failed with
+// fail_reason=buildFailReasonAppDeleted instead of leaving them to race the
+// gitops worker's git_repos deletion.
+//
+// Without this, a build in flight when its app is deleted keeps running:
+// gitops-agent's doDeleteApp (dbwatcher.go) removes the app's git_repos row
+// unconditionally, the builds.git_repo_id FK is ON DELETE SET NULL (migration
+// 116), and build-agent's build-agent/internal/db/builds.go scans that NULL
+// into a non-pointer uuid.UUID field -- the zero value -- so the runner then
+// looks up repo 00000000-0000-0000-0000-000000000000 and the build dies with
+// "load repo 00000000-0000-0000-0000-000000000000: no rows in result set",
+// an internal id shown to the user as if it meant something. Landed here,
+// before that git_repos row is ever touched, because this UPDATE runs inside
+// DeleteApp's own transaction, which commits well before the async gitops
+// worker picks up the operation.
+//
+// This UPDATE is guarded by status IN (...) exactly like build-agent's own
+// MarkFailedWithReason and MarkFailedPlatformError (build-agent/internal/db/
+// builds.go), so once this call wins the transition to 'failed' the runner's
+// later compare-and-set writes -- also gated on the build still being in a
+// non-terminal phase -- simply match zero rows and never overwrite it.
+func failInFlightBuilds(ctx context.Context, tx pgx.Tx, environmentID uuid.UUID, appName string) error {
+	_, err := tx.Exec(ctx,
+		`UPDATE builds
+		    SET status = 'failed', fail_reason = $3,
+		        error_message = 'app deleted while the build was in flight',
+		        finished_at = now(), updated_at = now()
+		  WHERE environment_id = $1 AND app_name = $2
+		    AND status IN ('queued', 'detecting', 'building', 'pushing')`,
+		environmentID, appName, buildFailReasonAppDeleted,
 	)
 	return err
 }
