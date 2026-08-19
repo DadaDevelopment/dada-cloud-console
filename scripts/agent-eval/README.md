@@ -32,12 +32,23 @@ calls one, that is recorded as a safety violation and the report exits 1.
 | `DADA_PROJECT_ID` | run_eval | required |
 | `DADA_ENV_ID` | run_eval | required |
 | `DADA_EVAL_SCOPES` | run_eval | JSON array of `{projectId, envId}`, needed for `--concurrency > 1` |
+| `DADA_EVAL_ALLOW_PROJECTS` | run_eval | comma-separated project ids the run may target; defaults to the sandbox alone |
 | `DADA_AI_KEY` | judge | required unless `--dry-run`, = `AGENT_CHAT_GATEWAY_KEY` |
 | `DADA_AI_BASE` | judge | `https://ai.dada-tuda.ru/v1` |
 | `DADA_AI_MODEL` | judge | `gpt-4o`, override with `--model` |
 | `LANGFUSE_PUBLIC_KEY` | push_scores | required, same project keys as the backend |
 | `LANGFUSE_SECRET_KEY` | push_scores | required |
 | `LANGFUSE_HOST` | push_scores | `https://cloud.langfuse.com` |
+
+Every scope must be the `agent-sandbox` project (`7a387969-e082-415c-8b61-1f53f7e18295`),
+or the runner refuses to start. The personas ask the assistant to deploy things, connect
+repos and attach domains, so pointing them at a working project is a scripted stranger
+operating real infrastructure. The 2026-08-03 run did exactly that: the eval service
+account still held `/orgs/dada/Owner`, its `listProjects` grounding call returned every
+project of the shared org, and a persona was offered a confirm card to connect a repo into
+`smart-tender`. The credential now carries one project grant on the sandbox
+(`argo-infra` → `keycloak-config/chart/templates/dada-eval-svc-sandbox-grant.yaml`), so a
+wrong scope 403s mid-run; `DADA_EVAL_ALLOW_PROJECTS` is the deliberate override.
 
 Concurrency needs one scope per worker. The agent keeps one conversation per
 `(user, project, env)`, so two cases sharing a scope in parallel would read each other's

@@ -86,6 +86,31 @@ def load_scopes() -> list:
     ]
 
 
+SANDBOX_PROJECT_ID = "7a387969-e082-415c-8b61-1f53f7e18295"
+
+
+def allowed_projects() -> set:
+    """Project ids the harness may drive.
+
+    The personas in dataset.jsonl are written as a real user talking to the
+    assistant: they ask it to deploy things, connect repos and attach domains,
+    and the confirm-gated write cases hand it a card it could approve. Pointed
+    at a working project that is exactly a scripted stranger operating someone
+    else's infrastructure -- which is what the 2026-08-03 run did, when the
+    eval service account still held /orgs/dada/Owner and its listProjects
+    grounding call returned every project of the shared org.
+
+    The credential is now scoped to the sandbox alone, so a wrong scope fails
+    as a 403 mid-run instead of touching a live project. This refuses it before
+    the first turn, where the message can say why. DADA_EVAL_ALLOW_PROJECTS
+    overrides it for a deliberate, one-off run against something else.
+    """
+    raw = os.environ.get("DADA_EVAL_ALLOW_PROJECTS", "").strip()
+    if raw:
+        return {x.strip() for x in raw.split(",") if x.strip()}
+    return {SANDBOX_PROJECT_ID}
+
+
 class Collector:
     """Accumulates one case's SSE stream across the chat and confirm turns."""
 
@@ -323,6 +348,17 @@ def main() -> int:
     scopes = load_scopes()
     if not scopes or not scopes[0]["projectId"]:
         eprint("set DADA_PROJECT_ID and DADA_ENV_ID (or DADA_EVAL_SCOPES) before running")
+        return 1
+    allowed = allowed_projects()
+    off_limits = sorted({s["projectId"] for s in scopes if s["projectId"] not in allowed})
+    if off_limits:
+        eprint(
+            "refusing to run against project(s) %s: the harness is confined to the sandbox\n"
+            "(%s). The eval service account holds a project grant on the sandbox only, so\n"
+            "these scopes would 403 mid-run anyway. Set DADA_EVAL_ALLOW_PROJECTS to a\n"
+            "comma-separated list of project ids for a deliberate run elsewhere."
+            % (", ".join(off_limits), SANDBOX_PROJECT_ID)
+        )
         return 1
     if args.concurrency > len(scopes):
         eprint(
