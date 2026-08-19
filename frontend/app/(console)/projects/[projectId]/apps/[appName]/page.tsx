@@ -24,6 +24,7 @@ import { normalizeAppUrlStatus, appUrlReasonMessageKey } from "@/lib/app-url-sta
 import { AppNextStepCard } from "@/components/deploy/app-next-step-card";
 import { AppLiveBanner } from "@/components/deploy/app-live-banner";
 import { AppLastMileBanner } from "@/components/deploy/app-last-mile-banner";
+import { evaluateLastMile } from "@/lib/last-mile-status";
 import { AppDeployDriftBanner } from "@/components/deploy/app-deploy-drift-banner";
 import { AppLatestBuildCard } from "@/components/deploy/app-latest-build-card";
 import { AppCurrentDeployCard } from "@/components/deploy/app-current-deploy-card";
@@ -286,6 +287,8 @@ export default function AppDetailPage() {
   const isResource = resType !== "app";
   const alerts = getAppAlerts(app);
   const appPhaseReady = (app.phase ?? "").toLowerCase() === "ready";
+  const lastMileVerdict = evaluateLastMile(summary);
+  const displayPhase = appPhaseReady && lastMileVerdict ? "Unreachable" : app.phase;
   const isReadyNoAlerts = appPhaseReady && alerts.length === 0;
   const observedCpu = summary.observed_resources?.cpu_limit ?? summary.observed_resources?.cpu_request;
   const observedMem = summary.observed_resources?.memory_limit ?? summary.observed_resources?.memory_request;
@@ -356,7 +359,7 @@ export default function AppDetailPage() {
           />
           <div className="mt-2 flex items-center gap-3">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 font-mono">{appName}</h1>
-            <PhaseBadge phase={app.phase} />
+            <PhaseBadge phase={displayPhase} />
             {resType === "ingress" && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 dark:bg-blue-950/40 px-3 py-1 text-sm font-medium text-blue-700 dark:text-blue-300 ring-1 ring-inset ring-blue-200 dark:ring-blue-900">
                 <Globe className="h-4 w-4" /> {t("resources.type.ingress")}
