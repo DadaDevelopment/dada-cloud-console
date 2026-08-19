@@ -29,6 +29,9 @@ type adminFunnelCohortCount struct {
 	Count       int    `json:"count"`
 }
 
+// adminFunnelChannel is one traffic source's top-of-funnel row. Visits is a
+// visit count; every other number is a count of unique users, so the goal
+// stages nest inside Users and inside each other.
 type adminFunnelChannel struct {
 	Source               string `json:"source"`
 	Visits               int    `json:"visits"`
@@ -247,14 +250,23 @@ type metrikaTrafficSourceReport struct {
 	Totals []float64                 `json:"totals"`
 }
 
+// fetchMetrikaTrafficSourceFunnel reads the per-traffic-source top of the
+// funnel from Metrika.
+//
+// Goal stages use ym:s:goal<id>users (unique users who reached the goal), NOT
+// ym:s:goal<id>reaches (raw event count). A funnel stage has to be countable
+// against the stage above it, and reaches is not: one person deploying nine
+// times contributes nine reaches, which produced the production reading where
+// "successful deploy" (22) exceeded "registration complete" (5) on the same
+// source and made every downstream ribbon read as growth.
 func fetchMetrikaTrafficSourceFunnel(ctx context.Context, oauthToken string, days int) ([]adminFunnelChannel, adminFunnelChannel, error) {
 	metrics := []string{
 		"ym:s:visits",
 		"ym:s:users",
-		fmt.Sprintf("ym:s:goal%dreaches", cloudGoalRegisterOpened),
-		fmt.Sprintf("ym:s:goal%dreaches", cloudGoalSignupStarted),
-		fmt.Sprintf("ym:s:goal%dreaches", cloudGoalRegistrationComplete),
-		fmt.Sprintf("ym:s:goal%dreaches", cloudGoalDeploySuccess),
+		fmt.Sprintf("ym:s:goal%dusers", cloudGoalRegisterOpened),
+		fmt.Sprintf("ym:s:goal%dusers", cloudGoalSignupStarted),
+		fmt.Sprintf("ym:s:goal%dusers", cloudGoalRegistrationComplete),
+		fmt.Sprintf("ym:s:goal%dusers", cloudGoalDeploySuccess),
 	}
 	q := url.Values{}
 	q.Set("ids", strconv.Itoa(cloudFunnelCounterID))

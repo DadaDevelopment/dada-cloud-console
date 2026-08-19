@@ -42,6 +42,12 @@ func TestFetchMetrikaTrafficSourceFunnel(t *testing.T) {
 		if got := q.Get("date1"); got != "30daysAgo" {
 			t.Fatalf("date1 = %q", got)
 		}
+		wantMetrics := "ym:s:visits,ym:s:users," +
+			"ym:s:goal585010094users,ym:s:goal593177849users," +
+			"ym:s:goal586052031users,ym:s:goal585205874users"
+		if gotMetrics := q.Get("metrics"); gotMetrics != wantMetrics {
+			t.Fatalf("metrics = %q, want %q (goal stages must be unique users, not reaches)", gotMetrics, wantMetrics)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"data":[{"dimensions":[{"name":"Direct traffic"}],"metrics":[12,9,5,3,2,1]}],

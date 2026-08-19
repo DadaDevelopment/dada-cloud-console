@@ -1,170 +1,212 @@
 "use client";
 import { useMemo, useState } from "react";
-import type { AdminFunnelChannel } from "@/lib/types";
-
-const STAGE_KEYS = ["visits", "register_opened", "signup_started", "registration_complete", "deploy_success"] as const;
-type StageKey = (typeof STAGE_KEYS)[number];
+import { buildChannelFunnelLayout, type ChannelFunnelSeries } from "@/lib/channel-funnel";
 
 const SOURCE_COLORS: Record<string, string> = {
   "Direct traffic": "#3b82f6",
-  "Internal traffic": "#10b981",
-  "Search engine traffic": "#f59e0b",
-  "Link traffic": "#8b5cf6",
+  "Internal traffic": "#f97316",
+  "Search engine traffic": "#10b981",
+  "Link traffic": "#a855f7",
   "Messenger traffic": "#ec4899",
-  "Recommendation system traffic": "#06b6d4",
+  "Social network traffic": "#06b6d4",
+  "Recommendation system traffic": "#14b8a6",
+  "Ad traffic": "#eab308",
 };
-const FALLBACK_COLOR = "#94a3b8";
+const FALLBACK_COLORS = ["#6366f1", "#0ea5e9", "#84cc16", "#f43f5e", "#8b5cf6"];
+const DROP_COLOR = "#cbd5e1";
+const DROP_COLOR_DARK = "#475569";
 
-const WIDTH = 900;
-const HEIGHT = 380;
-const PAD_TOP = 34;
-const PAD_BOTTOM = 8;
-const NODE_W = 10;
-const PLOT_H = HEIGHT - PAD_TOP - PAD_BOTTOM;
+/**
+ * Text sits on top of the ribbons it describes; the halo is what keeps a
+ * number legible where a wide band runs underneath it. `currentColor` picks up
+ * the card background from the wrapper, so it inverts with the theme.
+ */
+const HALO = {
+  paintOrder: "stroke" as const,
+  stroke: "currentColor",
+  strokeWidth: 3,
+  strokeLinejoin: "round" as const,
+};
 
-function ribbonPath(x0: number, y0top: number, y0bot: number, x1: number, y1top: number, y1bot: number): string {
-  const xm = (x0 + x1) / 2;
-  return [
-    `M${x0},${y0top}`,
-    `C${xm},${y0top} ${xm},${y1top} ${x1},${y1top}`,
-    `L${x1},${y1bot}`,
-    `C${xm},${y1bot} ${xm},${y0bot} ${x0},${y0bot}`,
-    "Z",
-  ].join(" ");
+const TOP_PAD = 26;
+const BOTTOM_PAD = 6;
+
+function colorFor(source: string, index: number): string {
+  return SOURCE_COLORS[source] ?? FALLBACK_COLORS[index % FALLBACK_COLORS.length];
 }
 
+/**
+ * Channel funnel as a drop-off Sankey: one ribbon per traffic source, split at
+ * every stage into the people who went on and the people who left. Colour
+ * follows the source the whole way, so loss stays attributable to the channel
+ * that delivered it.
+ *
+ * Stage values must be unique users (Metrika ym:s:goal<id>users). Feeding it
+ * raw goal reaches makes later stages exceed earlier ones and the diagram
+ * silently becomes a lie about growth.
+ */
 export function ChannelFunnelSankey({
   channels,
-  totals,
   sourceLabel,
   stageLabels,
+  dropLabels,
+  clampNote,
 }: {
-  channels: AdminFunnelChannel[];
-  totals: AdminFunnelChannel;
+  channels: ChannelFunnelSeries[];
   sourceLabel: (source: string) => string;
   stageLabels: string[];
+  dropLabels: string[];
+  clampNote: (sources: string) => string;
 }) {
   const [hovered, setHovered] = useState<string | null>(null);
-  const [tooltip, setTooltip] = useState<{ x: number; y: number; source: string; stage: string; count: number } | null>(null);
 
-  const ordered = useMemo(() => [...channels].sort((a, b) => b.visits - a.visits), [channels]);
+  const layout = useMemo(
+    () => buildChannelFunnelLayout(channels, stageLabels, dropLabels),
+    [channels, stageLabels, dropLabels],
+  );
 
-  const maxTotal = Math.max(1, ...STAGE_KEYS.map((k) => totals[k as StageKey]));
-  const scale = PLOT_H / maxTotal;
-  const colX = STAGE_KEYS.map((_, i) => NODE_W / 2 + (i * (WIDTH - NODE_W)) / (STAGE_KEYS.length - 1));
+  const colors = useMemo(() => {
+    const map = new Map<string, string>();
+    layout.nodes
+      .filter((n) => n.kind === "source")
+      .forEach((n, i) => map.set(n.source!, colorFor(n.source!, i)));
+    return map;
+  }, [layout]);
 
-  const bands = useMemo(() => {
-    return STAGE_KEYS.map((key) => {
-      let y = PAD_TOP;
-      return ordered.map((c) => {
-        const h = c[key as StageKey] * scale;
-        const band = { source: c.source, y0: y, y1: y + h };
-        y += h;
-        return band;
-      });
-    });
-  }, [ordered, scale]);
+  const nodeLabels = useMemo(() => new Map(layout.nodes.map((n) => [n.id, n.label])), [layout]);
 
-  if (ordered.length === 0) return null;
+  if (layout.nodes.length === 0) return null;
+
+  const viewH = layout.height + TOP_PAD + BOTTOM_PAD;
+  const columnCount = stageLabels.length;
+  const columnX = (column: number) => (column * (layout.width - layout.nodeWidth)) / (columnCount - 1);
 
   return (
-    <div className="relative">
-      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="w-full" role="img" aria-label="Sankey-диаграмма канальной воронки">
-        {STAGE_KEYS.map((key, i) => (
+    <div className="text-white dark:text-gray-900">
+      <svg
+        viewBox={`0 0 ${layout.width} ${viewH}`}
+        className="w-full"
+        role="img"
+        aria-label="Канальная воронка: источник → регистрация"
+      >
+        <g transform={`translate(0 ${TOP_PAD})`}>
           <text
-            key={key}
-            x={colX[i]}
-            y={16}
-            textAnchor={i === 0 ? "start" : i === STAGE_KEYS.length - 1 ? "end" : "middle"}
+            x={columnX(0)}
+            y={-12}
             className="fill-gray-500 dark:fill-gray-400"
             style={{ fontSize: 11, fontWeight: 600 }}
           >
-            {stageLabels[i]} · {totals[key as StageKey]}
+            {stageLabels[0]} · {layout.entryTotal}
           </text>
-        ))}
 
-        {STAGE_KEYS.slice(0, -1).map((_, si) =>
-          ordered.map((c, ci) => {
-            const b0 = bands[si][ci];
-            const b1 = bands[si + 1][ci];
-            const color = SOURCE_COLORS[c.source] ?? FALLBACK_COLOR;
-            const dim = hovered && hovered !== c.source;
+          {layout.links.map((link) => {
+            const xm = (link.x0 + link.x1) / 2;
+            const dim = hovered !== null && hovered !== link.source;
+            const color = link.kind === "drop" ? DROP_COLOR : (colors.get(link.source) ?? FALLBACK_COLORS[0]);
             return (
               <path
-                key={`${c.source}-${si}`}
-                d={ribbonPath(colX[si] + NODE_W / 2, b0.y0, b0.y1, colX[si + 1] - NODE_W / 2, b1.y0, b1.y1)}
-                fill={color}
-                opacity={dim ? 0.12 : 0.55}
-                onMouseEnter={() => setHovered(c.source)}
-                onMouseLeave={() => {
-                  setHovered(null);
-                  setTooltip(null);
-                }}
-                onMouseMove={(e) => {
-                  const rect = (e.target as SVGElement).ownerSVGElement?.getBoundingClientRect();
-                  if (!rect) return;
-                  setTooltip({
-                    x: e.clientX - rect.left,
-                    y: e.clientY - rect.top,
-                    source: sourceLabel(c.source),
-                    stage: stageLabels[si],
-                    count: c[STAGE_KEYS[si] as StageKey],
-                  });
-                }}
-              />
+                key={link.id}
+                d={`M${link.x0},${link.y0} C${xm},${link.y0} ${xm},${link.y1} ${link.x1},${link.y1}`}
+                fill="none"
+                stroke={color}
+                strokeWidth={link.width}
+                opacity={dim ? 0.08 : link.kind === "drop" ? 0.32 : 0.62}
+                className={link.kind === "drop" ? "dark:stroke-slate-600" : undefined}
+                onMouseEnter={() => setHovered(link.source)}
+                onMouseLeave={() => setHovered(null)}
+              >
+                <title>{`${sourceLabel(link.source)} → ${nodeLabels.get(link.target) ?? ""}: ${link.value}`}</title>
+              </path>
             );
-          }),
-        )}
+          })}
 
-        {STAGE_KEYS.map((key, si) =>
-          ordered.map((c, ci) => {
-            const b = bands[si][ci];
-            if (b.y1 <= b.y0) return null;
-            const color = SOURCE_COLORS[c.source] ?? FALLBACK_COLOR;
-            const dim = hovered && hovered !== c.source;
+          {layout.nodes.map((node) => {
+            const isSource = node.kind === "source";
+            const dim = hovered !== null && isSource && hovered !== node.source;
+            const fill = isSource
+              ? (colors.get(node.source!) ?? FALLBACK_COLORS[0])
+              : node.kind === "drop"
+                ? DROP_COLOR
+                : "#1f2937";
+            const last = node.column === columnCount - 1;
+            const labelX = last ? node.x - 8 : node.x + layout.nodeWidth + 8;
+            const anchor = last ? "end" : "start";
+            const showLabel = !isSource && node.value > 0;
             return (
-              <rect
-                key={`node-${key}-${c.source}`}
-                x={colX[si] - NODE_W / 2}
-                y={b.y0}
-                width={NODE_W}
-                height={Math.max(1, b.y1 - b.y0)}
-                fill={color}
-                opacity={dim ? 0.3 : 1}
-                rx={2}
-              />
+              <g key={node.id}>
+                <rect
+                  x={node.x}
+                  y={node.y}
+                  width={layout.nodeWidth}
+                  height={Math.max(node.height, 1)}
+                  rx={2}
+                  fill={fill}
+                  opacity={dim ? 0.25 : 1}
+                  className={node.kind === "drop" ? "dark:fill-slate-600" : node.kind === "passed" ? "dark:fill-gray-100" : undefined}
+                  onMouseEnter={() => isSource && setHovered(node.source!)}
+                  onMouseLeave={() => setHovered(null)}
+                >
+                  <title>{`${isSource ? sourceLabel(node.source!) : node.label}: ${node.value}`}</title>
+                </rect>
+                {showLabel && (
+                  <>
+                    <text
+                      x={labelX}
+                      y={node.y + Math.max(node.height, 12) / 2 - 2}
+                      textAnchor={anchor}
+                      className={node.kind === "drop" ? "fill-gray-400 dark:fill-gray-500" : "fill-gray-900 dark:fill-gray-100"}
+                      style={{ ...HALO, fontSize: 11, fontWeight: node.kind === "passed" ? 600 : 500 }}
+                    >
+                      {node.label}
+                    </text>
+                    <text
+                      x={labelX}
+                      y={node.y + Math.max(node.height, 12) / 2 + 12}
+                      textAnchor={anchor}
+                      className={node.kind === "drop" ? "fill-gray-400 dark:fill-gray-500" : "fill-blue-600 dark:fill-blue-400"}
+                      style={{ ...HALO, fontSize: 11, fontWeight: 700 }}
+                    >
+                      {node.value}
+                      {node.share !== undefined ? ` · ${(node.share * 100).toFixed(1)}%` : ""}
+                    </text>
+                  </>
+                )}
+              </g>
             );
-          }),
-        )}
+          })}
+        </g>
       </svg>
 
-      {tooltip && (
-        <div
-          className="pointer-events-none absolute z-10 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-2.5 py-1.5 text-xs shadow-lg"
-          style={{ left: tooltip.x + 12, top: tooltip.y + 12 }}
-        >
-          <div className="font-semibold text-gray-900 dark:text-gray-100">{tooltip.source}</div>
-          <div className="text-gray-500 dark:text-gray-400">
-            {tooltip.stage}: <span className="font-medium tabular-nums text-gray-900 dark:text-gray-100">{tooltip.count}</span>
-          </div>
-        </div>
-      )}
-
       <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
-        {ordered.map((c) => (
-          <button
-            key={c.source}
-            type="button"
-            onMouseEnter={() => setHovered(c.source)}
-            onMouseLeave={() => setHovered(null)}
-            className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300"
-            style={{ opacity: hovered && hovered !== c.source ? 0.4 : 1 }}
-          >
-            <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: SOURCE_COLORS[c.source] ?? FALLBACK_COLOR }} />
-            {sourceLabel(c.source)}
-          </button>
-        ))}
+        {layout.nodes
+          .filter((n) => n.kind === "source")
+          .map((n) => (
+            <button
+              key={n.id}
+              type="button"
+              onMouseEnter={() => setHovered(n.source!)}
+              onMouseLeave={() => setHovered(null)}
+              className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300"
+              style={{ opacity: hovered !== null && hovered !== n.source ? 0.4 : 1 }}
+            >
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                style={{ backgroundColor: colors.get(n.source!) ?? FALLBACK_COLORS[0] }}
+              />
+              {sourceLabel(n.source!)} · {n.value}
+            </button>
+          ))}
+        <span className="flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500">
+          <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: DROP_COLOR_DARK, opacity: 0.5 }} />
+          {dropLabels[0]}
+        </span>
       </div>
+
+      {layout.clamped.length > 0 && (
+        <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+          {clampNote(layout.clamped.map(sourceLabel).join(", "))}
+        </p>
+      )}
     </div>
   );
 }

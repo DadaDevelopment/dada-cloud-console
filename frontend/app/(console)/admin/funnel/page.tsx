@@ -8,6 +8,7 @@ import { AuditFacetFilter, type FacetOption } from "@/components/console/audit-f
 import { Spinner } from "@/components/ui/spinner";
 import { useT } from "@/lib/i18n/console/context";
 import { ChannelFunnelSankey } from "@/components/console/channel-funnel-sankey";
+import type { ChannelFunnelSeries } from "@/lib/channel-funnel";
 
 const WINDOWS = ["7d", "30d", "90d", "all"] as const;
 
@@ -142,6 +143,11 @@ export default function AdminFunnelPage() {
   }));
   const trafficReport = data?.channel_funnel;
   const trafficRows = trafficReport ? [...trafficReport.channels, trafficReport.totals] : [];
+  const trafficSeries: ChannelFunnelSeries[] = (trafficReport?.channels ?? []).map((c) => ({
+    source: c.source,
+    values: [c.users, c.register_opened, c.signup_started, c.registration_complete],
+  }));
+  const regStagesAllZero = (reg?.stages ?? []).every((stage) => stage.count === 0);
 
   return (
     <div>
@@ -176,17 +182,25 @@ export default function AdminFunnelPage() {
           <>
             <div className="mt-5">
               <ChannelFunnelSankey
-                channels={trafficReport.channels}
-                totals={trafficReport.totals}
+                channels={trafficSeries}
                 sourceLabel={trafficSourceLabel}
                 stageLabels={[
-                  t("adminFunnel.channel.visits"),
+                  t("adminFunnel.channel.entered"),
                   t("adminFunnel.channel.register"),
                   t("adminFunnel.channel.started"),
                   t("adminFunnel.channel.complete"),
-                  t("adminFunnel.channel.deploy"),
                 ]}
+                dropLabels={[
+                  t("adminFunnel.channel.left"),
+                  t("adminFunnel.channel.abandoned"),
+                  t("adminFunnel.channel.unfinished"),
+                ]}
+                clampNote={(sources) => t("adminFunnel.channel.clamped", { sources })}
               />
+              <div className="mt-4 flex flex-wrap gap-x-6 gap-y-1 rounded-lg border border-dashed border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40 px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                <span>{t("adminFunnel.channel.deployAside", { count: trafficReport.totals.deploy_success })}</span>
+                <span>{t("adminFunnel.channel.visitsAside", { visits: trafficReport.totals.visits })}</span>
+              </div>
             </div>
             <details className="mt-5 group">
               <summary className="cursor-pointer text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
@@ -228,23 +242,24 @@ export default function AdminFunnelPage() {
       </div>
 
       <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
-        <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Регистрация в Keycloak: открыл форму → зарегистрировался</h2>
-        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          Этапы — из отдельного счётчика Метрики на id.dada-tuda.ru (не общий счётчик консоли). «Зарегистрировано» —
-          реальные строки в базе за то же окно, не сэмпл Метрики. Этапы видят только форму email/пароль — вход через
-          Яндекс/Google/GitHub уходит на сторону провайдера и минует эту форму, поэтому его считает блок «По каналу»
-          ниже, а не этапы.
-        </p>
+        <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t("adminFunnel.reg.title")}</h2>
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("adminFunnel.reg.body")}</p>
         {!loading && reg && !reg.available ? (
-          <p className="mt-3 text-sm text-amber-600 dark:text-amber-400">{reg.note || "Метрика недоступна"}</p>
+          <p className="mt-3 text-sm text-amber-600 dark:text-amber-400">{reg.note || t("adminFunnel.reg.unavailable")}</p>
         ) : loading ? (
           <div className="flex h-24 items-center justify-center"><Spinner size="md" /></div>
         ) : (
           <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-3">
-            <div className="md:col-span-2"><BarRows rows={regRows} labelWidth="w-40" /></div>
+            <div className="md:col-span-2">
+              {regStagesAllZero ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400">{t("adminFunnel.reg.allZero")}</p>
+              ) : (
+                <BarRows rows={regRows} labelWidth="w-40" />
+              )}
+            </div>
             <div className="flex flex-col justify-center gap-3 border-t border-gray-100 dark:border-gray-800/60 pt-3 md:border-t-0 md:border-l md:pl-4 md:pt-0">
               <div>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Зарегистрировано (БД)</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{t("adminFunnel.reg.registered")}</p>
                 <p className="text-2xl font-semibold text-gray-900 dark:text-gray-100">{reg?.registered ?? "—"}</p>
               </div>
             </div>
@@ -253,16 +268,12 @@ export default function AdminFunnelPage() {
       </div>
 
       <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
-        <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Регистрация по каналу: пароль vs провайдер</h2>
-        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          Реальные строки БД, по тому, как родился аккаунт — email/пароль или брокер (Яндекс и т.п. не требуют
-          подтверждения почты, конверсия там обычно выше). Аккаунты, заведённые до этой метки, в разбивку не
-          попадают — их канал не записан.
-        </p>
+        <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t("adminFunnel.door.title")}</h2>
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("adminFunnel.door.body")}</p>
         {loading ? (
           <div className="flex h-24 items-center justify-center"><Spinner size="md" /></div>
         ) : channelRows.length === 0 ? (
-          <p className="mt-3 text-sm text-gray-400 dark:text-gray-500">Нет данных за окно — либо ещё не было регистраций, либо все они старше метки канала.</p>
+          <p className="mt-3 text-sm text-gray-400 dark:text-gray-500">{t("adminFunnel.door.empty")}</p>
         ) : (
           <div className="mt-3"><BarRows rows={channelRows} labelWidth="w-40" /></div>
         )}
