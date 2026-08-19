@@ -32,6 +32,13 @@ type autofixRequest struct {
 // (an explicit "Auto-fix with AI" action) -- nothing calls this automatically.
 // Write role required.
 //
+// The audit row this writes on a successful launch is outcome=pending, never
+// success: reaching this point only proves the run was accepted, not that it
+// fixed anything. The terminal verdict -- applied a change, finished with
+// nothing to show, or failed outright -- is written later by ResolveAutofix
+// (autofix_notify.go, driven off the DadaAgent webhook), because that is the
+// earliest point the platform actually knows the outcome.
+//
 // @ID          triggerAutofix
 // @Summary     Auto-fix a reported issue with AI
 // @Description Launches a DadaAgent auto-fix run against the app's linked repo: root-causes the supplied error (or the app's latest failed build when omitted), opens a PR, and reports back via the existing DadaAgent webhook. Write role required.
@@ -138,7 +145,7 @@ func (h *Handler) TriggerAutofix(c *gin.Context) {
 		return
 	}
 
-	audit(auditOutcomeSuccess, map[string]any{
+	audit(auditOutcomePending, map[string]any{
 		"cloud_task_id":  row.ID,
 		"error_supplied": suppliedError,
 	})

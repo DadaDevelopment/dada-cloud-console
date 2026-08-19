@@ -115,6 +115,6 @@ func (h *Handler) dadaAgentWebhook(c *gin.Context, verifier tokenVerifier) {
 		respondError(c, http.StatusInternalServerError, "update failed")
 		return
 	}
-	h.notifyAutofixOutcome(tr)
+	h.notifyAutofixOutcome(c.Request.Context(), tr)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }

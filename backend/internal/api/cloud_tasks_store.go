@@ -110,15 +110,17 @@ func (h *Handler) listCloudTasks(ctx context.Context, projectID uuid.UUID, appNa
 // task -- the agent can and does send more than one, and an outcome email must
 // go out exactly once.
 type cloudTaskTransition struct {
-	Matched   bool
-	ID        uuid.UUID
-	ProjectID uuid.UUID
-	AppName   string
-	TaskType  string
-	OldStatus string
-	NewStatus string
-	PRURL     string
-	Error     string
+	Matched       bool
+	ID            uuid.UUID
+	ProjectID     uuid.UUID
+	EnvironmentID uuid.UUID
+	AppName       string
+	TaskType      string
+	ActorID       uuid.UUID
+	OldStatus     string
+	NewStatus     string
+	PRURL         string
+	Error         string
 }
 
 // updateCloudTaskByIntent applies a webhook/agent status update. Each field is
@@ -138,9 +140,9 @@ func (h *Handler) updateCloudTaskByIntent(ctx context.Context, intentID, status,
 		   updated_at = NOW()
 		 FROM prev
 		 WHERE t.id = prev.id
-		 RETURNING t.id, t.project_id, t.app_name, t.task_type, prev.status, t.status, t.pr_url, t.error`,
+		 RETURNING t.id, t.project_id, t.environment_id, t.app_name, t.task_type, t.actor_id, prev.status, t.status, t.pr_url, t.error`,
 		intentID, status, prURL, artifacts, errMsg).
-		Scan(&tr.ID, &tr.ProjectID, &tr.AppName, &tr.TaskType, &tr.OldStatus, &tr.NewStatus, &prURLCol, &errCol)
+		Scan(&tr.ID, &tr.ProjectID, &tr.EnvironmentID, &tr.AppName, &tr.TaskType, &tr.ActorID, &tr.OldStatus, &tr.NewStatus, &prURLCol, &errCol)
 	if err == pgx.ErrNoRows {
 		return cloudTaskTransition{}, nil
 	}

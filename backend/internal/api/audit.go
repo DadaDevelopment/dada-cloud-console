@@ -60,6 +60,18 @@ const (
 	auditActionFinishGitAppInstall = "FinishGitAppInstall"
 )
 
+// The two halves of one auto-fix run, same shape as the GitHub install flight
+// above: TriggerAutofix only proves the run was launched (the agent accepted
+// the job and did not throw), never whether it fixed anything, because the
+// agent reports back later through its own webhook. ResolveAutofix is written
+// once that webhook lands a terminal status, and its outcome is the one that
+// answers "did this help" -- pending in between means exactly that: launched,
+// not yet resolved. Splitting these was the fix for the
+// lifecoachrussia@yandex.ru incident (2026-08-19): TriggerAutofix's launch
+// audit read as "success" and nobody ever wrote a row for the fact that no
+// pull request followed and the app stayed crash-looping.
+const auditActionResolveAutofix = "ResolveAutofix"
+
 const (
 	auditOutcomeSuccess = "success"
 	auditOutcomeFailure = "failure"
