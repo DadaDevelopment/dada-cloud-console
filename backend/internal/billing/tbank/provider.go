@@ -27,6 +27,11 @@ var invoiceNumberPattern = regexp.MustCompile(`INV-\d{4}-\d{5}`)
 // real mismatch, not rounding.
 const amountEpsilon = 0.005
 
+// rubleCurrencyCode is ISO 4217 numeric 643. The platform account is in
+// rubles and invoice amounts are rubles, so an operation in any other
+// currency cannot settle one.
+const rubleCurrencyCode = "643"
+
 // Provider reconciles pending invoice payments against the platform's
 // T-Bank Business account statement. It embeds billing.ManualProvider so a
 // matched payment can be handed straight to AssignPlan, the same plan-grant
@@ -67,7 +72,9 @@ type pendingInvoice struct {
 // account statement covering the oldest of them through now, and matches
 // each statement operation to a pending row by invoice number (found via
 // invoiceNumberPattern in the operation's payment purpose) plus an exact
-// amount match. A matched operation flips its row to succeeded and assigns
+// amount match. Only a settled incoming ruble operation is eligible: a
+// debit is our own money leaving, and an unsettled hold is not money that
+// has landed. A matched operation flips its row to succeeded and assigns
 // the plan, guarded by "status = 'pending'" in the same UPDATE so a
 // statement operation seen twice across runs (tbank_operation_id already
 // recorded, or the row already flipped) can never double-apply.
@@ -104,7 +111,14 @@ func (p *Provider) Reconcile(ctx context.Context) (matched int, err error) {
 	}
 
 	for _, op := range ops {
-		number := invoiceNumberPattern.FindString(op.Description)
+		if !op.IsSettledCredit() {
+			continue
+		}
+		if op.CurrencyCode != "" && op.CurrencyCode != rubleCurrencyCode {
+			log.Printf("tbank: reconcile: operation %s is in currency %s, not rubles, skipping", op.OperationID, op.CurrencyCode)
+			continue
+		}
+		number := invoiceNumberPattern.FindString(op.Purpose)
 		if number == "" {
 			continue
 		}
@@ -112,13 +126,8 @@ func (p *Provider) Reconcile(ctx context.Context) (matched int, err error) {
 		if !ok {
 			continue
 		}
-		opAmount, err := strconv.ParseFloat(op.Amount, 64)
-		if err != nil {
-			log.Printf("tbank: reconcile: unparseable amount %q on operation %s, skipping", op.Amount, op.OperationID)
-			continue
-		}
-		if math.Abs(opAmount-inv.AmountValue) > amountEpsilon {
-			log.Printf("tbank: reconcile: invoice=%s statement amount=%s does not match expected %.2f, leaving pending",
+		if math.Abs(op.Amount-inv.AmountValue) > amountEpsilon {
+			log.Printf("tbank: reconcile: invoice=%s statement amount=%.2f does not match expected %.2f, leaving pending",
 				number, op.Amount, inv.AmountValue)
 			continue
 		}

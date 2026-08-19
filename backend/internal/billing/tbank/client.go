@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -54,19 +55,84 @@ func New(token string, sandbox bool) *Client {
 	}
 }
 
-// StatementOperation is one line of an account statement: money that moved,
-// with the payer's own free-text payment purpose (where the invoice number
-// is expected to appear) and an amount in rubles as a decimal string.
+// StatementOperation is one line of an account statement, normalized from
+// the wire shape T-Bank actually returns: an amount in account currency,
+// the payer's own free-text payment purpose (where the invoice number is
+// expected to appear), and the direction of the money.
 type StatementOperation struct {
-	OperationID string `json:"operationId"`
-	Amount      string `json:"amount"`
-	Description string `json:"description"`
-	Date        string `json:"date"`
+	OperationID string
+	// Type is "Credit" for money arriving on the account and "Debit" for
+	// money leaving it. Only a Credit can settle an invoice.
+	Type string
+	// Status is "Transaction" for a settled operation. A hold or an
+	// authorization is not money that has landed.
+	Status       string
+	Amount       float64
+	CurrencyCode string
+	Purpose      string
+	Date         string
+	PayerINN     string
+	PayerName    string
+}
+
+// IsSettledCredit reports whether the operation is money that has actually
+// arrived on the account. Reconciliation must never settle an invoice from
+// a debit (our own outgoing payment) or from an unsettled hold.
+func (o StatementOperation) IsSettledCredit() bool {
+	return strings.EqualFold(o.Type, "Credit") && strings.EqualFold(o.Status, "Transaction")
+}
+
+// statementParty is the payer/receiver block T-Bank attaches to an
+// operation. Only the payer's identity is read, to record who paid.
+type statementParty struct {
+	INN  string `json:"inn"`
+	Name string `json:"name"`
+}
+
+// wireOperation is the raw statement line as T-Bank sends it. The API
+// returns amounts as JSON numbers (not strings) and carries the payment
+// purpose in payPurpose -- description holds only a short bank-side label.
+type wireOperation struct {
+	OperationID     string         `json:"operationId"`
+	TypeOfOperation string         `json:"typeOfOperation"`
+	Status          string         `json:"operationStatus"`
+	AccountAmount   float64        `json:"accountAmount"`
+	RubleAmount     float64        `json:"rubleAmount"`
+	CurrencyCode    string         `json:"accountCurrencyDigitalCode"`
+	PayPurpose      string         `json:"payPurpose"`
+	Description     string         `json:"description"`
+	OperationDate   string         `json:"operationDate"`
+	Payer           statementParty `json:"payer"`
+}
+
+// normalize maps a wire operation onto StatementOperation. Purpose falls
+// back to description only when payPurpose is absent, so a bank-side label
+// never masquerades as the payer's own text.
+func (w wireOperation) normalize() StatementOperation {
+	amount := w.AccountAmount
+	if amount == 0 {
+		amount = w.RubleAmount
+	}
+	purpose := w.PayPurpose
+	if purpose == "" {
+		purpose = w.Description
+	}
+	return StatementOperation{
+		OperationID:  w.OperationID,
+		Type:         w.TypeOfOperation,
+		Status:       w.Status,
+		Amount:       amount,
+		CurrencyCode: w.CurrencyCode,
+		Purpose:      purpose,
+		Date:         w.OperationDate,
+		PayerINN:     w.Payer.INN,
+		PayerName:    w.Payer.Name,
+	}
 }
 
 // statementResponse is the subset of GET /statement this client reads.
 type statementResponse struct {
-	Operations []StatementOperation `json:"operations"`
+	Operations []wireOperation `json:"operations"`
 }
 
 // apiError is the T-Bank Business error envelope returned on non-2xx
@@ -128,7 +194,11 @@ func (c *Client) Statement(ctx context.Context, accountNumber string, from, to t
 	if err := json.Unmarshal(respBody, &body); err != nil {
 		return nil, fmt.Errorf("tbank: decode statement response: %w", err)
 	}
-	return body.Operations, nil
+	ops := make([]StatementOperation, 0, len(body.Operations))
+	for _, w := range body.Operations {
+		ops = append(ops, w.normalize())
+	}
+	return ops, nil
 }
 
 func (c *Client) baseURL() string {
