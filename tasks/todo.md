@@ -621,3 +621,42 @@ Funnel reads from `GET /api/v1/admin/growth/campaigns`.
       the current deployment no longer renders them either. Regression test
       passes; `ff0d1662` is pushed, but the self-hosted console has no linked
       automatic build and therefore has not yet rolled out the durable fix.
+
+## Google visibility investigation — Dada Cloud landing (2026-08-18)
+
+- [x] Capture GSC Search Analytics export and sitemap state; URL Inspection is pending because GSC Page indexing is still processing and the API has no configured read credential.
+- [x] Compare sitemap URLs with GSC's last processed snapshot: 104 live canonical URLs versus 88 discovered on 2026-07-29.
+- [x] Verify live rendering, robots, declared canonicals, redirects, Googlebot parity, and lab CWV; real-user CWV remains unavailable.
+- [x] Compare Google performance with the Yandex baseline without overstating page-level zero impressions.
+- [x] Separate indexing, technical, content/intent, and authority/link explanations.
+- [x] Rank hypotheses and reject premature repository changes.
+
+### Review — Google visibility investigation
+
+Diagnosis: Google reports are too new to distinguish indexation from ranking. GSC shows 0
+impressions for 2026-07-28..08-16, Page indexing remains processing, and the sitemap's last
+processed snapshot has 88 URLs while the live sitemap now has 104. Live robots, SSR HTML,
+canonical, redirects, and 104/104 sitemap URL status checks do not show an indexing block.
+The provided Google credentials are not yet usable: PageSpeed/CrUX is service-blocked and the
+web OAuth client lacks the local callback used by `seo-google`. See
+`tasks/seo/GOOGLE-2026-08-18.md` for evidence, gaps, and ranked hypotheses.
+
+## Build failure UX: три кейса из админ-панели (2026-08-19)
+
+Кейсы с панели «Последняя сборка упала»:
+1. `fanvk` — `trigger jenkins build: get crumb: crumb: 503 <html>…nginx…`
+2. `affiliate-site` — `resolve build number: queue item 67584: 404 <html>…Jetty…`
+3. `sevarateambot` — `build_failed: script returned exit code 1`
+
+- [x] F1 `readErr`: HTML-тело апстрима → одна плоская строка (`503 Service Temporarily Unavailable`), кап по длине
+- [x] F2 транзиентный ретрай внутри jenkins-клиента (crumb/resolve/get build/progressive text + trigger при 5xx-ответе) с бэкоффом
+- [x] F3 404 очереди = `ErrQueueItemGone` → усыновить уже стартовавшую сборку по `queueId` вместо перезапуска всей сборки
+- [x] F4 generic-детализация: не отдавать юзеру обёртку `script returned exit code N`, вытаскивать настоящую причину выше по логу
+- [x] Тесты + `go test ./...` в build-agent — зелено, все три новых теста RED-проверены выключением фикса
+
+### Итог
+- HTML апстрима (nginx/Jetty) больше не доезжает до `builds.error_message`: одна строка, кап 160 символов.
+- Гейтвейный 502/503/504/429 переживается внутри клиента (4 попытки, бэкофф 1-2-4с) — сборка не краснеет от секундного шва. POST триггера повторяется ТОЛЬКО при 5xx-ответе, никогда после транспортной ошибки (иначе дубль сборки).
+- 404 элемента очереди больше не убивает живую сборку: усыновляем по `queueId` из `/job/<job>/api/json`.
+- Опрос очереди терпит транзиентные ошибки 2 минуты вместо мгновенной смерти.
+- `script returned exit code N` больше не выдаётся юзеру как «причина» — вытаскивается настоящая строка выше по логу.

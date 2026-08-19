@@ -302,16 +302,95 @@ func classifyFailure(console string) (code string, detail string) {
 			return buildFailPlatformError, line
 		}
 	}
-	lastError := ""
-	for _, line := range lines {
+	lastErrAt, lastError := -1, ""
+	for i, line := range lines {
 		if strings.HasPrefix(line, "ERROR: ") {
-			lastError = strings.TrimPrefix(line, "ERROR: ")
+			lastErrAt, lastError = i, strings.TrimPrefix(line, "ERROR: ")
 		}
 	}
-	if lastError != "" {
-		return buildFailGeneric, lastError
+	if lastError == "" {
+		return "", ""
 	}
-	return "", ""
+	if isJenkinsWrapperError(lastError) {
+		if cause := causeAbove(lines, lastErrAt); cause != "" {
+			return buildFailGeneric, cause
+		}
+	}
+	return buildFailGeneric, lastError
+}
+
+// jenkinsWrapperSignatures are the lines the pipeline prints when a step it
+// ran exited non-zero. They name the exit code and nothing else: "script
+// returned exit code 1" is the one fact the owner of a red build already has
+// -- the build failed -- dressed as a diagnosis. The command's own output,
+// which is the answer, sits above it in the console.
+var jenkinsWrapperSignatures = []string{
+	"script returned exit code",
+	"Error when executing",
+	"Error when executing always post condition",
+}
+
+// isJenkinsWrapperError reports whether an ERROR line is Jenkins reporting a
+// non-zero exit rather than a tool reporting what went wrong.
+func isJenkinsWrapperError(line string) bool {
+	for _, sig := range jenkinsWrapperSignatures {
+		if strings.Contains(line, sig) {
+			return true
+		}
+	}
+	return false
+}
+
+// genericCauseLookback bounds how far above the wrapper the real cause is
+// searched for. A failing command's last words are within a screen of it; a
+// wider window starts picking up output of the step that succeeded before.
+const genericCauseLookback = 80
+
+// pipelineNoisePrefixes are console lines written by the pipeline harness
+// itself, never by the command that failed.
+var pipelineNoisePrefixes = []string{"[Pipeline]", "Post stage", "Finished:", "Running on", "Also:", "hudson.", "\tat "}
+
+// causeAbove pulls the line that actually explains a wrapper failure out of
+// the console above it: the last line that reads like an error, or failing
+// that the failing command's last line of output. Returns "" when nothing
+// above the wrapper is usable, leaving the caller on the wrapper itself
+// rather than on nothing.
+func causeAbove(lines []string, wrapper int) string {
+	if wrapper <= 0 {
+		return ""
+	}
+	stop := wrapper - genericCauseLookback
+	if stop < 0 {
+		stop = 0
+	}
+	fallback := ""
+	for i := wrapper - 1; i >= stop; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" || isPipelineNoise(line) || isJenkinsWrapperError(line) {
+			continue
+		}
+		if strings.HasPrefix(line, "+ ") { // echoed command, not its output
+			continue
+		}
+		if causeErrorRe.MatchString(line) {
+			return strings.TrimPrefix(line, "ERROR: ")
+		}
+		if fallback == "" {
+			fallback = line
+		}
+	}
+	return fallback
+}
+
+// isPipelineNoise reports whether a console line came from the pipeline
+// harness rather than from the build.
+func isPipelineNoise(line string) bool {
+	for _, p := range pipelineNoisePrefixes {
+		if strings.HasPrefix(line, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // normalizeConsole turns raw Jenkins console text into trimmed, timestamp-free,
@@ -1201,15 +1280,51 @@ func (r *Runner) attach(ctx context.Context, b *db.Build, repo *db.Repo, number 
 	return out, nil
 }
 
+// queueErrGrace bounds how long the queue poll keeps trying through errors
+// that are not a verdict. Every two seconds this loop asks Jenkins one
+// question, and a single unlucky answer -- a gateway shedding load, a
+// controller mid-restart -- used to end the build: the first error returned
+// straight out and the whole build was re-queued from scratch. Two minutes of
+// patience covers a controller restart while still surrendering long before
+// the build's own timeout.
+const queueErrGrace = 2 * time.Minute
+
 // waitForBuildNumber polls the queue item until Jenkins assigns an executor.
+//
+// Two failures are handled rather than propagated. A transient error is
+// tolerated for queueErrGrace, because the item is almost always still in the
+// queue behind it. And an evicted item (ErrQueueItemGone) is resolved by
+// asking the job which build carries this queue id: Jenkins forgets a queue
+// item five minutes after it leaves the queue, so a 404 usually means the
+// build STARTED and is running right now -- failing on it both lost a live
+// build and, through the retry path, started a duplicate of it.
 func (r *Runner) waitForBuildNumber(ctx context.Context, queueID int64) (int, error) {
+	var firstErrAt time.Time
 	for {
 		number, started, err := r.jenkins.ResolveBuildNumber(ctx, queueID)
-		if err != nil {
+		switch {
+		case err == nil:
+			firstErrAt = time.Time{}
+			if started {
+				return number, nil
+			}
+		case errors.Is(err, jenkins.ErrQueueItemGone):
+			n, ok, ferr := r.jenkins.FindBuildByQueueID(ctx, r.cfg.JenkinsJob, queueID)
+			if ferr != nil {
+				log.Warn().Err(ferr).Int64("queue_item", queueID).Msg("adopt evicted queue item: build lookup failed")
+			} else if ok {
+				log.Info().Int64("queue_item", queueID).Int("number", n).Msg("queue item evicted; adopted its running jenkins build")
+				return n, nil
+			}
 			return 0, fmt.Errorf("resolve build number: %w", err)
-		}
-		if started {
-			return number, nil
+		default:
+			if firstErrAt.IsZero() {
+				firstErrAt = time.Now()
+			}
+			if time.Since(firstErrAt) > queueErrGrace {
+				return 0, fmt.Errorf("resolve build number: %w", err)
+			}
+			log.Warn().Err(err).Int64("queue_item", queueID).Msg("queue poll failed; still waiting")
 		}
 		select {
 		case <-ctx.Done():

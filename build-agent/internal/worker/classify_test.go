@@ -37,12 +37,12 @@ func TestClassifyFailure(t *testing.T) {
 			wantDetail: "error: unknown package",
 		},
 		{
-			name: "unmatched failure falls back to last ERROR line",
+			name: "unmatched failure reports the cause above the exit-code wrapper",
 			console: "[2026-07-24T02:00:00.000Z] fatal: Remote branch gone not found in upstream origin\n" +
 				"[2026-07-24T02:00:01.000Z] ERROR: script returned exit code 128\n" +
 				"[2026-07-24T02:00:02.000Z] Finished: FAILURE\n",
 			wantCode:   buildFailGeneric,
-			wantDetail: "script returned exit code 128",
+			wantDetail: "fatal: Remote branch gone not found in upstream origin",
 		},
 		{
 			name: "library checkout that ran out of retries is ours, not the user's code",

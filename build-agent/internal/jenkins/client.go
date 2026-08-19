@@ -7,6 +7,7 @@ package jenkins
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,20 +22,104 @@ var queueItemBodyRe = regexp.MustCompile(`/queue/item/(\d+)/`)
 
 // Client talks to a Jenkins controller with API-token basic auth.
 type Client struct {
-	baseURL string // e.g. https://jenkins.dada-tuda.ru (no trailing slash)
-	user    string
-	token   string
-	http    *http.Client
+	baseURL  string // e.g. https://jenkins.dada-tuda.ru (no trailing slash)
+	user     string
+	token    string
+	http     *http.Client
+	attempts int           // total tries per call, including the first
+	backoff  time.Duration // base delay, doubled per retry
 }
+
+// ErrQueueItemGone reports that Jenkins no longer holds the queue item we are
+// polling. Jenkins evicts a left queue item after five minutes, so a 404 is
+// ambiguous by itself: the item was either cancelled long ago or -- far more
+// often -- it started and its build has been running past the eviction
+// window. Treating it as a plain error failed builds whose Jenkins job was
+// alive and, worse, re-queued them into a duplicate job. Callers catch this
+// and go looking for the started build by queue id instead.
+var ErrQueueItemGone = errors.New("queue item no longer known to jenkins")
 
 // New returns a Client. baseURL may carry a trailing slash; it is trimmed.
 func New(baseURL, user, token string) *Client {
 	return &Client{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		user:    user,
-		token:   token,
-		http:    &http.Client{Timeout: 30 * time.Second},
+		baseURL:  strings.TrimRight(baseURL, "/"),
+		user:     user,
+		token:    token,
+		http:     &http.Client{Timeout: 30 * time.Second},
+		attempts: defaultAttempts,
+		backoff:  defaultBackoff,
 	}
+}
+
+// defaultAttempts and defaultBackoff bound the in-call retry of a transient
+// upstream answer. A gateway 502/503/504 in front of Jenkins is the single
+// most common way a build died without the user's repo being touched: the
+// controller restarts, the ingress sheds load for a few seconds, and the one
+// request we happened to make in that window turned into a red build the user
+// had to restart by hand. Four tries over ~7s of backoff outlive that window
+// without holding a build hostage to a real outage.
+const (
+	defaultAttempts = 4
+	defaultBackoff  = time.Second
+)
+
+// transientStatus reports whether an upstream status means "not now" rather
+// than "no". These are gateway answers: the request never reached Jenkins (or
+// Jenkins refused to take it yet), so nothing was queued, started, or lost by
+// asking again.
+func transientStatus(code int) bool {
+	switch code {
+	case http.StatusBadGateway, http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout, http.StatusTooManyRequests:
+		return true
+	}
+	return false
+}
+
+// doRetry issues a request, retrying transient upstream answers with an
+// exponential backoff.
+//
+// retryTransport separates the two kinds of failure a POST cannot treat
+// alike. A transient STATUS is always safe to repeat: the gateway answered
+// for Jenkins, so no build was queued. A TRANSPORT error is not: the request
+// may well have landed and started a build whose response we never read, and
+// repeating it would trigger a second build for one push. Reads pass true;
+// buildWithParameters passes false.
+func (c *Client) doRetry(ctx context.Context, method, fullURL string, body func() io.Reader, hdr map[string]string, retryTransport bool) (*http.Response, error) {
+	attempts := c.attempts
+	if attempts < 1 {
+		attempts = 1
+	}
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		if i > 0 {
+			delay := c.backoff << (i - 1)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+		var rdr io.Reader
+		if body != nil {
+			rdr = body()
+		}
+		resp, err := c.do(ctx, method, fullURL, rdr, hdr)
+		if err != nil {
+			if !retryTransport || ctx.Err() != nil {
+				return nil, err
+			}
+			lastErr = err
+			continue
+		}
+		if transientStatus(resp.StatusCode) && i < attempts-1 {
+			lastErr = fmt.Errorf("%s", readErr(resp))
+			resp.Body.Close()
+			continue
+		}
+		return resp, nil
+	}
+	return nil, lastErr
 }
 
 // BuildInfo is the subset of a build's api/json we act on.
@@ -73,7 +158,7 @@ func (c *Client) do(ctx context.Context, method, fullURL string, body io.Reader,
 // crumb fetches the CSRF crumb. Controllers with crumbs disabled return 404; we
 // treat that as "no crumb needed" rather than an error.
 func (c *Client) crumb(ctx context.Context) (field, value string, err error) {
-	resp, err := c.do(ctx, http.MethodGet, c.baseURL+"/crumbIssuer/api/json", nil, nil)
+	resp, err := c.doRetry(ctx, http.MethodGet, c.baseURL+"/crumbIssuer/api/json", nil, nil, true)
 	if err != nil {
 		return "", "", err
 	}
@@ -110,7 +195,8 @@ func (c *Client) TriggerBuild(ctx context.Context, jobFullName string, params ma
 	}
 
 	u := c.baseURL + jobPath(jobFullName) + "/buildWithParameters"
-	resp, err := c.do(ctx, http.MethodPost, u, strings.NewReader(form.Encode()), hdr)
+	encoded := form.Encode()
+	resp, err := c.doRetry(ctx, http.MethodPost, u, func() io.Reader { return strings.NewReader(encoded) }, hdr, false)
 	if err != nil {
 		return 0, fmt.Errorf("trigger build: %w", err)
 	}
@@ -158,11 +244,14 @@ func queueIDFromLocation(loc string) (int64, error) {
 // and an error if the item was cancelled.
 func (c *Client) ResolveBuildNumber(ctx context.Context, queueID int64) (int, bool, error) {
 	u := fmt.Sprintf("%s/queue/item/%d/api/json?tree=cancelled,executable[number]", c.baseURL, queueID)
-	resp, err := c.do(ctx, http.MethodGet, u, nil, nil)
+	resp, err := c.doRetry(ctx, http.MethodGet, u, nil, nil, true)
 	if err != nil {
 		return 0, false, fmt.Errorf("queue item: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return 0, false, fmt.Errorf("queue item %d: %w", queueID, ErrQueueItemGone)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return 0, false, fmt.Errorf("queue item %d: %s", queueID, readErr(resp))
 	}
@@ -187,7 +276,7 @@ func (c *Client) ResolveBuildNumber(ctx context.Context, queueID int64) (int, bo
 // GetBuild returns the build's result/building/duration.
 func (c *Client) GetBuild(ctx context.Context, jobFullName string, number int) (BuildInfo, error) {
 	u := fmt.Sprintf("%s%s/%d/api/json?tree=number,result,building,duration", c.baseURL, jobPath(jobFullName), number)
-	resp, err := c.do(ctx, http.MethodGet, u, nil, nil)
+	resp, err := c.doRetry(ctx, http.MethodGet, u, nil, nil, true)
 	if err != nil {
 		return BuildInfo{}, fmt.Errorf("get build: %w", err)
 	}
@@ -207,7 +296,7 @@ func (c *Client) GetBuild(ctx context.Context, jobFullName string, number int) (
 // (X-More-Data). This is the incremental log bridge primitive.
 func (c *Client) ProgressiveText(ctx context.Context, jobFullName string, number int, start int64) (text string, next int64, more bool, err error) {
 	u := fmt.Sprintf("%s%s/%d/logText/progressiveText?start=%d", c.baseURL, jobPath(jobFullName), number, start)
-	resp, err := c.do(ctx, http.MethodGet, u, nil, nil)
+	resp, err := c.doRetry(ctx, http.MethodGet, u, nil, nil, true)
 	if err != nil {
 		return "", start, false, fmt.Errorf("progressive text: %w", err)
 	}
@@ -229,7 +318,75 @@ func (c *Client) ProgressiveText(ctx context.Context, jobFullName string, number
 	return string(buf), next, more, nil
 }
 
+// htmlTagRe and wsRe flatten an upstream error page into one line.
+var (
+	htmlTagRe = regexp.MustCompile(`(?s)<[^>]*>`)
+	wsRe      = regexp.MustCompile(`\s+`)
+)
+
+// upstreamErrMaxLen caps the body excerpt carried in an error.
+const upstreamErrMaxLen = 160
+
+// readErr renders a failed response as one short human line.
+//
+// Both nginx and Jetty answer with a full HTML document, and every byte of it
+// used to travel into builds.error_message and out to the build page and the
+// admin panel: the owner of a broken app was shown three lines of markup and
+// a Jetty version banner to say "the build server was briefly unavailable".
+// The tags go, the whitespace collapses, and the excerpt is capped, so what
+// survives is the sentence a reader actually needs ("503 Service Temporarily
+// Unavailable") rather than the page it arrived in.
 func readErr(resp *http.Response) string {
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
-	return fmt.Sprintf("%d %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	return strings.TrimSpace(fmt.Sprintf("%d %s", resp.StatusCode, flattenUpstreamBody(string(b))))
 }
+
+// flattenUpstreamBody strips markup, collapses whitespace and truncates.
+func flattenUpstreamBody(body string) string {
+	s := htmlTagRe.ReplaceAllString(body, " ")
+	s = strings.TrimSpace(wsRe.ReplaceAllString(s, " "))
+	if runes := []rune(s); len(runes) > upstreamErrMaxLen {
+		s = strings.TrimSpace(string(runes[:upstreamErrMaxLen])) + "…"
+	}
+	return s
+}
+
+// FindBuildByQueueID returns the number of the build Jenkins started for
+// queueID, and false when no recent build carries it.
+//
+// Every build's api/json exposes the queueId it was started from, which makes
+// this an exact correlation rather than a guess by app name and timestamp:
+// when a queue item is evicted out from under a poll (ErrQueueItemGone), the
+// build it became can be adopted instead of failing the row and triggering a
+// duplicate job.
+func (c *Client) FindBuildByQueueID(ctx context.Context, jobFullName string, queueID int64) (int, bool, error) {
+	u := fmt.Sprintf("%s%s/api/json?tree=builds[number,queueId]{0,%d}", c.baseURL, jobPath(jobFullName), buildScanDepth)
+	resp, err := c.doRetry(ctx, http.MethodGet, u, nil, nil, true)
+	if err != nil {
+		return 0, false, fmt.Errorf("list builds: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, false, fmt.Errorf("list builds %s: %s", jobFullName, readErr(resp))
+	}
+	var jr struct {
+		Builds []struct {
+			Number  int   `json:"number"`
+			QueueID int64 `json:"queueId"`
+		} `json:"builds"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&jr); err != nil {
+		return 0, false, fmt.Errorf("decode builds: %w", err)
+	}
+	for _, b := range jr.Builds {
+		if b.QueueID == queueID && b.Number > 0 {
+			return b.Number, true, nil
+		}
+	}
+	return 0, false, nil
+}
+
+// buildScanDepth bounds how far back FindBuildByQueueID looks. A queue item
+// is evicted five minutes after it leaves the queue, so the build that took
+// it is always among the most recent ones on a job of this throughput.
+const buildScanDepth = 60
