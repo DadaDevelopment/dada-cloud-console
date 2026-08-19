@@ -653,6 +653,11 @@ export const apps: Messages = {
     ru: "Том почти заполнен. Увеличьте размер или очистите данные, иначе приложение может перестать писать данные.",
     en: "Volume is nearly full. Grow it or clear data, or the app may stop being able to write.",
   },
+  "apps.storage.usage.inodesShort": { ru: "{percent}% inode", en: "{percent}% inodes" },
+  "apps.storage.usage.inodesWarn": {
+    ru: "На томе заканчиваются inode — лимит на количество файлов, не на гигабайты. Увеличение размера тома это не исправит — нужно удалить или упаковать лишние мелкие файлы.",
+    en: "The volume is running out of inodes — the file-count limit, not gigabytes. Enlarging the volume will not fix this — delete or pack the excess small files.",
+  },
   "apps.resources.title": { ru: "Ресурсы", en: "Resources" },
   "apps.resources.subtitle": {
     ru: "Платформа сама подбирает CPU и память. Когда приложению перестаёт хватать, размер растёт автоматически — вручную ничего указывать не нужно.",

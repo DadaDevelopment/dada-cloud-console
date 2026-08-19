@@ -4,6 +4,12 @@ import Link from "next/link";
 import { appsApi, getToken, API_BASE_URL } from "@/lib/api";
 import type { AppVolume } from "@/lib/types";
 import { useT } from "@/lib/i18n/console/context";
+import {
+  evaluateVolumeUsage,
+  severityBarClass,
+  severityTextClass,
+  type VolumeUsage,
+} from "@/lib/volume-usage";
 
 /**
  * Selectable Longhorn storage classes. longhorn-dev is the 2-replica default: it
@@ -43,7 +49,7 @@ export function StorageManager({ projectId, envId, appName, canEdit }: Props) {
   const [exportBusy, setExportBusy] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportResult, setExportResult] = useState<{ url: string; filename: string } | null>(null);
-  const [usage, setUsage] = useState<{ ratio: number } | null>(null);
+  const [usage, setUsage] = useState<VolumeUsage | null>(null);
 
   useEffect(() => {
     if (!envId) return;
@@ -68,7 +74,15 @@ export function StorageManager({ projectId, envId, appName, canEdit }: Props) {
     appsApi
       .volumeUsage(projectId, envId, appName)
       .then((d) => {
-        if (!cancelled) setUsage({ ratio: d.ratio });
+        const withInodes = d as unknown as VolumeUsage;
+        if (!cancelled) {
+          setUsage({
+            ratio: withInodes.ratio,
+            inodes_used: withInodes.inodes_used,
+            inodes_total: withInodes.inodes_total,
+            inodes_ratio: withInodes.inodes_ratio,
+          });
+        }
       })
       .catch(() => {
         if (!cancelled) setUsage(null);
@@ -145,39 +159,43 @@ export function StorageManager({ projectId, envId, appName, canEdit }: Props) {
         ) : (
           <span className="text-gray-400 dark:text-gray-500">{t("apps.storage.none")}</span>
         )}
-        {usage && (
-          <div className="mt-3">
-            <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-              <span>{t("apps.storage.usage.label")}</span>
-              <span
-                className={
-                  usage.ratio >= 0.95
-                    ? "font-medium text-red-600 dark:text-red-400"
-                    : usage.ratio >= 0.85
-                      ? "font-medium text-amber-600 dark:text-amber-500"
-                      : "font-medium text-gray-700 dark:text-gray-300"
-                }
-              >
-                {Math.round(usage.ratio * 100)}%
-              </span>
-            </div>
-            <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-800">
-              <div
-                className={
-                  usage.ratio >= 0.95
-                    ? "h-full rounded-full bg-red-600"
-                    : usage.ratio >= 0.85
-                      ? "h-full rounded-full bg-amber-500"
-                      : "h-full rounded-full bg-blue-600"
-                }
-                style={{ width: `${Math.min(100, Math.round(usage.ratio * 100))}%` }}
-              />
-            </div>
-            {usage.ratio >= 0.85 && (
-              <p className="mt-1.5 text-xs text-amber-600 dark:text-amber-500">{t("apps.storage.usage.warn")}</p>
-            )}
-          </div>
-        )}
+        {usage &&
+          (() => {
+            const view = evaluateVolumeUsage(usage);
+            return (
+              <div className="mt-3">
+                <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                  <span>{t("apps.storage.usage.label")}</span>
+                  <span className="flex items-center gap-2">
+                    <span className={severityTextClass(view.bytesSeverity)}>
+                      {Math.round(view.bytesRatio * 100)}%
+                    </span>
+                    {view.hasInodes && (
+                      <span className={severityTextClass(view.inodesSeverity)}>
+                        {t("apps.storage.usage.inodesShort", {
+                          percent: Math.round((view.inodesRatio ?? 0) * 100),
+                        })}
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-800">
+                  <div
+                    className={severityBarClass(view.overallSeverity)}
+                    style={{ width: `${Math.min(100, Math.round(view.displayRatio * 100))}%` }}
+                  />
+                </div>
+                {view.bytesSeverity !== "ok" && (
+                  <p className="mt-1.5 text-xs text-amber-600 dark:text-amber-500">{t("apps.storage.usage.warn")}</p>
+                )}
+                {view.hasInodes && view.inodesSeverity !== "ok" && (
+                  <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">
+                    {t("apps.storage.usage.inodesWarn")}
+                  </p>
+                )}
+              </div>
+            );
+          })()}
       </div>
 
       <div className="mt-5 grid gap-4 sm:grid-cols-3">

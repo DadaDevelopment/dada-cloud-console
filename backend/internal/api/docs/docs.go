@@ -14018,7 +14018,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Reads the app's PersistentVolumeClaim used/capacity ratio from Prometheus (kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes). 404 when the app has no volume, is not a Kubernetes app, or the metric has not scraped yet. 503 when Prometheus or the cluster client is not configured.",
+                "description": "Reads the app's PersistentVolumeClaim used/capacity ratio from Prometheus (kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes), plus its inode used/total ratio (kubelet_volume_stats_inodes_used / kubelet_volume_stats_inodes) when that series has scraped. 404 when the app has no volume, is not a Kubernetes app, or the byte metric has not scraped yet. 503 when Prometheus or the cluster client is not configured.",
                 "produces": [
                     "application/json"
                 ],
@@ -14052,7 +14052,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "object with used_bytes, capacity_bytes and ratio",
+                        "description": "object with used_bytes, capacity_bytes, ratio, binding_kind, and (when the inode series has scraped) inodes_used, inodes_total, inodes_ratio",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
