@@ -886,3 +886,25 @@ cost/revenue contract; distinguish markup (`price / cost - 1`) from gross margin
 (`(price - cost) / price`). Do not re-price rows that already carry an
 authoritative billed amount, and do not present modelled price as collected
 revenue.
+
+## 2026-08-18 — Browser boundary for analytics
+
+An instruction to use private analytics data does not authorize controlling the
+user's browser. Prefer the requested API/CLI skill; if it is unavailable, ask
+for data access without navigating, clicking, or changing browser visibility.
+
+## 2026-08-19 — Charting a metric before checking what it counts
+
+Mistake: the admin channel funnel shipped on `ym:s:goal<id>reaches`. Nobody
+checked that Metrika offers a `users` variant per goal, so stages counted
+repeat visits instead of people: Direct traffic read 199 register_opened and 22
+deploy_success against 47 and 9 real users, and deploy_success ended up larger
+than registration_complete. The chart then dutifully drew loss as growth. Two
+sessions and a hand-off happened before the owner said "на проде треш" — the
+numbers were visibly non-monotonic the whole time.
+
+Rule: before drawing a funnel, assert the invariant the shape promises — each
+stage nests inside the one above it. If the data violates it, the metric is
+wrong, not the chart. Pin the exact metric string in a test so the next edit
+cannot quietly revert the unit, and surface any clamp to the reader instead of
+smoothing it away.
