@@ -85,9 +85,11 @@ func run(dryRun, verbose, includeInternal bool) error {
 		"transactions_updated":   report.TransactionsUpdated,
 		"transactions_unchanged": report.Unchanged,
 		"payments_unlinked":      report.PaymentsUnlinked,
+		"hosting_cost_rub":       report.HostingCostRUB,
+		"hosting_cost_ingested":  false,
 	}
 	if report.BegetSkipped != "" {
-		summary["beget_expense_skipped"] = report.BegetSkipped
+		summary["hosting_cost_unavailable"] = report.BegetSkipped
 	}
 	if err := enc.Encode(summary); err != nil {
 		return err

@@ -1,9 +1,8 @@
 # Dada Cloud → FinCore
 
 Dada Cloud pushes its own economics into FinCore, the analytical CRM this team
-also builds. Users become clients, money that arrived becomes an incoming fact,
-the Beget hosting bill becomes an expense. Nothing about this lives in FinCore's
-product code: the whole integration is `backend/internal/fincore` plus the
+also builds. Users become clients and money that arrived becomes an incoming
+fact. Nothing about this lives in FinCore's product code: the whole integration is `backend/internal/fincore` plus the
 customer's own machine ingest seam.
 
 ## What is pushed
@@ -12,7 +11,9 @@ customer's own machine ingest seam.
 | --- | --- | --- |
 | console user | client | `external_id` = `users.id`, source system `dada_cloud` |
 | succeeded YooKassa payment | CREDIT transaction | `source_identity` = `payment:<uuid>` |
-| Beget monthly bill | DEBIT transaction | `source_identity` = `beget:<YYYY-MM>` |
+
+The Beget hosting bill used to be pushed as a DEBIT and no longer is -- see
+"The bank is the source of money" below.
 
 FinCore namespaces those keys with the source system, so a row lands as
 `dada_cloud:payment:<uuid>`. Re-running the backfill converges on the same rows
@@ -36,6 +37,33 @@ carry `payee_name` — the DTO rejects the whole batch otherwise.
 The tenant is chosen by the `x-tenant-slug` header. It is sent explicitly on
 every request: without it FinCore falls back to the caller's active membership,
 which is a silent write into whichever tenant the token happened to sit in.
+
+## The bank is the source of money
+
+The company's T-Bank account is already streamed into this same FinCore tenant
+by the findata T-Bank integration: 76 statements from 2025-10-29 onward, the
+real Beget outflow among them (5000 RUB on 2026-08-19 and on 2026-07-20, ООО
+"БЕГЕТ", INN 7801451618). Anything this console mints that describes the same
+money is a second booking of it.
+
+That is not hypothetical. The hourly push wrote statement id 3,
+`dada_cloud:beget:2026-08`, 13194 RUB dated 2026-08-01, and FinCore classified
+it into financial fact id 3, `outgoing_payment`, `is_current=true`. August
+DEBIT then read 149193 RUB across 8 rows with Beget appearing as 18194 RUB
+instead of the 5000 RUB that actually left the account. The figure was not even
+wrong in the same direction: 13194 RUB is modelled monthly consumption from the
+Beget API, 5000 RUB is what was paid.
+
+So the console no longer ingests the hosting bill. `Syncer.collectHostingCost`
+still measures it -- it lands in the report and in the `fincore sync done` log
+line as `hosting_cost_rub` -- but it is management accounting, not a bank fact,
+and FinCore has no seam for that yet. When one exists, per-project allocation is
+the thing worth sending: the bank knows 5000 RUB left, only the console knows
+which project ate it.
+
+Statement id 3 and fact id 3 are still in the customer's production tenant and
+have to be removed by hand -- this integration has no delete path and must not
+grow one.
 
 ## Judgement calls the code makes
 

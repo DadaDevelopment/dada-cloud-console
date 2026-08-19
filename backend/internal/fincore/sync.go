@@ -156,7 +156,17 @@ type Report struct {
 	// console user. They are still pushed; they land without a client.
 	PaymentsUnlinked int
 
-	// BegetSkipped explains an absent hosting expense instead of letting a
+	// HostingCostRUB is this month's hosting bill as the Beget API prices it.
+	//
+	// It is measured and reported, never ingested. The company's bank account
+	// is already streamed into FinCore by the findata T-Bank integration, and
+	// the real outflow to Beget lands there as its own statement (5000 RUB on
+	// 2026-08-19, INN 7801451618). Pushing a modelled monthly figure next to it
+	// booked the same expense twice with a different number -- see
+	// docs/runbooks/fincore-dogfood.md.
+	HostingCostRUB float64
+
+	// BegetSkipped explains an absent hosting figure instead of letting a
 	// zero read as "we pay nothing".
 	BegetSkipped string
 }
@@ -187,6 +197,7 @@ func (s *Syncer) loop(ctx context.Context) {
 				Int("clients_created", report.ClientsCreated).
 				Int("transactions", len(report.Transactions)).
 				Int("transactions_created", report.TransactionsCreated).
+				Float64("hosting_cost_rub", report.HostingCostRUB).
 				Int("unchanged", report.Unchanged).
 				Msg("fincore sync done")
 		}
@@ -213,11 +224,7 @@ func (s *Syncer) Run(ctx context.Context, dryRun bool) (Report, error) {
 	}
 	report.PaymentsUnlinked = unlinked
 
-	begetTx, skipped := s.collectBegetExpense(ctx, time.Now().UTC())
-	report.BegetSkipped = skipped
-	if begetTx != nil {
-		txs = append(txs, *begetTx)
-	}
+	report.HostingCostRUB, report.BegetSkipped = s.collectHostingCost(ctx)
 
 	if s.projectID > 0 {
 		for i := range txs {
@@ -307,10 +314,14 @@ func (s *Syncer) collectPayments(ctx context.Context) ([]Transaction, int, error
 	return out, unlinked, nil
 }
 
-// collectBegetExpense builds this month's hosting expense, or explains why
-// there is none. It never returns a guessed figure: the caller reports the
-// reason instead, so an absent expense cannot be read as a cheap month.
-func (s *Syncer) collectBegetExpense(ctx context.Context, now time.Time) (*Transaction, string) {
+// collectHostingCost measures this month's hosting bill, or explains why there
+// is none. It never returns a guessed figure: the caller reports the reason
+// instead, so an absent cost cannot be read as a cheap month.
+//
+// The number is for the report and the log only. It is not a bank fact and is
+// not ingested; the account's real payments reach FinCore through the bank
+// integration.
+func (s *Syncer) collectHostingCost(ctx context.Context) (float64, string) {
 	if s.beget != nil {
 		clusters, err := s.beget.ListClusters(ctx)
 		if err != nil {
@@ -318,23 +329,18 @@ func (s *Syncer) collectBegetExpense(ctx context.Context, now time.Time) (*Trans
 		} else {
 			selected := beget.SelectClusters(clusters, s.begetClusterSlug)
 			total := 0.0
-			breakdown := map[string]any{}
 			for _, cl := range selected {
-				price := cl.TotalMonthlyRUB()
-				total += price
-				breakdown["cluster_"+cl.Slug] = FormatAmount(price)
+				total += cl.TotalMonthlyRUB()
 			}
 			if total > 0 {
-				tx := TransactionFromBegetBill(now, total, breakdown)
-				return &tx, ""
+				return total, ""
 			}
 		}
 	}
 
 	if s.hardwareMonthlyRUB > 0 {
-		tx := TransactionFromBegetBill(now, s.hardwareMonthlyRUB, map[string]any{"source": "configured"})
-		return &tx, ""
+		return s.hardwareMonthlyRUB, ""
 	}
 
-	return nil, "no beget billing source: BEGET_K8S_TOKEN unset or unreadable and HARDWARE_MONTHLY_COST_RUB is 0"
+	return 0, "no beget billing source: BEGET_K8S_TOKEN unset or unreadable and HARDWARE_MONTHLY_COST_RUB is 0"
 }

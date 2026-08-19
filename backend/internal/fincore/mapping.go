@@ -7,20 +7,14 @@ import (
 	"time"
 )
 
-// yookassaAccount and begetAccount stand in for the cash source of a fact.
+// yookassaAccount stands in for the cash source of a fact.
 // FinCore never resolves an account number against a real bank -- it only
 // compares them -- so naming them keeps revenue and hosting spend separable in
 // the ledger instead of collapsing both onto the synthetic EXT:dada_cloud
 // account the ingest seam would otherwise assign.
 const (
 	yookassaAccount = "YOOKASSA"
-	begetAccount    = "BEGET"
 )
-
-// begetPayeeName is the counterparty on the hosting bill. No INN is sent: the
-// authority for Beget's requisites is the invoice PDF, and guessing them here
-// would put an unverified tax id on a real expense.
-const begetPayeeName = "Бегет"
 
 // CloudUser is the console side of a FinCore client.
 type CloudUser struct {
@@ -54,13 +48,6 @@ func ClientExternalID(u CloudUser) string { return u.ID }
 // PaymentSourceIdentity keys a payment fact. FinCore prefixes it with the
 // source system, so the stored key ends up "dada_cloud:payment:<uuid>".
 func PaymentSourceIdentity(paymentID string) string { return "payment:" + paymentID }
-
-// BegetSourceIdentity keys the hosting bill for one calendar month. Re-running
-// a month lands on the same row, so a price change mid-month corrects the
-// expense instead of adding a second one.
-func BegetSourceIdentity(month time.Time) string {
-	return "beget:" + month.Format("2006-01")
-}
 
 // ClientFromUser maps a console user onto FinCore's client shape.
 func ClientFromUser(u CloudUser) ClientUpsert {
@@ -162,36 +149,6 @@ func paymentPurpose(p CloudPayment) string {
 		purpose += ", платёж ЮKassa " + yk
 	}
 	return purpose
-}
-
-// TransactionFromBegetBill maps the hosting bill for one month onto an
-// outgoing money fact.
-//
-// Only the month being billed is ever emitted. Beget's API reports the current
-// price of the clusters, not a history of invoices, so stamping today's price
-// onto past months would invent expenses that were never charged -- those live
-// in the invoice PDFs.
-func TransactionFromBegetBill(month time.Time, amountRUB float64, breakdown map[string]any) Transaction {
-	period := month.Format("2006-01")
-	metadata := map[string]any{"period": period, "source": "beget_api"}
-	for k, v := range breakdown {
-		metadata[k] = v
-	}
-	return Transaction{
-		SourceIdentity: BegetSourceIdentity(month),
-		AccountNumber:  begetAccount,
-		OperationDate:  WallTime(monthStart(month)),
-		Direction:      DirectionDebit,
-		Amount:         FormatAmount(amountRUB),
-		Currency:       "RUB",
-		PayeeName:      begetPayeeName,
-		PaymentPurpose: "Хостинг Dada Cloud (Beget), " + period,
-		Metadata:       metadata,
-	}
-}
-
-func monthStart(t time.Time) time.Time {
-	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
 }
 
 // FormatAmount renders a ruble figure the way the ingest DTO parses it: a

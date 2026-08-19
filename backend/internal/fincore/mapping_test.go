@@ -1,6 +1,7 @@
 package fincore
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -98,28 +99,15 @@ func TestPaymentSourceIdentityIsStableAcrossRuns(t *testing.T) {
 	}
 }
 
-func TestBegetBillIsADebitDatedToTheMonthItCovers(t *testing.T) {
-	month := time.Date(2026, 8, 19, 17, 30, 0, 0, time.UTC)
-	tx := TransactionFromBegetBill(month, 10040.40, map[string]any{"cluster_prod-k8s-3node": "7711.80"})
+func TestHostingCostIsMeasuredButNotIngested(t *testing.T) {
+	got, reason := (&Syncer{hardwareMonthlyRUB: 1234.50}).collectHostingCost(context.Background())
+	if got != 1234.50 || reason != "" {
+		t.Fatalf("collectHostingCost = %v, %q; want the configured bill and no excuse", got, reason)
+	}
 
-	if tx.Direction != DirectionDebit {
-		t.Fatalf("direction = %q, want DEBIT", tx.Direction)
-	}
-	if tx.PayeeName == "" {
-		t.Fatal("payee_name is empty; the ingest DTO rejects a DEBIT without one")
-	}
-	if tx.PayeeINN != "" {
-		t.Fatalf("payee_inn = %q; requisites come from the invoice, not from a guess", tx.PayeeINN)
-	}
-	if tx.Amount != "10040.40" {
-		t.Fatalf("amount = %q, want a plain two-decimal string", tx.Amount)
-	}
-	if tx.SourceIdentity != "beget:2026-08" {
-		t.Fatalf("source_identity = %q", tx.SourceIdentity)
-	}
-	want := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
-	if !time.Time(tx.OperationDate).Equal(want) {
-		t.Fatalf("operation_date = %s, want the first day of the billed month", time.Time(tx.OperationDate))
+	got, reason = (&Syncer{}).collectHostingCost(context.Background())
+	if got != 0 || reason == "" {
+		t.Fatalf("collectHostingCost = %v, %q; an absent billing source must say so, not read as a free month", got, reason)
 	}
 }
 
