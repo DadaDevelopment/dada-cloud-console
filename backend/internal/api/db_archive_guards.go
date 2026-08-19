@@ -13,6 +13,77 @@ import (
 type archiveDeleteGuard struct {
 	Name string `json:"name"`
 	Kind string `json:"kind"`
+	// Enabled is pg_trigger.tgenabled as found. The delete phase suspends a
+	// trigger guard for the length of one batch and must put it back in the
+	// state the tenant had it in, not in the default one: a trigger left at "O"
+	// that was declared ENABLE ALWAYS would stop firing under logical
+	// replication, and nothing in the tenant's schema would say why. Empty for
+	// a rule, which is not suspendable.
+	Enabled string `json:"-"`
+}
+
+// archiveGuardTrigger is the Kind of a guard the delete phase can suspend.
+const (
+	archiveGuardBeforeDelete    = "before delete trigger"
+	archiveGuardInsteadOfDelete = "instead of delete trigger"
+	archiveGuardRule            = "on delete do instead rule"
+)
+
+// archiveGuardSuspendable reports whether the delete phase can take this guard
+// out of the way for the length of one batch.
+//
+// Triggers can: ALTER TABLE ... DISABLE TRIGGER names exactly one of them and
+// leaves the foreign keys (internal triggers) enforcing. A DO INSTEAD rule
+// cannot: rules are rewrite rules, there is no per-statement suspension for
+// them, and dropping one is a schema change the platform has no business
+// making. Pure.
+func archiveGuardSuspendable(g archiveDeleteGuard) bool {
+	return g.Kind != archiveGuardRule
+}
+
+// archiveSuspendableGuards and archiveBlockingGuards split what the delete
+// phase can work around from what still refuses the run. Pure.
+func archiveSuspendableGuards(guards []archiveDeleteGuard) []archiveDeleteGuard {
+	out := []archiveDeleteGuard{}
+	for _, g := range guards {
+		if archiveGuardSuspendable(g) {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+func archiveBlockingGuards(guards []archiveDeleteGuard) []archiveDeleteGuard {
+	out := []archiveDeleteGuard{}
+	for _, g := range guards {
+		if !archiveGuardSuspendable(g) {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// archiveGuardSuspendSQL and archiveGuardRestoreSQL are the two halves of one
+// batch's suspension.
+//
+// Restore is not "ENABLE TRIGGER": that word means tgenabled = 'O', and a
+// trigger the tenant declared ENABLE ALWAYS or ENABLE REPLICA would come back
+// weaker than it went in. Pure.
+func archiveGuardSuspendSQL(schema, table string, g archiveDeleteGuard) string {
+	return fmt.Sprintf("ALTER TABLE %s DISABLE TRIGGER %s",
+		pgx.Identifier{schema, table}.Sanitize(), pgx.Identifier{g.Name}.Sanitize())
+}
+
+func archiveGuardRestoreSQL(schema, table string, g archiveDeleteGuard) string {
+	word := "ENABLE"
+	switch g.Enabled {
+	case "A":
+		word = "ENABLE ALWAYS"
+	case "R":
+		word = "ENABLE REPLICA"
+	}
+	return fmt.Sprintf("ALTER TABLE %s %s TRIGGER %s",
+		pgx.Identifier{schema, table}.Sanitize(), word, pgx.Identifier{g.Name}.Sanitize())
 }
 
 // archiveDeleteGuards lists the tenant's own guards that stand between a run and
@@ -34,7 +105,8 @@ func archiveDeleteGuards(ctx context.Context, conn *pgx.Conn, schema, table stri
 	rows, err := conn.Query(ctx, `
 		SELECT t.tgname,
 		       CASE WHEN (t.tgtype & 64) > 0 THEN 'instead of delete trigger'
-		            ELSE 'before delete trigger' END
+		            ELSE 'before delete trigger' END,
+		       t.tgenabled::text
 		  FROM pg_trigger t
 		  JOIN pg_class c ON c.oid = t.tgrelid
 		  JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -44,7 +116,7 @@ func archiveDeleteGuards(ctx context.Context, conn *pgx.Conn, schema, table stri
 		   AND (t.tgtype & 8) > 0
 		   AND (t.tgtype & 66) > 0
 		UNION ALL
-		SELECT r.rulename, 'on delete do instead rule'
+		SELECT r.rulename, 'on delete do instead rule', ''
 		  FROM pg_rewrite r
 		  JOIN pg_class c ON c.oid = r.ev_class
 		  JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -59,7 +131,7 @@ func archiveDeleteGuards(ctx context.Context, conn *pgx.Conn, schema, table stri
 	out := []archiveDeleteGuard{}
 	for rows.Next() {
 		var g archiveDeleteGuard
-		if err := rows.Scan(&g.Name, &g.Kind); err != nil {
+		if err := rows.Scan(&g.Name, &g.Kind, &g.Enabled); err != nil {
 			return nil, err
 		}
 		out = append(out, g)
@@ -78,6 +150,6 @@ func archiveDeleteGuardsReason(schema, table string, guards []archiveDeleteGuard
 		names = append(names, fmt.Sprintf("%s (%s)", g.Name, g.Kind))
 	}
 	return fmt.Sprintf(
-		"%s.%s cannot be archived: %s decides what a delete on this table does, so the rows would be exported and then kept. Drop or disable it if these rows are meant to be removable.",
+		"%s.%s cannot be archived: %s decides what a delete on this table does, so the rows would be exported and then kept. A rewrite rule cannot be suspended for one statement the way a trigger can, so this one has to be dropped by whoever owns the schema.",
 		schema, table, strings.Join(names, ", "))
 }

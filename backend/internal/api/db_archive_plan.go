@@ -296,12 +296,12 @@ func (h *Handler) GetDatabaseArchivePlan(c *gin.Context) {
 		respondError(c, http.StatusServiceUnavailable, "cannot read the table's delete rules right now")
 		return
 	}
-	if len(guards) > 0 {
+	if blocking := archiveBlockingGuards(guards); len(blocking) > 0 {
 		c.JSON(http.StatusOK, gin.H{
 			"table":           schema + "." + relname,
 			"archivable":      false,
-			"reason":          archiveDeleteGuardsReason(schema, relname, guards),
-			"blockedByGuards": guards,
+			"reason":          archiveDeleteGuardsReason(schema, relname, blocking),
+			"blockedByGuards": blocking,
 			"columns":         cols,
 			"totalRows":       totalRows,
 			"totalBytes":      totalBytes,
@@ -349,6 +349,9 @@ func (h *Handler) GetDatabaseArchivePlan(c *gin.Context) {
 	}
 	if len(unresolved) > 0 {
 		out["uncheckedKeys"] = unresolved
+	}
+	if suspend := archiveSuspendableGuards(guards); len(suspend) > 0 {
+		out["suspendedGuards"] = suspend
 	}
 
 	if cutoff != nil {

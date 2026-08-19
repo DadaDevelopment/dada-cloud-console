@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -113,5 +114,124 @@ func TestDoInsteadRuleIsRefused(t *testing.T) {
 	}
 	if msg := archiveDeleteGuardsReason(schema, "plain", guards); !strings.Contains(msg, "keep_everything") {
 		t.Fatalf("the refusal does not name the rule: %s", msg)
+	}
+}
+
+// TestSuspendedGuardDeletesAndRestores is the whole feature in one test: rows a
+// BEFORE DELETE trigger refuses are removed anyway, and the trigger is back
+// guarding the table the moment the batch commits.
+func TestSuspendedGuardDeletesAndRestores(t *testing.T) {
+	conn := testTenantConn(t)
+	ctx := context.Background()
+	schema := seedGuardedTables(t, conn)
+	hist := pgx.Identifier{schema, "history"}.Sanitize()
+
+	if _, err := conn.Exec(ctx, `INSERT INTO `+hist+` (id, observed_at) VALUES
+		(1, '2026-01-01'), (2, '2026-01-02'), (3, '2026-09-01')`); err != nil {
+		t.Fatalf("seed rows: %v", err)
+	}
+	if _, err := conn.Exec(ctx, `DELETE FROM `+hist+` WHERE id = 1`); err == nil {
+		t.Fatal("the trigger let a plain delete through; the test proves nothing")
+	}
+
+	guards, err := archiveDeleteGuards(ctx, conn, schema, "history")
+	if err != nil {
+		t.Fatalf("read delete guards: %v", err)
+	}
+	if len(archiveBlockingGuards(guards)) != 0 {
+		t.Fatalf("a trigger guard must be suspendable, got %+v", guards)
+	}
+
+	run := archiveRun{
+		Schema: schema, Table: "history", CutoffColumn: "observed_at",
+		Cutoff: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+	}
+	n, err := archiveDeleteBatch(ctx, conn, run, archiveDeleteSQL(run), archiveSuspendableGuards(guards))
+	if err != nil {
+		t.Fatalf("delete with the guard suspended: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("deleted %d rows, want the 2 rows before the cutoff", n)
+	}
+
+	var left int64
+	if err := conn.QueryRow(ctx, `SELECT count(*) FROM `+hist).Scan(&left); err != nil {
+		t.Fatalf("count what is left: %v", err)
+	}
+	if left != 1 {
+		t.Fatalf("%d rows left, want only the one after the cutoff", left)
+	}
+
+	var enabled string
+	if err := conn.QueryRow(ctx,
+		`SELECT tgenabled::text FROM pg_trigger WHERE tgname = 'trg_history_append_only'`).Scan(&enabled); err != nil {
+		t.Fatalf("read the trigger back: %v", err)
+	}
+	if enabled != "O" {
+		t.Fatalf("tgenabled = %q after the batch, want the trigger restored to O", enabled)
+	}
+	if _, err := conn.Exec(ctx, `DELETE FROM `+hist+` WHERE id = 3`); err == nil {
+		t.Fatal("the trigger did not come back: a plain delete still succeeds")
+	}
+}
+
+// TestSuspendedGuardKeepsEnableAlways pins the detail a naive restore loses:
+// ENABLE TRIGGER means tgenabled = 'O', so an ALWAYS trigger put back that way
+// would silently stop firing under logical replication.
+func TestSuspendedGuardKeepsEnableAlways(t *testing.T) {
+	conn := testTenantConn(t)
+	ctx := context.Background()
+	schema := seedGuardedTables(t, conn)
+	hist := pgx.Identifier{schema, "history"}.Sanitize()
+
+	if _, err := conn.Exec(ctx, `ALTER TABLE `+hist+` ENABLE ALWAYS TRIGGER trg_history_append_only`); err != nil {
+		t.Fatalf("declare the trigger ALWAYS: %v", err)
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO `+hist+` (id, observed_at) VALUES (1, '2026-01-01')`); err != nil {
+		t.Fatalf("seed rows: %v", err)
+	}
+
+	guards, err := archiveDeleteGuards(ctx, conn, schema, "history")
+	if err != nil {
+		t.Fatalf("read delete guards: %v", err)
+	}
+	run := archiveRun{
+		Schema: schema, Table: "history", CutoffColumn: "observed_at",
+		Cutoff: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+	}
+	if _, err := archiveDeleteBatch(ctx, conn, run, archiveDeleteSQL(run), archiveSuspendableGuards(guards)); err != nil {
+		t.Fatalf("delete with the guard suspended: %v", err)
+	}
+
+	var enabled string
+	if err := conn.QueryRow(ctx,
+		`SELECT tgenabled::text FROM pg_trigger WHERE tgname = 'trg_history_append_only'`).Scan(&enabled); err != nil {
+		t.Fatalf("read the trigger back: %v", err)
+	}
+	if enabled != "A" {
+		t.Fatalf("tgenabled = %q, want A: the ALWAYS declaration must survive the batch", enabled)
+	}
+}
+
+// TestDoInsteadRuleStillRefuses keeps the half of the guard that has no
+// suspension: a rewrite rule cannot be taken out of the way for one statement.
+func TestDoInsteadRuleStillRefuses(t *testing.T) {
+	conn := testTenantConn(t)
+	ctx := context.Background()
+	schema := seedGuardedTables(t, conn)
+
+	if _, err := conn.Exec(ctx,
+		`CREATE RULE keep_everything AS ON DELETE TO `+pgx.Identifier{schema, "plain"}.Sanitize()+` DO INSTEAD NOTHING`); err != nil {
+		t.Fatalf("create the rule: %v", err)
+	}
+	guards, err := archiveDeleteGuards(ctx, conn, schema, "plain")
+	if err != nil {
+		t.Fatalf("read delete guards: %v", err)
+	}
+	if len(archiveBlockingGuards(guards)) != 1 {
+		t.Fatalf("a do-instead rule must still refuse the run, got %+v", guards)
+	}
+	if len(archiveSuspendableGuards(guards)) != 0 {
+		t.Fatalf("a rule must never be reported as suspendable, got %+v", guards)
 	}
 }

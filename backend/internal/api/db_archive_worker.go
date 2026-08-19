@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -414,20 +415,29 @@ func (w *dbArchiveWorker) deleteRows(ctx context.Context, r archiveRun) error {
 	}
 	defer conn.Close(context.Background())
 
+	guards, err := archiveDeleteGuards(ctx, conn, r.Schema, r.Table)
+	if err != nil {
+		return fmt.Errorf("read delete rules on %s.%s: %w", r.Schema, r.Table, err)
+	}
+	if blocking := archiveBlockingGuards(guards); len(blocking) > 0 {
+		return errors.New(archiveDeleteGuardsReason(r.Schema, r.Table, blocking))
+	}
+	suspend := archiveSuspendableGuards(guards)
+
 	sql := archiveDeleteSQL(r)
 
 	deadline := time.Now().Add(dbArchiveDeleteBudget)
 	deleted := r.DeletedRows
 	for time.Now().Before(deadline) {
-		tag, err := conn.Exec(ctx, sql, r.Cutoff)
+		affected, err := archiveDeleteBatch(ctx, conn, r, sql, suspend)
 		if err != nil {
 			w.recordDeleted(ctx, r, deleted)
 			return fmt.Errorf("delete archived rows: %w", err)
 		}
-		if tag.RowsAffected() == 0 {
+		if affected == 0 {
 			break
 		}
-		deleted += tag.RowsAffected()
+		deleted += affected
 		w.recordDeleted(ctx, r, deleted)
 	}
 	if err := w.recordDeletedErr(ctx, r, deleted); err != nil {
@@ -441,6 +451,66 @@ func (w *dbArchiveWorker) deleteRows(ctx context.Context, r archiveRun) error {
 		return nil
 	}
 	return w.setPhase(ctx, r, dbArchiveRepack)
+}
+
+// archiveDeleteBatch deletes one batch with the tenant's own delete guards
+// suspended for the length of that batch, and only that batch.
+//
+// The suspension is the point. A table whose history is append-only refuses
+// every delete, which used to end the run after the export had already written
+// the Parquet -- the archive existed, the rows stayed, and the database never
+// shrank. The rows this removes are already exported AND verified: the verify
+// phase read the Parquet back and held it to an exact row count before this
+// phase was reachable at all. So the invariant the trigger defends -- that
+// history is never lost -- is the one thing that is provably still true.
+//
+// Everything about the suspension is scoped as narrowly as it can be:
+//
+//   - it happens inside the batch's own transaction, so a crash, a lost
+//     connection or a rollout rolls the trigger back on with the delete. There
+//     is no window in which the process can die and leave the tenant's table
+//     unguarded.
+//   - it names each trigger individually rather than reaching for
+//     session_replication_role, which would also switch off the foreign keys and
+//     let this delete strand child rows pointing at nothing.
+//   - it restores the exact tgenabled the trigger was found with, so an ENABLE
+//     ALWAYS trigger does not quietly come back as a plain one.
+//
+// The ACCESS EXCLUSIVE lock ALTER TABLE takes is held for one batch, not for
+// the run.
+func archiveDeleteBatch(ctx context.Context, conn *pgx.Conn, r archiveRun, sql string, guards []archiveDeleteGuard) (int64, error) {
+	if len(guards) == 0 {
+		tag, err := conn.Exec(ctx, sql, r.Cutoff)
+		if err != nil {
+			return 0, err
+		}
+		return tag.RowsAffected(), nil
+	}
+
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+
+	for _, g := range guards {
+		if _, err := tx.Exec(ctx, archiveGuardSuspendSQL(r.Schema, r.Table, g)); err != nil {
+			return 0, fmt.Errorf("suspend %s: %w", g.Name, err)
+		}
+	}
+	tag, err := tx.Exec(ctx, sql, r.Cutoff)
+	if err != nil {
+		return 0, err
+	}
+	for _, g := range guards {
+		if _, err := tx.Exec(ctx, archiveGuardRestoreSQL(r.Schema, r.Table, g)); err != nil {
+			return 0, fmt.Errorf("restore %s: %w", g.Name, err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
 }
 
 // recordDeletedErr stores how many rows the run has deleted so far.
