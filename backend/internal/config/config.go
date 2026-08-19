@@ -49,6 +49,12 @@ type Config struct {
 	PowerDNSAPIKey      string   // POWERDNS_API_KEY (secret)
 	PlatformNameservers []string // PLATFORM_NAMESERVERS (comma-separated)
 
+	// PlatformHealthNamespaces are the platform's own namespaces (gitops-agent,
+	// build-agent, and friends) the admin overview's platform_health section
+	// polls directly via the k8s API, so a crashlooping delivery pipeline is no
+	// longer invisible to the panel the owner uses to judge health.
+	PlatformHealthNamespaces []string // PLATFORM_HEALTH_NAMESPACES (comma-separated)
+
 	// Identity provider selection. AuthMode defaults to "local" → the existing
 	// HS256 local-JWT path (POST /auth/login + GinMiddleware). Set AUTH_MODE
 	// to "keycloak" to validate Keycloak RS256 access tokens via JWKS instead;
@@ -778,6 +784,7 @@ func Load() (*Config, error) {
 		PowerDNSAPIURL:              getEnv("POWERDNS_API_URL", "http://powerdns-api.powerdns.svc:8081"),
 		PowerDNSAPIKey:              getEnv("POWERDNS_API_KEY", ""),
 		PlatformNameservers:         splitList(getEnv("PLATFORM_NAMESERVERS", "ns1.dada-tuda.ru,ns2.dada-tuda.ru")),
+		PlatformHealthNamespaces:    splitList(getEnv("PLATFORM_HEALTH_NAMESPACES", "argocd-prod")),
 		DefaultDomainEnabled:        getEnv("DEFAULT_DOMAIN_ENABLED", "true") == "true",
 		DefaultDomainBase:           getEnv("DEFAULT_DOMAIN_BASE", "dada-tuda.ru"),
 		PreviewHostBase:             getEnv("PREVIEW_HOST_BASE", "pv.dada-tuda.ru"),

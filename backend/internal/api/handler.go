@@ -33,6 +33,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/userservice"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"k8s.io/client-go/kubernetes"
 )
 
 // Handler holds shared dependencies for all API handlers.
@@ -140,6 +141,11 @@ type Handler struct {
 	groupsAttempt sync.Map
 
 	pdns *pdns.Client
+
+	// platformHealthCS lazily-built in-cluster client for admin overview's
+	// platform_health section (admin_platform_health.go). Off-cluster nil.
+	platformHealthOnce sync.Once
+	platformHealthCS   kubernetes.Interface
 
 	auditNotifier         *notify.Notifier
 	auditNotifyEmail      string

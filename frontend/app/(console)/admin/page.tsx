@@ -12,6 +12,7 @@ import { EChart } from "@/components/charts/echart";
 import { useT } from "@/lib/i18n/console/context";
 import type { EChartsOption } from "echarts";
 import { liveUrlHeadline, liveUrlOkShare, liveUrlStaleDominates } from "@/lib/live-urls";
+import { platformHealthAgeSeconds, platformHealthIsStale, platformHealthState } from "@/lib/platform-health";
 
 const REFRESH_MS = 60_000;
 const DYNAMICS_DAYS = 14;
@@ -259,6 +260,37 @@ export default function AdminOverviewPage() {
     { key: "age", header: "Как давно", render: (r) => <span className="text-xs text-gray-500 dark:text-gray-400">{ageLabel(r.age_seconds)}</span> },
   ];
 
+  const platformUnhealthyColumns: Column<NonNullable<AdminOverviewResponse["platform_health"]>["unhealthy"][number]>[] = [
+    {
+      key: "workload",
+      header: "Ворклоад",
+      render: (r) => (
+        <div className="flex flex-col">
+          <span className="font-mono text-xs text-gray-900 dark:text-gray-100">{r.name}</span>
+          <span className="text-[11px] text-gray-400 dark:text-gray-500">{r.kind} / {r.workload}</span>
+        </div>
+      ),
+    },
+    { key: "namespace", header: "Неймспейс", render: (r) => <span className="font-mono text-xs text-gray-700 dark:text-gray-200">{r.namespace}</span> },
+    { key: "phase", header: t("adminOverview.notReady.col.phase"), render: (r) => <StateChip tone={phaseTone(r.phase)}>{r.phase}</StateChip> },
+    { key: "reason", header: "Причина", render: (r) => <span className="text-xs text-gray-500 dark:text-gray-400">{r.reason || r.message || "—"}</span> },
+    {
+      key: "restarts",
+      header: "Рестарты",
+      render: (r) => (
+        <span className={r.restarts > 0 ? "text-xs font-medium text-red-600 dark:text-red-400" : "text-xs text-gray-400 dark:text-gray-500"}>
+          {r.restarts}
+        </span>
+      ),
+    },
+    { key: "replicas", header: "Реплики", render: (r) => <span className="text-xs text-gray-500 dark:text-gray-400">{r.ready_replicas}/{r.desired_replicas}</span> },
+    { key: "age", header: "Как давно", render: (r) => <span className="text-xs text-gray-500 dark:text-gray-400">{ageLabel(r.age_seconds)}</span> },
+  ];
+
+  const platformHealth = data?.platform_health;
+  const platformState = platformHealth ? platformHealthState(platformHealth) : "blind";
+  const platformStale = platformHealth ? platformHealthIsStale(platformHealth.checked_at) : false;
+
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -472,6 +504,73 @@ export default function AdminOverviewPage() {
                 )
               }
             />
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="mb-6 grid grid-cols-1 gap-4">
+        <Card>
+          <CardHeader className="p-4 pb-2">
+            <CardTitle className="text-sm">Здоровье самой платформы</CardTitle>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Собственные поды платформы — gitops-agent, build-agent, консоль и остальное служебное — а не приложения
+              клиентов. Пустой список ниже имеет смысл только если проверка вообще состоялась.
+            </p>
+          </CardHeader>
+          <CardContent className="p-4 pt-0">
+            {isLoading ? (
+              <p className="text-sm text-gray-400 dark:text-gray-500">Загрузка…</p>
+            ) : platformState === "blind" ? (
+              <div className="rounded-lg border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 px-4 py-3">
+                <p className="text-sm font-medium text-red-700 dark:text-red-300">
+                  Платформа не осмотрена — пустота ниже НЕ значит «всё в порядке»
+                </p>
+                <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                  {platformHealth?.unavailable_reason || "Причина неизвестна: бэкенд ещё не отдаёт эти данные"}
+                </p>
+              </div>
+            ) : (
+              <>
+                {platformStale && platformHealth && (
+                  <div className="mb-3 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
+                    Снимок устарел: проверка была {ageLabel(platformHealthAgeSeconds(platformHealth.checked_at))} — текущей
+                    картине доверять нельзя
+                  </div>
+                )}
+                <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Поды</p>
+                    <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">{platformHealth?.pods_total ?? 0}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Ворклоады</p>
+                    <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">{platformHealth?.workloads_total ?? 0}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Неймспейсы</p>
+                    <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                      {(platformHealth?.namespaces ?? []).join(", ") || "—"}
+                    </p>
+                  </div>
+                </div>
+                <p className="mb-3 text-xs text-gray-400 dark:text-gray-500">
+                  Проверено {platformHealth ? ageLabel(platformHealthAgeSeconds(platformHealth.checked_at)) : "—"}
+                </p>
+                {platformState === "healthy" ? (
+                  <div className="flex items-center justify-center rounded-lg border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 py-10">
+                    <p className="text-sm font-medium text-green-600 dark:text-green-400">Все служебные поды платформы в порядке</p>
+                  </div>
+                ) : (
+                  <DataTable
+                    loading={false}
+                    rows={platformHealth?.unhealthy ?? []}
+                    getRowKey={(r) => `${r.namespace}/${r.kind}/${r.name}`}
+                    columns={platformUnhealthyColumns}
+                    pageSize={10}
+                  />
+                )}
+              </>
+            )}
           </CardContent>
         </Card>
       </div>

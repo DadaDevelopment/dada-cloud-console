@@ -1319,6 +1319,45 @@ export interface AdminOverviewLiveUrls {
   checked_internal: number;
 }
 
+/**
+ * One unhealthy pod or workload belonging to the platform itself (gitops-agent,
+ * build-agent, the console, and the rest of the service namespaces) -- not a
+ * customer app.
+ */
+export interface AdminOverviewUnhealthyPlatformWorkload {
+  namespace: string;
+  kind: string;
+  name: string;
+  workload: string;
+  phase: string;
+  ready: boolean;
+  restarts: number;
+  reason: string;
+  message: string;
+  age_seconds: number;
+  ready_replicas: number;
+  desired_replicas: number;
+}
+
+/**
+ * Health of the platform's own pods, as opposed to user apps.
+ *
+ * observed is the load-bearing field: false means the check itself could not
+ * run (unavailable_reason carries why) and an empty unhealthy list must NOT
+ * be read as "all good" -- it means nothing was looked at. checked_at is
+ * when the snapshot was taken; a stale checked_at is its own form of
+ * blindness even when observed is true.
+ */
+export interface AdminOverviewPlatformHealth {
+  observed: boolean;
+  unavailable_reason: string;
+  checked_at: string;
+  namespaces: string[];
+  pods_total: number;
+  workloads_total: number;
+  unhealthy: AdminOverviewUnhealthyPlatformWorkload[];
+}
+
 export interface AdminOverviewDayPoint {
   date: string;
   signups: number;
@@ -1380,6 +1419,7 @@ export interface AdminOverviewResponse {
   stuck_operations: AdminOverviewStuckOperations;
   failed_builds: AdminOverviewFailedBuild[];
   live_urls?: AdminOverviewLiveUrls;
+  platform_health?: AdminOverviewPlatformHealth;
   dynamics: AdminOverviewDayPoint[];
   dynamics_days: number;
 }
