@@ -91,7 +91,8 @@ func (e *Error) Error() string {
 }
 
 // Statement fetches every operation on accountNumber between from and to
-// (inclusive), both formatted as YYYY-MM-DD per the T-Bank Business API.
+// (inclusive), both sent as full RFC3339 timestamps in UTC. The T-Bank
+// Business API rejects a bare YYYY-MM-DD date on these parameters.
 func (c *Client) Statement(ctx context.Context, accountNumber string, from, to time.Time) ([]StatementOperation, error) {
 	url := fmt.Sprintf("%s/statement?accountNumber=%s&from=%s&to=%s",
 		c.baseURL(), accountNumber, from.UTC().Format(time.RFC3339), to.UTC().Format(time.RFC3339))
