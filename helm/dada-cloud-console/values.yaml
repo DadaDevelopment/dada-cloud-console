@@ -167,6 +167,15 @@ backend:
     # backend.secret below. Empty disables connect (409 payments_not_configured).
     YOOKASSA_PARTNER_CLIENT_ID: ""
   existingSecret: ""
+  # When existingSecret is set (prod: "dada-cloud-console-backend", hand-patched
+  # with kubectl, never rendered by this chart) the chart cannot see the secret's
+  # content, so it cannot compute a real checksum/secret annotation for it. Bump
+  # this string in the same change that patches the secret (e.g. a short date or
+  # counter) and the backend pod template's checksum/secret annotation changes,
+  # forcing a rollout. Forgetting to bump it is now a one-line git diff away from
+  # visible, instead of a silent stale-env pod that lives until an unrelated
+  # restart (see the ~21h GITOPS_ENCRYPTION_KEY outage this closes).
+  existingSecretVersion: ""
   # Service-unique secrets only. Shared keys (DB_URL, GITOPS_VALUES_TOKEN_SECRET,
   # PORTAINER_API_TOKEN) come from global.shared via the Secret template.
   secret:
@@ -301,6 +310,13 @@ gitopsAgent:
     DB_ROUTER_PORT: "5432"
     DB_ROUTER_DIRECT_SHARDS: ""
   existingSecret: ""
+  # See backend.existingSecretVersion above for what this is and why: in prod
+  # existingSecret points at the same hand-patched dada-cloud-console-backend
+  # Secret (GITOPS_ENCRYPTION_KEY lives here), so this chart cannot checksum its
+  # real content. Bump this alongside any kubectl patch to that secret to force
+  # a gitops-agent rollout instead of leaving stale AES-GCM key bytes in a live
+  # process env (root cause of the ~21h platform-wide delivery outage).
+  existingSecretVersion: ""
   # Service-unique secrets only. Shared keys (DATABASE_URL, GITOPS_DEFAULT_REPO_URL/
   # USERNAME/TOKEN, GITOPS_VALUES_TOKEN_SECRET) come from global.shared.
   secret:

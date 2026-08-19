@@ -19,6 +19,14 @@ spec:
       labels:
         {{- include "dada-cloud-console.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: gitops-agent
+      annotations:
+        # Rolls gitops-agent when its own secret changes AND when
+        # gitopsAgent.existingSecretVersion is bumped (existingSecret mode: this
+        # chart cannot see that secret's content, only a manually-bumped
+        # version token). Without this, envFrom.secretRef never re-reads on
+        # Secret edit -- a corrupted GITOPS_ENCRYPTION_KEY stays live until an
+        # unrelated restart (the ~21h outage this closes).
+        checksum/secret: {{ printf "%s|%s" (include (print $.Template.BasePath "/gitops-agent-secret.yaml") .) (.Values.gitopsAgent.existingSecretVersion | default "") | sha256sum }}
     spec:
       serviceAccountName: {{ include "dada-cloud-console.fullname" . }}
       terminationGracePeriodSeconds: {{ .Values.gitopsAgent.terminationGracePeriodSeconds | default 60 }}
