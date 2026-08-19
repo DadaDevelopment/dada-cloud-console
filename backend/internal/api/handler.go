@@ -380,6 +380,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	h.StartBoxSessionSweeper(context.Background())
 	h.StartBoxOperationsWorker(context.Background())
 	h.StartArchiveRedetectSweeper(context.Background())
+	h.startFinCoreSync(cfg)
 
 	if h.agentChatLLM.Configured() {
 		source := "static AGENT_CHAT_GATEWAY_KEY"

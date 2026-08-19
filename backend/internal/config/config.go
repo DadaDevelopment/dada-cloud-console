@@ -305,6 +305,31 @@ type Config struct {
 	// default.
 	BegetK8SClusterSlug string // BEGET_K8S_CLUSTER_SLUG
 
+	// FinCore is Dada Development's own analytical CRM (a separate product this
+	// team builds). Dada Cloud dogfoods it: users become clients, succeeded
+	// YooKassa payments become incoming money, the Beget hosting bill becomes
+	// an expense. Empty FinCoreBaseURL/FinCoreToken/FinCoreTenantSlug switches
+	// the push off entirely -- internal/fincore.New returns a nil client and
+	// the syncer never starts.
+	FinCoreBaseURL string // FINCORE_BASE_URL
+	// FinCoreToken must be a FinCore service token (fcs_...). The machine
+	// ingest seam authenticates through require_scopes and refuses a human's
+	// JWT with 401, so a personal token here fails every pass.
+	FinCoreToken string // FINCORE_TOKEN
+	// FinCoreTenantSlug picks the tenant the facts land in. FinCore is
+	// schema-per-tenant and falls back to the token's own tenant when the
+	// header is absent, so this is stated explicitly rather than inferred.
+	FinCoreTenantSlug string // FINCORE_TENANT_SLUG
+	// FinCoreProjectID pins every pushed fact to one FinCore project, keeping
+	// this product's economics separable from the rest of Dada Development.
+	// Zero leaves the project to FinCore's own classification rules.
+	FinCoreProjectID int // FINCORE_PROJECT_ID
+	// FinCoreIncludeInternalOrgs lifts the filter that keeps the platform's own
+	// orgs out of revenue. Off by default: the only succeeded payment in
+	// production belongs to org "dada" -- the company paying itself -- and
+	// booking it as income would show revenue no customer ever sent.
+	FinCoreIncludeInternalOrgs bool // FINCORE_INCLUDE_INTERNAL_ORGS
+
 	// User-telemetry read store (multi-tenant Grafana Mimir). The monitoring
 	// product (user-pushed metrics) reads from here with a per-tenant
 	// X-Scope-OrgID header; infra/container/db metrics keep reading the plain
@@ -830,6 +855,11 @@ func Load() (*Config, error) {
 		AgentTokenUSDToRUB:          getEnvFloat("AGENT_TOKEN_USD_RUB_RATE", 80.0),
 		BegetK8SToken:               getEnv("BEGET_K8S_TOKEN", ""),
 		BegetK8SClusterSlug:         getEnv("BEGET_K8S_CLUSTER_SLUG", ""),
+		FinCoreBaseURL:              getEnv("FINCORE_BASE_URL", ""),
+		FinCoreToken:                getEnv("FINCORE_TOKEN", ""),
+		FinCoreTenantSlug:           getEnv("FINCORE_TENANT_SLUG", ""),
+		FinCoreProjectID:            getEnvInt("FINCORE_PROJECT_ID", 0),
+		FinCoreIncludeInternalOrgs:  getEnv("FINCORE_INCLUDE_INTERNAL_ORGS", "false") == "true",
 		UserMetricsQueryURL:         getEnv("USER_METRICS_QUERY_URL", ""),
 		UserMetricsQueryUser:        getEnv("USER_METRICS_QUERY_USER", ""),
 		UserMetricsQueryPass:        getEnv("USER_METRICS_QUERY_PASS", ""),
