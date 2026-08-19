@@ -118,7 +118,7 @@ func TestRetryPlatformFailedBuilds_ClearsTheHold(t *testing.T) {
 	buildID := seedPlatformFailedBuild(t, pool, gitRepoID, envID, "app-hold", "sha-hold-"+uuid.New().String()[:8], time.Hour, 0)
 	exec(t, pool, `UPDATE builds SET retry_after = NOW() + interval '1 hour' WHERE id = $1`, buildID)
 
-	if _, err := RetryPlatformFailedBuilds(ctx, pool, 10*time.Minute, 24*time.Hour, 3); err != nil {
+	if _, err := RetryPlatformFailedBuilds(ctx, pool, 10*time.Minute, 24*time.Hour, PlatformRecoveryMaxAttempts); err != nil {
 		t.Fatalf("RetryPlatformFailedBuilds: %v", err)
 	}
 	var hold *time.Time

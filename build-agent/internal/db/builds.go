@@ -733,3 +733,14 @@ func SupersededBuilds(ctx context.Context, pool *pgxpool.Pool, gitRepoID uuid.UU
 	}
 	return ids, rows.Err()
 }
+
+// InflightMaxAttempts bounds the retries a single build may take while it is
+// still in flight: a handful of seconds-to-minutes backoffs, meant for a
+// transport blip, not for an outage.
+const InflightMaxAttempts = 3
+
+// PlatformRecoveryMaxAttempts is the separate, larger budget the post-outage
+// recovery pass spends. It must stay above InflightMaxAttempts: a build only
+// reaches the recovery pass by first exhausting the in-flight budget, so a
+// shared counter makes the pass structurally unable to select anything.
+const PlatformRecoveryMaxAttempts = 6

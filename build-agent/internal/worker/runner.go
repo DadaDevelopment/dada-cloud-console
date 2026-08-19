@@ -666,10 +666,18 @@ const (
 
 // RetryPlatformFailures re-queues builds killed by the platform's own breakage
 // once it is healthy again, so a fixed outage stops leaving every affected
-// user with a red build only they can restart. Bounded by maxBuildAttempts, so
-// an outage that is still going resolves to a failed build, not a loop.
+// user with a red build only they can restart.
+//
+// The budget is db.PlatformRecoveryMaxAttempts, NOT maxBuildAttempts: a build
+// only ever reaches this pass by first exhausting the in-flight budget, whose
+// backoff spans minutes while an outage spans hours. Sharing one counter made
+// the pass unable to select any real platform failure -- on 2026-08-19 all 17
+// platform failures of the previous 14 days sat at attempt = maxBuildAttempts,
+// and the pass had never fired for an external user. The larger budget still
+// terminates: an outage that is still going burns the remaining attempts one
+// per sweep and the build ends failed, not looping.
 func (r *Runner) RetryPlatformFailures(ctx context.Context) {
-	ids, err := db.RetryPlatformFailedBuilds(ctx, r.pool, platformRetryMinAge, platformRetryMaxAge, maxBuildAttempts)
+	ids, err := db.RetryPlatformFailedBuilds(ctx, r.pool, platformRetryMinAge, platformRetryMaxAge, db.PlatformRecoveryMaxAttempts)
 	if err != nil {
 		log.Error().Err(err).Msg("retry platform-failed builds")
 		return
@@ -827,8 +835,9 @@ func retryDelayText(retryAt time.Time) string {
 }
 
 // maxBuildAttempts bounds automatic retries of a build that keeps hitting
-// transient failures.
-const maxBuildAttempts = 3
+// transient failures while it is still in flight. The post-outage recovery
+// pass deliberately spends a different budget -- see RetryPlatformFailures.
+const maxBuildAttempts = db.InflightMaxAttempts
 
 // isRetryable reports whether a build failure is worth another attempt: an
 // external Jenkins ABORTED (the console never aborts Jenkins itself) or a

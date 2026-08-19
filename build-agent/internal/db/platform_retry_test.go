@@ -50,7 +50,7 @@ func TestRetryPlatformFailedBuilds_RequeuesAndAudits(t *testing.T) {
 	gitRepoID := seedGitRepoOwned(t, pool, projectID, envID, "app-platfail", ownerID)
 	buildID := seedPlatformFailedBuild(t, pool, gitRepoID, envID, "app-platfail", "sha-platfail-"+uuid.New().String()[:8], time.Hour, 0)
 
-	ids, err := RetryPlatformFailedBuilds(ctx, pool, 10*time.Minute, 24*time.Hour, 3)
+	ids, err := RetryPlatformFailedBuilds(ctx, pool, 10*time.Minute, 24*time.Hour, PlatformRecoveryMaxAttempts)
 	if err != nil {
 		t.Fatalf("RetryPlatformFailedBuilds: %v", err)
 	}
@@ -103,9 +103,9 @@ func TestRetryPlatformFailedBuilds_LeavesUserFailuresAndFreshOnesAlone(t *testin
 	seedBuildStarted(t, pool, supersededRepo, envID, "app-superseded", "sha-new-"+uuid.New().String()[:8], "building", nil)
 
 	exhaustedRepo := seedGitRepoOwned(t, pool, projectID, envID, "app-exhausted", ownerID)
-	exhaustedBuild := seedPlatformFailedBuild(t, pool, exhaustedRepo, envID, "app-exhausted", "sha-exh-"+uuid.New().String()[:8], time.Hour, 3)
+	exhaustedBuild := seedPlatformFailedBuild(t, pool, exhaustedRepo, envID, "app-exhausted", "sha-exh-"+uuid.New().String()[:8], time.Hour, PlatformRecoveryMaxAttempts)
 
-	ids, err := RetryPlatformFailedBuilds(ctx, pool, 10*time.Minute, 24*time.Hour, 3)
+	ids, err := RetryPlatformFailedBuilds(ctx, pool, 10*time.Minute, 24*time.Hour, PlatformRecoveryMaxAttempts)
 	if err != nil {
 		t.Fatalf("RetryPlatformFailedBuilds: %v", err)
 	}
@@ -121,5 +121,31 @@ func TestRetryPlatformFailedBuilds_LeavesUserFailuresAndFreshOnesAlone(t *testin
 		if status, _, _ := buildRetryState(t, pool, id); status != "failed" {
 			t.Errorf("%s: status = %q, want failed", name, status)
 		}
+	}
+}
+
+// TestRetryPlatformFailedBuilds_RecoversBuildsThatExhaustedTheInflightBudget is
+// the shape every real platform failure has: the in-flight retries burn the
+// attempt budget within minutes of backoff, the outage lasts hours, and the
+// build ends at attempt == maxBuildAttempts. On 2026-08-19 all 17 platform
+// failures of the previous 14 days sat at exactly that number, so a recovery
+// pass sharing that budget could never select a single one of them.
+func TestRetryPlatformFailedBuilds_RecoversBuildsThatExhaustedTheInflightBudget(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	projectID, envID := seedProjectEnv(t, pool, "small")
+	ownerID := seedUser(t, pool)
+	repoID := seedGitRepoOwned(t, pool, projectID, envID, "app-burned", ownerID)
+	buildID := seedPlatformFailedBuild(t, pool, repoID, envID, "app-burned", "sha-burned-"+uuid.New().String()[:8], time.Hour, InflightMaxAttempts)
+
+	ids, err := RetryPlatformFailedBuilds(ctx, pool, 10*time.Minute, 24*time.Hour, PlatformRecoveryMaxAttempts)
+	if err != nil {
+		t.Fatalf("RetryPlatformFailedBuilds: %v", err)
+	}
+	if !containsID(ids, buildID) {
+		t.Fatalf("retried ids = %v, want the build that burned its in-flight budget (%s)", ids, buildID)
+	}
+	if status, _, attempt := buildRetryState(t, pool, buildID); status != "queued" || attempt != InflightMaxAttempts+1 {
+		t.Errorf("status = %q attempt = %d, want queued / %d", status, attempt, InflightMaxAttempts+1)
 	}
 }
