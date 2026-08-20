@@ -55,3 +55,15 @@ export function severityBarClass(severity: UsageSeverity): string {
   if (severity === "warn") return "h-full rounded-full bg-amber-500";
   return "h-full rounded-full bg-blue-600";
 }
+
+/**
+ * Formats an inode/file count with plain-ASCII thousands separators (a
+ * regular space, never U+00A0 - Intl's ru-RU grouping uses the non-breaking
+ * space, which is banned house-wide). Negative and non-finite input renders
+ * as an em dash rather than a misleading number.
+ */
+export function formatCount(n: number): string {
+  if (!isFinite(n) || n < 0) return "-";
+  const rounded = Math.round(n);
+  return rounded.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+}

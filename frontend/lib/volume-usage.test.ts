@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { evaluateVolumeUsage } from "./volume-usage.ts";
+import { evaluateVolumeUsage, formatCount } from "./volume-usage.ts";
 
 test("evaluateVolumeUsage: inodes worse than bytes drives crit severity off inodes, and bytes stay ok", () => {
   const view = evaluateVolumeUsage({ ratio: 0.74, inodes_used: 1310720, inodes_total: 1310720, inodes_ratio: 1 });
@@ -41,4 +41,21 @@ test("evaluateVolumeUsage: thresholds match the shipped bytes behavior (0.85 war
   assert.equal(evaluateVolumeUsage({ ratio: 0.85 }).bytesSeverity, "warn");
   assert.equal(evaluateVolumeUsage({ ratio: 0.94 }).bytesSeverity, "warn");
   assert.equal(evaluateVolumeUsage({ ratio: 0.95 }).bytesSeverity, "crit");
+});
+
+test("formatCount: groups thousands with a plain ASCII space, never a locale non-breaking space", () => {
+  assert.equal(formatCount(1310720), "1 310 720");
+  assert.equal(formatCount(0), "0");
+  assert.equal(formatCount(999), "999");
+  assert.equal(formatCount(1000), "1 000");
+  assert.equal(formatCount(42), "42");
+  const grouped = formatCount(1310720);
+  assert.equal(grouped.includes(String.fromCharCode(160)), false);
+});
+
+test("formatCount: rounds fractional input and rejects negative/non-finite as a dash", () => {
+  assert.equal(formatCount(1234.6), "1 235");
+  assert.equal(formatCount(-5), "-");
+  assert.equal(formatCount(NaN), "-");
+  assert.equal(formatCount(Infinity), "-");
 });

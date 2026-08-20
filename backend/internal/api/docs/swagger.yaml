@@ -1458,6 +1458,13 @@ definitions:
       type:
         type: string
     type: object
+  api.volumeCompactRequest:
+    properties:
+      path:
+        type: string
+    required:
+    - path
+    type: object
   api.writeAppFileRequest:
     properties:
       content:
@@ -11246,6 +11253,156 @@ paths:
       security:
       - BearerAuth: []
       summary: Upload a file into an app's persistent volume
+      tags:
+      - app
+  /projects/{projectId}/environments/{envId}/apps/{appName}/volume/maintenance/compact:
+    get:
+      description: 'Reads the status of the Job POST started for the given path: running,
+        succeeded, failed, or absent (no compact was ever started for this path, or
+        its Job has already been swept). On succeeded, also returns files_packed,
+        archive_path, archive_bytes, inodes_free_before/after and inodes_freed.'
+      operationId: getAppVolumeMaintenanceCompact
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: Directory that was (or will be) packed, relative to the volume
+          root
+        in: query
+        name: path
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with status, and on status=succeeded also files_packed/archive_path/archive_bytes/inodes_free_before/inodes_free_after/inodes_freed/finished_at;
+            on status=failed also reason and hint
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Read the result of an app's volume compact
+      tags:
+      - app
+    post:
+      consumes:
+      - application/json
+      description: 'Creates (or reuses, if one is already running or finished for
+        the same directory) a Kubernetes Job that mounts the app''s PersistentVolumeClaim
+        read-write, tars the given directory (relative to the volume root, or the
+        absolute form returned in the report''s top_dirs), verifies the archive before
+        touching anything, and only then deletes the original files. Does not wait
+        for the Job: poll GET on the same path with the same path query parameter
+        for the result. 400 when the path fails validation. 404 when the app has no
+        volume or is not a Kubernetes app.'
+      operationId: createAppVolumeMaintenanceCompact
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: Directory to pack, relative to the volume root
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.volumeCompactRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with job_name and status=running
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Pack a directory of an app's volume to recover inodes
       tags:
       - app
   /projects/{projectId}/environments/{envId}/apps/{appName}/volume/maintenance/report:

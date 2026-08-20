@@ -67,6 +67,15 @@ rules:
   # left to exec into. The Job is read-only (the claim is mounted ReadOnly)
   # and removes itself through ttlSecondsAfterFinished, so delete is not
   # granted. Reading the result needs pods/log, already granted above.
+  #
+  # The same rule also covers volume compact: the read-write Job that packs
+  # a directory into a tar.gz and deletes the originals once the archive is
+  # verified, recovering the inodes the report can only diagnose. It still
+  # needs no delete: its Job name is derived from app+path (see
+  # volumeCompactJobName in volume_compact_jobs.go), so a repeated POST for
+  # the same directory reuses the existing Job by name instead of needing to
+  # replace it, exactly like the report's Ensure. It also self-removes
+  # through ttlSecondsAfterFinished.
   - apiGroups: ["batch"]
     resources:
       - jobs

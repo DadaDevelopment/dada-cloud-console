@@ -29,6 +29,8 @@ import type {
   AppsResponse,
   AppFileListResponse,
   AppFileContent,
+  VolumeMaintenanceReport,
+  VolumeCompactStatus,
   UploadSourceArchiveResponse,
   InfraResponse,
   AppServersResponse,
@@ -621,8 +623,36 @@ export const appsApi = {
     ),
 
   volumeUsage: (projectId: string, envId: string, appName: string) =>
-    apiFetch<{ used_bytes: number; capacity_bytes: number; ratio: number }>(
-      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/volume/usage`
+    apiFetch<{
+      used_bytes: number;
+      capacity_bytes: number;
+      ratio: number;
+      binding_kind?: string;
+      inodes_used?: number;
+      inodes_total?: number;
+      inodes_ratio?: number;
+    }>(`/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/volume/usage`),
+
+  startVolumeMaintenanceReport: (projectId: string, envId: string, appName: string) =>
+    apiFetch<{ job_name: string; status: "running" }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/volume/maintenance/report`,
+      { method: "POST" }
+    ),
+
+  getVolumeMaintenanceReport: (projectId: string, envId: string, appName: string) =>
+    apiFetch<VolumeMaintenanceReport>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/volume/maintenance/report`
+    ),
+
+  startVolumeCompact: (projectId: string, envId: string, appName: string, path: string) =>
+    apiFetch<{ job_name: string; status: "running" }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/volume/maintenance/compact`,
+      { method: "POST", body: { path } }
+    ),
+
+  getVolumeCompactStatus: (projectId: string, envId: string, appName: string) =>
+    apiFetch<VolumeCompactStatus>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/volume/maintenance/compact`
     ),
 
   updateComposeVolume: (

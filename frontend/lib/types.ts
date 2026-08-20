@@ -581,6 +581,52 @@ export interface AppVolume {
   storage_class?: string;
 }
 
+/** One depth-2 subdirectory the volume maintenance report counted files under. */
+export interface VolumeMaintenanceTopDir {
+  path: string;
+  files: number;
+}
+
+/**
+ * Result of GET .../volume/maintenance/report. status is running while the
+ * scan Job has not finished, absent when nobody has started one yet (or it
+ * was already swept), and succeeded/failed once the Job is done. Only
+ * succeeded carries the usage and top_dirs fields; only failed carries
+ * reason/hint.
+ */
+export interface VolumeMaintenanceReport {
+  status: "running" | "succeeded" | "failed" | "absent";
+  inodes_total?: number;
+  inodes_used?: number;
+  inodes_free?: number;
+  inodes_ratio?: number;
+  bytes_total?: number;
+  bytes_used?: number;
+  bytes_free?: number;
+  top_dirs?: VolumeMaintenanceTopDir[];
+  truncated?: boolean;
+  finished_at?: string;
+  reason?: string;
+  hint?: string;
+}
+
+/**
+ * Result of GET .../volume/maintenance/compact. Mirrors VolumeMaintenanceReport's
+ * status vocabulary. succeeded carries the packing outcome; failed carries
+ * reason/hint.
+ */
+export interface VolumeCompactStatus {
+  status: "running" | "succeeded" | "failed" | "absent";
+  job_name?: string;
+  files_packed?: number;
+  archive_path?: string;
+  archive_bytes?: number;
+  inodes_free_before?: number;
+  inodes_free_after?: number;
+  reason?: string;
+  hint?: string;
+}
+
 /**
  * The CPU/memory envelope an app actually runs with, in Kubernetes quantity
  * notation. Always present on the read path: the backend resolves it from the

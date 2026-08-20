@@ -1,15 +1,20 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { appsApi, getToken, API_BASE_URL } from "@/lib/api";
-import type { AppVolume } from "@/lib/types";
+import type { AppVolume, VolumeMaintenanceReport, VolumeMaintenanceTopDir, VolumeCompactStatus } from "@/lib/types";
 import { useT } from "@/lib/i18n/console/context";
+import { Modal } from "@/components/ui/modal";
+import { formatBytes } from "@/components/charts/format";
 import {
   evaluateVolumeUsage,
   severityBarClass,
   severityTextClass,
+  formatCount,
   type VolumeUsage,
 } from "@/lib/volume-usage";
+
+const maintenancePollMs = 4_000;
 
 /**
  * Selectable Longhorn storage classes. longhorn-dev is the 2-replica default: it
@@ -74,13 +79,12 @@ export function StorageManager({ projectId, envId, appName, canEdit }: Props) {
     appsApi
       .volumeUsage(projectId, envId, appName)
       .then((d) => {
-        const withInodes = d as unknown as VolumeUsage;
         if (!cancelled) {
           setUsage({
-            ratio: withInodes.ratio,
-            inodes_used: withInodes.inodes_used,
-            inodes_total: withInodes.inodes_total,
-            inodes_ratio: withInodes.inodes_ratio,
+            ratio: d.ratio,
+            inodes_used: d.inodes_used,
+            inodes_total: d.inodes_total,
+            inodes_ratio: d.inodes_ratio,
           });
         }
       })
@@ -91,6 +95,97 @@ export function StorageManager({ projectId, envId, appName, canEdit }: Props) {
       cancelled = true;
     };
   }, [projectId, envId, appName, current]);
+
+  const [report, setReport] = useState<VolumeMaintenanceReport | null>(null);
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const reportPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const [compactTarget, setCompactTarget] = useState<string | null>(null);
+  const [compactConfirm, setCompactConfirm] = useState<string | null>(null);
+  const [compactStatus, setCompactStatus] = useState<VolumeCompactStatus | null>(null);
+  const [compactError, setCompactError] = useState<string | null>(null);
+  const compactPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (reportPollRef.current) clearInterval(reportPollRef.current);
+      if (compactPollRef.current) clearInterval(compactPollRef.current);
+    };
+  }, []);
+
+  function pollReport() {
+    if (reportPollRef.current) clearInterval(reportPollRef.current);
+    reportPollRef.current = setInterval(() => {
+      appsApi
+        .getVolumeMaintenanceReport(projectId, envId, appName)
+        .then((r) => {
+          setReport(r);
+          if (r.status !== "running" && reportPollRef.current) {
+            clearInterval(reportPollRef.current);
+            reportPollRef.current = null;
+          }
+        })
+        .catch(() => {
+          if (reportPollRef.current) {
+            clearInterval(reportPollRef.current);
+            reportPollRef.current = null;
+          }
+        });
+    }, maintenancePollMs);
+  }
+
+  async function startReport() {
+    setReportBusy(true);
+    setReportError(null);
+    try {
+      await appsApi.startVolumeMaintenanceReport(projectId, envId, appName);
+      setReport({ status: "running" });
+      pollReport();
+    } catch (e) {
+      setReportError(e instanceof Error ? e.message : t("apps.storage.report.startError"));
+    } finally {
+      setReportBusy(false);
+    }
+  }
+
+  function pollCompact() {
+    if (compactPollRef.current) clearInterval(compactPollRef.current);
+    compactPollRef.current = setInterval(() => {
+      appsApi
+        .getVolumeCompactStatus(projectId, envId, appName)
+        .then((r) => {
+          setCompactStatus(r);
+          if (r.status !== "running" && compactPollRef.current) {
+            clearInterval(compactPollRef.current);
+            compactPollRef.current = null;
+          }
+        })
+        .catch(() => {
+          if (compactPollRef.current) {
+            clearInterval(compactPollRef.current);
+            compactPollRef.current = null;
+          }
+        });
+    }, maintenancePollMs);
+  }
+
+  async function confirmCompact() {
+    const dirPath = compactConfirm;
+    if (!dirPath) return;
+    setCompactConfirm(null);
+    setCompactTarget(dirPath);
+    setCompactError(null);
+    setCompactStatus(null);
+    try {
+      await appsApi.startVolumeCompact(projectId, envId, appName, dirPath);
+      setCompactStatus({ status: "running" });
+      pollCompact();
+    } catch (e) {
+      setCompactError(e instanceof Error ? e.message : t("apps.storage.compact.startError"));
+      setCompactTarget(null);
+    }
+  }
 
   async function submit() {
     setBusy(true);
@@ -293,8 +388,141 @@ export function StorageManager({ projectId, envId, appName, canEdit }: Props) {
               </a>
             </p>
           )}
+
+          <div className="mt-6 border-t border-gray-200 dark:border-gray-800 pt-5">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+              {t("apps.storage.report.button")}
+            </h3>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("apps.storage.report.hint")}</p>
+
+            <button
+              onClick={startReport}
+              disabled={reportBusy || report?.status === "running"}
+              className="mt-3 inline-flex items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+            >
+              {(reportBusy || report?.status === "running") && (
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
+              )}
+              {report?.status === "running" ? t("apps.storage.report.busy") : t("apps.storage.report.button")}
+            </button>
+
+            {reportError && <p className="mt-3 text-sm text-red-600 dark:text-red-400">{reportError}</p>}
+
+            {report?.status === "failed" && (
+              <p className="mt-3 text-sm text-red-600 dark:text-red-400">
+                {t("apps.storage.report.failed")}
+                {report.reason ? `: ${report.reason}` : ""}
+              </p>
+            )}
+
+            {report?.status === "succeeded" && (
+              <div className="mt-3">
+                <p className="text-sm text-gray-700 dark:text-gray-300">
+                  {t("apps.storage.report.summary", {
+                    bytesUsed: formatBytes(report.bytes_used ?? 0),
+                    bytesTotal: formatBytes(report.bytes_total ?? 0),
+                    inodesUsed: formatCount(report.inodes_used ?? 0),
+                    inodesTotal: formatCount(report.inodes_total ?? 0),
+                    inodesFree: formatCount(report.inodes_free ?? 0),
+                  })}
+                </p>
+
+                {report.truncated && (
+                  <p className="mt-1.5 text-xs text-amber-600 dark:text-amber-500">
+                    {t("apps.storage.report.truncated")}
+                  </p>
+                )}
+
+                <p className="mt-4 text-xs font-medium text-gray-500 dark:text-gray-400">
+                  {t("apps.storage.report.topDirsTitle")}
+                </p>
+
+                {(report.top_dirs ?? []).length === 0 ? (
+                  <p className="mt-2 text-sm text-gray-400 dark:text-gray-500">{t("apps.storage.report.empty")}</p>
+                ) : (
+                  <div className="mt-2 overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-gray-50 dark:bg-gray-950 text-xs text-gray-500 dark:text-gray-400">
+                        <tr>
+                          <th className="px-3 py-2 font-medium">{t("apps.storage.report.colPath")}</th>
+                          <th className="px-3 py-2 font-medium">{t("apps.storage.report.colFiles")}</th>
+                          <th className="px-3 py-2 font-medium">{t("apps.storage.report.colAction")}</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                        {(report.top_dirs ?? []).map((dir: VolumeMaintenanceTopDir) => (
+                          <tr key={dir.path}>
+                            <td className="px-3 py-2 font-mono text-xs text-gray-900 dark:text-gray-100">
+                              {dir.path}
+                            </td>
+                            <td className="px-3 py-2 text-gray-700 dark:text-gray-300">{formatCount(dir.files)}</td>
+                            <td className="px-3 py-2">
+                              <button
+                                onClick={() => setCompactConfirm(dir.path)}
+                                disabled={!canEdit || compactStatus?.status === "running"}
+                                className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50 disabled:no-underline"
+                              >
+                                {compactTarget === dir.path && compactStatus?.status === "running"
+                                  ? t("apps.storage.compact.busy")
+                                  : t("apps.storage.compact.button")}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {compactError && <p className="mt-3 text-sm text-red-600 dark:text-red-400">{compactError}</p>}
+
+            {compactTarget && compactStatus?.status === "failed" && (
+              <p className="mt-3 text-sm text-red-600 dark:text-red-400">
+                {t("apps.storage.compact.failed")}
+                {compactStatus.reason ? `: ${compactStatus.reason}` : ""}
+              </p>
+            )}
+
+            {compactTarget && compactStatus?.status === "succeeded" && (
+              <p className="mt-3 text-sm text-green-600 dark:text-green-400">
+                {t("apps.storage.compact.success", {
+                  freed: formatCount(
+                    (compactStatus.inodes_free_after ?? 0) - (compactStatus.inodes_free_before ?? 0)
+                  ),
+                  archivePath: compactStatus.archive_path ?? "",
+                  archiveBytes: formatBytes(compactStatus.archive_bytes ?? 0),
+                })}
+              </p>
+            )}
+          </div>
         </div>
       )}
+
+      <Modal
+        isOpen={!!compactConfirm}
+        onClose={() => setCompactConfirm(null)}
+        title={t("apps.storage.compact.confirmTitle")}
+      >
+        <p className="text-sm text-gray-700 dark:text-gray-300">
+          {t("apps.storage.compact.confirmBody", { path: compactConfirm ?? "" })}
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            onClick={() => setCompactConfirm(null)}
+            className="rounded-lg border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+          >
+            {t("apps.storage.compact.cancel")}
+          </button>
+          <button
+            onClick={confirmCompact}
+            className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+          >
+            {t("apps.storage.compact.confirmAction")}
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }
