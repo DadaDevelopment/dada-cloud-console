@@ -19,8 +19,10 @@
  *    to prefetch the install url in a mount effect, which meant every page
  *    render, not just a deliberate click, wrote a StartGitAppInstall audit
  *    row and inflated the "started GitHub install" funnel count with page
- *    views. The render/click test below fails if that prefetch effect comes
- *    back; see the harness component at the bottom of this file.
+ *    views. The harness below proves the wiring pattern is click-driven, but
+ *    it renders its own button, not the page -- so a prefetch reintroduced
+ *    into the page would not fail it. The source guard at the bottom of this
+ *    file is what actually watches the page file itself.
  */
 
 import { test } from "node:test";
@@ -142,4 +144,42 @@ test("a connect button wired through connectToGithub fetches on click, not on mo
       root.unmount();
     });
   }
+});
+
+/**
+ * Source guard on the real page file.
+ *
+ * The harness test above proves the pattern, not the page: it renders a button
+ * this file owns, so a prefetch effect put back into git/import/page.tsx would
+ * leave it green. This test reads that page's source and fails if any of its
+ * mount effects fetch an install url again -- the audit row behind that call is
+ * the funnel's numerator, and it must only ever be written by a click.
+ */
+test("the git import page never fetches an install url from a mount effect", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+
+  const pagePath = join(
+    import.meta.dirname,
+    "..",
+    "app",
+    "(console)",
+    "projects",
+    "[projectId]",
+    "git",
+    "import",
+    "page.tsx"
+  );
+  const source = await readFile(pagePath, "utf8");
+  assert.match(source, /connectToGithub/, "page no longer wires through connectToGithub -- update this guard");
+
+  const effects = source.match(/useEffect\(\(\)[\s\S]*?\n {2}\}, \[[^\]]*\]\);/g) ?? [];
+  assert.ok(effects.length > 0, "found no useEffect blocks -- the guard's parser needs updating");
+
+  const offenders = effects.filter((body) => /installUrl\s*\(/.test(body));
+  assert.deepEqual(
+    offenders,
+    [],
+    "a mount effect fetches the install url again; that writes a StartGitAppInstall audit row per render"
+  );
 });
