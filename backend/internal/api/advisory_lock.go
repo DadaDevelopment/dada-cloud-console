@@ -41,6 +41,7 @@ const (
 	lockKeyDBMoveDrive       int64 = 0x64616461_000E
 	lockKeyDBTierReconcile   int64 = 0x64616461_000F
 	lockKeyDBArchiveDrive    int64 = 0x64616461_0010
+	lockKeyPlatformSelfHeal  int64 = 0x64616461_0011
 )
 
 // maxConcurrentAdvisoryLockHolders caps how many background loops may pin a

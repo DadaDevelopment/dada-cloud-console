@@ -72,6 +72,15 @@ const (
 // pull request followed and the app stayed crash-looping.
 const auditActionResolveAutofix = "ResolveAutofix"
 
+// PlatformSelfHealRebuild is written twice per app the sweeper acts on, same
+// intent/verdict split as the pair above: once with outcome=pending before
+// the rebuild is queued (metadata carries the cause_kind and the registry
+// note so the row is self-explanatory without a code lookup), and once more
+// with the real outcome once the INSERT INTO builds has actually run. The
+// two rows share OperationID, which is what makes them joinable -- see
+// platform_selfheal.go.
+const auditActionPlatformSelfHealRebuild = "PlatformSelfHealRebuild"
+
 const (
 	auditOutcomeSuccess = "success"
 	auditOutcomeFailure = "failure"

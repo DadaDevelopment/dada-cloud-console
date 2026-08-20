@@ -571,6 +571,16 @@ type Config struct {
 	// and refreshing regardless of this flag.
 	SignupEnabled bool // SIGNUP_ENABLED (default false)
 
+	// PlatformSelfHealEnabled (PLATFORM_SELFHEAL_ENABLED, default false) arms
+	// the sweeper that rebuilds apps already stuck on an image affected by a
+	// signature the platform has since fixed. Off by default for the same
+	// reason as the reactivation campaigns above: deploying the code and
+	// letting it queue real builds against a customer's linked repo are
+	// separate decisions, and the sweeper's own registry (see
+	// platform_selfheal.go) is the thing that should gate WHICH signatures it
+	// acts on once armed, not whether it runs at all.
+	PlatformSelfHealEnabled bool // PLATFORM_SELFHEAL_ENABLED (default false)
+
 	BillingEnabled          bool  // BILLING_ENABLED (default false) — guards metering ticker; billing endpoints always load plans read-only
 	BillingMeterIntervalSec int64 // BILLING_METER_INTERVAL_SECS (default 3600)
 	// BillingExemptOrgs (BILLING_EXEMPT_ORGS, comma-separated) never hit a quota
@@ -935,6 +945,7 @@ func Load() (*Config, error) {
 		GithubOAuthRedirectURI:      getEnv("GITHUB_OAUTH_REDIRECT_URI", ""),
 		MetrikaOAuthToken:           getEnv("METRIKA_OAUTH_TOKEN", ""),
 		SignupEnabled:               getEnv("SIGNUP_ENABLED", "false") == "true",
+		PlatformSelfHealEnabled:     getEnv("PLATFORM_SELFHEAL_ENABLED", "false") == "true",
 		BillingEnabled:              getEnv("BILLING_ENABLED", "false") == "true",
 		ReactivationCampaignEnabled: getEnv("REACTIVATION_CAMPAIGN_ENABLED", "false") == "true",
 		ReactivationFixWaveEnabled:  getEnv("REACTIVATION_FIX_WAVE_ENABLED", "false") == "true",
