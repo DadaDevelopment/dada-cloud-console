@@ -1,8 +1,10 @@
 package yookassa
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -457,5 +459,184 @@ func TestProcessWebhook_Renewal_ExtendsFromCurrentExpiry(t *testing.T) {
 	}
 	if notified != nil {
 		t.Fatal("expiry_notified_at must reset on renewal so reminders re-arm for the new term")
+	}
+}
+
+// cancelThenHangServer answers the create call by first canceling the
+// caller's own context, then never responding at all. It reproduces a
+// browser tab closed mid-checkout honestly: the client's HTTP round trip
+// observes the SAME context the caller passed to Checkout going dead, not a
+// mock standing in for that context.
+func cancelThenHangServer(t *testing.T, cancel context.CancelFunc) *Client {
+	t.Helper()
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cancel()
+		<-release
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(release) })
+	c := New("shop", "secret")
+	c.BaseURL = srv.URL
+	c.HTTPClient = srv.Client()
+	return c
+}
+
+// cancelAfterResponseTransport lets a create call succeed in full over the
+// wire and only THEN cancels the caller's context, deterministically -- the
+// response body is drained from the network before cancellation fires, so
+// CreatePayment always observes a complete, successful response. This
+// reproduces the second P0-PAY-CHECKOUT-class defect: cancellation landing
+// between a successful CreatePayment and the write that stores its
+// yk_payment_id/confirmation_url on the payments row.
+type cancelAfterResponseTransport struct {
+	base   http.RoundTripper
+	cancel context.CancelFunc
+}
+
+func (t *cancelAfterResponseTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.base.RoundTrip(req)
+	if err != nil {
+		return resp, err
+	}
+	body, readErr := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if readErr != nil {
+		return resp, readErr
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	t.cancel()
+	return resp, nil
+}
+
+func succeedThenCancelServer(t *testing.T, cancel context.CancelFunc) *Client {
+	t.Helper()
+	c := newFakeYooKassaServer(t, "pending")
+	c.HTTPClient = &http.Client{Transport: &cancelAfterResponseTransport{
+		base:   c.HTTPClient.Transport,
+		cancel: cancel,
+	}}
+	return c
+}
+
+// TestCheckout_CallerContextCanceledDuringCreatePayment_StillRecordsFailure
+// pins the live 2026-08-18 gap (eb4c8e48, orga dada): recordCheckoutFailureTx
+// used to run on the SAME context CreatePayment had just failed on. A
+// canceled context makes Pool.Begin fail too, so the payments row stayed a
+// bare "pending" forever (no webhook can ever arrive for a payment YooKassa
+// never created) AND CreatePaymentFailed was never written -- the durable
+// signal this whole mechanism exists to guarantee. Of four payments rows
+// where CreatePayment never created a payment, exactly one got an audit row
+// before this fix; eb4c8e48 landed three days after the first half of this
+// fix (08-15) and still has none.
+func TestCheckout_CallerContextCanceledDuringCreatePayment_StillRecordsFailure(t *testing.T) {
+	pool := testProviderPool(t)
+	orgID := "org-checkout-ctxcancel-" + uuid.NewString()[:8]
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM payments WHERE org_id = $1`, orgID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM audit_events WHERE resource_kind = 'Payment' AND resource_name = $1`, orgID)
+	})
+
+	before := testutil.ToFloat64(metrics.PaymentCreateFailuresCollectorForTest("transport"))
+
+	reqCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client := cancelThenHangServer(t, cancel)
+	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false, 1, 0)
+	plan := pricing.Plan{Key: "startup", Name: "Startup", PriceRUB: 990}
+
+	paymentID, confirmationURL, err := p.Checkout(reqCtx, orgID, plan, "buyer@example.com", "sub-checkout-ctxcancel", uuid.NewString(), false, uuid.Nil)
+	if err == nil {
+		t.Fatal("Checkout returned no error for a canceled caller context")
+	}
+	if paymentID != "" || confirmationURL != "" {
+		t.Fatalf("Checkout returned paymentID=%q confirmationURL=%q on cancellation, want both empty", paymentID, confirmationURL)
+	}
+
+	var status string
+	var rowCount int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*), max(status) FROM payments WHERE org_id = $1`, orgID,
+	).Scan(&rowCount, &status); err != nil {
+		t.Fatalf("read payment row: %v", err)
+	}
+	if rowCount != 1 {
+		t.Fatalf("payment rows for org=%d, want exactly 1", rowCount)
+	}
+	if status != "canceled" {
+		t.Fatalf("status=%q want canceled -- a bare pending row can never receive a webhook and would be stuck forever", status)
+	}
+
+	var auditCount int
+	var action, outcome string
+	if err := pool.QueryRow(context.Background(), `
+		SELECT count(*), max(action), max(outcome)
+		FROM audit_events WHERE resource_kind = 'Payment' AND resource_name = $1
+	`, orgID).Scan(&auditCount, &action, &outcome); err != nil {
+		t.Fatalf("read audit_events row: %v", err)
+	}
+	if auditCount != 1 {
+		t.Fatalf("audit_events rows for org=%d, want exactly 1 -- a canceled caller context must not silence the durable failure trail", auditCount)
+	}
+	if action != "CreatePaymentFailed" {
+		t.Fatalf("action=%q want CreatePaymentFailed", action)
+	}
+	if outcome != "failure" {
+		t.Fatalf("outcome=%q want failure", outcome)
+	}
+
+	after := testutil.ToFloat64(metrics.PaymentCreateFailuresCollectorForTest("transport"))
+	if after <= before {
+		t.Fatalf("dada_payment_create_failures_total{error_class=\"transport\"} did not increase: before=%v after=%v", before, after)
+	}
+}
+
+// TestCheckout_CallerContextCanceledAfterCreatePaymentSucceeds_StillStoresYkPaymentID
+// pins the second defect found alongside the first: a CreatePayment that
+// already succeeded at YooKassa, followed by cancellation landing on the
+// UPDATE that stores yk_payment_id/confirmation_url on the payments row.
+// Before this fix that UPDATE ran on the same canceled context and never
+// landed, so the row stayed pending with no yk_payment_id forever -- money
+// already moved at YooKassa, but the incoming webhook has nothing to match
+// and falls into OutcomeUnknownPayment, and the customer never gets their
+// plan.
+func TestCheckout_CallerContextCanceledAfterCreatePaymentSucceeds_StillStoresYkPaymentID(t *testing.T) {
+	pool := testProviderPool(t)
+	orgID := "org-checkout-ctxcancel-ok-" + uuid.NewString()[:8]
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM payments WHERE org_id = $1`, orgID)
+	})
+
+	reqCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client := succeedThenCancelServer(t, cancel)
+	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false, 1, 0)
+	plan := pricing.Plan{Key: "startup", Name: "Startup", PriceRUB: 990}
+
+	paymentID, confirmationURL, err := p.Checkout(reqCtx, orgID, plan, "buyer@example.com", "sub-checkout-ctxcancel-ok", uuid.NewString(), false, uuid.Nil)
+	if err != nil {
+		t.Fatalf("Checkout: %v (CreatePayment succeeded at YooKassa before cancellation; the write recording that must not fail)", err)
+	}
+	if paymentID == "" {
+		t.Fatal("Checkout returned empty payment id")
+	}
+	if confirmationURL == "" {
+		t.Fatal("Checkout returned empty confirmation url despite a successful CreatePayment")
+	}
+
+	var status, ykPaymentID, storedConfirmationURL string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT status, coalesce(yk_payment_id, ''), coalesce(confirmation_url, '') FROM payments WHERE id = $1`, paymentID,
+	).Scan(&status, &ykPaymentID, &storedConfirmationURL); err != nil {
+		t.Fatalf("read checkout row: %v", err)
+	}
+	if status != "pending" {
+		t.Fatalf("status=%q want pending", status)
+	}
+	if ykPaymentID == "" {
+		t.Fatal("yk_payment_id was not stored despite a successful CreatePayment -- the incoming webhook has nothing to match and the customer paid for nothing")
+	}
+	if storedConfirmationURL != confirmationURL {
+		t.Fatalf("stored confirmation_url=%q want %q", storedConfirmationURL, confirmationURL)
 	}
 }

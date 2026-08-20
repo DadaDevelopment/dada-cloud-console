@@ -104,6 +104,33 @@ var ErrReceiptEmailRequired = errors.New("yookassa: fiscal receipt requires a cu
 // "checkout failed".
 var ErrRecurringNotSupported = errors.New("yookassa: merchant account cannot save payment method for recurring charges")
 
+// checkoutWriteTimeout bounds a Checkout bookkeeping write detached from the
+// caller's own cancellation.
+const checkoutWriteTimeout = 5 * time.Second
+
+// checkoutBookkeepingContext derives the context Checkout records its
+// CreatePayment outcome on: it keeps the caller's values but drops its
+// cancellation, and adds a short deadline of its own.
+//
+// A canceled request context must not decide whether the outcome of a payment
+// attempt gets recorded. Sharing one context between the attempt and its
+// witness means the failure that kills the attempt kills the record of it too:
+// Pool.Begin refuses to start a transaction on a dead context, so the row
+// stays a bare pending nobody can explain and CreatePaymentFailed is never
+// written. Live shape of the class (2026-08-18, payment eb4c8e48, and two
+// 2026-08-14 rows before it): CreatePayment did not create a payment and no
+// audit row exists to say so; a canceled caller explains it, but the pod logs
+// had rotated, so the cause of those particular rows stays unproven.
+//
+// The same failure mode applies to the success path, where it costs more: a
+// CreatePayment that already succeeded at YooKassa but whose yk_payment_id
+// update loses the race with cancellation leaves a payments row that can never
+// match the incoming webhook -- the customer is charged and the plan never
+// arrives.
+func checkoutBookkeepingContext(reqCtx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(reqCtx), checkoutWriteTimeout)
+}
+
 // requireReceiptEmail refuses a charge that fiscalization makes impossible.
 // With SendReceipt on, an empty email is not a missing nicety: the shop rejects
 // the whole payment, and finding that out from a 400 after a pending row exists
@@ -209,7 +236,10 @@ func (p *YooKassaProvider) Checkout(ctx context.Context, orgID string, plan pric
 	if err != nil {
 		errorClass := classifyPaymentError(err)
 		metrics.RecordPaymentCreateFailure(errorClass)
-		if uerr := p.recordCheckoutFailureTx(ctx, id, actorID, orgID, plan.Key, amountValue, errorClass, err); uerr != nil {
+		bookkeepCtx, cancel := checkoutBookkeepingContext(ctx)
+		uerr := p.recordCheckoutFailureTx(bookkeepCtx, id, actorID, orgID, plan.Key, amountValue, errorClass, err)
+		cancel()
+		if uerr != nil {
 			return "", "", fmt.Errorf("yookassa: create payment: %w (also failed to mark canceled/audit: %v)", err, uerr)
 		}
 		if saveMethod && errorClass == "yk_forbidden" {
@@ -218,9 +248,11 @@ func (p *YooKassaProvider) Checkout(ctx context.Context, orgID string, plan pric
 		return "", "", fmt.Errorf("yookassa: create payment: %w", err)
 	}
 
-	_, err = p.Pool.Exec(ctx, `
+	bookkeepCtx, cancel := checkoutBookkeepingContext(ctx)
+	_, err = p.Pool.Exec(bookkeepCtx, `
 		UPDATE payments SET yk_payment_id = $1, confirmation_url = $2, updated_at = $3 WHERE id = $4
 	`, payment.ID, payment.Confirmation.URL, time.Now().UTC(), id)
+	cancel()
 	if err != nil {
 		return "", "", fmt.Errorf("yookassa: store yk payment id: %w", err)
 	}
