@@ -58,3 +58,22 @@ export function buildFailureSummary(build: {
 export function isRepoFixable(failReason?: string | null): boolean {
   return failReason !== "git_auth_failed" && failReason !== "platform_error" && failReason !== "app_deleted";
 }
+
+/**
+ * Reports whether the user can do anything about a failed build by
+ * reconnecting the repository.
+ *
+ * Not the complement of {@link isRepoFixable}: that predicate answers "can the
+ * auto-fix agent help", and it says no to three different reasons for three
+ * different reasons. Only `git_auth_failed` is actually about the git link.
+ * `platform_error` is our own failure (kkartov, 2026-08-19: five builds died on
+ * `load repo 00000000-...: no rows in result set`, a race in our delete path),
+ * and `app_deleted` means the build was cancelled because the app went away.
+ * Sending either of those to "reconnect the repository" bills our fault to the
+ * user's git setup and costs them a round trip that cannot help.
+ *
+ * @param failReason - the build's `fail_reason`
+ */
+export function needsRepoReconnect(failReason?: string | null): boolean {
+  return failReason === "git_auth_failed";
+}

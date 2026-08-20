@@ -10,7 +10,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { BuildStatusBadge, isBuildActive } from "@/components/deploy/build-status-badge";
 import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
-import { buildFailureSummary, isRepoFixable } from "@/lib/build-failure";
+import { buildFailureSummary, isRepoFixable, needsRepoReconnect } from "@/lib/build-failure";
 import { useT } from "@/lib/i18n/console/context";
 import { trackUxEvent } from "@/lib/ux-telemetry";
 import { resolveCommit, formatCommitLabel } from "@/lib/build-commit";
@@ -300,7 +300,7 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appUrlSt
             <BuildProvenance build={build} className="mt-1 min-w-0" />
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            {canDeploy && hasGitRepo && !isRepoFixable(build.fail_reason) && (
+            {canDeploy && hasGitRepo && needsRepoReconnect(build.fail_reason) && (
               <Link
                 href={`/projects/${projectId}/apps/${appName}/settings?tab=git${envId ? `&envId=${envId}` : ""}`}
                 data-ux="app_latest_build:reconnect_repo"
@@ -328,7 +328,7 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appUrlSt
                 disabled={rebuilding || autofixing}
                 data-ux="app_latest_build:rebuild"
                 className={
-                  hasGitRepo
+                  hasGitRepo && (needsRepoReconnect(build.fail_reason) || isRepoFixable(build.fail_reason))
                     ? "rounded-lg border border-red-200 dark:border-red-900 bg-white dark:bg-gray-900 px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                     : "rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-red-700 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                 }
