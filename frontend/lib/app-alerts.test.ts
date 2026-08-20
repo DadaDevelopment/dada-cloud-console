@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  alertChipAction,
   getOperationalAppAlerts,
   missingEnvVarKey,
   offersStartCommandFix,
@@ -100,4 +101,57 @@ test("offersStartCommandFix refuses every cause the start command cannot fix", (
   assert.equal(offersStartCommandFix("resource_limit"), false);
   assert.equal(offersStartCommandFix("missing_env_var"), false);
   assert.equal(offersStartCommandFix(undefined), false);
+});
+
+test("alertChipAction sends a volume alert straight to Storage", () => {
+  const alert: AppAlert = { type: "volume", detected_at: "2026-08-20T00:00:00Z" };
+  assert.deepEqual(alertChipAction(alert), {
+    labelKey: "apps.alerts.volume.cta",
+    uxMarker: "apps_alert_chip:volume",
+  });
+});
+
+test("alertChipAction sends a url alert to the logs it shares with the diagnosis text", () => {
+  const alert: AppAlert = { type: "url", detected_at: "2026-08-20T00:00:00Z" };
+  assert.deepEqual(alertChipAction(alert), {
+    labelKey: "apps.alerts.url.cta",
+    uxMarker: "apps_alert_chip:url",
+  });
+});
+
+test("alertChipAction sends a missing_env_var crash to adding the variable, not just the logs", () => {
+  const alert: AppAlert = { type: "crash", cause_kind: "missing_env_var", detected_at: "2026-08-20T00:00:00Z" };
+  assert.deepEqual(alertChipAction(alert), {
+    labelKey: "apps.alerts.crash.cause.missingEnvVar.cta",
+    uxMarker: "apps_alert_chip:crash",
+  });
+});
+
+test("alertChipAction sends both start-command crash causes to the same start-command lever", () => {
+  const needsArgs: AppAlert = { type: "crash", cause_kind: "app_needs_args", detected_at: "2026-08-20T00:00:00Z" };
+  const entrypointImport: AppAlert = {
+    type: "crash",
+    cause_kind: "app_entrypoint_import",
+    detected_at: "2026-08-20T00:00:00Z",
+  };
+  assert.equal(alertChipAction(needsArgs).labelKey, "apps.alerts.crash.cause.needsArgs.cta");
+  assert.equal(alertChipAction(entrypointImport).labelKey, "apps.alerts.crash.cause.needsArgs.cta");
+});
+
+test("alertChipAction sends a volume-shaped crash cause (bytes or inodes) to Storage", () => {
+  const bytes: AppAlert = { type: "crash", cause_kind: "platform_storage", detected_at: "2026-08-20T00:00:00Z" };
+  const inodes: AppAlert = {
+    type: "crash",
+    cause_kind: "platform_storage_inodes",
+    detected_at: "2026-08-20T00:00:00Z",
+  };
+  assert.equal(alertChipAction(bytes).labelKey, "apps.alerts.volume.cta");
+  assert.equal(alertChipAction(inodes).labelKey, "apps.alerts.volume.cta");
+});
+
+test("alertChipAction never invents a lever for a crash cause it cannot name", () => {
+  const appCode: AppAlert = { type: "crash", cause_kind: "app_code", detected_at: "2026-08-20T00:00:00Z" };
+  const empty: AppAlert = { type: "crash", detected_at: "2026-08-20T00:00:00Z" };
+  assert.equal(alertChipAction(appCode).labelKey, "apps.alerts.crash.cta");
+  assert.equal(alertChipAction(empty).labelKey, "apps.alerts.crash.cta");
 });

@@ -25,7 +25,7 @@ import { Globe, Database, ChevronDown, AlertTriangle } from "lucide-react";
 import { AppPreviewPane } from "@/components/app-preview-pane";
 import { LogsViewer } from "@/components/logs-viewer";
 import { classifyVMResource, extractIngressSpec, extractDatabaseSpec } from "@/lib/vm-resources";
-import { getAppAlerts, hasAlertType, type AppAlert } from "@/lib/app-alerts";
+import { alertChipAction, getAppAlerts, hasAlertType, type AppAlert } from "@/lib/app-alerts";
 import { normalizeAppUrlStatus, appUrlReasonMessageKey } from "@/lib/app-url-status";
 import { Tooltip } from "@/components/ui/tooltip";
 
@@ -656,6 +656,9 @@ function AppRow({ app, env, projectId, expanded, onToggle, t }: AppRowProps) {
   const db = resType === "database" ? extractDatabaseSpec(app) : null;
   const appHref = `/projects/${projectId}/apps/${app.name}?envId=${env.id}`;
   const alerts = getAppAlerts(app);
+  const crashAlert = alerts.find((a) => a.type === "crash");
+  const volumeAlert = alerts.find((a) => a.type === "volume");
+  const urlAlert = alerts.find((a) => a.type === "url");
   const hasCrashAlert = hasAlertType(alerts, "crash");
   const hasVolumeAlert = hasAlertType(alerts, "volume");
   const hasURLAlert = hasAlertType(alerts, "url");
@@ -703,20 +706,41 @@ function AppRow({ app, env, projectId, expanded, onToggle, t }: AppRowProps) {
               {app.demo_expires_at && (
                 <DemoAppChip projectId={projectId} envId={env.id} appName={app.name} expiresAt={app.demo_expires_at} />
               )}
-              {hasCrashAlert && (
-                <span className="inline-flex items-center rounded-full bg-red-100 dark:bg-red-950/60 px-2 py-0.5 text-xs font-medium text-red-700 dark:text-red-300">
+              {hasCrashAlert && crashAlert && (
+                <Link
+                  href={appHref}
+                  onClick={(e) => e.stopPropagation()}
+                  data-ux={alertChipAction(crashAlert).uxMarker}
+                  className="inline-flex items-center gap-1 rounded-full bg-red-100 dark:bg-red-950/60 px-2 py-0.5 text-xs font-medium text-red-700 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900 transition-colors"
+                >
                   {t("apps.alerts.chip.crash")}
-                </span>
+                  <span aria-hidden="true">·</span>
+                  {t(alertChipAction(crashAlert).labelKey)}
+                </Link>
               )}
-              {hasVolumeAlert && (
-                <span className="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-950/60 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+              {hasVolumeAlert && volumeAlert && (
+                <Link
+                  href={appHref}
+                  onClick={(e) => e.stopPropagation()}
+                  data-ux={alertChipAction(volumeAlert).uxMarker}
+                  className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-950/60 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900 transition-colors"
+                >
                   {t("apps.alerts.chip.volume")}
-                </span>
+                  <span aria-hidden="true">·</span>
+                  {t(alertChipAction(volumeAlert).labelKey)}
+                </Link>
               )}
-              {hasURLAlert && (
-                <span className="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-950/60 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+              {hasURLAlert && urlAlert && (
+                <Link
+                  href={appHref}
+                  onClick={(e) => e.stopPropagation()}
+                  data-ux={alertChipAction(urlAlert).uxMarker}
+                  className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-950/60 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900 transition-colors"
+                >
                   {t("apps.alerts.chip.url")}
-                </span>
+                  <span aria-hidden="true">·</span>
+                  {t(alertChipAction(urlAlert).labelKey)}
+                </Link>
               )}
             </div>
             <p className="mt-0.5 truncate font-mono text-xs text-gray-400 dark:text-gray-500">{subtitle}</p>

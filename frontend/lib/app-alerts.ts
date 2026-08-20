@@ -132,6 +132,52 @@ export function hasAlertType(alerts: AppAlert[], type: AppAlertType): boolean {
   return alerts.some((a) => a.type === type);
 }
 
+export interface AlertChipAction {
+  labelKey: string;
+  uxMarker: string;
+}
+
+/**
+ * Names the one next click an alert chip on the apps list row should offer,
+ * instead of only coloring in a diagnosis. Backlog 0412: 4 of 7 live stuck
+ * registrations end their audit trail on ViewApps because the row told the
+ * owner something was wrong and gave them nowhere to go next.
+ *
+ * The label is picked by `type` first, then by `cause_kind` for `"crash"`
+ * alerts, reusing the same i18n keys the app detail page's
+ * AppAlertsBanner already renders for that cause so the chip's promise and
+ * the page it lands on say the same thing. `"volume"` and `"url"` alerts
+ * have no `cause_kind` of their own and always resolve to their one fix.
+ * A `"crash"` alert whose `cause_kind` is missing, empty, or not one of the
+ * kinds with a dedicated lever (including plain `"app_code"`) falls back to
+ * "view logs" — this function must never invent a lever the backend did not
+ * report, per AppAlertCauseKind's doc comment above.
+ *
+ * `uxMarker` is stable per alert `type` only: `"apps_alert_chip:crash"` /
+ * `":volume"` / `":url"`. M2 (backlog 0412) measures whether ViewApps stops
+ * being a dead end by this marker landing in ux_events, independent of
+ * which cause produced the chip.
+ */
+export function alertChipAction(alert: AppAlert): AlertChipAction {
+  const uxMarker = `apps_alert_chip:${alert.type}`;
+  if (alert.type === "volume") {
+    return { labelKey: "apps.alerts.volume.cta", uxMarker };
+  }
+  if (alert.type === "url") {
+    return { labelKey: "apps.alerts.url.cta", uxMarker };
+  }
+  if (alert.cause_kind === "missing_env_var") {
+    return { labelKey: "apps.alerts.crash.cause.missingEnvVar.cta", uxMarker };
+  }
+  if (offersStartCommandFix(alert.cause_kind)) {
+    return { labelKey: "apps.alerts.crash.cause.needsArgs.cta", uxMarker };
+  }
+  if (alert.cause_kind === "platform_storage" || alert.cause_kind === "platform_storage_inodes") {
+    return { labelKey: "apps.alerts.volume.cta", uxMarker };
+  }
+  return { labelKey: "apps.alerts.crash.cta", uxMarker };
+}
+
 /**
  * True when the crash cause is one the app's owner fixes by giving the app an
  * explicit start command. Both kinds here say the same thing about the same
