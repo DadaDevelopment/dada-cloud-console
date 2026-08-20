@@ -1340,6 +1340,7 @@ func (h *Handler) UpdateAppProfile(c *gin.Context) {
 
 type updateAppStartCommandRequest struct {
 	StartCommand string `json:"start_command"`
+	Redeploy     bool   `json:"redeploy"`
 }
 
 // ApplyStartCommandUpdate sets or clears the start_command key on an app's
@@ -1372,16 +1373,31 @@ func ApplyStartCommandUpdate(cur map[string]any, startCommand string) map[string
 // doDeployImageVersion carries into renderer.AppSpec.StartCommand on the app's
 // next deploy.
 //
-// This endpoint deliberately does not enqueue a redeploy of its own.
+// By default this endpoint does not enqueue a redeploy of its own.
 // UpdateAppProfile used to enqueue one on every profile change and it took
 // internal/telemost-bot's hand-maintained values.yaml apart in production on
 // 2026-08-02 (see the comment on UpdateAppProfile): a bare config edit must
 // never force a re-render out from under an app the console does not fully
 // own. The new value takes effect on the app's next organic deploy.
 //
+// The caller can opt in with "redeploy": true, which enqueues the same
+// DeployImageVersion re-render queueEnvApply uses for env vars -- the app's
+// CURRENT image, re-rendered so the new start_command reaches the running
+// pods immediately -- inside the SAME transaction as the config write, so
+// the two either both land or both roll back. This is for the one path
+// where forcing a re-render is exactly what the user asked for: the
+// crash-banner's start-command repair flow (offersStartCommandFix in
+// frontend/lib/app-alerts.ts), where a first-day user's app is already
+// crashlooping and "save" with no redeploy leaves them stuck on the old,
+// broken command after doing exactly what the banner told them to do. The
+// plain settings-page editor never sets it, so an unrelated config edit
+// still cannot force a re-render the way UpdateAppProfile once did. Apps
+// with no image yet are skipped the same way queueEnvApply skips them --
+// there is nothing to deploy -- and the start-command write still succeeds.
+//
 // @ID          updateAppStartCommand
 // @Summary     Set an app's start command
-// @Description Sets or clears the shell command the app is started with, replacing the image CMD (rendered as command: ["sh","-c"] plus this string). Fixes an app that crashloops because its image has no usable start command. Synchronous; takes effect on the app's next deploy rather than forcing one immediately. Empty string clears the value.
+// @Description Sets or clears the shell command the app is started with, replacing the image CMD (rendered as command: ["sh","-c"] plus this string). Fixes an app that crashloops because its image has no usable start command. Synchronous; takes effect on the app's next deploy by default. Pass "redeploy": true to also enqueue an immediate re-render of the app's current image in the same transaction (used by the crash-recovery flow); the response then includes the queued operation. Empty string clears the value.
 // @Tags        app
 // @Accept      json
 // @Produce     json
@@ -1490,9 +1506,30 @@ func (h *Handler) UpdateAppStartCommand(c *gin.Context) {
 		return
 	}
 
+	var redeployOp *models.Operation
+	if req.Redeploy {
+		if image, imgErr := h.lastDeployedImage(ctx, tx, projectID, envID, appName); imgErr == nil && image != "" {
+			redeployOp, err = enqueueRedeployOp(ctx, tx, claims.UserID, projectID, envID, appName, image)
+			if err != nil {
+				respondError(c, http.StatusInternalServerError, "failed to queue redeploy")
+				return
+			}
+		}
+	}
+
 	if err = tx.Commit(ctx); err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to update app")
 		return
+	}
+
+	auditMetadata := map[string]string{"start_command": req.StartCommand}
+	message := "Start-command arguments updated; takes effect on the app's next deploy"
+	if redeployOp != nil {
+		auditMetadata["redeploy_operation_id"] = redeployOp.ID.String()
+		message = "Start-command arguments updated; redeploy queued"
+	} else if req.Redeploy {
+		auditMetadata["redeploy_requested"] = "true"
+		auditMetadata["redeploy_skipped_reason"] = "no_deployed_image"
 	}
 
 	h.recordAudit(ctx, claims.UserID, auditEntry{
@@ -1502,13 +1539,17 @@ func (h *Handler) UpdateAppStartCommand(c *gin.Context) {
 		ResourceKind:  "App",
 		ResourceName:  appName,
 		Outcome:       auditOutcomeSuccess,
-		Metadata:      map[string]string{"start_command": req.StartCommand},
+		Metadata:      auditMetadata,
 	})
 
-	c.JSON(http.StatusOK, gin.H{
+	resp := gin.H{
 		"start_command": req.StartCommand,
-		"message":       "Start-command arguments updated; takes effect on the app's next deploy",
-	})
+		"message":       message,
+	}
+	if redeployOp != nil {
+		resp["operation"] = redeployOp
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // quantityBytes converts a restricted k8s quantity (Mi/Gi/Ti, validated by

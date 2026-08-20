@@ -478,7 +478,7 @@ export default function AppDetailPage() {
         alerts={alerts}
         logsHref={`/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}#logs`}
         storageHref={`/projects/${projectId}/apps/${appName}/settings?tab=storage${envId ? `&envId=${envId}` : ""}`}
-        startCommandHref={`/projects/${projectId}/apps/${appName}/settings?tab=config${envId ? `&envId=${envId}` : ""}#start-command`}
+        startCommandHref={`/projects/${projectId}/apps/${appName}/settings?tab=config${envId ? `&envId=${envId}` : ""}&repair=start-command#start-command`}
         envVarsHref={`/projects/${projectId}/apps/${appName}/settings?tab=env${envId ? `&envId=${envId}` : ""}`}
         projectId={projectId}
         envId={envId}

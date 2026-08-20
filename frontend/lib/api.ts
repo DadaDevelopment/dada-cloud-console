@@ -651,13 +651,24 @@ export const appsApi = {
   /**
    * Overrides the shell-style arguments the app's container starts with.
    * Empty string clears the override and returns the app to the platform
-   * default baked into the image. Does not enqueue a redeploy of its own —
-   * takes effect on the app's next organic deploy.
+   * default baked into the image. By default does not enqueue a redeploy of
+   * its own — takes effect on the app's next organic deploy. Pass
+   * `redeploy: true` (used by the crash-banner repair flow only — see
+   * StartCommandEditor's `autoRedeploy` prop) to also queue an immediate
+   * re-render of the app's current image atomically with the save; the
+   * response then carries `operation` for the caller to poll to a terminal
+   * status.
    */
-  updateStartCommand: (projectId: string, envId: string, appName: string, startCommand: string) =>
-    apiFetch<{ start_command: string; message: string }>(
+  updateStartCommand: (
+    projectId: string,
+    envId: string,
+    appName: string,
+    startCommand: string,
+    redeploy?: boolean
+  ) =>
+    apiFetch<{ start_command: string; message: string; operation?: Operation }>(
       `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/start-command`,
-      { method: "PATCH", body: { start_command: startCommand } }
+      { method: "PATCH", body: { start_command: startCommand, redeploy: !!redeploy } }
     ),
 
   // Roll a compose (VM) app back to its previous committed compose.yaml + redeploy.

@@ -235,7 +235,13 @@ export default function AppSettingsPage() {
               canEdit={canEdit}
               isUploadedSource={isUploadedSource}
             />
-            <StartCommandEditor projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} />
+            <StartCommandEditor
+              projectId={projectId}
+              envId={envId}
+              appName={appName}
+              canEdit={canEdit}
+              autoRedeploy={searchParams.get("repair") === "start-command"}
+            />
           </div>
         )
       )}

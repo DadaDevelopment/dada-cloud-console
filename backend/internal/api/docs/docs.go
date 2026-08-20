@@ -12410,7 +12410,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Sets or clears the shell command the app is started with, replacing the image CMD (rendered as command: [\"sh\",\"-c\"] plus this string). Fixes an app that crashloops because its image has no usable start command. Synchronous; takes effect on the app's next deploy rather than forcing one immediately. Empty string clears the value.",
+                "description": "Sets or clears the shell command the app is started with, replacing the image CMD (rendered as command: [\"sh\",\"-c\"] plus this string). Fixes an app that crashloops because its image has no usable start command. Synchronous; takes effect on the app's next deploy by default. Pass \"redeploy\": true to also enqueue an immediate re-render of the app's current image in the same transaction (used by the crash-recovery flow); the response then includes the queued operation. Empty string clears the value.",
                 "consumes": [
                     "application/json"
                 ],
@@ -23050,6 +23050,9 @@ const docTemplate = `{
         "api.updateAppStartCommandRequest": {
             "type": "object",
             "properties": {
+                "redeploy": {
+                    "type": "boolean"
+                },
                 "start_command": {
                     "type": "string"
                 }

@@ -544,6 +544,10 @@ export const apps: Messages = {
   "apps.startCommand.saved": { ru: "Сохранено — применится при следующем деплое", en: "Saved — applies on the next deploy" },
   "apps.startCommand.error.load": { ru: "Не удалось загрузить команду запуска", en: "Failed to load the start command" },
   "apps.startCommand.error.save": { ru: "Не удалось сохранить", en: "Save failed" },
+  "apps.startCommand.applying": { ru: "Применяем — перезапускаем приложение с новой командой…", en: "Applying — restarting the app with the new command…" },
+  "apps.startCommand.applied": { ru: "Применено — приложение перезапущено с новой командой", en: "Applied — the app restarted with the new command" },
+  "apps.startCommand.error.apply": { ru: "Команда сохранена, но перезапуск не удался — приложение всё ещё работает со старой командой", en: "The command was saved, but the restart failed — the app is still running the old command" },
+  "apps.startCommand.error.applyTimeout": { ru: "Команда сохранена, но перезапуск занимает дольше обычного — проверьте статус приложения", en: "The command was saved, but the restart is taking longer than usual — check the app's status" },
   "apps.env.heading": { ru: "Переменные окружения", en: "Environment variables" },
   "apps.env.subtitle": {
     ru: "Подставляются в приложение при запуске. После сохранения приложение передеплоится само. Секреты шифруются при хранении.",

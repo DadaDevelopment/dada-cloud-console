@@ -48,29 +48,43 @@ type envVar struct {
 // skipped: there is nothing to deploy, and their env is picked up by the deploy
 // that materializes them.
 func (h *Handler) queueEnvApply(c *gin.Context, claims *auth.Claims, projectID, envID uuid.UUID, appName string) (*models.Operation, bool) {
-	image, err := h.lastDeployedImage(c.Request.Context(), projectID, envID, appName)
+	image, err := h.lastDeployedImage(c.Request.Context(), h.pool, projectID, envID, appName)
 	if err != nil || image == "" {
 		return nil, false
 	}
-
-	payloadBytes, err := json.Marshal(models.DeployImageVersionPayload{AppName: appName, Image: image})
+	op, err := enqueueRedeployOp(c.Request.Context(), h.pool, claims.UserID, projectID, envID, appName, image)
 	if err != nil {
 		return nil, false
 	}
+	return op, true
+}
+
+// enqueueRedeployOp inserts the DeployImageVersion operation that
+// queueEnvApply and UpdateAppStartCommand's opt-in redeploy both use to
+// force a re-render of an app's CURRENT image, so a config change stored
+// only in the database (env var, start command) actually reaches the
+// running pods. Takes a pgxQuerier so callers can run it inside their own
+// transaction (start-command's opt-in redeploy commits atomically with the
+// config write) or directly against the pool (queueEnvApply).
+func enqueueRedeployOp(ctx context.Context, q pgxQuerier, actorID, projectID, envID uuid.UUID, appName, image string) (*models.Operation, error) {
+	payloadBytes, err := json.Marshal(models.DeployImageVersionPayload{AppName: appName, Image: image})
+	if err != nil {
+		return nil, err
+	}
 
 	var op models.Operation
-	row := h.pool.QueryRow(c.Request.Context(),
+	row := q.QueryRow(ctx,
 		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
 		 VALUES ($1, $2, $3, 'DeployImageVersion', 'App', $4, 'Created', $5)
 		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
 		           status, payload, validation_result, git_commit, git_path, argo_application,
 		           error_code, error_message, created_at, updated_at`,
-		claims.UserID, projectID, envID, appName, payloadBytes,
+		actorID, projectID, envID, appName, payloadBytes,
 	)
 	if err := scanOperation(row, &op); err != nil {
-		return nil, false
+		return nil, err
 	}
-	return &op, true
+	return &op, nil
 }
 
 // lastDeployedImage resolves the image an env-triggered re-deploy should
@@ -97,9 +111,9 @@ func (h *Handler) queueEnvApply(c *gin.Context, claims *auth.Claims, projectID, 
 // that class of app -- but it does mean an app that was ever redeployed
 // through the git/build flow always prefers that ledger over the cache, even
 // if a later direct-image deploy landed more recently outside it.
-func (h *Handler) lastDeployedImage(ctx context.Context, projectID, envID uuid.UUID, appName string) (string, error) {
+func (h *Handler) lastDeployedImage(ctx context.Context, q pgxQuerier, projectID, envID uuid.UUID, appName string) (string, error) {
 	var image string
-	err := h.pool.QueryRow(ctx,
+	err := q.QueryRow(ctx,
 		`SELECT image_uri FROM deployments
 		 WHERE environment_id = $1 AND app_name = $2
 		 ORDER BY created_at DESC LIMIT 1`,
@@ -112,7 +126,7 @@ func (h *Handler) lastDeployedImage(ctx context.Context, projectID, envID uuid.U
 		return "", err
 	}
 
-	err = h.pool.QueryRow(ctx,
+	err = q.QueryRow(ctx,
 		`SELECT COALESCE(summary_json->>'image', '') FROM resource_snapshots
 		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3`,
 		projectID, envID, appName,
