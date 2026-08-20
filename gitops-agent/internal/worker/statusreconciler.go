@@ -1197,11 +1197,11 @@ func (r *StatusReconciler) reconcile(ctx context.Context) map[snapKey]bool {
 		if env := observedResources(la); len(env) > 0 {
 			patchFields["observed_resources"] = env
 		}
-		if la.reason != "" {
-			patchFields["reason"] = la.reason
-		}
+		patchFields["reason"] = la.reason
 		if la.lastExitCode != nil {
 			patchFields["exit_code"] = *la.lastExitCode
+		} else {
+			patchFields["exit_code"] = nil
 		}
 		if hostInfo, err := db.PrimaryHostname(ctx, r.pool, k.env, k.app, r.cfg.DefaultDomainBase); err != nil {
 			log.Warn().Err(err).Str("app", k.app).Msg("status-reconciler: primary hostname lookup")
