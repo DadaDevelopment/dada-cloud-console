@@ -50,6 +50,28 @@ func seedPendingPayment(t *testing.T, pool *pgxpool.Pool, orgID, ykPaymentID str
 	return paymentID
 }
 
+// seedPendingInvoice inserts one pending, payment_method='invoice' row -- the
+// shape billing_invoice.go CreateInvoice produces for a legal-entity payer --
+// with no yk_payment_id, since an invoice never goes through YooKassa.
+func seedPendingInvoice(t *testing.T, pool *pgxpool.Pool, orgID string, createdAt time.Time) uuid.UUID {
+	t.Helper()
+	paymentID := uuid.New()
+	invoiceNumber := "INV-TEST-" + uuid.NewString()[:8]
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO payments (id, org_id, plan, amount_value, currency, status, payment_method, invoice_number, created_by_sub, created_at)
+		VALUES ($1, $2, 'startup', '990.00', 'RUB', 'pending', 'invoice', $3, 'sub-1', $4)
+	`, paymentID, orgID, invoiceNumber, createdAt)
+	if err != nil {
+		t.Fatalf("seed pending invoice: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM payments WHERE org_id = $1`, orgID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM billing_accounts WHERE org_id = $1`, orgID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM audit_events WHERE resource_name = $1`, orgID)
+	})
+	return paymentID
+}
+
 func readPaymentStatus(t *testing.T, pool *pgxpool.Pool, paymentID uuid.UUID) string {
 	t.Helper()
 	var status string
@@ -167,6 +189,44 @@ func TestSweepPendingPayments_KeepsRecentRowsWithoutYooKassaID(t *testing.T) {
 
 	if got := readPaymentStatus(t, pool, paymentID); got != "pending" {
 		t.Fatalf("status = %q, want \"pending\": a 3-hour-old row may still be a slow write of yk_payment_id", got)
+	}
+}
+
+// The regression this fix closes: INV-2026-00001 was a legal-entity invoice,
+// inserted pending with no yk_payment_id by design (it settles by bank-statement
+// match, not YooKassa), and got killed by the no-yk_payment_id rule at the
+// pendingPaymentAbandonAfter (24h) mark while the wire transfer was still in
+// flight. A pending invoice must survive past 24h.
+func TestSweepPendingPayments_DoesNotAbandonInvoiceAt24h(t *testing.T) {
+	pool := testPaymentsPool(t)
+	now := time.Now().UTC()
+	orgID := "org-pendinv24h-" + uuid.NewString()[:8]
+
+	paymentID := seedPendingInvoice(t, pool, orgID, now.Add(-30*time.Hour))
+
+	SweepPendingPayments(context.Background(), pool, nil, now)
+
+	if got := readPaymentStatus(t, pool, paymentID); got != "pending" {
+		t.Fatalf("status = %q, want \"pending\": an invoice has no yk_payment_id by design and must not be judged by the card-checkout 24h rule", got)
+	}
+}
+
+// An invoice does eventually time out, just on its own, much longer, clock:
+// pendingInvoiceAbandonAfter (14 days).
+func TestSweepPendingPayments_AbandonsInvoiceAfter14Days(t *testing.T) {
+	pool := testPaymentsPool(t)
+	now := time.Now().UTC()
+	orgID := "org-pendinv14d-" + uuid.NewString()[:8]
+
+	paymentID := seedPendingInvoice(t, pool, orgID, now.Add(-15*24*time.Hour))
+
+	SweepPendingPayments(context.Background(), pool, nil, now)
+
+	if got := readPaymentStatus(t, pool, paymentID); got != "canceled" {
+		t.Fatalf("status = %q, want \"canceled\": an invoice unpaid for 15 days must eventually close, on its own clock", got)
+	}
+	if n := countAuditRows(t, pool, orgID, "PaymentAbandoned"); n != 1 {
+		t.Fatalf("PaymentAbandoned audit rows for org=%s = %d, want 1", orgID, n)
 	}
 }
 

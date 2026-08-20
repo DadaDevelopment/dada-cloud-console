@@ -21,12 +21,31 @@ import (
 // most one hour of not having the plan they paid for.
 const pendingPaymentReconcileAfter = 15 * time.Minute
 
-// pendingPaymentAbandonAfter bounds how long a row with no yk_payment_id may
-// stay pending. Such a row has no path to becoming terminal -- no YooKassa
-// payment exists, so no webhook is ever coming -- and every one of them is a
-// customer who tried to pay and could not. A day is enough for a slow write of
-// the id (Checkout stores it immediately after CreatePayment) to have landed.
+// pendingPaymentAbandonAfter bounds how long a card-checkout row with no
+// yk_payment_id may stay pending. Such a row has no path to becoming terminal
+// -- no YooKassa payment exists, so no webhook is ever coming -- and every one
+// of them is a customer who tried to pay and could not. A day is enough for a
+// slow write of the id (Checkout stores it immediately after CreatePayment)
+// to have landed.
+//
+// This applies only to payment_method <> 'invoice'. A legal-entity invoice
+// (billing_invoice.go CreateInvoice) is inserted as pending with no
+// yk_payment_id BY DESIGN -- it never goes through YooKassa, it is matched
+// against a bank statement by tbank.Provider.Reconcile keyed on invoice_number
+// -- so this rule read every invoice as abandoned and killed the org's only
+// real one (INV-2026-00001) at the 24h mark while its wire transfer was still
+// in flight. See pendingInvoiceAbandonAfter for that population's own, much
+// longer, timeout.
 const pendingPaymentAbandonAfter = 24 * time.Hour
+
+// pendingInvoiceAbandonAfter bounds how long an unpaid legal-entity invoice
+// may stay pending before the sweeper gives up on it. Unlike a card checkout,
+// an invoice has a real, slow, human payment path -- accounting cycles,
+// approval chains, bank processing -- so it earns a far longer grace period
+// than pendingPaymentAbandonAfter. Fourteen days is long enough to cover a
+// normal corporate payment cycle without leaving a truly dead invoice pending
+// forever.
+const pendingInvoiceAbandonAfter = 14 * 24 * time.Hour
 
 // pendingPaymentSweepLimit bounds one pass. Each candidate costs one YooKassa
 // API call, and a backlog is better spread over several hourly ticks than
@@ -83,10 +102,16 @@ type pendingPaymentRow struct {
 // at YooKassa stays pending here (OutcomeNoop) and is retried on the next
 // tick.
 //
-// Rows WITHOUT a yk_payment_id older than pendingPaymentAbandonAfter are
-// closed as canceled: no YooKassa payment was ever created for them, so
-// nothing can ever settle them, and leaving them pending both lies to the
-// customer's payment history and inflates every "payments in flight" count.
+// Card-checkout rows (payment_method <> 'invoice') WITHOUT a yk_payment_id
+// older than pendingPaymentAbandonAfter are closed as canceled: no YooKassa
+// payment was ever created for them, so nothing can ever settle them, and
+// leaving them pending both lies to the customer's payment history and
+// inflates every "payments in flight" count.
+//
+// Invoice rows (payment_method = 'invoice') never have a yk_payment_id -- they
+// are matched to a bank statement by tbank.Provider.Reconcile instead -- so
+// they are excluded from that rule and given their own, much longer, timeout:
+// see pendingInvoiceAbandonAfter.
 //
 // Registered and ticked alongside the other billing sweepers, see
 // cmd/server/main.go.
@@ -97,7 +122,10 @@ func SweepPendingPayments(ctx context.Context, pool *pgxpool.Pool, rec pendingPa
 		}
 	}
 	for _, row := range listAbandonedPendingPayments(ctx, pool, now) {
-		abandonPendingPayment(ctx, pool, row, now)
+		abandonPendingPayment(ctx, pool, row, now, "no_yk_payment_id")
+	}
+	for _, row := range listAbandonedPendingInvoices(ctx, pool, now) {
+		abandonPendingPayment(ctx, pool, row, now, "invoice_unpaid_14d")
 	}
 	metrics.MarkPaymentSweep(time.Now())
 }
@@ -168,14 +196,18 @@ func reconcilePendingPayment(ctx context.Context, pool *pgxpool.Pool, rec pendin
 	}
 }
 
-// listAbandonedPendingPayments returns the pending rows that never got a
-// YooKassa payment at all.
+// listAbandonedPendingPayments returns the pending, non-invoice rows that
+// never got a YooKassa payment at all. payment_method = 'invoice' is excluded
+// on purpose: an invoice is inserted pending with no yk_payment_id by design
+// (billing_invoice.go CreateInvoice) and is reconciled against a bank
+// statement instead, see listAbandonedPendingInvoices for its own timeout.
 func listAbandonedPendingPayments(ctx context.Context, pool *pgxpool.Pool, now time.Time) []pendingPaymentRow {
 	rows, err := pool.Query(ctx, `
 		SELECT id, org_id, plan, created_at
 		FROM payments
 		WHERE status = 'pending'
 		  AND (yk_payment_id IS NULL OR yk_payment_id = '')
+		  AND payment_method IS DISTINCT FROM 'invoice'
 		  AND created_at < $1::timestamptz
 		ORDER BY created_at
 		LIMIT $2
@@ -201,6 +233,40 @@ func listAbandonedPendingPayments(ctx context.Context, pool *pgxpool.Pool, now t
 	return out
 }
 
+// listAbandonedPendingInvoices returns pending legal-entity invoices
+// (payment_method = 'invoice') older than pendingInvoiceAbandonAfter: their
+// own, far longer, grace period for a wire transfer that never arrived.
+func listAbandonedPendingInvoices(ctx context.Context, pool *pgxpool.Pool, now time.Time) []pendingPaymentRow {
+	rows, err := pool.Query(ctx, `
+		SELECT id, org_id, plan, created_at
+		FROM payments
+		WHERE status = 'pending'
+		  AND payment_method = 'invoice'
+		  AND created_at < $1::timestamptz
+		ORDER BY created_at
+		LIMIT $2
+	`, now.Add(-pendingInvoiceAbandonAfter), pendingPaymentSweepLimit)
+	if err != nil {
+		log.Printf("pending payments: list abandoned invoices: %v", err)
+		return nil
+	}
+	defer rows.Close()
+
+	out := make([]pendingPaymentRow, 0)
+	for rows.Next() {
+		var r pendingPaymentRow
+		if err := rows.Scan(&r.ID, &r.OrgID, &r.Plan, &r.CreatedAt); err != nil {
+			log.Printf("pending payments: scan abandoned invoice row: %v", err)
+			return out
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("pending payments: read abandoned invoice rows: %v", err)
+	}
+	return out
+}
+
 // abandonPendingPayment closes one unsettleable row and records why, both in
 // the SAME transaction. The split is what let the original incident go
 // unnoticed: a row that turns canceled on its own says nothing about having
@@ -210,7 +276,13 @@ func listAbandonedPendingPayments(ctx context.Context, pool *pgxpool.Pool, now t
 // listing query and this write is never overwritten -- zero rows affected
 // means somebody else settled it, which is the desired end state, not an
 // error, and no audit row is written for it.
-func abandonPendingPayment(ctx context.Context, pool *pgxpool.Pool, row pendingPaymentRow, now time.Time) {
+//
+// reason is recorded on the audit row as-is, distinguishing a card checkout
+// that never got a yk_payment_id ("no_yk_payment_id") from an invoice whose
+// wire transfer never arrived within its own, longer, grace period
+// ("invoice_unpaid_14d") -- two different populations closed by the same
+// mechanics for two different reasons.
+func abandonPendingPayment(ctx context.Context, pool *pgxpool.Pool, row pendingPaymentRow, now time.Time, reason string) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		log.Printf("pending payments: begin abandon tx payment=%s: %v", row.ID, err)
@@ -233,7 +305,7 @@ func abandonPendingPayment(ctx context.Context, pool *pgxpool.Pool, row pendingP
 		"payment_id":    row.ID.String(),
 		"plan":          row.Plan,
 		"pending_since": row.CreatedAt.UTC().Format(time.RFC3339),
-		"reason":        "no_yk_payment_id",
+		"reason":        reason,
 	})
 	if merr != nil {
 		meta = []byte(`{}`)
