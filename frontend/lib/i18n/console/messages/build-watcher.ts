@@ -12,10 +12,20 @@ export const buildWatcher: Messages = {
     en: "The build for {app} finished successfully.",
   },
   "buildWatcher.success.openApp": { ru: "Открыть приложение", en: "Open application" },
-  "buildWatcher.failure.title": { ru: "Сборка не удалась", en: "Build failed" },
-  "buildWatcher.failure.body": {
+  "buildWatcher.failure.build.title": { ru: "Сборка не удалась", en: "Build failed" },
+  "buildWatcher.failure.build.body": {
     ru: "Сборка {app} завершилась с ошибкой.",
     en: "The build for {app} failed.",
+  },
+  "buildWatcher.failure.platform.title": { ru: "Сбой на нашей стороне", en: "Our platform failed" },
+  "buildWatcher.failure.platform.body": {
+    ru: "Сборка {app} упала не из-за вашего кода — сломалось у нас. «Пересобрать» работает всегда.",
+    en: "The build for {app} failed on our side, not in your code. Rebuild always works.",
+  },
+  "buildWatcher.failure.appDeleted.title": { ru: "Сборка прервана", en: "Build stopped" },
+  "buildWatcher.failure.appDeleted.body": {
+    ru: "Приложение {app} удалили, пока шла сборка, поэтому её прервали.",
+    en: "The app {app} was deleted while this build was running, so it was stopped.",
   },
   "buildWatcher.openBuild": { ru: "Открыть сборку", en: "Open build" },
   "buildWatcher.dismiss": { ru: "Закрыть", en: "Dismiss" },
@@ -24,9 +34,19 @@ export const buildWatcher: Messages = {
     ru: "Сборка {app} завершилась успешно. Нажмите, чтобы открыть.",
     en: "The build for {app} finished successfully. Click to open.",
   },
-  "buildWatcher.notify.failure.title": { ru: "Сборка не удалась", en: "Build failed" },
-  "buildWatcher.notify.failure.body": {
+  "buildWatcher.notify.failure.build.title": { ru: "Сборка не удалась", en: "Build failed" },
+  "buildWatcher.notify.failure.build.body": {
     ru: "Сборка {app} завершилась с ошибкой. Нажмите, чтобы посмотреть.",
     en: "The build for {app} failed. Click to see why.",
+  },
+  "buildWatcher.notify.failure.platform.title": { ru: "Сбой на нашей стороне", en: "Our platform failed" },
+  "buildWatcher.notify.failure.platform.body": {
+    ru: "Сборка {app} упала не из-за вашего кода. Нажмите, чтобы посмотреть.",
+    en: "The build for {app} failed on our side, not in your code. Click to see why.",
+  },
+  "buildWatcher.notify.failure.appDeleted.title": { ru: "Сборка прервана", en: "Build stopped" },
+  "buildWatcher.notify.failure.appDeleted.body": {
+    ru: "Приложение {app} удалили, пока шла сборка. Нажмите, чтобы посмотреть.",
+    en: "The app {app} was deleted while this build was running. Click to see why.",
   },
 };

@@ -9,6 +9,13 @@ import { BUILD_TRACK_EVENT, readTrackedBuilds, untrackBuild, type TrackedBuild }
 import { showBuildNotification } from "@/lib/build-notify";
 import { useT } from "@/lib/i18n/console/context";
 import { trackUxEvent } from "@/lib/ux-telemetry";
+import {
+  classifyBuildNotice,
+  buildNoticeFailureKeys,
+  buildNoticeNotifyFailureKeys,
+  buildNoticeUxTarget,
+  type BuildNoticeKind,
+} from "@/lib/build-notice";
 
 const POLL_MS = 3000;
 const APP_READY_POLL_MS = 5000;
@@ -30,6 +37,7 @@ interface Notice {
   envId: string;
   appName: string;
   status: NoticeStatus;
+  kind: BuildNoticeKind;
   appUrl: string | null;
   appReady: boolean;
   appPolls: number;
@@ -117,6 +125,7 @@ export function BuildWatcher() {
                   envId: entry.envId,
                   appName: entry.appName,
                   status: build.status as NoticeStatus,
+                  kind: classifyBuildNotice(build.fail_reason),
                   appUrl: null,
                   appReady: false,
                   appPolls: 0,
@@ -174,7 +183,7 @@ export function BuildWatcher() {
       const key = `${n.buildId}:${n.status}`;
       if (viewedRef.current.has(key)) return;
       viewedRef.current.add(key);
-      trackUxEvent("view", `build_notice:${n.status === "success" ? "success" : "failure"}`);
+      trackUxEvent("view", buildNoticeUxTarget(n.status, n.kind));
     });
   }, [notices]);
 
@@ -192,9 +201,10 @@ export function BuildWatcher() {
       notifiedRef.current.add(key);
       const success = n.status === "success";
       const href = buildHref(n);
+      const failure = buildNoticeNotifyFailureKeys(n.kind);
       const shown = showBuildNotification({
-        title: t(success ? "buildWatcher.notify.success.title" : "buildWatcher.notify.failure.title"),
-        body: t(success ? "buildWatcher.notify.success.body" : "buildWatcher.notify.failure.body", {
+        title: t(success ? "buildWatcher.notify.success.title" : failure.title),
+        body: t(success ? "buildWatcher.notify.success.body" : failure.body, {
           app: n.appName,
         }),
         tag: n.buildId,
@@ -254,6 +264,7 @@ export function BuildWatcher() {
       {notices.map((notice) => {
         const success = notice.status === "success";
         const href = buildHref(notice);
+        const failure = buildNoticeFailureKeys(notice.kind);
         return (
           <div
             key={notice.buildId}
@@ -266,10 +277,10 @@ export function BuildWatcher() {
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="font-medium">
-                  {t(success ? "buildWatcher.success.title" : "buildWatcher.failure.title")}
+                  {t(success ? "buildWatcher.success.title" : failure.title)}
                 </p>
-                <p className="mt-0.5 truncate opacity-90">
-                  {t(success ? "buildWatcher.success.body" : "buildWatcher.failure.body", {
+                <p className="mt-0.5 opacity-90">
+                  {t(success ? "buildWatcher.success.body" : failure.body, {
                     app: notice.appName,
                   })}
                 </p>
