@@ -15,6 +15,7 @@ import (
 	"io"
 	"mime/quotedprintable"
 	"net/smtp"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -325,6 +326,7 @@ const (
 	CauseKindPlatformRegistry      = "platform_registry"
 	CauseKindResourceLimit         = "resource_limit"
 	CauseKindNeedsArgs             = "app_needs_args"
+	CauseKindEntrypointImport      = "app_entrypoint_import"
 	CauseKindDBReadOnly            = "db_read_only"
 )
 
@@ -357,6 +359,70 @@ var needsArgsCrashSignatures = []string{
 	"error: missing required argument",
 	`Error: required flag(s)`,
 	"error: accepts 1 arg(s), received 0",
+}
+
+// entrypointImportCrashTextFmt is the cause_kind=CauseKindEntrypointImport
+// verdict: the interpreter died on an import of a package that is plainly
+// present inside the image, because the entry point was started as a bare
+// file path instead of as a module of that package. Worded like
+// needsArgsCrashText -- neither "your code is broken" nor "we are broken" --
+// except that here the launch line is ours: when a repo has no explicit start
+// command the platform generates one ("python app/main.py"), and for a repo
+// whose entry point lives inside a package that line puts the package's own
+// directory on sys.path instead of its parent, so "import app.*" cannot
+// resolve. The way out is the same shape change the start-command field
+// already offers, which is why this kind must reach the console banner as a
+// start-command-fixable cause and never as an accusation.
+//
+// Live case 2026-08-20: gulyaev-ai-core crashlooped on
+// "ModuleNotFoundError: No module named 'app'" from /app/app/main.py, and the
+// owner was told it was an error in his own Python code.
+const entrypointImportCrashTextFmt = "Приложение упало на импорте модуля %q, хотя этот пакет лежит в образе рядом с точкой входа. Так бывает, когда команда запуска, подобранная платформой автоматически, запускает файл напрямую — тогда интерпретатор не видит пакет целиком. Это не сбой платформы и, скорее всего, не ошибка в коде — задайте команду запуска явно, модулем или сервером (например python -m %s.main или uvicorn %s.main:app)."
+
+// moduleNotFoundPattern is the CPython message that names the module an
+// import failed on. Matched with a regexp rather than strings.Contains
+// because the module name itself is the signal: only when that name also
+// appears as a directory of the crashing frame's own file path do we know the
+// package exists and the launch line, not the code, is what hid it.
+var moduleNotFoundPattern = regexp.MustCompile(`No module named ['"]([^'"]+)['"]`)
+
+// tracebackFilePattern pulls the file path out of each CPython traceback
+// frame line (`  File "/app/app/main.py", line 3, in <module>`).
+var tracebackFilePattern = regexp.MustCompile(`File "([^"]+)"`)
+
+// classifyEntrypointImport reports the missing top-level package name when
+// the excerpt shows a Python import failure that our own generated launch
+// line plausibly caused, and "" otherwise.
+//
+// The test is deliberately narrow, held to the same bar as
+// platformCrashSignatures: the root of the missing module name must ALSO
+// appear as a directory segment of a file path named in the same traceback.
+// A genuinely absent dependency ("No module named 'fastapi'") never satisfies
+// that -- fastapi is not a directory the crashing file sits under -- so a
+// missing requirement, a typo in an import and every other real code fault
+// keep their app_code verdict. A package that is both missing from sys.path
+// and physically present next to the file being run is the one shape only a
+// wrong launch line produces.
+func classifyEntrypointImport(excerpt string) string {
+	match := moduleNotFoundPattern.FindStringSubmatch(excerpt)
+	if match == nil {
+		return ""
+	}
+	root := match[1]
+	if idx := strings.Index(root, "."); idx >= 0 {
+		root = root[:idx]
+	}
+	if root == "" {
+		return ""
+	}
+	for _, frame := range tracebackFilePattern.FindAllStringSubmatch(excerpt, -1) {
+		for _, segment := range strings.Split(path.Dir(frame[1]), "/") {
+			if segment == root {
+				return root
+			}
+		}
+	}
+	return ""
 }
 
 // resourceLimitCrashText is the cause_kind=CauseKindResourceLimit verdict
@@ -545,6 +611,9 @@ func ClassifyCrashCause(excerpt string) (kind, text string) {
 		if strings.Contains(excerpt, pattern) {
 			return CauseKindNeedsArgs, needsArgsCrashText
 		}
+	}
+	if module := classifyEntrypointImport(excerpt); module != "" {
+		return CauseKindEntrypointImport, fmt.Sprintf(entrypointImportCrashTextFmt, module, module, module)
 	}
 	for _, sig := range pythonCrashSignatures {
 		if strings.Contains(excerpt, sig.pattern) {

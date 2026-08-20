@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   getOperationalAppAlerts,
   missingEnvVarKey,
+  offersStartCommandFix,
   parseBadConnCauseLine,
   suggestSSLModeDisable,
   type AppAlert,
@@ -83,4 +84,20 @@ test("missingEnvVarKey refuses anything that is not a bare env var name", () => 
   assert.equal(missingEnvVarKey("TELEGRAM_API_TOKEN=abc"), null);
   assert.equal(missingEnvVarKey("telegram_api_token"), null);
   assert.equal(missingEnvVarKey("9LIVES"), null);
+});
+
+test("offersStartCommandFix covers the entrypoint-import crash the platform's own launch line caused", () => {
+  assert.equal(offersStartCommandFix("app_entrypoint_import"), true);
+});
+
+test("offersStartCommandFix keeps the CLI case it already served", () => {
+  assert.equal(offersStartCommandFix("app_needs_args"), true);
+});
+
+test("offersStartCommandFix refuses every cause the start command cannot fix", () => {
+  assert.equal(offersStartCommandFix("app_code"), false);
+  assert.equal(offersStartCommandFix("platform_network"), false);
+  assert.equal(offersStartCommandFix("resource_limit"), false);
+  assert.equal(offersStartCommandFix("missing_env_var"), false);
+  assert.equal(offersStartCommandFix(undefined), false);
 });

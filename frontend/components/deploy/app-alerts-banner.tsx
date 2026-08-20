@@ -8,6 +8,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { diagnoseApi, cloudTasksApi, databasesApi, envVarsApi } from "@/lib/api";
 import {
   missingEnvVarKey,
+  offersStartCommandFix,
   parseBadConnCauseLine,
   suggestSSLModeDisable,
   type AppAlert,
@@ -69,6 +70,8 @@ function crashCauseKey(kind?: string): string | null {
       return "apps.alerts.crash.cause.resourceLimit";
     case "app_needs_args":
       return "apps.alerts.crash.cause.needsArgs";
+    case "app_entrypoint_import":
+      return "apps.alerts.crash.cause.entrypointImport";
     case "db_read_only":
       return "apps.alerts.crash.cause.dbReadOnly";
     default:
@@ -573,6 +576,7 @@ export function AppAlertsBanner({ alerts, logsHref, storageHref, startCommandHre
                     alert.cause_kind === "platform_storage_inodes" ||
                     alert.cause_kind === "platform_registry" ||
                     alert.cause_kind === "app_needs_args" ||
+                    alert.cause_kind === "app_entrypoint_import" ||
                     alert.cause_kind === "resource_limit" ||
                     alert.cause_kind === "db_read_only" ? (
                       <p className="text-xs font-semibold text-red-800 dark:text-red-200">
@@ -665,7 +669,7 @@ export function AppAlertsBanner({ alerts, logsHref, storageHref, startCommandHre
                     {t("apps.alerts.crash.cause.missingEnvVar.settings")}
                   </Link>
                 )}
-                {alert.cause_kind === "app_needs_args" && (
+                {offersStartCommandFix(alert.cause_kind) && (
                   <Link
                     href={startCommandHref}
                     className="inline-flex items-center gap-1 text-xs font-semibold text-red-700 dark:text-red-300 underline underline-offset-2 hover:text-red-800 dark:hover:text-red-200"

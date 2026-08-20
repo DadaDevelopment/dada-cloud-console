@@ -44,6 +44,8 @@ function buildCrashCauseKey(kind?: AppAlert["cause_kind"]): string | null {
       return "apps.alerts.crash.cause.resourceLimit";
     case "app_needs_args":
       return "apps.alerts.crash.cause.needsArgs";
+    case "app_entrypoint_import":
+      return "apps.alerts.crash.cause.entrypointImport";
     case "missing_env_var":
       return "apps.alerts.crash.cause.missingEnvVar";
     default:

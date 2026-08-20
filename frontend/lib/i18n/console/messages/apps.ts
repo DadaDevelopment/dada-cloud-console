@@ -783,6 +783,10 @@ export const apps: Messages = {
     en: "The program exited right after start: it expects command-line arguments (a CLI script), and the platform starts an app without any. Neither a platform failure nor a bug in your code — set a start command with the arguments it needs in the app's settings.",
   },
   "apps.alerts.crash.cause.needsArgs.cta": { ru: "Задать команду запуска", en: "Set a start command" },
+  "apps.alerts.crash.cause.entrypointImport": {
+    ru: "Приложение упало на импорте собственного пакета, который лежит в образе рядом с точкой входа. Так бывает, когда команда запуска подобрана платформой автоматически и запускает файл напрямую — тогда интерпретатор не видит пакет целиком. Это не сбой платформы и, скорее всего, не ошибка в коде — задайте команду запуска явно, модулем или сервером (python -m пакет.main, uvicorn, gunicorn).",
+    en: "The app failed importing its own package, which sits in the image right next to the entry point. That happens when the start command the platform picked automatically runs the file directly, so the interpreter never sees the whole package. Neither a platform failure nor, most likely, a bug in your code — set the start command explicitly, as a module or a server (python -m package.main, uvicorn, gunicorn).",
+  },
   "apps.alerts.crash.cause.dbReadOnly": {
     ru: "База данных переведена в режим только для чтения, поэтому запись падает с ошибкой. Обычно это происходит, когда база превышает лимит места по тарифу. Освободите место в базе или перейдите на тариф с большим лимитом — это предложение, а не поломка с вашей стороны.",
     en: "The database was switched to read-only mode, so writes fail. This usually happens when the database goes over the plan's storage limit. Free up space in the database or move to a plan with more room - this is a way out, not something broken on your end.",

@@ -47,6 +47,15 @@ export type AppAlertType = "crash" | "volume" | "url";
  * backend's notify.CauseKindDBReadOnly) — neutral and, in the common case,
  * ours: plan-limit enforcement flips the app's Postgres role to
  * `default_transaction_read_only`, so the app code is untouched and correct.
+ * `"app_entrypoint_import"` is `"app_needs_args"`'s sibling for the other way
+ * a generated launch line can be wrong: the interpreter died importing a
+ * package that is present in the image right beside the entry point, because
+ * the platform started that entry point as a bare file path instead of as a
+ * module (see the backend's notify.CauseKindEntrypointImport). Neutral, and
+ * in the common case ours — the code is fine, our launch line hid the
+ * package — so it renders with the platform kinds' styling and, like
+ * `"app_needs_args"`, links to the start-command field that fixes it.
+ *
  * `"platform_storage_inodes"` is `"platform_storage"`'s sibling for the OTHER
  * way a volume runs out: the disk has free gigabytes but no free inodes (the
  * per-file-count limit ext4 keeps separate from byte capacity — see the
@@ -65,6 +74,7 @@ export type AppAlertCauseKind =
   | "platform_registry"
   | "resource_limit"
   | "app_needs_args"
+  | "app_entrypoint_import"
   | "bad_connection_string"
   | "ssl_not_supported"
   | "missing_env_var"
@@ -120,6 +130,20 @@ export function getOperationalAppAlerts(alerts: AppAlert[]): AppAlert[] {
 /** True if any alert in the list is the given type. */
 export function hasAlertType(alerts: AppAlert[], type: AppAlertType): boolean {
   return alerts.some((a) => a.type === type);
+}
+
+/**
+ * True when the crash cause is one the app's owner fixes by giving the app an
+ * explicit start command. Both kinds here say the same thing about the same
+ * lever: `"app_needs_args"` means the program refused the empty command line
+ * we start it with, and `"app_entrypoint_import"` means our generated launch
+ * line ran the entry point as a file and hid its own package from the
+ * interpreter. Everything else — including plain `"app_code"` — returns false,
+ * so the banner never sends an owner to change a start command that was never
+ * the problem.
+ */
+export function offersStartCommandFix(kind?: AppAlertCauseKind): boolean {
+  return kind === "app_needs_args" || kind === "app_entrypoint_import";
 }
 
 /**
