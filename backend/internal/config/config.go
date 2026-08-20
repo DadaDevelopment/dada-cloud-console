@@ -55,6 +55,18 @@ type Config struct {
 	// longer invisible to the panel the owner uses to judge health.
 	PlatformHealthNamespaces []string // PLATFORM_HEALTH_NAMESPACES (comma-separated)
 
+	// Pulse export ships an hourly admin-overview snapshot to a GitHub repo so
+	// the routine can read platform state even when its own network path to
+	// the RU cluster is dead but GitHub is reachable (gitops-agent already
+	// proves that path works every commit). PulseExportToken falls back to
+	// GITOPS_DEFAULT_TOKEN, the token gitops-agent's own push already carries
+	// in this pod's env via envFrom.secretRef -- no new credential needed.
+	// Export is off when PulseExportToken or PulseExportRepo is empty.
+	PulseExportRepo         string // PULSE_EXPORT_REPO
+	PulseExportBranch       string // PULSE_EXPORT_BRANCH
+	PulseExportToken        string // PULSE_EXPORT_TOKEN, falls back to GITOPS_DEFAULT_TOKEN
+	PulseExportIntervalSecs int    // PULSE_EXPORT_INTERVAL_SECS
+
 	// Identity provider selection. AuthMode defaults to "local" → the existing
 	// HS256 local-JWT path (POST /auth/login + GinMiddleware). Set AUTH_MODE
 	// to "keycloak" to validate Keycloak RS256 access tokens via JWKS instead;
@@ -795,6 +807,10 @@ func Load() (*Config, error) {
 		PowerDNSAPIKey:              getEnv("POWERDNS_API_KEY", ""),
 		PlatformNameservers:         splitList(getEnv("PLATFORM_NAMESERVERS", "ns1.dada-tuda.ru,ns2.dada-tuda.ru")),
 		PlatformHealthNamespaces:    splitList(getEnv("PLATFORM_HEALTH_NAMESPACES", "argocd-prod")),
+		PulseExportRepo:             getEnv("PULSE_EXPORT_REPO", "DadaDevelopment/argo-infra"),
+		PulseExportBranch:           getEnv("PULSE_EXPORT_BRANCH", "pulse"),
+		PulseExportToken:            getEnv("PULSE_EXPORT_TOKEN", getEnv("GITOPS_DEFAULT_TOKEN", "")),
+		PulseExportIntervalSecs:     getEnvInt("PULSE_EXPORT_INTERVAL_SECS", 3600),
 		DefaultDomainEnabled:        getEnv("DEFAULT_DOMAIN_ENABLED", "true") == "true",
 		DefaultDomainBase:           getEnv("DEFAULT_DOMAIN_BASE", "dada-tuda.ru"),
 		PreviewHostBase:             getEnv("PREVIEW_HOST_BASE", "pv.dada-tuda.ru"),

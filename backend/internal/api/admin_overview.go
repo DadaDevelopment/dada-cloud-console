@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -373,75 +374,74 @@ func (h *Handler) GetAdminOverview(c *gin.Context) {
 		days = overviewDynamicsMaxDays
 	}
 
-	ctx := c.Request.Context()
+	out, err := h.BuildAdminOverview(c.Request.Context(), days)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
 
+// BuildAdminOverview collects the same snapshot GetAdminOverview has always
+// returned, minus the HTTP transport concerns (auth, days clamping,
+// c.JSON). Pulled out so pulse_export.go can capture the identical payload
+// on a timer without going through gin at all -- see the "panel blindness
+// read as health" postmortem this export exists to route around.
+func (h *Handler) BuildAdminOverview(ctx context.Context, days int) (map[string]any, error) {
 	users, err := h.overviewUsers(ctx)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to aggregate users")
-		return
+		return nil, fmt.Errorf("failed to aggregate users")
 	}
 	projects, err := h.overviewProjects(ctx)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to aggregate projects")
-		return
+		return nil, fmt.Errorf("failed to aggregate projects")
 	}
 	builds, err := h.overviewBuilds(ctx)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to aggregate builds")
-		return
+		return nil, fmt.Errorf("failed to aggregate builds")
 	}
 	domains, err := h.overviewDomains(ctx)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to aggregate domains")
-		return
+		return nil, fmt.Errorf("failed to aggregate domains")
 	}
 	notReady, err := h.overviewNotReadyApps(ctx)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to list not-ready apps")
-		return
+		return nil, fmt.Errorf("failed to list not-ready apps")
 	}
 	noSignal, err := h.overviewNoSignalApps(ctx)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to list apps without a health signal")
-		return
+		return nil, fmt.Errorf("failed to list apps without a health signal")
 	}
 	notReadyFreshness, err := h.overviewNotReadyFreshness(ctx)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to check not-ready freshness")
-		return
+		return nil, fmt.Errorf("failed to check not-ready freshness")
 	}
 	notReadyOther, err := h.overviewNotReadyOtherResources(ctx)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to list not-ready resources")
-		return
+		return nil, fmt.Errorf("failed to list not-ready resources")
 	}
 	domainIssues, err := h.overviewDomainIssues(ctx)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to list domain issues")
-		return
+		return nil, fmt.Errorf("failed to list domain issues")
 	}
 	stuckOps, err := h.overviewStuckOperations(ctx)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to list stuck operations")
-		return
+		return nil, fmt.Errorf("failed to list stuck operations")
 	}
 	failedBuilds, err := h.overviewFailedLatestBuilds(ctx)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to list failed latest builds")
-		return
+		return nil, fmt.Errorf("failed to list failed latest builds")
 	}
 	dynamics, err := h.overviewDynamics(ctx, days)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to aggregate dynamics")
-		return
+		return nil, fmt.Errorf("failed to aggregate dynamics")
 	}
 	liveURLs, err := h.overviewLiveURLs(ctx)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to aggregate live URL health")
-		return
+		return nil, fmt.Errorf("failed to aggregate live URL health")
 	}
 	platformHealthOut := h.overviewPlatformHealth(ctx, h.platformHealthClientset(), h.cfg.PlatformHealthNamespaces)
-	c.JSON(http.StatusOK, gin.H{
+	return map[string]any{
 		"users":               users,
 		"projects":            projects,
 		"builds":              builds,
@@ -458,7 +458,7 @@ func (h *Handler) GetAdminOverview(c *gin.Context) {
 		"dynamics_days":       days,
 		"live_urls":           liveURLs,
 		"platform_health":     platformHealthOut,
-	})
+	}, nil
 }
 
 // overviewUsers counts customer accounts and how many of them acted in the last

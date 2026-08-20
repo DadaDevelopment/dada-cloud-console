@@ -71,7 +71,7 @@ func main() {
 	log.Info().Msg("migrations complete")
 
 	// Set up HTTP router
-	router := api.SetupRouter(pool, cfg)
+	router, apiHandler := api.SetupRouterWithHandler(pool, cfg)
 	handler := api.NewPreviewGate(pool, cfg, router)
 
 	// Refresh Prometheus state gauges (operations / domain health) served at
@@ -136,6 +136,30 @@ func main() {
 			}
 		}
 	}()
+
+	pulseExporter := api.NewPulseExporter(apiHandler, cfg)
+	if !pulseExporter.Enabled() {
+		log.Info().Msg("pulse export disabled: PULSE_EXPORT_TOKEN/GITOPS_DEFAULT_TOKEN or PULSE_EXPORT_REPO not set")
+	} else {
+		pulseCtx, pulseCancel := context.WithCancel(context.Background())
+		defer pulseCancel()
+		pulseInterval := time.Duration(cfg.PulseExportIntervalSecs) * time.Second
+		go func() {
+			pulseExporter.RunPulseExportTick(pulseCtx)
+			ticker := time.NewTicker(pulseInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-pulseCtx.Done():
+					return
+				case <-ticker.C:
+					pulseExporter.RunPulseExportTick(pulseCtx)
+				}
+			}
+		}()
+		log.Info().Dur("interval", pulseInterval).Str("repo", cfg.PulseExportRepo).
+			Str("branch", cfg.PulseExportBranch).Msg("pulse export started")
+	}
 
 	if cfg.BillingEnabled {
 		billingPlans, planErr := billing.LoadPlans("")

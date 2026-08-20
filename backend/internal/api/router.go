@@ -167,6 +167,16 @@ var trustedProxyCIDRs = []string{"10.244.0.0/16", "10.16.0.0/16"}
 
 // SetupRouter configures and returns the Gin engine with all API routes registered.
 func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
+	r, _ := SetupRouterWithHandler(pool, cfg)
+	return r
+}
+
+// SetupRouterWithHandler is SetupRouter plus the Handler it built, for callers
+// that need to drive the same aggregation the HTTP routes use without a second
+// Handler (a second one would double up on its background loops -- cost cache
+// warmer, Grafana reconciler -- for no reason). pulse_export.go is the only
+// caller today.
+func SetupRouterWithHandler(pool *pgxpool.Pool, cfg *config.Config) (*gin.Engine, *Handler) {
 	if !cfg.DevMode {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -781,5 +791,5 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 	// them (shared Grafana runs on emptyDir). No-op when Grafana is unconfigured.
 	h.StartGrafanaReconciler(context.Background(), defaultReconcileInterval)
 
-	return r
+	return r, h
 }
