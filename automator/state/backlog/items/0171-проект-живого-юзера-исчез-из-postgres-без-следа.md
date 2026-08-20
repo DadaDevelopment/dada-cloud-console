@@ -1,0 +1,10 @@
+---
+id: 0171
+status: open
+prio: P0
+title: ПРОЕКТ ЖИВОГО ЮЗЕРА ИСЧЕЗ ИЗ POSTGRES БЕЗ СЛЕДА DeleteProject
+created: 2026-08-10
+sess: sess-0810g
+section: 🔴 P0 08-15 (sess-0815b) — «ПОСЛЕДНЯЯ МИЛЯ» ОТДАЁТ ЛОЖНО-ЗЕЛЁНОЕ: 17/17 ok ПРИ ТР
+---
+- [ ] 🔴 ПРОЕКТ ЖИВОГО ЮЗЕРА ИСЧЕЗ ИЗ POSTGRES БЕЗ СЛЕДА `DeleteProject` (sess-0810g, 2026-08-10, [live psql]) — единственный новый юзер цикла `chenlikun.18@gmail.com` (08-09 05:37Z) провёл 36-минутную глубокую сессию: 333 события в `ux_events` (подключил GitHub, задеплоил апп, увидел success, удалил апп с подтверждением ввода имени, создал и задеплоил второй) — а в `audit_events` **1 строка**, только `SessionStart`. Сам проект `ed2d8cb0-b8c4-4fff-aeed-768e09ce78c6` сейчас отсутствует в `projects`/`git_repos`/`environments`/`builds` (запрос по id, не по owner_id), при этом ни одного `DeleteProject` в аудите и ни одного reaper/orphan-GC в `backend/internal`, который бы это объяснял. Две задачи: (1) почему template/`tpl.onramp`-путь деплоя не пишет в `audit_events`; (2) куда физически делся проект. Смежно: `backend/internal/api/internal_provision.go:44-109` коммитит project+environment без `h.recordAudit()`, в отличие от `projects.go:232-241`. **РЕЦИДИВ, второй юзер, sess-0810h (аудит-разбор цикла)**: `macmam@atomicmail.io` — единственный настоящий intent-to-deploy окна 08-03..08-10 — деплоил через AI-чат, упёрся в `no AppServer attached` / `preview upstream unavailable`, попросил чат починить, и его `projects`/`environments`/`git_repos` исчезли без единой строки в `audit_events`. Значит это не разовая аномалия, а путь. Кандидат-триггер: демо-реапер `backend/internal/api/demo_apps.go:171 enqueueDemoDelete` — по коду зовёт `recordSystemAudit` (`audit.go:231`), а в БД по этому `project_id` аудита нет вовсе; либо `DeleteProject` (`delete_impact.go:547-620`) каскадом сносит собственную запись вместе с project_id. Правка: писать удаление проекта в хранилище, которое не висит на FK удаляемого проекта, + алерт «новый юзер + деплой за 48ч + проект пропал».
