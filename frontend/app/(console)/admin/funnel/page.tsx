@@ -8,7 +8,6 @@ import { AuditFacetFilter, type FacetOption } from "@/components/console/audit-f
 import { Spinner } from "@/components/ui/spinner";
 import { useT } from "@/lib/i18n/console/context";
 import { ChannelFunnelSankey } from "@/components/console/channel-funnel-sankey";
-import { FunnelSteps } from "@/components/console/funnel-steps";
 import type { ChannelFunnelSeries } from "@/lib/channel-funnel";
 
 const WINDOWS = ["7d", "30d", "90d", "all"] as const;
@@ -46,33 +45,6 @@ function trafficSourceLabel(source: string): string {
     "Recommendation system traffic": "Рекомендации",
   };
   return labels[source] ?? source;
-}
-
-/** Shared bar-row visual so the Keycloak leg and the product-adoption leg
- * read as one funnel, not two different chart styles bolted together. */
-function BarRows({ rows, labelWidth = "w-16" }: { rows: Row[]; labelWidth?: string }) {
-  const max = rows.length ? Math.max(1, ...rows.map((r) => r.count)) : 1;
-  return (
-    <div className="space-y-2.5">
-      {rows.map((r) => {
-        const pct = max > 0 ? Math.max(r.count > 0 ? 3 : 0, (r.count / max) * 100) : 0;
-        return (
-          <div key={r.key} className="flex items-center gap-3">
-            <div className={`${labelWidth} shrink-0 text-xs font-medium text-gray-500 dark:text-gray-400`}>{r.label}</div>
-            <div className="relative h-6 flex-1 overflow-hidden rounded bg-gray-100 dark:bg-gray-800">
-              <div
-                className={`h-full rounded transition-all ${r.tone === "error" ? "bg-red-500 dark:bg-red-600" : "bg-blue-500 dark:bg-blue-600"}`}
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-            <div className="w-14 shrink-0 text-right text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
-              {r.count}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
 }
 
 export default function AdminFunnelPage() {
@@ -148,6 +120,8 @@ export default function AdminFunnelPage() {
     source: c.source,
     values: [c.users, c.register_opened, c.signup_started, c.registration_complete],
   }));
+  const regFunnelRows: Row[] = regRows.filter((r) => r.tone !== "error");
+  const regErrors = regRows.filter((r) => r.tone === "error").reduce((sum, r) => sum + r.count, 0);
   const regStagesAllZero = (reg?.stages ?? []).every((stage) => stage.count === 0);
 
   return (
@@ -255,13 +229,22 @@ export default function AdminFunnelPage() {
               {regStagesAllZero ? (
                 <p className="text-sm text-gray-500 dark:text-gray-400">{t("adminFunnel.reg.allZero")}</p>
               ) : (
-                <FunnelSteps rows={regRows} />
+                <ChannelFunnelSankey
+                  channels={[{ source: "reg", values: regFunnelRows.map((r) => r.count) }]}
+                  sourceLabel={() => regFunnelRows[0]?.label ?? ""}
+                  stageLabels={regFunnelRows.map((r) => r.label)}
+                  dropLabels={regFunnelRows.slice(1).map((r) => t("adminFunnel.sankey.dropAt", { stage: r.label }))}
+                  clampNote={(sources) => t("adminFunnel.channel.clamped", { sources })}
+                />
               )}
             </div>
             <div className="flex flex-col justify-center gap-3 border-t border-gray-100 dark:border-gray-800/60 pt-3 md:border-t-0 md:border-l md:pl-4 md:pt-0">
               <div>
                 <p className="text-xs text-gray-500 dark:text-gray-400">{t("adminFunnel.reg.registered")}</p>
                 <p className="text-2xl font-semibold text-gray-900 dark:text-gray-100">{reg?.registered ?? "—"}</p>
+                {regErrors > 0 && (
+                  <p className="mt-2 text-xs text-red-600 dark:text-red-400">{t("adminFunnel.reg.errorAside", { count: regErrors })}</p>
+                )}
               </div>
             </div>
           </div>
@@ -276,7 +259,15 @@ export default function AdminFunnelPage() {
         ) : channelRows.length === 0 ? (
           <p className="mt-3 text-sm text-gray-400 dark:text-gray-500">{t("adminFunnel.door.empty")}</p>
         ) : (
-          <div className="mt-3"><BarRows rows={channelRows} labelWidth="w-40" /></div>
+          <div className="mt-5">
+            <ChannelFunnelSankey
+              channels={channelRows.map((r) => ({ source: r.key, values: [r.count, r.count] }))}
+              sourceLabel={(source) => channelLabel(source)}
+              stageLabels={[t("adminFunnel.door.stageDoor"), t("adminFunnel.door.stageRegistered")]}
+              dropLabels={[t("adminFunnel.channel.dropped")]}
+              clampNote={(sources) => t("adminFunnel.channel.clamped", { sources })}
+            />
+          </div>
         )}
       </div>
 
@@ -311,7 +302,17 @@ export default function AdminFunnelPage() {
             <Spinner size="md" />
           </div>
         ) : (
-          <FunnelSteps rows={rows} />
+          rows.every((r) => r.count === 0) ? (
+          <p className="text-sm text-gray-400 dark:text-gray-500">{t("adminFunnel.cohort.empty")}</p>
+        ) : (
+          <ChannelFunnelSankey
+            channels={[{ source: "cohort", values: rows.map((r) => r.count) }]}
+            sourceLabel={() => rows[0]?.label ?? ""}
+            stageLabels={rows.map((r) => r.label)}
+            dropLabels={rows.slice(1).map((r) => t("adminFunnel.sankey.dropAt", { stage: r.label }))}
+            clampNote={(sources) => t("adminFunnel.channel.clamped", { sources })}
+          />
+          )
         )}
         {data?.paid_note && (
           <p className="mt-4 border-t border-gray-100 dark:border-gray-800 pt-3 text-xs text-gray-400 dark:text-gray-500">

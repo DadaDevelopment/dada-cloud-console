@@ -71,6 +71,15 @@ export const adminFunnel: Messages = {
     en: "{visits} visits in the window. Funnel stages are unique Metrika users, not events: one person with five deploys counts once.",
   },
 
+  "adminFunnel.cohort.empty": {
+    ru: "За окно нет ни одной регистрации — воронке не из чего вырасти.",
+    en: "No signups in this window — the funnel has nothing to grow from.",
+  },
+  "adminFunnel.sankey.dropAt": { ru: "Не дошли до «{stage}»", en: "Did not reach “{stage}”" },
+  "adminFunnel.door.stageDoor": { ru: "Дверь", en: "Door" },
+  "adminFunnel.door.stageRegistered": { ru: "Зарегистрировались", en: "Signed up" },
+  "adminFunnel.reg.errorAside": { ru: "Ошибок формы за окно: {count}", en: "Form errors in the window: {count}" },
+
   "adminFunnel.reg.title": {
     ru: "Регистрация в Keycloak: открыл форму → зарегистрировался",
     en: "Keycloak registration: opened the form → signed up",
