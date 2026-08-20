@@ -12,13 +12,19 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
 // findAppPVCName resolves the live PersistentVolumeClaim backing appName in
 // namespace through the app's pod spec: rendered PVCs carry no dada.io/app
 // label (observed live — only pods do), so the pod volume list is the one
-// authoritative claim-to-app binding. Returns "" when no pod of this app
-// mounts a PVC, or the cluster is unreachable.
+// authoritative claim-to-app binding. When no pod exists (an app crashlooping
+// past its restart budget, or stopped) this falls back to a direct Get on
+// "<appName>-pvc", the deterministic name the Helm chart gives every app's
+// claim. The fallback never lists or guesses: it only trusts a claim whose
+// name it already knows, so it cannot hand back a different app's PVC even
+// if the namespace holds several. Returns "" when neither path finds a claim,
+// or the cluster is unreachable.
 func findAppPVCName(ctx context.Context, namespace, appName string) string {
 	clientset := newAppHealthClientset()
 	if clientset == nil {
@@ -26,20 +32,40 @@ func findAppPVCName(ctx context.Context, namespace, appName string) string {
 	}
 	listCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	pods, err := clientset.CoreV1().Pods(namespace).List(listCtx, metav1.ListOptions{
+	return resolveAppPVCName(listCtx, clientset, namespace, appName)
+}
+
+// resolveAppPVCName is findAppPVCName's logic with the clientset taken as a
+// parameter, so it is callable with a fake clientset in tests instead of only
+// through the in-cluster client findAppPVCName builds. Pure given clientset.
+func resolveAppPVCName(ctx context.Context, clientset kubernetes.Interface, namespace, appName string) string {
+	pods, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: "dada.io/app=" + appName,
 	})
-	if err != nil {
-		return ""
-	}
-	for i := range pods.Items {
-		for _, v := range pods.Items[i].Spec.Volumes {
-			if v.PersistentVolumeClaim != nil {
-				return v.PersistentVolumeClaim.ClaimName
+	if err == nil {
+		for i := range pods.Items {
+			for _, v := range pods.Items[i].Spec.Volumes {
+				if v.PersistentVolumeClaim != nil {
+					return v.PersistentVolumeClaim.ClaimName
+				}
 			}
 		}
 	}
-	return ""
+	return fallbackAppPVCName(ctx, clientset, namespace, appName)
+}
+
+// fallbackAppPVCName is resolveAppPVCName's second path, used when no pod of
+// the app mounts a claim. Verified live against fonbet-value-pvc (2026-08-19,
+// artemmendeleev-gmail-com-prod): the claim carries no dada.io/app label of
+// its own, only argocd.argoproj.io/instance, so a Get by the naming
+// convention -- not a label selector -- is the only lookup this can trust
+// without risking a different app's claim.
+func fallbackAppPVCName(ctx context.Context, clientset kubernetes.Interface, namespace, appName string) string {
+	pvc, err := clientset.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, appName+"-pvc", metav1.GetOptions{})
+	if err != nil || pvc == nil {
+		return ""
+	}
+	return pvc.Name
 }
 
 // volumeUsageFields is the pure, testable shape of GetAppVolumeUsage's

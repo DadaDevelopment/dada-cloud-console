@@ -517,6 +517,8 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/volume/export", h.ExportAppVolume)
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/net-probe", h.ProbeAppNetwork)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/volume/usage", h.GetAppVolumeUsage)
+		api.POST("/projects/:projectId/environments/:envId/apps/:appName/volume/maintenance/report", h.CreateAppVolumeMaintenanceReport)
+		api.GET("/projects/:projectId/environments/:envId/apps/:appName/volume/maintenance/report", h.GetAppVolumeMaintenanceReport)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/volume/files", h.ListAppFiles)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/volume/files/content", h.ReadAppFile)
 		api.PUT("/projects/:projectId/environments/:envId/apps/:appName/volume/files/content", h.WriteAppFile)

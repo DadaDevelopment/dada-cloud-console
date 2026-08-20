@@ -60,6 +60,17 @@ rules:
     resources:
       - pods/exec
     verbs: ["create"]
+  # Volume maintenance reports mount an app's PVC into a short-lived Job in
+  # the app's own namespace. This is deliberately not pods/exec: exec needs a
+  # running pod, and the outage this report exists for -- a volume with zero
+  # free inodes -- is exactly the state in which the app has no running pod
+  # left to exec into. The Job is read-only (the claim is mounted ReadOnly)
+  # and removes itself through ttlSecondsAfterFinished, so delete is not
+  # granted. Reading the result needs pods/log, already granted above.
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+    verbs: ["create", "get", "list", "watch"]
   # The network probe (ProbeAppNetwork) attaches a small, platform-maintained
   # debug image to a running app pod as an ephemeral container, then execs
   # fixed DNS/TCP/TLS/HTTP checks inside it. It needs its own subresource
