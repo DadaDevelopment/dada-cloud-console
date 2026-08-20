@@ -912,10 +912,11 @@ func (w *appHealthWatcher) maybeNotify(ctx context.Context, projectID uuid.UUID,
 		codeHint = notify.ClassifyCrashLog(logExcerpt)
 	}
 	agentURL := consoleLink + "#agent"
-	subject, body := notify.ComposeAppAlert(alert.AppName, alert.Reason, alert.PodName, logExcerpt, consoleLink, codeHint, agentURL)
+	projectName := w.h.projectDisplayName(ctx, projectID)
+	subject, body := notify.ComposeAppAlert(alert.AppName, projectName, alert.Reason, alert.PodName, logExcerpt, consoleLink, codeHint, agentURL)
 	if source == alertSourceOperator {
 		log.Printf("app-health: WARN no reachable owner for project %s, falling back to operator for app=%s reason=%s", projectID, alert.AppName, alert.Reason)
-		subject, body = notify.ComposeNoOwnerFallback(projectID.String(), w.h.projectDisplayName(ctx, projectID), subject, body)
+		subject, body = notify.ComposeNoOwnerFallback(projectID.String(), projectName, subject, body)
 	}
 	if err := w.h.auditNotifier.Send(to, subject, body); err != nil {
 		log.Printf("app-health: send to %s failed for app=%s: %v", to, alert.AppName, err)

@@ -889,8 +889,18 @@ func ExtractCauseLine(excerpt string) string {
 // would be a false claim -- that exact wording was previously used
 // unconditionally and made a registry failure on our side read as the
 // owner's own app crashing.
-func ComposeAppAlert(appName, reason, podName, logExcerpt, consoleLink, codeHint, agentURL string) (subject, body string) {
-	subject = fmt.Sprintf("Dada Cloud: %s не работает (%s)", appName, reason)
+//
+// projectName is stated in both the subject and the body on purpose (live
+// case bruzas.85@mail.ru, 2026-08-20): app_name is not unique platform-wide,
+// only (namespace, app_name) is, so an owner who has two projects with the
+// same app_name (a live "sevarateambot" in one, a crashlooping duplicate in
+// the other) got an email that named only the app and left him unable to
+// tell which of his two stacks it was about -- he read it as his working bot
+// being broken. The project name is the one piece of context the owner
+// already recognizes from the console UI, so it is what disambiguates here,
+// not the raw namespace or a project id the email never otherwise mentions.
+func ComposeAppAlert(appName, projectName, reason, podName, logExcerpt, consoleLink, codeHint, agentURL string) (subject, body string) {
+	subject = fmt.Sprintf("Dada Cloud: %s (проект %s) не работает (%s)", appName, projectName, reason)
 	var b strings.Builder
 	switch reason {
 	case "ImagePullBackOff", "ErrImagePull":
@@ -898,6 +908,7 @@ func ComposeAppAlert(appName, reason, podName, logExcerpt, consoleLink, codeHint
 	default:
 		fmt.Fprintf(&b, "Приложение %s перезапускается и, похоже, не поднимается.\n\n", appName)
 	}
+	fmt.Fprintf(&b, "Проект: %s\n", projectName)
 	fmt.Fprintf(&b, "Причина: %s\n", reason)
 	fmt.Fprintf(&b, "Под: %s\n\n", podName)
 	if codeHint != "" {

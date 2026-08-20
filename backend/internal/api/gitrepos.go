@@ -1451,6 +1451,10 @@ func (h *Handler) linkGitRepo(ctx context.Context, actorID, projectID, envID uui
 	if req.Profile != "small" && req.Profile != "medium" && req.Profile != "large" {
 		return nil, &opFault{http.StatusBadRequest, "invalid_profile", "profile must be one of: small, medium, large"}
 	}
+	if fault := h.crossProjectRepoFault(ctx, projectID, req.RepoFullName, req.AppName); fault != nil {
+		return nil, fault
+	}
+
 	cloneURL := req.CloneURL
 	if cloneURL == "" {
 		cloneURL = "https://github.com/" + req.RepoFullName + ".git"
@@ -1556,6 +1560,34 @@ func (h *Handler) linkGitRepo(ctx context.Context, actorID, projectID, envID uui
 	}
 	r.PlatformAccess = classifyPlatformAccess(r.Provider, r.InstallationID)
 	return &r, nil
+}
+
+// crossProjectRepoFault refuses binding a repository under an app name that
+// the same org already uses in another project. The git_repos unique
+// constraint only covers (project_id, environment_id, app_name), so the same
+// repo could be connected under the same app name into two projects, yielding
+// two argo trees and two image repos for one name (backlog 0385). The same
+// repo under a DIFFERENT app name stays allowed: one repository holding
+// several deployable services is a legitimate layout.
+func (h *Handler) crossProjectRepoFault(ctx context.Context, projectID uuid.UUID, repoFullName, appName string) *opFault {
+	var otherProjectName string
+	err := h.pool.QueryRow(ctx,
+		`SELECT p2.display_name FROM git_repos gr
+		 JOIN projects p2 ON p2.id = gr.project_id
+		 JOIN projects p1 ON p1.id = $1
+		 WHERE gr.repo_full_name = $2 AND gr.app_name = $3
+		   AND gr.project_id != $1 AND p2.org_id = p1.org_id
+		 LIMIT 1`,
+		projectID, repoFullName, appName,
+	).Scan(&otherProjectName)
+	if err == pgx.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return &opFault{http.StatusInternalServerError, "repo_conflict_check_failed", "failed to check for existing repo links"}
+	}
+	return &opFault{http.StatusConflict, "repo_linked_to_other_project",
+		fmt.Sprintf("repository %q is already connected as app %q in project %q", repoFullName, appName, otherProjectName)}
 }
 
 // linkConflictFault turns a unique-violation on git_repos(project_id,

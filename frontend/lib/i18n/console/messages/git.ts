@@ -220,6 +220,10 @@ export const git: Messages = {
     ru: "Этот репозиторий уже подключен к этому приложению. Повторно подключать не нужно - откройте приложение.",
     en: "This repository is already connected to this app. No need to reconnect it - open the app instead.",
   },
+  "git.import.byUrl.error.repoLinkedToOtherProject": {
+    ru: "Этот репозиторий уже подключен в другом вашем проекте. Откройте его там, а не подключайте повторно - иначе получится второе, конкурирующее приложение.",
+    en: "This repository is already connected in another one of your projects. Open it there instead of connecting it again - otherwise you get a second, competing app.",
+  },
   "git.import.byUrl.alreadyConnected.rebuild": { ru: "Пересобрать и задеплоить", en: "Rebuild and deploy" },
   "git.import.byUrl.alreadyConnected.open": { ru: "Открыть приложение", en: "Open the app" },
   "git.import.byUrl.error.empty": { ru: "Введите clone URL репозитория", en: "Enter the repository's clone URL" },

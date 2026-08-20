@@ -259,20 +259,29 @@ export async function apiFetch<T>(
 
 /**
  * Classifies a 409 from ConnectGitRepo (backend/internal/api/gitrepos.go) into
- * which of the two known conflicts happened, so callers can show the right
- * copy instead of the raw backend sentence.
+ * which of the known conflicts happened, so callers can show the right copy
+ * instead of the raw backend sentence.
  *
  * `repo_already_connected`: this exact repository is already linked to that
  * app - the caller's previous attempt succeeded and this is a retry.
+ * `repo_linked_to_other_project`: this exact repository is already linked
+ * somewhere else in the same org - connecting it again would spin up a
+ * second, competing stack for the same app rather than reuse the first.
  * `app_name_taken` (or any other/missing code, for rollout compatibility with
  * a backend that has not deployed `code` yet): the app name collides with a
  * different repository.
  */
-export type ConnectRepoConflict = "repo_already_connected" | "app_name_taken" | null;
+export type ConnectRepoConflict =
+  | "repo_already_connected"
+  | "repo_linked_to_other_project"
+  | "app_name_taken"
+  | null;
 
 export function classifyConnectRepoConflict(status: number | undefined, code: string | undefined): ConnectRepoConflict {
   if (status !== 409) return null;
-  return code === "repo_already_connected" ? "repo_already_connected" : "app_name_taken";
+  if (code === "repo_already_connected") return "repo_already_connected";
+  if (code === "repo_linked_to_other_project") return "repo_linked_to_other_project";
+  return "app_name_taken";
 }
 
 /**

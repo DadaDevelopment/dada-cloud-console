@@ -19,15 +19,20 @@ import (
 // that matched what actually happened.
 func TestLinkGitRepo_ConflictSplitsRepeatFromCollision(t *testing.T) {
 	pool := testInstallPool(t)
-	projectID, envID, userID := seedInstallProject(t, pool, "acme", "k8s")
-	t.Cleanup(func() { dropSeededAudit(pool, "GitRepo", "shared-app") })
+	suffix := uuid.NewString()[:8]
+	orgID := "acme-collision-" + suffix
+	repoFirst := "acme/first-repo-" + suffix
+	repoSecond := "acme/second-repo-" + suffix
+	appName := "shared-app-" + suffix
+	projectID, envID, userID := seedInstallProject(t, pool, orgID, "k8s")
+	t.Cleanup(func() { dropSeededAudit(pool, "GitRepo", appName) })
 
 	h := &Handler{pool: pool, cfg: &config.Config{GitopsEncryptionKey: installTestKey}}
 	ctx := context.Background()
 
 	first := &connectGitRepoRequest{
-		RepoFullName: "acme/first-repo",
-		AppName:      "shared-app",
+		RepoFullName: repoFirst,
+		AppName:      appName,
 		Provider:     "github",
 	}
 	if _, fault := h.linkGitRepo(ctx, userID, projectID, envID, first); fault != nil {
@@ -36,8 +41,8 @@ func TestLinkGitRepo_ConflictSplitsRepeatFromCollision(t *testing.T) {
 
 	t.Run("same repo again yields repo_already_connected", func(t *testing.T) {
 		repeat := &connectGitRepoRequest{
-			RepoFullName: "acme/first-repo",
-			AppName:      "shared-app",
+			RepoFullName: repoFirst,
+			AppName:      appName,
 			Provider:     "github",
 		}
 		_, fault := h.linkGitRepo(ctx, userID, projectID, envID, repeat)
@@ -54,8 +59,8 @@ func TestLinkGitRepo_ConflictSplitsRepeatFromCollision(t *testing.T) {
 
 	t.Run("different repo under the same app name yields app_name_taken", func(t *testing.T) {
 		collider := &connectGitRepoRequest{
-			RepoFullName: "acme/second-repo",
-			AppName:      "shared-app",
+			RepoFullName: repoSecond,
+			AppName:      appName,
 			Provider:     "github",
 		}
 		_, fault := h.linkGitRepo(ctx, userID, projectID, envID, collider)
@@ -69,6 +74,49 @@ func TestLinkGitRepo_ConflictSplitsRepeatFromCollision(t *testing.T) {
 			t.Fatalf("reason = %q, want app_name_taken", fault.Reason)
 		}
 	})
+}
+
+// TestLinkGitRepo_SameRepoInAnotherProjectOfSameOrgIsRefused proves backlog
+// 0385's actual failure mode is closed: the git_repos unique constraint only
+// covers (project_id, environment_id, app_name), so nothing stopped the same
+// owner from connecting the same repository under the SAME app name into a
+// second project -- exactly what happened live with alexas85/SevaraTeamBot,
+// bound first into project tvkassistantbot and then, a day later, into
+// project sevarabot: two argo trees, two image repos, one live app and one
+// eternal CrashLoop zombie, with no warning either time.
+func TestLinkGitRepo_SameRepoInAnotherProjectOfSameOrgIsRefused(t *testing.T) {
+	pool := testInstallPool(t)
+	orgID := "same-owner-" + uuid.NewString()[:8]
+	firstProjectID, firstEnvID, userID := seedInstallProject(t, pool, orgID, "k8s")
+	secondProjectID, secondEnvID, _ := seedInstallProject(t, pool, orgID, "k8s")
+
+	h := &Handler{pool: pool, cfg: &config.Config{GitopsEncryptionKey: installTestKey}}
+	ctx := context.Background()
+
+	first := &connectGitRepoRequest{
+		RepoFullName: "alexas85/SevaraTeamBot",
+		AppName:      "sevarateambot",
+		Provider:     "github",
+	}
+	if _, fault := h.linkGitRepo(ctx, userID, firstProjectID, firstEnvID, first); fault != nil {
+		t.Fatalf("seed link into first project failed: %+v", fault)
+	}
+
+	second := &connectGitRepoRequest{
+		RepoFullName: "alexas85/SevaraTeamBot",
+		AppName:      "sevarateambot",
+		Provider:     "github",
+	}
+	_, fault := h.linkGitRepo(ctx, userID, secondProjectID, secondEnvID, second)
+	if fault == nil {
+		t.Fatalf("expected the second project's link to be refused, got a successful link (duplicate stack)")
+	}
+	if fault.Status != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", fault.Status)
+	}
+	if fault.Reason != "repo_linked_to_other_project" {
+		t.Fatalf("reason = %q, want repo_linked_to_other_project", fault.Reason)
+	}
 }
 
 // TestLinkConflictFault_LookupMissBecomesAppNameTaken guards the fallback: if
@@ -95,5 +143,30 @@ func TestLinkConflictFault_LookupMissBecomesAppNameTaken(t *testing.T) {
 	}
 	if fault.Reason != "app_name_taken" {
 		t.Fatalf("reason = %q, want app_name_taken on a lookup miss", fault.Reason)
+	}
+}
+
+// TestLinkGitRepo_SameRepoUnderAnotherAppNameIsAllowed keeps the 0385 guard
+// from turning into a wall: one repository holding several deployable
+// services is a legitimate layout, and only the same repo under the same app
+// name produces the duplicate stack the guard exists to prevent.
+func TestLinkGitRepo_SameRepoUnderAnotherAppNameIsAllowed(t *testing.T) {
+	pool := testInstallPool(t)
+	orgID := "monorepo-owner-" + uuid.NewString()[:8]
+	firstProjectID, firstEnvID, userID := seedInstallProject(t, pool, orgID, "k8s")
+	secondProjectID, secondEnvID, _ := seedInstallProject(t, pool, orgID, "k8s")
+
+	h := &Handler{pool: pool, cfg: &config.Config{GitopsEncryptionKey: installTestKey}}
+	ctx := context.Background()
+
+	repo := "alexas85/" + uuid.NewString()[:8]
+	first := &connectGitRepoRequest{RepoFullName: repo, AppName: "api", Provider: "github"}
+	if _, fault := h.linkGitRepo(ctx, userID, firstProjectID, firstEnvID, first); fault != nil {
+		t.Fatalf("seed link into first project failed: %+v", fault)
+	}
+
+	second := &connectGitRepoRequest{RepoFullName: repo, AppName: "worker", Provider: "github"}
+	if _, fault := h.linkGitRepo(ctx, userID, secondProjectID, secondEnvID, second); fault != nil {
+		t.Fatalf("second app name from the same repo must be allowed, got %+v", fault)
 	}
 }

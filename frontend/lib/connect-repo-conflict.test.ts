@@ -19,6 +19,13 @@ test("409 with code app_name_taken classifies as app_name_taken", () => {
   assert.equal(classifyConnectRepoConflict(409, "app_name_taken"), "app_name_taken");
 });
 
+test("409 with code repo_linked_to_other_project classifies as repo_linked_to_other_project", () => {
+  assert.equal(
+    classifyConnectRepoConflict(409, "repo_linked_to_other_project"),
+    "repo_linked_to_other_project",
+  );
+});
+
 test("409 with no code falls back to app_name_taken (old backend during rollout)", () => {
   assert.equal(classifyConnectRepoConflict(409, undefined), "app_name_taken");
 });

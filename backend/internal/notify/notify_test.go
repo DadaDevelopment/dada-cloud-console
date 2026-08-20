@@ -159,7 +159,7 @@ func TestClassifyCrashCauseWithReasonImagePullBackOffIsPlatformRegistry(t *testi
 func TestComposeAppAlertImagePullBackOffDoesNotClaimTheAppIsRestarting(t *testing.T) {
 	for _, reason := range []string{"ImagePullBackOff", "ErrImagePull"} {
 		t.Run(reason, func(t *testing.T) {
-			_, body := ComposeAppAlert("web", reason, "web-abc12", "", "https://console.dada-tuda.ru/projects/p1/apps/web", "", "https://console.dada-tuda.ru/projects/p1/apps/web#agent")
+			_, body := ComposeAppAlert("web", "Web Project", reason, "web-abc12", "", "https://console.dada-tuda.ru/projects/p1/apps/web", "", "https://console.dada-tuda.ru/projects/p1/apps/web#agent")
 			if strings.Contains(body, "перезапускается") {
 				t.Fatalf("a container stuck in %s never started, so the alert must not claim it is restarting; got: %s", reason, body)
 			}
@@ -320,14 +320,14 @@ func TestExtractCauseLineTruncatesByRunesNotBytes(t *testing.T) {
 }
 
 func TestComposeAppAlertIncludesHintWhenPresent(t *testing.T) {
-	_, body := ComposeAppAlert("web", "CrashLoopBackOff", "web-abc12", "panic: boom", "https://console.dada-tuda.ru/projects/p1/apps/web", "Судя по логам, это похоже на ошибку в коде приложения.", "https://console.dada-tuda.ru/projects/p1/apps/web#agent")
+	_, body := ComposeAppAlert("web", "Web Project", "CrashLoopBackOff", "web-abc12", "panic: boom", "https://console.dada-tuda.ru/projects/p1/apps/web", "Судя по логам, это похоже на ошибку в коде приложения.", "https://console.dada-tuda.ru/projects/p1/apps/web#agent")
 	if !strings.Contains(body, "Судя по логам, это похоже на ошибку в коде приложения.") {
 		t.Fatalf("expected body to contain code hint, got: %s", body)
 	}
 }
 
 func TestComposeAppAlertOmitsHintWhenEmpty(t *testing.T) {
-	_, body := ComposeAppAlert("web", "OOMKilled", "web-abc12", "", "https://console.dada-tuda.ru/projects/p1/apps/web", "", "https://console.dada-tuda.ru/projects/p1/apps/web#agent")
+	_, body := ComposeAppAlert("web", "Web Project", "OOMKilled", "web-abc12", "", "https://console.dada-tuda.ru/projects/p1/apps/web", "", "https://console.dada-tuda.ru/projects/p1/apps/web#agent")
 	if strings.Contains(body, "Судя по логам") {
 		t.Fatalf("expected body to omit code hint line, got: %s", body)
 	}
@@ -335,12 +335,41 @@ func TestComposeAppAlertOmitsHintWhenEmpty(t *testing.T) {
 
 func TestComposeAppAlertIncludesAgentURL(t *testing.T) {
 	agentURL := "https://console.dada-tuda.ru/projects/p1/apps/web#agent"
-	_, body := ComposeAppAlert("web", "CrashLoopBackOff", "web-abc12", "some log", "https://console.dada-tuda.ru/projects/p1/apps/web", "", agentURL)
+	_, body := ComposeAppAlert("web", "Web Project", "CrashLoopBackOff", "web-abc12", "some log", "https://console.dada-tuda.ru/projects/p1/apps/web", "", agentURL)
 	if !strings.Contains(body, agentURL) {
 		t.Fatalf("expected body to contain agent URL %q, got: %s", agentURL, body)
 	}
 	if !strings.Contains(body, "AI-агента") {
 		t.Fatalf("expected body to mention the AI agent, got: %s", body)
+	}
+}
+
+// TestComposeAppAlertDistinguishesTwoProjectsWithTheSameAppName is the live
+// bug bruzas.85@mail.ru hit 2026-08-19: he owns two projects, SevaraBot
+// (healthy) and TVK_AssistantBot (a crashlooping duplicate), both running an
+// app named "sevarateambot"/"sevarateambot-deploy". app_health_alerts is
+// correctly keyed by (namespace, app_name) -- two separate rows, one per
+// project -- so the watcher alerted on the real crash in TVK_AssistantBot.
+// But the email it sent named only the app, never the project, so the owner
+// could not tell it apart from an alert about his working bot in SevaraBot
+// and read it as "sevarateambot is down" full stop. Subject and body must
+// both carry the project name, and the two projects' emails must be
+// distinguishable from each other.
+func TestComposeAppAlertDistinguishesTwoProjectsWithTheSameAppName(t *testing.T) {
+	subjectBroken, bodyBroken := ComposeAppAlert("sevarateambot", "TVK_AssistantBot", "CrashLoopBackOff", "sevarateambot-deploy-7ffcd44f6b-s6mct", "", "https://console.dada-tuda.ru/projects/tvk/apps/sevarateambot", "", "https://console.dada-tuda.ru/projects/tvk/apps/sevarateambot#agent")
+	subjectHealthy, bodyHealthy := ComposeAppAlert("sevarateambot", "SevaraBot", "CrashLoopBackOff", "sevarateambot-deploy-7ffcd44f6b-s6mct", "", "https://console.dada-tuda.ru/projects/seva/apps/sevarateambot", "", "https://console.dada-tuda.ru/projects/seva/apps/sevarateambot#agent")
+
+	if !strings.Contains(subjectBroken, "TVK_AssistantBot") {
+		t.Fatalf("expected subject to name the project TVK_AssistantBot, got: %s", subjectBroken)
+	}
+	if !strings.Contains(bodyBroken, "TVK_AssistantBot") {
+		t.Fatalf("expected body to name the project TVK_AssistantBot, got: %s", bodyBroken)
+	}
+	if subjectBroken == subjectHealthy {
+		t.Fatalf("two different projects with the same app_name must not produce identical subjects: %q", subjectBroken)
+	}
+	if bodyBroken == bodyHealthy {
+		t.Fatalf("two different projects with the same app_name must not produce identical bodies: %q", bodyBroken)
 	}
 }
 

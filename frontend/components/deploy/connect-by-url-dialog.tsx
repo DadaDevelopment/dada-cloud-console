@@ -180,6 +180,8 @@ export function ConnectByUrlDialog({ projectId, envId, open, onClose }: ConnectB
         setAlreadyConnected(trimmedName);
       } else if (conflict === "app_name_taken") {
         setError(t("git.import.byUrl.error.appNameTaken"));
+      } else if (conflict === "repo_linked_to_other_project") {
+        setError(t("git.import.byUrl.error.repoLinkedToOtherProject"));
       } else if (isGithubAccessRequiredError(apiErr?.status, apiErr?.code)) {
         setError(t("git.import.error.githubAccessRequired"));
         setGithubAccessRequired(true);

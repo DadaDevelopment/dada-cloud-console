@@ -528,6 +528,11 @@ export default function GitImportPage() {
         setSubmitting(false);
         return;
       }
+      if (conflict === "repo_linked_to_other_project") {
+        setSubmitError(t("git.import.byUrl.error.repoLinkedToOtherProject"));
+        setSubmitting(false);
+        return;
+      }
       if (conflict !== "repo_already_connected") {
         setSubmitError(err instanceof Error ? err.message : t("git.import.error.connect"));
         setSubmitting(false);
