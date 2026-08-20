@@ -820,7 +820,7 @@ type AppServiceSpec struct {
 // container.
 func (s AppServiceSpec) serviceBlock(envFile string) map[string]any {
 	if s.Service != nil {
-		return s.Service
+		return withManagedEnvFile(s.Service, envFile, s.HasEnv)
 	}
 	b := map[string]any{"image": s.Image, "restart": "unless-stopped"}
 	if len(s.Ports) > 0 {
@@ -833,6 +833,87 @@ func (s AppServiceSpec) serviceBlock(envFile string) map[string]any {
 		b["env_file"] = []string{envFile}
 	}
 	return b
+}
+
+// withManagedEnvFile returns the adopted service block with the Console-managed
+// per-app env file appended to its env_file list. An adopted block is otherwise
+// reproduced verbatim, which means it keeps whatever env_file the hand-authored
+// stack declared — typically the environment-level ".env". The Console writes
+// the vars a user sets into the per-app apps/<name>/.env, so without this
+// reference that file is rendered on every assembly and read by nobody: setting
+// an env var in the Console silently does nothing to an adopted VM app.
+//
+// The managed file is appended LAST because docker compose lets later env_file
+// entries win on a key collision, and an explicit Console value must beat a
+// stale one baked into the stack's own .env.
+//
+// When the app has no Console env vars the block is returned untouched. That
+// preserves the data-safety invariant of adoption: an unchanged block keeps the
+// same config hash, so assembly does not recreate a running prod container just
+// to add an env_file nothing would read.
+func withManagedEnvFile(block map[string]any, envFile string, hasEnv bool) map[string]any {
+	if !hasEnv || envFile == "" {
+		return block
+	}
+	existing := envFileEntries(block["env_file"])
+	for _, e := range existing {
+		if envFileEntryPath(e) == envFile {
+			return block
+		}
+	}
+	out := make(map[string]any, len(block)+1)
+	for k, v := range block {
+		out[k] = v
+	}
+	out["env_file"] = append(existing, newEnvFileEntry(existing, envFile))
+	return out
+}
+
+// envFileEntries normalises compose's env_file field into a list. The field is
+// either absent, a single string, or a list whose items are strings or long-form
+// {path, required} maps; all three shapes come back from adopted stacks.
+func envFileEntries(v any) []any {
+	switch t := v.(type) {
+	case nil:
+		return nil
+	case string:
+		return []any{t}
+	case []any:
+		return append([]any(nil), t...)
+	case []string:
+		out := make([]any, 0, len(t))
+		for _, e := range t {
+			out = append(out, e)
+		}
+		return out
+	default:
+		return []any{t}
+	}
+}
+
+// envFileEntryPath extracts the path from one env_file entry, short or long form.
+func envFileEntryPath(e any) string {
+	switch t := e.(type) {
+	case string:
+		return t
+	case map[string]any:
+		if p, ok := t["path"].(string); ok {
+			return p
+		}
+	}
+	return ""
+}
+
+// newEnvFileEntry builds the appended entry in the same shape the block already
+// uses. Compose tolerates a mixed list, but matching the existing form keeps the
+// rendered file readable and diffable against the stack it was adopted from.
+func newEnvFileEntry(existing []any, envFile string) any {
+	for _, e := range existing {
+		if _, isMap := e.(map[string]any); isMap {
+			return map[string]any{"path": envFile, "required": true}
+		}
+	}
+	return envFile
 }
 
 // externalVolumesFor pins every named volume referenced by AUTHORED apps as

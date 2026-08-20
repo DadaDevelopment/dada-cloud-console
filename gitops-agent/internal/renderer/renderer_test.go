@@ -1379,3 +1379,79 @@ func TestAuthoredNamedVolumesMatchesTheAggregatesExternalPins(t *testing.T) {
 		t.Fatal("no specs must produce no volumes, not an empty non-nil slice")
 	}
 }
+
+// TestAdoptedBlockReferencesManagedEnvFile locks the delivery of Console-managed
+// env vars to an ADOPTED compose app. The adopted service block is reproduced
+// verbatim so the container is not recreated, and its own `env_file` points at
+// the environment-level .env. The Console writes its managed vars to the
+// per-app apps/<name>/.env instead, so without an explicit reference that file
+// is rendered and never read: every env var set in the Console is a silent
+// no-op for the app.
+//
+// Regression: fin-core/findata backend. The 12 DADA_* keys lived in env_vars and
+// were rendered into apps/backend/.env, while the aggregate kept `env_file:
+// [.env]` — an env-level file holding zero DADA_ keys. The backend booted on
+// defaults (auth.enabled=False) and crash-looped on "Auth backend 'db' is not
+// registered". Four hand-written `environment:` blocks were committed to restore
+// it and all four were wiped by the next assembly, because the aggregate is
+// renderer OUTPUT rebuilt from the DB.
+func TestAdoptedBlockReferencesManagedEnvFile(t *testing.T) {
+	backend := map[string]any{
+		"image":    "nexus.dada-tuda.ru/dada/profi-backend:master-1.0.0-41",
+		"restart":  "unless-stopped",
+		"env_file": []any{".env"},
+		"expose":   []any{"8001"},
+	}
+	got, err := renderer.RenderAggregateCompose([]renderer.AppServiceSpec{
+		{AppName: "backend", Service: backend, HasEnv: true},
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var doc struct {
+		Services map[string]struct {
+			EnvFile []string `yaml:"env_file"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal([]byte(got), &doc); err != nil {
+		t.Fatalf("not valid yaml: %v\n%s", err, got)
+	}
+	list := doc.Services["backend"].EnvFile
+	var seenEnvLevel, seenManaged bool
+	for _, e := range list {
+		switch e {
+		case ".env":
+			seenEnvLevel = true
+		case "apps/backend/.env":
+			seenManaged = true
+		}
+	}
+	if !seenEnvLevel {
+		t.Errorf("adopted block lost its own env-level .env: %v\n%s", list, got)
+	}
+	if !seenManaged {
+		t.Errorf("adopted block never references the Console-managed apps/backend/.env, so env vars set in the Console are a silent no-op: %v\n%s", list, got)
+	}
+	if len(list) > 0 && list[len(list)-1] != "apps/backend/.env" {
+		t.Errorf("managed env file must come LAST so the Console wins on key collision: %v", list)
+	}
+}
+
+// TestAdoptedBlockWithoutEnvVarsIsUntouched keeps the data-safety invariant: an
+// adopted app with no Console env vars must stay byte-equal to the live stack,
+// so assembly does not change its config hash and recreate the container.
+func TestAdoptedBlockWithoutEnvVarsIsUntouched(t *testing.T) {
+	backend := map[string]any{
+		"image":    "nexus.dada-tuda.ru/dada/profi-backend:master-1.0.0-41",
+		"env_file": []any{".env"},
+	}
+	got, err := renderer.RenderAggregateCompose([]renderer.AppServiceSpec{
+		{AppName: "backend", Service: backend, HasEnv: false},
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(got, "apps/backend/.env") {
+		t.Errorf("app with no Console env vars gained an env_file entry (recreates the container for nothing):\n%s", got)
+	}
+}
