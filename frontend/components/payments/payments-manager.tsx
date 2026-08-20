@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { paymentsApi } from "@/lib/api";
 import type { PaymentsConnection } from "@/lib/api";
+import { paymentsEnvKeys, paymentsWebhooks } from "@/lib/payments-connection";
 import { useT } from "@/lib/i18n/console/context";
 
 interface Props {
@@ -219,11 +220,11 @@ console.log(await response.json());`;
             <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t("apps.payments.webhooks.title")}</h3>
             {connection.webhook_note === "no_public_hostname" ? (
               <p className="mt-1 text-sm text-amber-600 dark:text-amber-500">{t("apps.payments.webhooks.noHostnameWarning")}</p>
-            ) : connection.webhooks.length === 0 ? (
+            ) : paymentsWebhooks(connection).length === 0 ? (
               <p className="mt-1 text-sm text-gray-400 dark:text-gray-500">{t("apps.payments.webhooks.none")}</p>
             ) : (
               <ul className="mt-1 space-y-1 text-sm">
-                {connection.webhooks.map((w) => (
+                {paymentsWebhooks(connection).map((w) => (
                   <li key={w.id} className="font-mono text-gray-700 dark:text-gray-300">
                     {w.event} <span className="text-gray-400 dark:text-gray-500">({w.id})</span>
                   </li>
@@ -235,7 +236,7 @@ console.log(await response.json());`;
           <div>
             <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t("apps.payments.envKeys.title")}</h3>
             <ul className="mt-1 space-y-1 text-sm font-mono text-gray-700 dark:text-gray-300">
-              {connection.env_keys.map((k) => (
+              {paymentsEnvKeys(connection).map((k) => (
                 <li key={k}>{k}</li>
               ))}
             </ul>

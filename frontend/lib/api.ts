@@ -2116,9 +2116,9 @@ export interface PaymentsConnection {
   status: string;
   account_id: string | null;
   expires_at: string | null;
-  webhooks: PaymentsWebhook[];
+  webhooks: PaymentsWebhook[] | null;
   webhook_note: string | null;
-  env_keys: string[];
+  env_keys: string[] | null;
   connected_at: string | null;
 }
 
