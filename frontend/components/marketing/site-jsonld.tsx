@@ -2,6 +2,8 @@
 
 import { usePathname } from "next/navigation";
 
+import { COMPANY } from "@/lib/company";
+
 /**
  * Site-wide structured data emitted on every marketing route from the layout:
  * the Organization, the WebSite (with a SearchAction), a SiteNavigationElement
@@ -97,6 +99,22 @@ export function SiteJsonLd() {
     url: SITE_URL,
     logo: `${SITE_URL}/og.png`,
     description: c.orgDesc,
+    legalName: COMPANY.fullName,
+    taxID: COMPANY.inn,
+    vatID: COMPANY.inn,
+    address: {
+      "@type": "PostalAddress",
+      addressCountry: "RU",
+      addressLocality: "Санкт-Петербург",
+      postalCode: "198335",
+      streetAddress: COMPANY.legalAddress,
+    },
+    contactPoint: {
+      "@type": "ContactPoint",
+      contactType: "customer support",
+      email: COMPANY.email,
+      availableLanguage: ["ru", "en"],
+    },
     parentOrganization: {
       "@type": "Organization",
       "@id": "https://development.dada-tuda.ru/#organization",

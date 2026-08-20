@@ -1,5 +1,6 @@
 "use client";
 
+import { COMPANY } from "@/lib/company";
 import type { Locale } from "@/lib/i18n/dict";
 
 /**
@@ -9,9 +10,10 @@ import type { Locale } from "@/lib/i18n/dict";
  * on, dada_uid pseudonymous cookie), user-owned Postgres/S3, RU hosting, and the
  * free-plan quotas from backend/internal/billing/data/plans.yaml.
  *
- * Owner action before/right after publish: fill the operator legal identity
- * (юр. лицо / ИП, ОГРН/ИНН, юр. адрес) in the "Оператор" section — the code
- * ships with the public brand name and contact email only, no invented entity.
+ * The operator's legal identity (name, ИНН/КПП/ОГРН, registered address) is
+ * named in the "Оператор"/"Operator" sections from lib/company.ts: 152-ФЗ
+ * requires the operator to be identifiable, and a business customer will not
+ * transfer money to a service whose documents name no entity.
  */
 
 export interface LegalSection {
@@ -37,7 +39,8 @@ const privacyRu: LegalDocData = {
     {
       heading: "1. Оператор",
       body: [
-        "Оператором обработки персональных данных является владелец сервиса DADA Cloud.",
+        `Оператором обработки персональных данных является ${COMPANY.fullName} (${COMPANY.shortName}).`,
+        `ИНН ${COMPANY.inn}, КПП ${COMPANY.kpp}, ОГРН ${COMPANY.ogrn}. Адрес: ${COMPANY.legalAddress}.`,
         `По любым вопросам обработки данных и для реализации своих прав обращайтесь на электронную почту: ${CONTACT}.`,
       ],
     },
@@ -160,8 +163,12 @@ const termsRu: LegalDocData = {
       ],
     },
     {
-      heading: "8. Контакты",
-      body: [`По вопросам использования сервиса обращайтесь на ${CONTACT}.`],
+      heading: "8. Реквизиты и контакты",
+      body: [
+        `Сервис оказывает ${COMPANY.fullName} (${COMPANY.shortName}), ИНН ${COMPANY.inn}, КПП ${COMPANY.kpp}, ОГРН ${COMPANY.ogrn}, адрес: ${COMPANY.legalAddress}.`,
+        "Полные банковские реквизиты для оплаты по счёту опубликованы на странице «Реквизиты» (/company).",
+        `По вопросам использования сервиса обращайтесь на ${CONTACT}.`,
+      ],
     },
   ],
 };
@@ -175,7 +182,8 @@ const privacyEn: LegalDocData = {
     {
       heading: "1. Operator",
       body: [
-        "The operator of personal data processing is the owner of the DADA Cloud service.",
+        `The operator of personal data processing is ${COMPANY.shortNameEn}, a company registered in Russia (${COMPANY.fullName}).`,
+        `INN ${COMPANY.inn}, KPP ${COMPANY.kpp}, OGRN ${COMPANY.ogrn}. Registered address: ${COMPANY.legalAddress}.`,
         `For any data-processing questions or to exercise your rights, contact: ${CONTACT}.`,
       ],
     },
@@ -298,8 +306,12 @@ const termsEn: LegalDocData = {
       ],
     },
     {
-      heading: "8. Contact",
-      body: [`For service questions, contact ${CONTACT}.`],
+      heading: "8. Company details and contact",
+      body: [
+        `The service is provided by ${COMPANY.shortNameEn} (${COMPANY.fullName}), INN ${COMPANY.inn}, KPP ${COMPANY.kpp}, OGRN ${COMPANY.ogrn}, registered address: ${COMPANY.legalAddress}.`,
+        "Full bank details for payment by transfer are published on the company details page (/en/company).",
+        `For service questions, contact ${CONTACT}.`,
+      ],
     },
   ],
 };

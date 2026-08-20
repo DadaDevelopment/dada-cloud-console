@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Cloud } from "lucide-react";
+import { COMPANY } from "@/lib/company";
 import { useLang } from "@/lib/i18n/context";
 import { localeHref } from "@/lib/site";
 
@@ -40,6 +41,7 @@ const MARKETING_PATHS = new Set([
   "/developer/mcp-ai-agents",
   "/privacy",
   "/terms",
+  "/company",
 ]);
 
 export function MarketingFooter() {
@@ -92,8 +94,10 @@ export function MarketingFooter() {
           ))}
         </div>
         <div className="mt-10 flex flex-col items-start justify-between gap-2 border-t border-white/10 pt-6 text-xs sm:flex-row sm:items-center">
-          <span>
+          <span className="max-w-2xl">
             © 2026 DADA Cloud. {t.footer.rights}
+            <br />
+            {COMPANY.shortName}, ИНН {COMPANY.inn}, ОГРН {COMPANY.ogrn}, {COMPANY.legalAddress}
           </span>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
             {t.footer.legalLinks.map((l) => (

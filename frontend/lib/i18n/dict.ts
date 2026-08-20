@@ -1927,6 +1927,7 @@ const ru: Dict = {
       { label: "О платформе", href: "/" },
       { label: "Консоль", href: "/projects" },
       { label: "Вход", href: "/login" },
+      { label: "Реквизиты", href: "/company" },
       { label: "DADA Development", href: "https://development.dada-tuda.ru/" },
       { label: "AgentSync Hub", href: "https://a2a-hub.pro/" },
     ],
@@ -1942,6 +1943,7 @@ const ru: Dict = {
     legalLinks: [
       { label: "Политика конфиденциальности", href: "/privacy" },
       { label: "Пользовательское соглашение", href: "/terms" },
+      { label: "Реквизиты", href: "/company" },
     ],
   },
 };
@@ -3527,6 +3529,7 @@ const en: Dict = {
       { label: "About", href: "/" },
       { label: "Console", href: "/projects" },
       { label: "Log in", href: "/login" },
+      { label: "Company details", href: "/company" },
       { label: "DADA Development", href: "https://development.dada-tuda.ru/" },
       { label: "AgentSync Hub", href: "https://a2a-hub.pro/" },
     ],
@@ -3542,6 +3545,7 @@ const en: Dict = {
     legalLinks: [
       { label: "Privacy Policy", href: "/privacy" },
       { label: "Terms of Use", href: "/terms" },
+      { label: "Company details", href: "/company" },
     ],
   },
 };
