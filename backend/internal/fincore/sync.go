@@ -39,6 +39,10 @@ const internalAccountPredicate = `(
 // production that membership table holds 4 rows against 65 projects and 24
 // distinct owners, so filtering on membership alone would file 3 people as
 // clients and silently drop the rest.
+// The lateral join carries the paying entity's requisites onto the client
+// card. They come from the last invoice the org asked for, because that is the
+// only place the console ever learns an INN, and the INN is what lets FinCore
+// bind an incoming bank transfer to this client rather than to nobody.
 const clientsQuery = `
 SELECT u.id::text,
        u.username,
@@ -46,8 +50,20 @@ SELECT u.id::text,
        COALESCE(u.display_name, ''),
        u.created_at,
        COALESCE(u.signup_channel, ''),
-       COALESCE(u.signup_source, '')
+       COALESCE(u.signup_source, ''),
+       COALESCE(req.payer_inn, ''),
+       COALESCE(req.payer_kpp, ''),
+       COALESCE(req.payer_org_name, ''),
+       COALESCE(req.payer_legal_address, '')
 FROM users u
+LEFT JOIN LATERAL (
+    SELECT p.payer_inn, p.payer_kpp, p.payer_org_name, p.payer_legal_address
+    FROM payments p
+    WHERE p.org_id = u.username
+      AND COALESCE(p.payer_inn, '') <> ''
+    ORDER BY p.created_at DESC
+    LIMIT 1
+) req ON TRUE
 WHERE NOT ` + internalAccountPredicate + `
   AND (
        EXISTS (SELECT 1 FROM projects pr WHERE pr.owner_id = u.id)
@@ -87,6 +103,10 @@ SELECT p.id::text,
        COALESCE(p.yk_payment_id, ''),
        COALESCE(p.customer_email, ''),
        COALESCE(p.paid_at, p.updated_at),
+       COALESCE(p.payment_method, ''),
+       COALESCE(p.invoice_number, ''),
+       COALESCE(p.payer_inn, ''),
+       COALESCE(p.payer_org_name, ''),
        COALESCE(u.id::text, ''),
        COALESCE(u.username, ''),
        COALESCE(u.email, ''),
@@ -156,6 +176,11 @@ type Report struct {
 	// console user. They are still pushed; they land without a client.
 	PaymentsUnlinked int
 
+	// PaymentsSettledInBank counts succeeded payments deliberately not pushed
+	// because they arrived by bank transfer and the findata T-Bank feed
+	// already carries them.
+	PaymentsSettledInBank int
+
 	// HostingCostRUB is this month's hosting bill as the Beget API prices it.
 	//
 	// It is measured and reported, never ingested. The company's bank account
@@ -197,6 +222,7 @@ func (s *Syncer) loop(ctx context.Context) {
 				Int("clients_created", report.ClientsCreated).
 				Int("transactions", len(report.Transactions)).
 				Int("transactions_created", report.TransactionsCreated).
+				Int("payments_settled_in_bank", report.PaymentsSettledInBank).
 				Float64("hosting_cost_rub", report.HostingCostRUB).
 				Int("unchanged", report.Unchanged).
 				Msg("fincore sync done")
@@ -218,11 +244,12 @@ func (s *Syncer) Run(ctx context.Context, dryRun bool) (Report, error) {
 		report.Clients = append(report.Clients, ClientFromUser(u))
 	}
 
-	txs, unlinked, err := s.collectPayments(ctx)
+	txs, unlinked, settledInBank, err := s.collectPayments(ctx)
 	if err != nil {
 		return report, err
 	}
 	report.PaymentsUnlinked = unlinked
+	report.PaymentsSettledInBank = settledInBank
 
 	report.HostingCostRUB, report.BegetSkipped = s.collectHostingCost(ctx)
 
@@ -269,7 +296,8 @@ func (s *Syncer) collectUsers(ctx context.Context) ([]CloudUser, error) {
 	var out []CloudUser
 	for rows.Next() {
 		var u CloudUser
-		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.DisplayName, &u.CreatedAt, &u.SignupChannel, &u.SignupSource); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.DisplayName, &u.CreatedAt, &u.SignupChannel, &u.SignupSource,
+			&u.INN, &u.KPP, &u.OrgName, &u.LegalAddress); err != nil {
 			return nil, fmt.Errorf("fincore: scan user: %w", err)
 		}
 		out = append(out, u)
@@ -277,7 +305,15 @@ func (s *Syncer) collectUsers(ctx context.Context) ([]CloudUser, error) {
 	return out, rows.Err()
 }
 
-func (s *Syncer) collectPayments(ctx context.Context) ([]Transaction, int, error) {
+// collectPayments turns money the console collected into facts to push, and
+// leaves out the money the bank already reports.
+//
+// A payment settled by bank transfer reaches FinCore twice if this pushes it:
+// once as the T-Bank statement the findata integration streams, once as our
+// own row. The hosting bill already did exactly that. The console's job for
+// those is attribution, not booking -- the client card carries the payer's INN
+// so FinCore can bind the bank's own row to the right client.
+func (s *Syncer) collectPayments(ctx context.Context) ([]Transaction, int, int, error) {
 	var rows pgx.Rows
 	var err error
 	if s.includeInternal {
@@ -286,20 +322,26 @@ func (s *Syncer) collectPayments(ctx context.Context) ([]Transaction, int, error
 		rows, err = s.pool.Query(ctx, paymentsQuery(false), internalOrgIDs)
 	}
 	if err != nil {
-		return nil, 0, fmt.Errorf("fincore: query payments: %w", err)
+		return nil, 0, 0, fmt.Errorf("fincore: query payments: %w", err)
 	}
 	defer rows.Close()
 
 	var out []Transaction
 	unlinked := 0
+	settledInBank := 0
 	for rows.Next() {
 		var p CloudPayment
 		var owner CloudUser
 		if err := rows.Scan(
 			&p.ID, &p.OrgID, &p.Plan, &p.Amount, &p.Currency, &p.YKPaymentID, &p.CustomerEmail, &p.PaidAt,
+			&p.Method, &p.InvoiceNumber, &p.PayerINN, &p.PayerOrgName,
 			&owner.ID, &owner.Username, &owner.Email, &owner.DisplayName, &owner.CreatedAt, &owner.SignupChannel, &owner.SignupSource,
 		); err != nil {
-			return nil, 0, fmt.Errorf("fincore: scan payment: %w", err)
+			return nil, 0, 0, fmt.Errorf("fincore: scan payment: %w", err)
+		}
+		if p.SettledInBank() {
+			settledInBank++
+			continue
 		}
 		if owner.ID != "" {
 			p.Owner = &owner
@@ -309,9 +351,9 @@ func (s *Syncer) collectPayments(ctx context.Context) ([]Transaction, int, error
 		out = append(out, TransactionFromPayment(p))
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
-	return out, unlinked, nil
+	return out, unlinked, settledInBank, nil
 }
 
 // collectHostingCost measures this month's hosting bill, or explains why there

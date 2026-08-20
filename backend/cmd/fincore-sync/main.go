@@ -75,18 +75,19 @@ func run(dryRun, verbose, includeInternal bool) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	summary := map[string]any{
-		"dry_run":                report.DryRun,
-		"tenant":                 cfg.FinCoreTenantSlug,
-		"clients":                len(report.Clients),
-		"clients_created":        report.ClientsCreated,
-		"clients_updated":        report.ClientsUpdated,
-		"transactions":           len(report.Transactions),
-		"transactions_created":   report.TransactionsCreated,
-		"transactions_updated":   report.TransactionsUpdated,
-		"transactions_unchanged": report.Unchanged,
-		"payments_unlinked":      report.PaymentsUnlinked,
-		"hosting_cost_rub":       report.HostingCostRUB,
-		"hosting_cost_ingested":  false,
+		"dry_run":                  report.DryRun,
+		"tenant":                   cfg.FinCoreTenantSlug,
+		"clients":                  len(report.Clients),
+		"clients_created":          report.ClientsCreated,
+		"clients_updated":          report.ClientsUpdated,
+		"transactions":             len(report.Transactions),
+		"transactions_created":     report.TransactionsCreated,
+		"transactions_updated":     report.TransactionsUpdated,
+		"transactions_unchanged":   report.Unchanged,
+		"payments_unlinked":        report.PaymentsUnlinked,
+		"payments_settled_in_bank": report.PaymentsSettledInBank,
+		"hosting_cost_rub":         report.HostingCostRUB,
+		"hosting_cost_ingested":    false,
 	}
 	if report.BegetSkipped != "" {
 		summary["hosting_cost_unavailable"] = report.BegetSkipped

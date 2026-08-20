@@ -10,7 +10,7 @@ customer's own machine ingest seam.
 | Dada Cloud | FinCore | key |
 | --- | --- | --- |
 | console user | client | `external_id` = `users.id`, source system `dada_cloud` |
-| succeeded YooKassa payment | CREDIT transaction | `source_identity` = `payment:<uuid>` |
+| succeeded card payment | CREDIT transaction | `source_identity` = `payment:<uuid>` |
 
 The Beget hosting bill used to be pushed as a DEBIT and no longer is -- see
 "The bank is the source of money" below.
@@ -64,6 +64,40 @@ which project ate it.
 Statement id 3 and fact id 3 are still in the customer's production tenant and
 have to be removed by hand -- this integration has no delete path and must not
 grow one.
+
+## Attribution
+
+Money has to end up on a client card, and there are two routes into the
+company, so there are two mechanisms.
+
+**Card payments.** YooKassa collects them and settles to the account as one
+aggregated payout, so no bank line ever names the customer. The console is the
+only witness of who paid what, and it pushes each payment with
+`client_external_id` = the console user id. That is the whole attribution: the
+fact lands on the client the ingest seam resolves by external key.
+
+**Bank transfers.** A customer who asks for an invoice pays from their own
+account, and that payment reaches FinCore on its own through the findata T-Bank
+feed. The console does **not** push those -- `CloudPayment.SettledInBank` drops
+every row whose `payment_method` is `invoice`, and the count shows up as
+`payments_settled_in_bank` in the report. Pushing them would repeat the hosting
+bill mistake exactly.
+
+What the console contributes there is identity. `payments` captures
+`payer_inn`, `payer_kpp`, `payer_org_name` and `payer_legal_address` when the
+invoice is issued, and the client sync carries the latest of them onto the
+client card as `iin` and `requisites`, with the legal entity taking over
+`short_name`. FinCore binds an incoming transfer to the client whose card
+matches the payer -- client 1 in this tenant carries `iin` 7840394339 and all
+seven transfers from that INN are classified `credit_with_domain_match` with
+`client_id: 1`. A cloud client with no INN can never be credited with a
+transfer, whatever else the console knows about them.
+
+**Where this stands today.** Live dry-run on 2026-08-20: 21 clients, **0 with
+an INN**, 1 transaction. No customer has ever paid by invoice -- the only two
+rows carrying requisites are our own sandbox test and Dada Development itself,
+and both are `canceled`/`pending`. So the transfer half of attribution is wired
+and provably idle; it starts producing the moment a real invoice is paid.
 
 ## Judgement calls the code makes
 

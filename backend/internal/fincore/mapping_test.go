@@ -119,3 +119,72 @@ func TestFormatAmountNeverEmitsScientificNotation(t *testing.T) {
 		t.Fatalf("FormatAmount = %q", got)
 	}
 }
+
+// TestClientCarriesPayerRequisitesSoBankTransfersCanBind pins the attribution
+// key. FinCore binds an incoming transfer to the client whose card matches the
+// statement's payer; a client without an INN can never be credited with money
+// that arrived by transfer.
+func TestClientCarriesPayerRequisitesSoBankTransfersCanBind(t *testing.T) {
+	got := ClientFromUser(CloudUser{
+		ID:           "u-1",
+		Username:     "acme",
+		Email:        "cfo@acme.ru",
+		DisplayName:  "Иван Петров",
+		INN:          "7807402712",
+		KPP:          "780701001",
+		OrgName:      `ООО "АКМЕ"`,
+		LegalAddress: "Санкт-Петербург, ул. Тестовая, 1",
+	})
+
+	if got.INN != "7807402712" {
+		t.Fatalf("iin = %q, want the payer INN the console captured", got.INN)
+	}
+	if got.ShortName != `ООО "АКМЕ"` {
+		t.Fatalf("short_name = %q, want the legal entity that pays", got.ShortName)
+	}
+	if !strings.Contains(got.Requisites, "ИНН 7807402712") || !strings.Contains(got.Requisites, "КПП 780701001") {
+		t.Fatalf("requisites = %q, want the payer's INN and KPP", got.Requisites)
+	}
+	if got.ContactPerson != "Иван Петров" {
+		t.Fatalf("contact_person = %q, want the person behind the org", got.ContactPerson)
+	}
+
+	person := ClientFromUser(CloudUser{ID: "u-2", Username: "solo", DisplayName: "Соло Разработчик"})
+	if person.INN != "" || person.Requisites != "" {
+		t.Fatalf("card payer got iin=%q requisites=%q, want both empty", person.INN, person.Requisites)
+	}
+	if person.ShortName != "Соло Разработчик" {
+		t.Fatalf("short_name = %q, want the person's own name", person.ShortName)
+	}
+}
+
+// TestInvoicePaymentIsLeftToTheBank guards the rule the hosting bill broke:
+// money that lands on the company account as its own statement line is already
+// in FinCore through the bank feed, so the console must not mint a second row
+// for it. A card payment has no such line and stays ours to push.
+func TestInvoicePaymentIsLeftToTheBank(t *testing.T) {
+	if !(CloudPayment{Method: "invoice"}).SettledInBank() {
+		t.Fatal("invoice payment not recognised as settled in the bank: it would be booked twice")
+	}
+	if (CloudPayment{Method: "card"}).SettledInBank() {
+		t.Fatal("card payment treated as a bank line: YooKassa money would go unrecorded")
+	}
+	if (CloudPayment{}).SettledInBank() {
+		t.Fatal("payment with no method treated as a bank line")
+	}
+
+	tx := TransactionFromPayment(CloudPayment{
+		ID: "p-1", OrgID: "acme", Plan: "business", Amount: "2900.00",
+		Method: "card", InvoiceNumber: "INV-2026-00002",
+		PayerINN: "7807402712", PayerOrgName: `ООО "АКМЕ"`,
+	})
+	if tx.PayerINN != "7807402712" {
+		t.Fatalf("payer_inn = %q, want the INN so FinCore can match the payer", tx.PayerINN)
+	}
+	if tx.PayerName != `ООО "АКМЕ"` {
+		t.Fatalf("payer_name = %q, want the legal entity", tx.PayerName)
+	}
+	if !strings.Contains(tx.PaymentPurpose, "INV-2026-00002") {
+		t.Fatalf("payment_purpose = %q, want the invoice number a bank transfer quotes", tx.PaymentPurpose)
+	}
+}
