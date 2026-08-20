@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -480,8 +481,13 @@ func (h *Handler) InstallSolution(c *gin.Context) {
 			Metadata:      meta,
 		})
 	}
-	rejectErr := func(status int, reason, msg string) {
-		audit(auditOutcomeFailure, map[string]any{"reason": reason, "status": status})
+	rejectErr := func(status int, reason, msg string, causes ...error) {
+		meta := map[string]any{"reason": reason, "status": status}
+		if len(causes) > 0 && causes[0] != nil {
+			meta["error"] = causes[0].Error()
+			log.Printf("solutions: install app=%s reason=%s: %v", appAudit, reason, causes[0])
+		}
+		audit(auditOutcomeFailure, meta)
 		respondError(c, status, msg)
 	}
 
@@ -667,8 +673,13 @@ func (h *Handler) installImageSolution(c *gin.Context, claims *auth.Claims, proj
 			Metadata:      meta,
 		})
 	}
-	rejectErr := func(status int, reason, msg string) {
-		audit(auditOutcomeFailure, map[string]any{"reason": reason, "status": status, "track": "image"})
+	rejectErr := func(status int, reason, msg string, causes ...error) {
+		meta := map[string]any{"reason": reason, "status": status, "track": "image"}
+		if len(causes) > 0 && causes[0] != nil {
+			meta["error"] = causes[0].Error()
+			log.Printf("solutions: install-image app=%s reason=%s: %v", appName, reason, causes[0])
+		}
+		audit(auditOutcomeFailure, meta)
 		respondError(c, status, msg)
 	}
 
@@ -693,7 +704,7 @@ func (h *Handler) installImageSolution(c *gin.Context, claims *auth.Claims, proj
 	}
 	for key, value := range env {
 		if _, err := h.upsertEnvVar(c.Request.Context(), envID, appName, key, value, secretEnv[key], "runtime", claims.UserID.String()); err != nil {
-			rejectErr(http.StatusInternalServerError, "env_failed", "failed to store the project's settings")
+			rejectErr(http.StatusInternalServerError, "env_failed", "failed to store the project's settings", err)
 			return
 		}
 	}

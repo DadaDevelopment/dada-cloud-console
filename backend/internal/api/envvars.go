@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -289,7 +290,12 @@ func (h *Handler) SetEnvVar(c *gin.Context) {
 		return
 	}
 
-	rejectEnv := func(status int, reason, msg string) {
+	rejectEnv := func(status int, reason, msg string, causes ...error) {
+		meta := map[string]any{"reason": reason, "status": status}
+		if len(causes) > 0 && causes[0] != nil {
+			meta["error"] = causes[0].Error()
+			log.Printf("envvars: SetEnvVar app=%s reason=%s: %v", appName, reason, causes[0])
+		}
 		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
 			ProjectID:     projectID,
 			EnvironmentID: envID,
@@ -297,7 +303,7 @@ func (h *Handler) SetEnvVar(c *gin.Context) {
 			ResourceKind:  "EnvVar",
 			ResourceName:  appName,
 			Outcome:       auditOutcomeFailure,
-			Metadata:      map[string]any{"reason": reason, "status": status},
+			Metadata:      meta,
 		})
 		respondError(c, status, msg)
 	}
@@ -337,7 +343,7 @@ func (h *Handler) SetEnvVar(c *gin.Context) {
 
 	ev, err := h.upsertEnvVar(c.Request.Context(), envID, appName, key, req.Value, req.IsSecret, scope, claims.UserID.String())
 	if err != nil {
-		rejectEnv(http.StatusInternalServerError, "save_failed", "failed to save env var")
+		rejectEnv(http.StatusInternalServerError, "save_failed", "failed to save env var", err)
 		return
 	}
 
@@ -430,7 +436,12 @@ func (h *Handler) BulkSetEnvVars(c *gin.Context) {
 		return
 	}
 
-	rejectEnv := func(status int, reason, msg string) {
+	rejectEnv := func(status int, reason, msg string, causes ...error) {
+		meta := map[string]any{"reason": reason, "status": status}
+		if len(causes) > 0 && causes[0] != nil {
+			meta["error"] = causes[0].Error()
+			log.Printf("envvars: SetEnvVar app=%s reason=%s: %v", appName, reason, causes[0])
+		}
 		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
 			ProjectID:     projectID,
 			EnvironmentID: envID,
@@ -438,7 +449,7 @@ func (h *Handler) BulkSetEnvVars(c *gin.Context) {
 			ResourceKind:  "EnvVar",
 			ResourceName:  appName,
 			Outcome:       auditOutcomeFailure,
-			Metadata:      map[string]any{"reason": reason, "status": status},
+			Metadata:      meta,
 		})
 		respondError(c, status, msg)
 	}
@@ -498,7 +509,7 @@ func (h *Handler) BulkSetEnvVars(c *gin.Context) {
 	for _, v := range req.Vars {
 		ev, err := h.upsertEnvVar(c.Request.Context(), envID, appName, v.Key, v.Value, v.IsSecret, v.Scope, claims.UserID.String())
 		if err != nil {
-			rejectEnv(http.StatusInternalServerError, "save_failed", "failed to save env var")
+			rejectEnv(http.StatusInternalServerError, "save_failed", "failed to save env var", err)
 			return
 		}
 		saved = append(saved, ev)
@@ -676,8 +687,13 @@ func (h *Handler) RevealEnvVar(c *gin.Context) {
 			Metadata:      meta,
 		})
 	}
-	rejectErr := func(status int, reason, msg string) {
-		audit(auditOutcomeFailure, map[string]any{"reason": reason, "status": status})
+	rejectErr := func(status int, reason, msg string, causes ...error) {
+		meta := map[string]any{"reason": reason, "status": status}
+		if len(causes) > 0 && causes[0] != nil {
+			meta["error"] = causes[0].Error()
+			log.Printf("envvars: RevealEnvVar app=%s key=%s reason=%s: %v", appName, key, reason, causes[0])
+		}
+		audit(auditOutcomeFailure, meta)
 		respondError(c, status, msg)
 	}
 
@@ -693,7 +709,7 @@ func (h *Handler) RevealEnvVar(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		rejectErr(http.StatusInternalServerError, "membership_check_failed", "failed to check project membership")
+		rejectErr(http.StatusInternalServerError, "membership_check_failed", "failed to check project membership", err)
 		return
 	}
 	if !canWrite(role) {
@@ -703,7 +719,7 @@ func (h *Handler) RevealEnvVar(c *gin.Context) {
 	}
 
 	if ok, err := h.envBelongsToProject(c.Request.Context(), envID, projectID); err != nil {
-		rejectErr(http.StatusInternalServerError, "env_check_failed", "failed to verify environment")
+		rejectErr(http.StatusInternalServerError, "env_check_failed", "failed to verify environment", err)
 		return
 	} else if !ok {
 		audit(auditOutcomeFailure, map[string]any{"reason": "env_not_in_project", "status": http.StatusNotFound})
@@ -723,13 +739,13 @@ func (h *Handler) RevealEnvVar(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		rejectErr(http.StatusInternalServerError, "load_failed", "failed to load env var")
+		rejectErr(http.StatusInternalServerError, "load_failed", "failed to load env var", err)
 		return
 	}
 
 	plain, err := crypto.DecryptToken(h.cfg.GitopsEncryptionKey, encrypted)
 	if err != nil {
-		rejectErr(http.StatusInternalServerError, "decrypt_failed", "failed to decrypt value")
+		rejectErr(http.StatusInternalServerError, "decrypt_failed", "failed to decrypt value", err)
 		return
 	}
 
@@ -788,7 +804,12 @@ func (h *Handler) DeleteEnvVar(c *gin.Context) {
 		return
 	}
 
-	rejectEnv := func(status int, reason, msg string) {
+	rejectEnv := func(status int, reason, msg string, causes ...error) {
+		meta := map[string]any{"reason": reason, "status": status}
+		if len(causes) > 0 && causes[0] != nil {
+			meta["error"] = causes[0].Error()
+			log.Printf("envvars: DeleteEnvVar app=%s reason=%s: %v", appName, reason, causes[0])
+		}
 		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
 			ProjectID:     projectID,
 			EnvironmentID: envID,
@@ -796,7 +817,7 @@ func (h *Handler) DeleteEnvVar(c *gin.Context) {
 			ResourceKind:  "EnvVar",
 			ResourceName:  appName,
 			Outcome:       auditOutcomeFailure,
-			Metadata:      map[string]any{"reason": reason, "status": status},
+			Metadata:      meta,
 		})
 		respondError(c, status, msg)
 	}
@@ -814,7 +835,7 @@ func (h *Handler) DeleteEnvVar(c *gin.Context) {
 		envID, appName, key,
 	)
 	if err != nil {
-		rejectEnv(http.StatusInternalServerError, "delete_failed", "failed to delete env var")
+		rejectEnv(http.StatusInternalServerError, "delete_failed", "failed to delete env var", err)
 		return
 	}
 	if tag.RowsAffected() == 0 {
