@@ -8,6 +8,7 @@ import { CopyButton } from "@/components/ui/copy-button";
 import { useT } from "@/lib/i18n/console/context";
 import { parseEnvBlob } from "@/lib/dotenv";
 import { isBareConnectionValue } from "@/lib/env-connection-warning";
+import { describeEnvError } from "@/lib/env-error";
 
 type Scope = "build" | "runtime" | "both";
 
@@ -38,6 +39,20 @@ const EMPTY: EditState = {
 
 function rowKey(v: EnvVar): string {
   return v.key;
+}
+
+/**
+ * Turns an env-vars API error into the message shown to the user: known
+ * `err.code` values get the reason + next-step pair from the env-error
+ * dictionary (never both a "delete the app" dead end and a bare "failed").
+ * Unknown codes fall back to `err.message` so nothing renders empty or
+ * "undefined".
+ */
+function envErrorMessage(t: (key: string, vars?: Record<string, string | number>) => string, err: unknown, fallbackKey: string): string {
+  const code = err instanceof Error ? (err as Error & { code?: string }).code : undefined;
+  const desc = describeEnvError(code);
+  if (desc) return `${t(desc.reasonKey)} ${t(desc.nextStepKey)}`;
+  return err instanceof Error ? err.message : t(fallbackKey);
 }
 
 export function EnvVarsEditor({
@@ -98,8 +113,13 @@ export function EnvVarsEditor({
       const { value } = await envVarsApi.reveal(projectId, envId, appName, v.key);
       setRevealed((prev) => ({ ...prev, [rk]: value }));
     } catch (err) {
-      const msg = err instanceof Error ? err.message : t("apps.env.error.reveal");
-      setError(/403|forbidden|permission/i.test(msg) ? t("apps.env.error.revealForbidden") : msg);
+      const status = err instanceof Error ? (err as Error & { status?: number }).status : undefined;
+      const code = err instanceof Error ? (err as Error & { code?: string }).code : undefined;
+      if (status === 403 && !describeEnvError(code)) {
+        setError(t("apps.env.error.revealForbidden"));
+      } else {
+        setError(envErrorMessage(t, err, "apps.env.error.reveal"));
+      }
     } finally {
       setRevealing(null);
     }
@@ -153,7 +173,7 @@ export function EnvVarsEditor({
         setModalOpen(false);
       }
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : t("apps.env.error.save"));
+      setSubmitError(envErrorMessage(t, err, "apps.env.error.save"));
     } finally {
       setSubmitting(false);
     }
@@ -179,7 +199,7 @@ export function EnvVarsEditor({
         setBulkOpen(false);
       }
     } catch (err) {
-      setBulkError(err instanceof Error ? err.message : t("apps.env.error.save"));
+      setBulkError(envErrorMessage(t, err, "apps.env.error.save"));
     } finally {
       setBulkSubmitting(false);
     }
@@ -193,7 +213,7 @@ export function EnvVarsEditor({
       await envVarsApi.remove(projectId, envId, appName, v.key);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("apps.env.error.delete"));
+      setError(envErrorMessage(t, err, "apps.env.error.delete"));
     } finally {
       setDeleting(null);
     }

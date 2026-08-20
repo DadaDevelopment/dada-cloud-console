@@ -680,7 +680,7 @@ func (h *Handler) installImageSolution(c *gin.Context, claims *auth.Claims, proj
 			log.Printf("solutions: install-image app=%s reason=%s: %v", appName, reason, causes[0])
 		}
 		audit(auditOutcomeFailure, meta)
-		respondError(c, status, msg)
+		respondErrorCode(c, status, reason, msg)
 	}
 
 	if err := validateKubeName(appName); err != nil {

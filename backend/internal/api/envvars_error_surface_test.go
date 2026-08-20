@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -103,5 +104,78 @@ func TestRevealEnvVar_DecryptFailureAuditCarriesRawError(t *testing.T) {
 	}
 	if !strings.Contains(*errText, "decoding encryption key") {
 		t.Fatalf("audit metadata error = %q, want it to contain the underlying hex-decode failure (\"decoding encryption key\")", *errText)
+	}
+}
+
+// TestRevealEnvVar_DecryptFailureResponseCarriesCodeNotRawError is the sibling
+// gate for the frontend side of the same 2026-08-18/19 outage: with no
+// machine-readable "code" in the HTTP body, the console could only branch on
+// error prose (a /403|forbidden|permission/i regex), so a broken
+// GITOPS_ENCRYPTION_KEY surfaced to kkartov@yandex.ru as a bare "не удалось",
+// and he pressed DeleteApp seven times chasing it.
+//
+// This pins that a failed reveal's JSON body carries a stable "code" field
+// the frontend can switch on, and -- the other half of the same incident --
+// that the body never carries the raw decrypt error text, which can contain
+// encryption-key material.
+func TestRevealEnvVar_DecryptFailureResponseCarriesCodeNotRawError(t *testing.T) {
+	pool := testOptimisticPool(t)
+	projectID, envID := seedOptimisticFixture(t, pool)
+	userID := seedUser(t, pool)
+	claims := godClaims(userID)
+
+	appName := "envcrypto-" + uuid.NewString()[:8]
+	seedApp(t, pool, projectID, envID, appName)
+
+	hGood := &Handler{pool: pool, cfg: &config.Config{GitopsEncryptionKey: installTestKey}}
+	key := "GITOPS_ENCRYPTION_KEY_TEST"
+	secretValue := "super-secret-value-do-not-leak"
+
+	setCtx, setRec := newCreateCtx(t, `{"value":"`+secretValue+`","is_secret":true,"scope":"runtime"}`,
+		gin.Params{
+			{Key: "projectId", Value: projectID.String()},
+			{Key: "envId", Value: envID.String()},
+			{Key: "appName", Value: appName},
+			{Key: "key", Value: key},
+		}, claims)
+	hGood.SetEnvVar(setCtx)
+	if setRec.Code != http.StatusOK {
+		t.Fatalf("SetEnvVar status = %d, want 200; body=%s", setRec.Code, setRec.Body.String())
+	}
+
+	brokenKey := "zz" + installTestKey[2:]
+	hBroken := &Handler{pool: pool, cfg: &config.Config{GitopsEncryptionKey: brokenKey}}
+
+	revealCtx, revealRec := newRevealCtx(t, gin.Params{
+		{Key: "projectId", Value: projectID.String()},
+		{Key: "envId", Value: envID.String()},
+		{Key: "appName", Value: appName},
+		{Key: "key", Value: key},
+	}, claims)
+	hBroken.RevealEnvVar(revealCtx)
+
+	if revealRec.Code != http.StatusInternalServerError {
+		t.Fatalf("RevealEnvVar status = %d, want 500; body=%s", revealRec.Code, revealRec.Body.String())
+	}
+
+	var body struct {
+		Error string `json:"error"`
+		Code  string `json:"code"`
+	}
+	if err := json.Unmarshal(revealRec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("RevealEnvVar response is not valid JSON: %v; body=%s", err, revealRec.Body.String())
+	}
+	if body.Code != "decrypt_failed" {
+		t.Fatalf("RevealEnvVar response code = %q, want %q; body=%s", body.Code, "decrypt_failed", revealRec.Body.String())
+	}
+
+	if strings.Contains(revealRec.Body.String(), "decoding encryption key") {
+		t.Fatalf("RevealEnvVar response leaked the raw decrypt error text: %s", revealRec.Body.String())
+	}
+	if strings.Contains(revealRec.Body.String(), secretValue) {
+		t.Fatalf("RevealEnvVar response leaked the secret value: %s", revealRec.Body.String())
+	}
+	if strings.Contains(revealRec.Body.String(), installTestKey) || strings.Contains(revealRec.Body.String(), brokenKey) {
+		t.Fatalf("RevealEnvVar response leaked key material: %s", revealRec.Body.String())
 	}
 }

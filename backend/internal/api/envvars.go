@@ -326,7 +326,7 @@ func (h *Handler) SetEnvVar(c *gin.Context) {
 			Outcome:       auditOutcomeFailure,
 			Metadata:      meta,
 		})
-		respondError(c, status, msg)
+		respondErrorCode(c, status, reason, msg)
 	}
 
 	if ok, err := h.envBelongsToProject(c.Request.Context(), envID, projectID); err != nil {
@@ -472,7 +472,7 @@ func (h *Handler) BulkSetEnvVars(c *gin.Context) {
 			Outcome:       auditOutcomeFailure,
 			Metadata:      meta,
 		})
-		respondError(c, status, msg)
+		respondErrorCode(c, status, reason, msg)
 	}
 
 	if ok, err := h.envBelongsToProject(c.Request.Context(), envID, projectID); err != nil {
@@ -715,7 +715,7 @@ func (h *Handler) RevealEnvVar(c *gin.Context) {
 			log.Printf("envvars: RevealEnvVar app=%s key=%s reason=%s: %v", appName, key, reason, causes[0])
 		}
 		audit(auditOutcomeFailure, meta)
-		respondError(c, status, msg)
+		respondErrorCode(c, status, reason, msg)
 	}
 
 	if c.Query("reveal") != "true" {
@@ -840,7 +840,7 @@ func (h *Handler) DeleteEnvVar(c *gin.Context) {
 			Outcome:       auditOutcomeFailure,
 			Metadata:      meta,
 		})
-		respondError(c, status, msg)
+		respondErrorCode(c, status, reason, msg)
 	}
 
 	if ok, err := h.envBelongsToProject(c.Request.Context(), envID, projectID); err != nil {
