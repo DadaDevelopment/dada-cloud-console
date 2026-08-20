@@ -1,8 +1,0 @@
----
-id: 0298
-status: open
-prio: P1
-title: P2-USERCHART-NO-PROBES · Рендеренный чарт юзерских аппов не выдаёт НИ readinessProbe, НИ livenessProbe
-section: Открытые долги (не терять)
----
-- [ ] P2-USERCHART-NO-PROBES · Рендеренный чарт юзерских аппов не выдаёт НИ `readinessProbe`, НИ `livenessProbe` [live: `kubectl -n workassistantbot-prod get deploy workassistantbot-deploy -o json` → обе null]. Чарт лежит в ВНЕШНЕМ репо `dada-argo` (`WorkloadRepoURL`, code gitops-agent/internal/renderer/renderer.go:275), локально не выкачан → прочитан НЕ был, клейм опирается на живой под + сообщение d381e60. Фаза теперь честная и без проб, поэтому это НЕ блокер — но для HTTP-аппов readiness на detected.Port убрал бы окно «процесс стартанул, отвечать не умеет». (обнаружено live 07-30 на M2-прогоне m2-bot-worker, ОСТАТОК от P1-UPLOAD-FALSE-GREEN — плейсхолдер убит, но зелёный врёт дальше): бот падает `KeyError: 'BOT_TOKEN'`, `restartCount=4`, а под всё равно `ready: true`, и консоль в списке флаппит **Pending ↔ Ready** [live kubectl + API polling 17:55→18:02]. Причина не в фазе, а в том, что у консольных приложений НЕТ liveness/readiness-проб вообще: kubelet считает готовым любой процесс, который успел стартануть, а между рестартами CrashLoopBackOff отдаёт Ready. Для веб-приложения это ловит хотя бы ingress-502, для воркера ловить нечем — юзер видит зелёное приложение, которое не работало ни секунды. Фикс не «добавить HTTP-пробу» (воркер не слушает): для worker=true правильный сигнал — restartCount/CrashLoopBackOff и exitCode последнего терминирования, их и надо поднимать в фазу; для HTTP-приложений отдельно завести readiness на detected.Port. M2: приложение с падающим процессом обязано показывать Failed/CrashLoop, а не Ready.
