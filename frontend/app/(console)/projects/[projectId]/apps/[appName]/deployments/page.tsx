@@ -11,7 +11,7 @@ import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
 import { BuildStatusBadge, isBuildActive } from "@/components/deploy/build-status-badge";
 import { useT } from "@/lib/i18n/console/context";
-import { buildFailureSummary } from "@/lib/build-failure";
+import { buildFailureSummary, isRepoFixable } from "@/lib/build-failure";
 import { formatCommitLabel, resolveCommit } from "@/lib/build-commit";
 import { BuildProvenance, buildTriggerLabel } from "@/components/deploy/build-provenance";
 import { trackBuildStart } from "@/lib/build-watch";
@@ -401,7 +401,7 @@ export default function AppDeploymentsPage() {
                             {actionId === b.id ? t("apps.deployments.cancelingBuild") : t("apps.deployments.cancelBuild")}
                           </button>
                         )}
-                        {canDeploy && b.status === "failed" && (
+                        {canDeploy && b.status === "failed" && isRepoFixable(b.fail_reason) && (
                           <button
                             onClick={() => handleAutofix(b)}
                             data-ux="app_deploy_feed:autofix"

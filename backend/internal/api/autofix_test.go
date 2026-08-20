@@ -12,7 +12,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/logsearch"
 )
 
@@ -274,5 +276,108 @@ func TestBuildFailureCause(t *testing.T) {
 				t.Fatalf("got %q want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestLatestFailedBuildFailReason_ReturnsPersistedReason proves the query the
+// TriggerAutofix gate depends on: given the app's most recent failed build,
+// it returns exactly that build's fail_reason.
+func TestLatestFailedBuildFailReason_ReturnsPersistedReason(t *testing.T) {
+	pool := autofixGuardPool(t)
+	projectID, envID, _ := seedAutofixTarget(t, pool)
+	gitRepoID := seedAutofixGitRepo(t, pool, projectID, envID, "web")
+	seedFailedBuild(t, pool, gitRepoID, envID, "web", "platform_error")
+
+	h := &Handler{pool: pool}
+	got, err := h.latestFailedBuildFailReason(context.Background(), envID, "web")
+	if err != nil {
+		t.Fatalf("latestFailedBuildFailReason: %v", err)
+	}
+	if got != "platform_error" {
+		t.Fatalf("fail_reason = %q, want %q", got, "platform_error")
+	}
+}
+
+// seedAutofixGitRepo inserts the git_repos row a builds row's FK requires.
+func seedAutofixGitRepo(t *testing.T, pool *pgxpool.Pool, projectID, envID uuid.UUID, appName string) uuid.UUID {
+	t.Helper()
+	var gitRepoID uuid.UUID
+	if err := pool.QueryRow(context.Background(),
+		`INSERT INTO git_repos (project_id, environment_id, app_name, provider, repo_full_name, clone_url)
+		 VALUES ($1, $2, $3, 'github', 'acme/web', 'https://github.com/acme/web.git')
+		 RETURNING id`,
+		projectID, envID, appName).Scan(&gitRepoID); err != nil {
+		t.Fatalf("seed git_repos: %v", err)
+	}
+	return gitRepoID
+}
+
+// seedFailedBuild inserts one failed build row with the given fail_reason.
+func seedFailedBuild(t *testing.T, pool *pgxpool.Pool, gitRepoID, envID uuid.UUID, appName, failReason string) uuid.UUID {
+	t.Helper()
+	var buildID uuid.UUID
+	if err := pool.QueryRow(context.Background(),
+		`INSERT INTO builds (git_repo_id, environment_id, app_name, commit_sha, branch, trigger, status, fail_reason)
+		 VALUES ($1, $2, $3, $4, 'main', 'manual', 'failed', $5)
+		 RETURNING id`,
+		gitRepoID, envID, appName, "sha-"+uuid.NewString()[:8], failReason).Scan(&buildID); err != nil {
+		t.Fatalf("seed failed build: %v", err)
+	}
+	return buildID
+}
+
+// TestTriggerAutofix_RefusesWhenLatestFailedBuildIsPlatformError pins the
+// server-side half of the gate: before this fix TriggerAutofix never read
+// fail_reason at all, so the API, the MCP tool triggerAutofix and agent-chat
+// could all launch (and burn AI budget on) an auto-fix run against a build
+// that failed because OUR infra broke, not the app's code -- proven on
+// 2026-08-19 by a user who was shown the gated card, did not click, then
+// found and clicked the second, ungated, button 21 seconds later.
+//
+// h.dadagent is left nil, so if the gate does not fire first, the request
+// falls through to launchAutofix and comes back 503 "dadagent integration not
+// configured" instead of the expected 422 -- the gate must be what answers.
+func TestTriggerAutofix_RefusesWhenLatestFailedBuildIsPlatformError(t *testing.T) {
+	pool := autofixGuardPool(t)
+	projectID, envID, _ := seedAutofixTarget(t, pool)
+	gitRepoID := seedAutofixGitRepo(t, pool, projectID, envID, "web")
+	seedFailedBuild(t, pool, gitRepoID, envID, "web", "platform_error")
+
+	h := &Handler{pool: pool}
+	claims := &auth.Claims{UserID: uuid.New(), Groups: []string{"/platform-admins"}}
+
+	rec := httptest.NewRecorder()
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader("{}"))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Params = gin.Params{
+		{Key: "projectId", Value: projectID.String()},
+		{Key: "envId", Value: envID.String()},
+		{Key: "appName", Value: "web"},
+	}
+	auth.SetClaims(c, claims)
+
+	h.TriggerAutofix(c)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("code=%d body=%s want 422 (platform_error must not launch an auto-fix run)", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body["code"] != "platform_error_not_fixable" {
+		t.Fatalf("code field = %v, want platform_error_not_fixable", body["code"])
+	}
+
+	var running int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM cloud_tasks WHERE project_id=$1 AND app_name='web' AND task_type='autofix'`,
+		projectID).Scan(&running); err != nil {
+		t.Fatalf("count cloud_tasks: %v", err)
+	}
+	if running != 0 {
+		t.Fatalf("cloud_tasks rows=%d, want 0: a refused launch must not claim the autofix slot", running)
 	}
 }

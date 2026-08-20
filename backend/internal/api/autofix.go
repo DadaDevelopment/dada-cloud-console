@@ -110,6 +110,16 @@ func (h *Handler) TriggerAutofix(c *gin.Context) {
 		return
 	}
 
+	if reason, ferr := h.latestFailedBuildFailReason(c.Request.Context(), envID, appName); ferr == nil && reason == buildFailReasonPlatformError {
+		reject(http.StatusUnprocessableEntity, "platform_error_not_fixable")
+		respondAutofixError(c, &autofixError{
+			status:  http.StatusUnprocessableEntity,
+			message: "сбой на нашей стороне: чинить в коде приложения нечего, автофикс тут не поможет",
+			code:    "platform_error_not_fixable",
+		})
+		return
+	}
+
 	var req autofixRequest
 	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
 		reject(http.StatusBadRequest, "malformed_body")
@@ -439,6 +449,34 @@ func (h *Handler) latestFailedBuildSummary(ctx context.Context, envID uuid.UUID,
 		reason = *failReason
 	}
 	return formatBuildFailureSummary(branch, commitSHA, commitMessage, finishedAt, reason, errorMessage), nil
+}
+
+// buildFailReasonPlatformError is the fail_reason the build agent stamps on a
+// build that never reached the app's code -- our own infra broke, not
+// anything the repo did. frontend/lib/build-failure.ts:isRepoFixable treats
+// it the same way; this constant is TriggerAutofix's half of that same rule,
+// enforced server-side so the API, the MCP tool and agent-chat cannot bypass
+// what the console UI already hides.
+const buildFailReasonPlatformError = "platform_error"
+
+// latestFailedBuildFailReason looks up only the fail_reason of the app's most
+// recent failed build, for callers that need to gate on it before deciding
+// whether to build the full summary. A nil fail_reason (build failed before
+// the column was populated) reports as "", never platformError.
+func (h *Handler) latestFailedBuildFailReason(ctx context.Context, envID uuid.UUID, appName string) (string, error) {
+	var failReason *string
+	err := h.pool.QueryRow(ctx,
+		`SELECT fail_reason FROM builds
+		  WHERE environment_id = $1 AND app_name = $2 AND status = 'failed'
+		  ORDER BY created_at DESC LIMIT 1`,
+		envID, appName).Scan(&failReason)
+	if err != nil {
+		return "", err
+	}
+	if failReason == nil {
+		return "", nil
+	}
+	return *failReason, nil
 }
 
 // Tuning knobs for fetchAutofixLogs' three-tier retry. autofixRecentWindow is
