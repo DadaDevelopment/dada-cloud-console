@@ -637,6 +637,36 @@ export const apps: Messages = {
   "apps.env.error.reason.deleteFailed": { ru: "Не удалось удалить переменную на сервере.", en: "The server failed to delete the variable." },
   "apps.env.error.reason.saveFailed": { ru: "Не удалось сохранить переменную на сервере.", en: "The server failed to save the variable." },
   "apps.env.error.reason.envFailed": { ru: "Не удалось сохранить настройки при установке решения.", en: "The server failed to save the settings while installing the solution." },
+  "apps.env.error.reason.notAMember": { ru: "Вы не состоите в участниках этого проекта.", en: "You are not a member of this project." },
+  "apps.env.error.reason.readOnlyRole": { ru: "Ваша роль в проекте даёт только просмотр — прав на запись и показ переменных нет.", en: "Your role in this project is read-only — you have no rights to write or reveal variables." },
+  "apps.env.error.reason.projectNotFound": { ru: "Проект не найден.", en: "The project was not found." },
+  "apps.env.error.reason.appNotFound": { ru: "Приложение не найдено.", en: "The app was not found." },
+  "apps.env.error.reason.envNotInProject": { ru: "Окружение не найдено или не относится к этому проекту.", en: "The environment was not found, or does not belong to this project." },
+  "apps.env.error.reason.varNotFound": { ru: "Эта переменная уже не существует.", en: "This variable no longer exists." },
+  "apps.env.error.nextStep.notAMember": {
+    ru: "Попросите владельца проекта добавить вас в участники, либо переключитесь на проект, где у вас есть доступ.",
+    en: "Ask the project owner to add you as a member, or switch to a project you already have access to.",
+  },
+  "apps.env.error.nextStep.readOnlyRole": {
+    ru: "Попросите владельца проекта выдать вам роль с правом записи — просмотр здесь ничего не сломает и не чинит.",
+    en: "Ask the project owner to grant you a role with write access — a read-only role neither breaks nor fixes anything here.",
+  },
+  "apps.env.error.nextStep.projectNotFound": {
+    ru: "Вернитесь к списку проектов и откройте действующий проект — этот, похоже, удалён или недоступен.",
+    en: "Go back to the project list and open a project that still exists — this one appears to be deleted or inaccessible.",
+  },
+  "apps.env.error.nextStep.appNotFound": {
+    ru: "Вернитесь к списку приложений проекта — это приложение, похоже, уже удалено.",
+    en: "Go back to the project's app list — this app appears to already be deleted.",
+  },
+  "apps.env.error.nextStep.envNotInProject": {
+    ru: "Обновите страницу и выберите окружение заново; если оно пропало из списка — создайте его заново.",
+    en: "Refresh the page and pick the environment again; if it is gone from the list, create it again.",
+  },
+  "apps.env.error.nextStep.varNotFound": {
+    ru: "Обновите список переменных — эта уже удалена или переименована, приложение и остальные переменные не пострадали.",
+    en: "Refresh the variable list — this one has already been deleted or renamed; the app and the other variables are untouched.",
+  },
   "apps.detail.config.title": { ru: "Конфигурация", en: "Configuration" },
   "apps.detail.config.env": { ru: "Переменные окружения", en: "Environment variables" },
   "apps.detail.config.envCount": { ru: "{n} переменных", en: "{n} variables" },

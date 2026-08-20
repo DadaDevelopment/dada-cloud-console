@@ -30,7 +30,14 @@ export type EnvErrorCode =
   | "decrypt_failed"
   | "delete_failed"
   | "save_failed"
-  | "env_failed";
+  | "env_failed"
+  | "not_a_member"
+  | "read_only_role"
+  | "project_not_found"
+  | "app_not_found"
+  | "env_not_in_project"
+  | "var_not_found"
+  | "not_found";
 
 export interface EnvErrorDescription {
   reasonKey: string;
@@ -57,6 +64,13 @@ const ENV_ERROR_DESCRIPTIONS: Record<EnvErrorCode, EnvErrorDescription> = {
   delete_failed: { reasonKey: "apps.env.error.reason.deleteFailed", nextStepKey: OUR_SIDE_NEXT_STEP },
   save_failed: { reasonKey: "apps.env.error.reason.saveFailed", nextStepKey: OUR_SIDE_NEXT_STEP },
   env_failed: { reasonKey: "apps.env.error.reason.envFailed", nextStepKey: OUR_SIDE_NEXT_STEP },
+  not_a_member: { reasonKey: "apps.env.error.reason.notAMember", nextStepKey: "apps.env.error.nextStep.notAMember" },
+  read_only_role: { reasonKey: "apps.env.error.reason.readOnlyRole", nextStepKey: "apps.env.error.nextStep.readOnlyRole" },
+  project_not_found: { reasonKey: "apps.env.error.reason.projectNotFound", nextStepKey: "apps.env.error.nextStep.projectNotFound" },
+  app_not_found: { reasonKey: "apps.env.error.reason.appNotFound", nextStepKey: "apps.env.error.nextStep.appNotFound" },
+  env_not_in_project: { reasonKey: "apps.env.error.reason.envNotInProject", nextStepKey: "apps.env.error.nextStep.envNotInProject" },
+  var_not_found: { reasonKey: "apps.env.error.reason.varNotFound", nextStepKey: "apps.env.error.nextStep.varNotFound" },
+  not_found: { reasonKey: "apps.env.error.reason.varNotFound", nextStepKey: "apps.env.error.nextStep.varNotFound" },
 };
 
 function isEnvErrorCode(code: string): code is EnvErrorCode {

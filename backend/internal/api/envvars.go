@@ -286,12 +286,12 @@ func (h *Handler) SetEnvVar(c *gin.Context) {
 
 	projectID, err := uuid.Parse(c.Param("projectId"))
 	if err != nil {
-		respondNotFound(c)
+		respondErrorCode(c, http.StatusNotFound, "project_not_found", "not found")
 		return
 	}
 	envID, err := uuid.Parse(c.Param("envId"))
 	if err != nil {
-		respondNotFound(c)
+		respondErrorCode(c, http.StatusNotFound, "env_not_in_project", "not found")
 		return
 	}
 	appName := c.Param("appName")
@@ -299,7 +299,7 @@ func (h *Handler) SetEnvVar(c *gin.Context) {
 
 	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
-		respondNotFound(c)
+		respondErrorCode(c, http.StatusNotFound, "not_a_member", "not found")
 		return
 	}
 	if err != nil {
@@ -307,7 +307,7 @@ func (h *Handler) SetEnvVar(c *gin.Context) {
 		return
 	}
 	if !canWrite(role) {
-		respondForbidden(c)
+		respondErrorCode(c, http.StatusForbidden, "read_only_role", "forbidden")
 		return
 	}
 
@@ -333,7 +333,7 @@ func (h *Handler) SetEnvVar(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "failed to verify environment")
 		return
 	} else if !ok {
-		respondNotFound(c)
+		respondErrorCode(c, http.StatusNotFound, "env_not_in_project", "not found")
 		return
 	}
 
@@ -433,19 +433,19 @@ func (h *Handler) BulkSetEnvVars(c *gin.Context) {
 
 	projectID, err := uuid.Parse(c.Param("projectId"))
 	if err != nil {
-		respondNotFound(c)
+		respondErrorCode(c, http.StatusNotFound, "project_not_found", "not found")
 		return
 	}
 	envID, err := uuid.Parse(c.Param("envId"))
 	if err != nil {
-		respondNotFound(c)
+		respondErrorCode(c, http.StatusNotFound, "env_not_in_project", "not found")
 		return
 	}
 	appName := c.Param("appName")
 
 	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
-		respondNotFound(c)
+		respondErrorCode(c, http.StatusNotFound, "not_a_member", "not found")
 		return
 	}
 	if err != nil {
@@ -453,7 +453,7 @@ func (h *Handler) BulkSetEnvVars(c *gin.Context) {
 		return
 	}
 	if !canWrite(role) {
-		respondForbidden(c)
+		respondErrorCode(c, http.StatusForbidden, "read_only_role", "forbidden")
 		return
 	}
 
@@ -479,7 +479,7 @@ func (h *Handler) BulkSetEnvVars(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "failed to verify environment")
 		return
 	} else if !ok {
-		respondNotFound(c)
+		respondErrorCode(c, http.StatusNotFound, "env_not_in_project", "not found")
 		return
 	}
 
@@ -684,12 +684,12 @@ func (h *Handler) RevealEnvVar(c *gin.Context) {
 
 	projectID, err := uuid.Parse(c.Param("projectId"))
 	if err != nil {
-		respondNotFound(c)
+		respondErrorCode(c, http.StatusNotFound, "project_not_found", "not found")
 		return
 	}
 	envID, err := uuid.Parse(c.Param("envId"))
 	if err != nil {
-		respondNotFound(c)
+		respondErrorCode(c, http.StatusNotFound, "env_not_in_project", "not found")
 		return
 	}
 	appName := c.Param("appName")
@@ -726,7 +726,7 @@ func (h *Handler) RevealEnvVar(c *gin.Context) {
 	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
 		audit(auditOutcomeFailure, map[string]any{"reason": "not_a_member", "status": http.StatusNotFound})
-		respondNotFound(c)
+		respondErrorCode(c, http.StatusNotFound, "not_a_member", "not found")
 		return
 	}
 	if err != nil {
@@ -735,7 +735,7 @@ func (h *Handler) RevealEnvVar(c *gin.Context) {
 	}
 	if !canWrite(role) {
 		audit(auditOutcomeFailure, map[string]any{"reason": "read_only_role", "status": http.StatusForbidden})
-		respondForbidden(c)
+		respondErrorCode(c, http.StatusForbidden, "read_only_role", "forbidden")
 		return
 	}
 
@@ -744,7 +744,7 @@ func (h *Handler) RevealEnvVar(c *gin.Context) {
 		return
 	} else if !ok {
 		audit(auditOutcomeFailure, map[string]any{"reason": "env_not_in_project", "status": http.StatusNotFound})
-		respondNotFound(c)
+		respondErrorCode(c, http.StatusNotFound, "env_not_in_project", "not found")
 		return
 	}
 
@@ -756,7 +756,7 @@ func (h *Handler) RevealEnvVar(c *gin.Context) {
 	).Scan(&encrypted)
 	if err == pgx.ErrNoRows {
 		audit(auditOutcomeFailure, map[string]any{"reason": "var_not_found", "status": http.StatusNotFound})
-		respondNotFound(c)
+		respondErrorCode(c, http.StatusNotFound, "var_not_found", "not found")
 		return
 	}
 	if err != nil {
@@ -800,12 +800,12 @@ func (h *Handler) DeleteEnvVar(c *gin.Context) {
 
 	projectID, err := uuid.Parse(c.Param("projectId"))
 	if err != nil {
-		respondNotFound(c)
+		respondErrorCode(c, http.StatusNotFound, "project_not_found", "not found")
 		return
 	}
 	envID, err := uuid.Parse(c.Param("envId"))
 	if err != nil {
-		respondNotFound(c)
+		respondErrorCode(c, http.StatusNotFound, "env_not_in_project", "not found")
 		return
 	}
 	appName := c.Param("appName")
@@ -813,7 +813,7 @@ func (h *Handler) DeleteEnvVar(c *gin.Context) {
 
 	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
-		respondNotFound(c)
+		respondErrorCode(c, http.StatusNotFound, "not_a_member", "not found")
 		return
 	}
 	if err != nil {
@@ -821,7 +821,7 @@ func (h *Handler) DeleteEnvVar(c *gin.Context) {
 		return
 	}
 	if !canWrite(role) {
-		respondForbidden(c)
+		respondErrorCode(c, http.StatusForbidden, "read_only_role", "forbidden")
 		return
 	}
 
@@ -847,7 +847,7 @@ func (h *Handler) DeleteEnvVar(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "failed to verify environment")
 		return
 	} else if !ok {
-		respondNotFound(c)
+		respondErrorCode(c, http.StatusNotFound, "env_not_in_project", "not found")
 		return
 	}
 
@@ -869,7 +869,7 @@ func (h *Handler) DeleteEnvVar(c *gin.Context) {
 			Outcome:       auditOutcomeFailure,
 			Metadata:      map[string]any{"reason": "not_found", "status": http.StatusNotFound, "key": key},
 		})
-		respondNotFound(c)
+		respondErrorCode(c, http.StatusNotFound, "not_found", "not found")
 		return
 	}
 

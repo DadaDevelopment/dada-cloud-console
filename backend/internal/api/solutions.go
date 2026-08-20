@@ -735,7 +735,7 @@ func (h *Handler) installImageSolution(c *gin.Context, claims *auth.Claims, proj
 				"track":  "image",
 				"app":    appName,
 			})
-			respondError(c, dbFault.Status, dbFault.Message)
+			respondErrorCode(c, dbFault.Status, dbFault.Reason, dbFault.Message)
 			return
 		}
 		dbOperation = res.Operation
@@ -768,7 +768,7 @@ func (h *Handler) installImageSolution(c *gin.Context, claims *auth.Claims, proj
 			"app":    appName,
 		})
 		if fault.Status != 0 {
-			respondError(c, fault.Status, fault.Message)
+			respondErrorCode(c, fault.Status, fault.Reason, fault.Message)
 		}
 		return
 	}
