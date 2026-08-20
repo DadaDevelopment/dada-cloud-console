@@ -48,12 +48,33 @@ type envVar struct {
 // image yet (a bare app, or an upload whose first build has not finished) are
 // skipped: there is nothing to deploy, and their env is picked up by the deploy
 // that materializes them.
+//
+// A VM (compose) app carries NO image in the operation. On that substrate the
+// worker does not deploy the payload image directly: it writes it into the
+// app's desired snapshot and then re-assembles the whole per-environment stack,
+// which renders every service from its snapshot. So the image an env-apply
+// carries is not a no-op there -- it is a release. On fin-core/findata the
+// snapshot desired image and the tag actually serving traffic had drifted
+// apart, and saving an env var would have shipped a different build of a live
+// customer site as a side effect of editing a variable. An empty image tells
+// the worker to re-assemble at whatever the snapshot already holds, which is
+// exactly what delivering an env var needs. It also makes env delivery work for
+// a VM app with no deploy history at all, where resolving an image first would
+// have skipped the apply entirely.
 func (h *Handler) queueEnvApply(c *gin.Context, claims *auth.Claims, projectID, envID uuid.UUID, appName string) (*models.Operation, bool) {
-	image, err := h.lastDeployedImage(c.Request.Context(), h.pool, projectID, envID, appName)
+	ctx := c.Request.Context()
+	if rt, err := h.envRuntime(ctx, projectID, envID); err == nil && rt == models.EnvironmentRuntimeVM {
+		op, err := enqueueRedeployOp(ctx, h.pool, claims.UserID, projectID, envID, appName, "")
+		if err != nil {
+			return nil, false
+		}
+		return op, true
+	}
+	image, err := h.lastDeployedImage(ctx, h.pool, projectID, envID, appName)
 	if err != nil || image == "" {
 		return nil, false
 	}
-	op, err := enqueueRedeployOp(c.Request.Context(), h.pool, claims.UserID, projectID, envID, appName, image)
+	op, err := enqueueRedeployOp(ctx, h.pool, claims.UserID, projectID, envID, appName, image)
 	if err != nil {
 		return nil, false
 	}

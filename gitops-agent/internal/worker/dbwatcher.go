@@ -1932,7 +1932,21 @@ func (w *DBWatcher) doImportComposeStack(ctx context.Context, op db.Operation) e
 //
 // This is the handler behind POST /api/v1/deploy (and PATCH .../image) for a
 // runtime=vm environment, so it is the seam a CI pipeline releases through.
+//
+// An EMPTY image is not a release: it is a config-apply. The console enqueues
+// it when a change that lives only in the database (an env var) has to reach a
+// running VM app, and the only thing needed there is a re-assembly of the
+// stack, which re-resolves every app's env on the way. Patching the desired
+// image is skipped, so a variable edit cannot ship a different build; and the
+// stale-release guard is skipped too, because an operation that names no image
+// can never roll production back to an older one -- refusing it as superseded
+// would silently drop the user's env change whenever a deploy had landed after
+// they hit save.
 func (w *DBWatcher) updateComposeAppImage(ctx context.Context, op db.Operation, appName, image string) error {
+	if isComposeEnvApply(image) {
+		return w.renderEnvAggregate(ctx, op, op.ProjectID, op.EnvironmentID)
+	}
+
 	superseded, err := w.supersededByLandedRelease(ctx, op, appName)
 	if err != nil {
 		return err
@@ -1955,11 +1969,7 @@ func (w *DBWatcher) updateComposeAppImage(ctx context.Context, op db.Operation, 
 	}
 	cur := map[string]any{}
 	_ = json.Unmarshal(summaryRaw, &cur)
-	desired := composeDesiredMap(cur)
-	setComposeDesiredImage(desired, image)
-	cur["desired"] = desired
-	cur["runtime"] = "compose"
-	cur["status"] = "Pending"
+	cur = composeSnapshotForRelease(cur, image)
 	updatedJSON, _ := json.Marshal(cur)
 	if err := db.UpsertSnapshot(ctx, w.pool,
 		op.ProjectID, op.EnvironmentID, "App", appName, "Pending", updatedJSON, time.Now(),
@@ -1967,6 +1977,32 @@ func (w *DBWatcher) updateComposeAppImage(ctx context.Context, op db.Operation, 
 		return err
 	}
 	return w.renderEnvAggregate(ctx, op, op.ProjectID, op.EnvironmentID)
+}
+
+// composeSnapshotForRelease returns the app snapshot a VM release persists: the
+// desired image moved to the released tag (in both the flat field and the
+// verbatim compose block an adopted app is rendered from) and the row marked
+// Pending for the assembly that follows. A config-apply carries no image and
+// never reaches here, so the tag the stack re-assembles with stays the one the
+// snapshot already held.
+func composeSnapshotForRelease(cur map[string]any, image string) map[string]any {
+	if isComposeEnvApply(image) {
+		return cur
+	}
+	desired := composeDesiredMap(cur)
+	setComposeDesiredImage(desired, image)
+	cur["desired"] = desired
+	cur["runtime"] = "compose"
+	cur["status"] = "Pending"
+	return cur
+}
+
+// isComposeEnvApply reports whether a VM DeployImageVersion operation asks for a
+// config-apply rather than a release. The console enqueues one with no image
+// when a change stored only in the database has to reach a running stack; every
+// real release names the tag it ships.
+func isComposeEnvApply(image string) bool {
+	return strings.TrimSpace(image) == ""
 }
 
 // supersededByLandedRelease reports the image of a LATER DeployImageVersion for
