@@ -68,7 +68,7 @@ export interface FunnelLayoutOptions {
 
 const DEFAULTS = {
   width: 920,
-  height: 340,
+  height: 220,
   nodeWidth: 11,
   nodeGap: 12,
   minNodeHeight: 3,

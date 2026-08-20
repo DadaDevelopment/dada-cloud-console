@@ -8,6 +8,7 @@ import { AuditFacetFilter, type FacetOption } from "@/components/console/audit-f
 import { Spinner } from "@/components/ui/spinner";
 import { useT } from "@/lib/i18n/console/context";
 import { ChannelFunnelSankey } from "@/components/console/channel-funnel-sankey";
+import { FunnelSteps } from "@/components/console/funnel-steps";
 import type { ChannelFunnelSeries } from "@/lib/channel-funnel";
 
 const WINDOWS = ["7d", "30d", "90d", "all"] as const;
@@ -254,7 +255,7 @@ export default function AdminFunnelPage() {
               {regStagesAllZero ? (
                 <p className="text-sm text-gray-500 dark:text-gray-400">{t("adminFunnel.reg.allZero")}</p>
               ) : (
-                <BarRows rows={regRows} labelWidth="w-40" />
+                <FunnelSteps rows={regRows} />
               )}
             </div>
             <div className="flex flex-col justify-center gap-3 border-t border-gray-100 dark:border-gray-800/60 pt-3 md:border-t-0 md:border-l md:pl-4 md:pt-0">
@@ -310,7 +311,7 @@ export default function AdminFunnelPage() {
             <Spinner size="md" />
           </div>
         ) : (
-          <BarRows rows={rows} />
+          <FunnelSteps rows={rows} />
         )}
         {data?.paid_note && (
           <p className="mt-4 border-t border-gray-100 dark:border-gray-800 pt-3 text-xs text-gray-400 dark:text-gray-500">

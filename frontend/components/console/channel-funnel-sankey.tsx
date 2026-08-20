@@ -85,7 +85,7 @@ export function ChannelFunnelSankey({
     <div className="text-white dark:text-gray-900">
       <svg
         viewBox={`0 0 ${layout.width} ${viewH}`}
-        className="w-full"
+        className="w-full max-w-[860px]"
         role="img"
         aria-label="Канальная воронка: источник → регистрация"
       >
