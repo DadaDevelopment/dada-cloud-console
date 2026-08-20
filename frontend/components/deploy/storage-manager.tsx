@@ -2,9 +2,8 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { appsApi, getToken, API_BASE_URL } from "@/lib/api";
-import type { AppVolume, VolumeMaintenanceReport, VolumeMaintenanceTopDir, VolumeCompactStatus } from "@/lib/types";
+import type { AppVolume, VolumeMaintenanceReport, VolumeMaintenanceTopDir } from "@/lib/types";
 import { useT } from "@/lib/i18n/console/context";
-import { Modal } from "@/components/ui/modal";
 import { formatBytes } from "@/components/charts/format";
 import {
   evaluateVolumeUsage,
@@ -101,16 +100,9 @@ export function StorageManager({ projectId, envId, appName, canEdit }: Props) {
   const [reportError, setReportError] = useState<string | null>(null);
   const reportPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const [compactTarget, setCompactTarget] = useState<string | null>(null);
-  const [compactConfirm, setCompactConfirm] = useState<string | null>(null);
-  const [compactStatus, setCompactStatus] = useState<VolumeCompactStatus | null>(null);
-  const [compactError, setCompactError] = useState<string | null>(null);
-  const compactPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
   useEffect(() => {
     return () => {
       if (reportPollRef.current) clearInterval(reportPollRef.current);
-      if (compactPollRef.current) clearInterval(compactPollRef.current);
     };
   }, []);
 
@@ -146,44 +138,6 @@ export function StorageManager({ projectId, envId, appName, canEdit }: Props) {
       setReportError(e instanceof Error ? e.message : t("apps.storage.report.startError"));
     } finally {
       setReportBusy(false);
-    }
-  }
-
-  function pollCompact() {
-    if (compactPollRef.current) clearInterval(compactPollRef.current);
-    compactPollRef.current = setInterval(() => {
-      appsApi
-        .getVolumeCompactStatus(projectId, envId, appName)
-        .then((r) => {
-          setCompactStatus(r);
-          if (r.status !== "running" && compactPollRef.current) {
-            clearInterval(compactPollRef.current);
-            compactPollRef.current = null;
-          }
-        })
-        .catch(() => {
-          if (compactPollRef.current) {
-            clearInterval(compactPollRef.current);
-            compactPollRef.current = null;
-          }
-        });
-    }, maintenancePollMs);
-  }
-
-  async function confirmCompact() {
-    const dirPath = compactConfirm;
-    if (!dirPath) return;
-    setCompactConfirm(null);
-    setCompactTarget(dirPath);
-    setCompactError(null);
-    setCompactStatus(null);
-    try {
-      await appsApi.startVolumeCompact(projectId, envId, appName, dirPath);
-      setCompactStatus({ status: "running" });
-      pollCompact();
-    } catch (e) {
-      setCompactError(e instanceof Error ? e.message : t("apps.storage.compact.startError"));
-      setCompactTarget(null);
     }
   }
 
@@ -446,7 +400,6 @@ export function StorageManager({ projectId, envId, appName, canEdit }: Props) {
                         <tr>
                           <th className="px-3 py-2 font-medium">{t("apps.storage.report.colPath")}</th>
                           <th className="px-3 py-2 font-medium">{t("apps.storage.report.colFiles")}</th>
-                          <th className="px-3 py-2 font-medium">{t("apps.storage.report.colAction")}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -456,17 +409,6 @@ export function StorageManager({ projectId, envId, appName, canEdit }: Props) {
                               {dir.path}
                             </td>
                             <td className="px-3 py-2 text-gray-700 dark:text-gray-300">{formatCount(dir.files)}</td>
-                            <td className="px-3 py-2">
-                              <button
-                                onClick={() => setCompactConfirm(dir.path)}
-                                disabled={!canEdit || compactStatus?.status === "running"}
-                                className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50 disabled:no-underline"
-                              >
-                                {compactTarget === dir.path && compactStatus?.status === "running"
-                                  ? t("apps.storage.compact.busy")
-                                  : t("apps.storage.compact.button")}
-                              </button>
-                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -475,54 +417,9 @@ export function StorageManager({ projectId, envId, appName, canEdit }: Props) {
                 )}
               </div>
             )}
-
-            {compactError && <p className="mt-3 text-sm text-red-600 dark:text-red-400">{compactError}</p>}
-
-            {compactTarget && compactStatus?.status === "failed" && (
-              <p className="mt-3 text-sm text-red-600 dark:text-red-400">
-                {t("apps.storage.compact.failed")}
-                {compactStatus.reason ? `: ${compactStatus.reason}` : ""}
-              </p>
-            )}
-
-            {compactTarget && compactStatus?.status === "succeeded" && (
-              <p className="mt-3 text-sm text-green-600 dark:text-green-400">
-                {t("apps.storage.compact.success", {
-                  freed: formatCount(
-                    (compactStatus.inodes_free_after ?? 0) - (compactStatus.inodes_free_before ?? 0)
-                  ),
-                  archivePath: compactStatus.archive_path ?? "",
-                  archiveBytes: formatBytes(compactStatus.archive_bytes ?? 0),
-                })}
-              </p>
-            )}
           </div>
         </div>
       )}
-
-      <Modal
-        isOpen={!!compactConfirm}
-        onClose={() => setCompactConfirm(null)}
-        title={t("apps.storage.compact.confirmTitle")}
-      >
-        <p className="text-sm text-gray-700 dark:text-gray-300">
-          {t("apps.storage.compact.confirmBody", { path: compactConfirm ?? "" })}
-        </p>
-        <div className="mt-5 flex justify-end gap-2">
-          <button
-            onClick={() => setCompactConfirm(null)}
-            className="rounded-lg border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-          >
-            {t("apps.storage.compact.cancel")}
-          </button>
-          <button
-            onClick={confirmCompact}
-            className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
-          >
-            {t("apps.storage.compact.confirmAction")}
-          </button>
-        </div>
-      </Modal>
     </div>
   );
 }

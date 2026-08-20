@@ -681,23 +681,7 @@ export const apps: Messages = {
   "apps.storage.report.topDirsTitle": { ru: "Директории по числу файлов", en: "Directories by file count" },
   "apps.storage.report.colPath": { ru: "Путь", en: "Path" },
   "apps.storage.report.colFiles": { ru: "Файлов", en: "Files" },
-  "apps.storage.report.colAction": { ru: "Действие", en: "Action" },
   "apps.storage.report.empty": { ru: "Сканирование не нашло директорий", en: "The scan found no directories" },
-  "apps.storage.compact.button": { ru: "Упаковать в архив", en: "Pack into archive" },
-  "apps.storage.compact.busy": { ru: "Упаковываем...", en: "Packing..." },
-  "apps.storage.compact.confirmTitle": { ru: "Упаковать директорию в архив?", en: "Pack this directory into an archive?" },
-  "apps.storage.compact.confirmBody": {
-    ru: "Директория {path} будет безвозвратно заменена одним файлом .tar.gz с тем же содержимым. Файлы внутри неё исчезнут по отдельности — останется только архив. Архив останется на этом же томе и займёт часть освобождённого места. Отменить это действие нельзя.",
-    en: "The directory {path} will be permanently replaced with a single .tar.gz file holding the same content. The individual files inside it will be gone — only the archive remains. The archive stays on this same volume and uses some of the freed space. This cannot be undone.",
-  },
-  "apps.storage.compact.confirmAction": { ru: "Да, упаковать", en: "Yes, pack it" },
-  "apps.storage.compact.cancel": { ru: "Отмена", en: "Cancel" },
-  "apps.storage.compact.startError": { ru: "Не удалось запустить упаковку", en: "Failed to start packing" },
-  "apps.storage.compact.failed": { ru: "Упаковка не завершилась", en: "Packing did not finish" },
-  "apps.storage.compact.success": {
-    ru: "Готово: освобождено {freed} inode. Архив: {archivePath} ({archiveBytes}).",
-    en: "Done: {freed} inodes freed. Archive: {archivePath} ({archiveBytes}).",
-  },
   "apps.resources.title": { ru: "Ресурсы", en: "Resources" },
   "apps.resources.subtitle": {
     ru: "Платформа сама подбирает CPU и память. Когда приложению перестаёт хватать, размер растёт автоматически — вручную ничего указывать не нужно.",

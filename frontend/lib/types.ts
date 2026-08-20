@@ -611,23 +611,6 @@ export interface VolumeMaintenanceReport {
 }
 
 /**
- * Result of GET .../volume/maintenance/compact. Mirrors VolumeMaintenanceReport's
- * status vocabulary. succeeded carries the packing outcome; failed carries
- * reason/hint.
- */
-export interface VolumeCompactStatus {
-  status: "running" | "succeeded" | "failed" | "absent";
-  job_name?: string;
-  files_packed?: number;
-  archive_path?: string;
-  archive_bytes?: number;
-  inodes_free_before?: number;
-  inodes_free_after?: number;
-  reason?: string;
-  hint?: string;
-}
-
-/**
  * The CPU/memory envelope an app actually runs with, in Kubernetes quantity
  * notation. Always present on the read path: the backend resolves it from the
  * legacy profile name for apps the autoscaler has never resized.
