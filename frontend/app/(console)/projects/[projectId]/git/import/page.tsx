@@ -20,6 +20,7 @@ import { timeAgo } from "@/lib/format";
 import { CopyButton } from "@/components/ui/copy-button";
 import { githubActionsStep, deployCurl } from "@/lib/deploy-snippet";
 import { trackBuildStart } from "@/lib/build-watch";
+import { connectToGithub } from "@/lib/git-install-connect";
 import { Search, Lock, Plus } from "lucide-react";
 
 type FrameworkPreset = { id: string; label: string; port: number };
@@ -218,7 +219,6 @@ export default function GitImportPage() {
   const [loadingInstalls, setLoadingInstalls] = useState(true);
   const [installError, setInstallError] = useState<string | null>(null);
   const [connectingProvider, setConnectingProvider] = useState<"github" | null>(null);
-  const [installUrl, setInstallUrl] = useState<string | null>(null);
 
   const [remoteRepos, setRemoteRepos] = useState<GitRemoteRepoCandidate[]>([]);
   const [loadingRepos, setLoadingRepos] = useState(false);
@@ -300,20 +300,6 @@ export default function GitImportPage() {
     /* eslint-enable react-hooks/set-state-in-effect */
     void refreshInstallations(allowed);
   }, [projectId, envId, isLoadingEnvs, allowed, refreshInstallations]);
-
-  useEffect(() => {
-    if (!allowed || loadingInstalls || installUrl) return;
-    let cancelled = false;
-    gitApi
-      .installUrl(projectId, "github")
-      .then(({ url }) => {
-        if (!cancelled) setInstallUrl(url);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [allowed, loadingInstalls, projectId, installUrl]);
 
   const loadRepos = useCallback(
     async (installs: GitInstallation[]) => {
@@ -402,25 +388,24 @@ export default function GitImportPage() {
 
   async function handleConnectProvider(provider: "github", forceInstall = false) {
     setInstallError(null);
-
-    if (forceInstall && installUrl) {
-      window.location.href = installUrl;
-      return;
-    }
-
     setConnectingProvider(provider);
     try {
-      const { installations: avail } = await gitApi.availableInstallations(projectId);
-      const list = avail ?? [];
-      const toBind = list.filter((a) => !a.bound);
-      if (list.length) {
-        await Promise.all(toBind.map((a) => gitApi.bindInstallation(projectId, a.installation_id)));
-        await refreshInstallations(false);
-        return;
+      if (!forceInstall) {
+        const { installations: avail } = await gitApi.availableInstallations(projectId);
+        const list = avail ?? [];
+        const toBind = list.filter((a) => !a.bound);
+        if (list.length) {
+          await Promise.all(toBind.map((a) => gitApi.bindInstallation(projectId, a.installation_id)));
+          await refreshInstallations(false);
+          return;
+        }
       }
-      const url = installUrl ?? (await gitApi.installUrl(projectId, provider)).url;
-      setInstallUrl(url);
-      window.location.href = url;
+      await connectToGithub({
+        fetchInstallUrl: async () => (await gitApi.installUrl(projectId, provider)).url,
+        navigate: (url) => {
+          window.location.href = url;
+        },
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("git.import.error.startInstall");
       setInstallError(/503|unavailable|not configured/i.test(msg) ? t("git.import.unavailable") : msg);
@@ -737,13 +722,16 @@ export default function GitImportPage() {
                     {t("git.import.byUrl.open")}
                   </button>
                 </div>
-                {installUrl && (
-                  <a
-                    href={installUrl}
-                    className="mt-3 inline-block text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                {allowed && (
+                  <button
+                    type="button"
+                    onClick={() => handleConnectProvider("github", true)}
+                    disabled={connectingProvider !== null}
+                    data-ux="git_import:open_github"
+                    className="mt-3 inline-block text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {t("git.import.openGithub")}
-                  </a>
+                  </button>
                 )}
               </div>
 
@@ -814,13 +802,16 @@ export default function GitImportPage() {
                     </div>
                   )}
                 </div>
-                {!deploying && installUrl && (
-                  <a
-                    href={installUrl}
-                    className="self-end text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                {!deploying && allowed && (
+                  <button
+                    type="button"
+                    onClick={() => handleConnectProvider("github", true)}
+                    disabled={connectingProvider !== null}
+                    data-ux="git_import:open_github"
+                    className="self-end text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {t("git.import.openGithub")}
-                  </a>
+                  </button>
                 )}
                 <div className="relative flex-1">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
