@@ -23,6 +23,7 @@ import { getAppAlerts } from "@/lib/app-alerts";
 import { normalizeAppUrlStatus, appUrlReasonMessageKey } from "@/lib/app-url-status";
 import { AppNextStepCard } from "@/components/deploy/app-next-step-card";
 import { AppLiveBanner } from "@/components/deploy/app-live-banner";
+import { AppTwinBanner } from "@/components/deploy/app-twin-banner";
 import { AppLastMileBanner } from "@/components/deploy/app-last-mile-banner";
 import { evaluateLastMile } from "@/lib/last-mile-status";
 import { AppDeployDriftBanner } from "@/components/deploy/app-deploy-drift-banner";
@@ -277,7 +278,7 @@ export default function AppDetailPage() {
     );
   }
 
-  const summary = app.summary_json as { image?: string; port?: number; replicas?: number; ready?: number; restarts?: number; profile?: string; resources?: { cpu_limit: string; memory_limit: string }; observed_resources?: { cpu_request?: string; cpu_limit?: string; memory_request?: string; memory_limit?: string }; runtime?: string; volume?: AppVolume; repo_full_name?: string; source?: string; url?: string; url_status?: string; url_reason?: string; preview_url?: string; git_sha?: string; git_message?: string; http_status?: number; http_reason?: string; http_checked_at?: string; worker?: boolean };
+  const summary = app.summary_json as { image?: string; port?: number; replicas?: number; ready?: number; restarts?: number; profile?: string; resources?: { cpu_limit: string; memory_limit: string }; observed_resources?: { cpu_request?: string; cpu_limit?: string; memory_request?: string; memory_limit?: string }; runtime?: string; volume?: AppVolume; repo_full_name?: string; source?: string; url?: string; url_status?: string; url_reason?: string; preview_url?: string; git_sha?: string; git_message?: string; http_status?: number; http_reason?: string; http_checked_at?: string; worker?: boolean; twin_of?: unknown };
   const urlStatus = normalizeAppUrlStatus(summary.url_status);
   const urlReasonKey = appUrlReasonMessageKey(summary.url_reason);
   const urlReason = summary.url_reason ? (urlReasonKey ? t(urlReasonKey) : t("apps.url.reason.unknown", { reason: summary.url_reason })) : null;
@@ -484,6 +485,13 @@ export default function AppDetailPage() {
         envId={envId}
         appName={appName}
       />
+
+      {!isResource && (
+        <AppTwinBanner
+          twinOf={summary.twin_of}
+          onDeleteThis={() => setDeleteTarget({ kind: "app", projectId, envId, appName })}
+        />
+      )}
 
       {!isResource && (
         <AppLastMileBanner

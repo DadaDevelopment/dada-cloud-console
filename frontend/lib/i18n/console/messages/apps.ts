@@ -166,6 +166,14 @@ export const apps: Messages = {
   "apps.liveBanner.copied": { ru: "Скопировано", en: "Copied" },
   "apps.liveBanner.dismiss": { ru: "Скрыть", en: "Dismiss" },
 
+  "apps.twin.title": { ru: "Это приложение — дубликат", en: "This app is a duplicate" },
+  "apps.twin.desc": {
+    ru: "Собрано из того же репозитория {repo}, что и приложение {appName} в проекте {projectName}. Два экземпляра одного бота или сервиса будут мешать друг другу.",
+    en: "Built from the same repository {repo} as the app {appName} in project {projectName}. Running two copies of one bot or service will fight each other.",
+  },
+  "apps.twin.openTwin": { ru: "Открыть оригинал", en: "Open the twin" },
+  "apps.twin.deleteThis": { ru: "Удалить это приложение", en: "Delete this app" },
+
   "apps.modal.create.title": { ru: "Создать приложение", en: "Create Application" },
   "apps.modal.create.name.label": { ru: "Имя приложения", en: "App name" },
   "apps.modal.create.name.title": {

@@ -479,6 +479,11 @@ func (h *Handler) ListApps(c *gin.Context) {
 	apps, repoByName, sourceByName := SynthesizeGitRepoApps(apps, gitRows, seen, projectID, envID)
 
 	FillRepoFullNameAndSource(apps, repoByName, sourceByName)
+	if repoByApp := RepoByAppFromSummaries(apps); len(repoByApp) > 0 {
+		if twins := h.loadAppTwins(c.Request.Context(), projectID, repoByApp); twins != nil {
+			FillTwins(apps, twins)
+		}
+	}
 	FillDemoExpiry(apps, gitRows)
 	FillEffectiveResources(apps)
 	RestatePlaceholderPhase(apps, buildStatus)

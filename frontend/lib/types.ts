@@ -642,6 +642,17 @@ export interface AppSummary {
    * chart's `args` value (gitops-agent renderer.AppSpec.Args).
    */
   start_command?: string;
+  /**
+   * Present only when the backend detects that this app's git repo is also
+   * connected to another app (same repo, different project) -- see
+   * `lib/app-twin.ts` for how the console turns this into a banner.
+   */
+  twin_of?: {
+    project_id: string;
+    project_name: string;
+    app_name: string;
+    repo_full_name: string;
+  };
 }
 
 export interface AppsResponse {
