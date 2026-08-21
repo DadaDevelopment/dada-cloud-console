@@ -350,6 +350,10 @@ export const apps: Messages = {
     ru: "Сборка образа упала внутри Dockerfile — смотрите лог.",
     en: "The image build failed inside the Dockerfile — check the log.",
   },
+  "apps.builds.fail.reason.missingManifest": {
+    ru: "Dockerfile, который сгенерировал Dada, ожидает манифест зависимостей (package.json, requirements.txt, go.mod и т.п.), а в корне репозитория его нет. Добавьте манифест в корень репозитория, или, если стек определён неверно, положите в репозиторий свой Dockerfile.",
+    en: "The Dockerfile Dada generated for this app expects a dependency manifest (package.json, requirements.txt, go.mod, etc.), but there is none at the repo root. Add the manifest to the repo root, or if the stack was detected wrong, add your own Dockerfile to the repository.",
+  },
   "apps.builds.fail.gitAuth.reconnect": {
     ru: "Переподключить репозиторий",
     en: "Reconnect the repository",
@@ -403,6 +407,10 @@ export const apps: Messages = {
   "apps.latestBuild.failed.repeatHint.platformError": {
     ru: "Это наша авария, не ваша: повторять сборку бессмысленно, мы уже видим ошибку и чиним её на своей стороне.",
     en: "This is on us, not you: retrying the build will not help, we already see the failure and are fixing it on our side.",
+  },
+  "apps.latestBuild.failed.repeatHint.missingManifest": {
+    ru: "Повтор не поможет: манифеста зависимостей в репозитории по-прежнему нет. Добавьте его в корень репозитория, или, если стек определён неверно, положите свой Dockerfile.",
+    en: "Retrying will not help: the dependency manifest is still missing from the repository. Add it to the repo root, or add your own Dockerfile if the stack was detected wrong.",
   },
   "apps.latestBuild.failed.repeatHint.generic": {
     ru: "Одна и та же ошибка повторяется — просто пересобрать не выйдет. Откройте лог сборки и разберитесь в причине, прежде чем пробовать снова.",

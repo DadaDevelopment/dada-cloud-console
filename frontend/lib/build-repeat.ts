@@ -38,6 +38,8 @@ export function repeatHintKey(failReason?: string | null): string {
   switch (failReason) {
     case "dockerfile_build_failed":
       return "apps.latestBuild.failed.repeatHint.dockerfileBuildFailed";
+    case "missing_manifest":
+      return "apps.latestBuild.failed.repeatHint.missingManifest";
     case "git_auth_failed":
       return "apps.latestBuild.failed.repeatHint.gitAuthFailed";
     case "platform_error":
