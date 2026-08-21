@@ -2110,6 +2110,101 @@ const docTemplate = `{
                 }
             }
         },
+        "/billing/promo/redeem": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Grants the org owning the caller's first project a fixed-term paid plan named by the promo code. Idempotent per (code, org): redeeming the same code twice for the same org returns promo_already_redeemed rather than granting a second term.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "billing"
+                ],
+                "summary": "Redeem a promo code for a paid plan",
+                "operationId": "redeemBillingPromo",
+                "parameters": [
+                    {
+                        "description": "Promo code",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.billingPromoRedeemRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "410": {
+                        "description": "Gone",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/billing/recommend-plan": {
             "post": {
                 "security": [
@@ -21660,6 +21755,14 @@ const docTemplate = `{
                 }
             }
         },
+        "api.billingPromoRedeemRequest": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                }
+            }
+        },
         "api.bindInstallationRequest": {
             "type": "object",
             "properties": {
@@ -21751,6 +21854,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "pr_number": {
+                    "type": "integer"
+                },
+                "repeat_count": {
                     "type": "integer"
                 },
                 "source": {
