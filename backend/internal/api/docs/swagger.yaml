@@ -425,6 +425,11 @@ definitions:
       error:
         type: string
     type: object
+  api.billingPromoRedeemRequest:
+    properties:
+      code:
+        type: string
+    type: object
   api.bindInstallationRequest:
     properties:
       installation_id:
@@ -493,6 +498,8 @@ definitions:
       logs_ref:
         type: string
       pr_number:
+        type: integer
+      repeat_count:
         type: integer
       source:
         type: string
@@ -3022,6 +3029,71 @@ paths:
       security:
       - BearerAuth: []
       summary: List billing plans
+      tags:
+      - billing
+  /billing/promo/redeem:
+    post:
+      consumes:
+      - application/json
+      description: 'Grants the org owning the caller''s first project a fixed-term
+        paid plan named by the promo code. Idempotent per (code, org): redeeming the
+        same code twice for the same org returns promo_already_redeemed rather than
+        granting a second term.'
+      operationId: redeemBillingPromo
+      parameters:
+      - description: Promo code
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.billingPromoRedeemRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "410":
+          description: Gone
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Redeem a promo code for a paid plan
       tags:
       - billing
   /billing/recommend-plan:
