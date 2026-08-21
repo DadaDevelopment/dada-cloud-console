@@ -1,136 +1,134 @@
-# Разбор аудита: путь новых юзеров, граф переходов, деньги
+# Audit path graph — sess-0821f, 2026-08-21
 
-Замер: sess-0821e, 2026-08-21 15:10 UTC. Гейт `probe-prod-access.sh` = ЗЕЛЁНЫЙ (apiserver /readyz=ok,
-psql exec в `databases/postgresql-0` живой, консоль http=307). Все SQL — `kubectl exec -n databases
-postgresql-0 -c postgresql -- psql "$DSN"`, DSN из секрета `argocd-prod/dada-cloud-console-backend`
-(та же роль, что читает бэкенд).
+Источник: psql в `cloud-console` через `kubectl exec pg-shard-0-postgresql-0 -n databases`
+(creds-секрет `dada-cloud-console-backend` в ns `argocd-prod`, DB на pod `pg-shard-0-postgresql-0`,
+НЕ на `postgresql-0` — тот отдельный шард). Момент снятия: `now()`=2026-08-21 17:08:07 UTC.
+Прод достижим, туннель не мешал, `ensure-proxy.sh` сказал DIRECT-OK (прокси не понадобился).
 
-Прошлый цикл закрыл окно на `now=2026-08-21 13:25 UTC` (файл этого же дня, см. git history). Дельта
-этого цикла — **1 новый юзер** (`created_at >= '2026-08-21 13:25:00+00'`). 30-дневное окно пересчитано
-целиком для проверки, что предыдущие выводы не устарели (граф/терминальные точки/фермерская волна не
-изменились — 30 юзеров в 30д = 29 прошлые + 1 новый).
+## 1. Новые юзеры
 
-## 1. Новый юзер за дельту-окно (полная цепочка)
+- **24ч**: 1 юзер — `tarotreaderhimu@gmail.com` (рега 2026-08-21 13:58:01 UTC, source=awesome_webhosting, channel=yandex). Это тот же кейс из п.5.
+- **30д (скользящее окно)**: 30 юзеров. Видна известная ферма-волна 08-08 (memory `project_signup_farm_wave_pollutes_funnel`): 15 из 30 юзеров зарегались в окне 19:49–22:56 UTC одного дня, случайные gmail/outlook/163.com/xyz-адреса.
 
-**`tarotreaderhimu@gmail.com`** (id `fa1cc1aa-2554-4d1f-ba72-7e6e2bd39ac4`), рег. 2026-08-21 13:58:01 UTC.
-Полная цепочка из `audit_events` (19 строк, все реальные, не фарма):
+## 2. Мёртвые сигнапы (30д когорта)
+
+13 из 30 юзеров имеют **ровно 0 в builds/agent_chat_messages/feedback** — настоящие мёртвые сигнапы:
+`17ffb57d-...@keycloak.local, bestmanskyline@gmail.com, chenlikun.18@gmail.com, clikuoo@gmail.com, dmimuser@outlook.com, dsoftru@yandex.ru, game@016818.xyz, grwang1201@outlook.com, langhakka9527@gmail.com, mail@ynotu.top, oddessc@outlook.com, zengqcyxx@gmail.com, zhisibi@163.com`.
+
+12 из них — только `SessionStart`, ноль попыток что-либо сделать (чистая ферма/бот-трафик).
+1 (`17ffb57d-...@keycloak.local`) дошёл до `AgentChatActionDeclined:connectGitRepo` — тронул продукт, но отказался/бросил, тоже 0 в builds/chat/feedback дальше.
+
+**Важно**: ноль в audit ≠ ноль сигнала автоматически — перепроверено. У этих 13 действительно ноль везде (builds/chat/feedback), это не провал инструментирования, это реальный мёртвый сигнап или бот.
+
+Остальные 17/30 юзеров имеют реальную активность (от 1 до 618 audit-событий).
+
+## 3. Граф переходов (30д когорта, per-user consecutive audit events)
+
+**Первое действие после регистрации** (top):
+- `SessionStart` — 19 юзеров (дальше либо тишина, либо новый визит)
+- `SignUp` — 6 (следующее событие уже другого типа, SignUp сам не всегда первая запись из-за таймингов)
+- `CreateApp` — 2, `AgentChatActionDeclined` — 1, `CreateServiceDatabase` — 1, `RedeemPromo` — 1
+
+**Терминальное действие** (последнее перед ≥24ч тишиной / последнее вообще):
+- `SessionStart` — 19 (это в основном те же мёртвые сигнапы — залогинился и всё)
+- `ViewApps` — 6, `DeployImageVersion` — 2, `AgentChatActionDeclined` — 1, `BuildFinished` — 1, `ViewProject` — 1
+
+**Топ переходов A→B** (across все audit-события 30д когорты, n = событий, distinct_users):
+```
+SessionStart -> ViewProject          177 / 9 users
+ViewProject  -> ViewApps             165 / 11 users
+ViewProject  -> ViewProject          132 / 6 users   (повторные заходы)
+ViewApps     -> SessionStart          76 / 7 users
+ViewApps     -> ViewApp               68 / 6 users
+ViewProject  -> SessionStart          66 / 6 users
+ViewApps     -> ViewProject           57 / 7 users
+UploadSourceArchive -> ViewBuildLogs  31 / 4 users
+ViewApp      -> ViewApps              29 / 6 users
+ViewBuildLogs -> BuildFinished        29 / 5 users
+ViewApp      -> UploadSourceArchive   24 / 2 users
+BuildFinished -> DeployImageVersion   24 / 4 users
+ConnectGitRepo -> TriggerBuild        11 / 5 users
+```
+Читается так: основной живой цикл — `ViewProject ↔ ViewApps ↔ ViewApp`, воронка деплоя реальна
+(`UploadSourceArchive → ViewBuildLogs → BuildFinished → DeployImageVersion`), но по объёму
+навигация к приложению доминирует над попытками что-то собрать/задеплоить.
+
+## 4. Деньги (7д)
+
+5 попыток оплаты за 7д, все дедуплицированы по `payments.id`:
+
+| org_id | status | amount | customer_email | комментарий |
+|---|---|---|---|---|
+| artempro2021@bk.ru | canceled | 2900 | artempro2021@bk.ru | owner платит себе |
+| dada | pending | 2900 | (пусто, payer_inn=7807402712) | внутренняя org |
+| dada | canceled | 990 | alexkekiy@dada-tuda.ru | owner |
+| dada | canceled | 990 | alexkekiy@dada-tuda.ru | owner |
+| dada | canceled | 990 | sandbox-test@dada-tuda.ru | тестовый аккаунт, org=dada (тоже owner alexkekiy) |
+
+**Все 5 попыток за 7д — от владельца org или от sandbox-test внутри owner-org. Ноль попыток от настоящего чужого (non-owner) плательщика за 7д.**
+
+За всё время в `payments`: 1 `succeeded` (org=dada, 990₽, 2026-07-25, тоже своя org, customer_email пуст) — это тоже не подтверждённая внешняя продажа, а внутренний прогон. `created_by_sub` пуст у ВСЕХ строк за 7д (см. memory `project_checkout_recorded_outcome_through_payers_own_context` — идентичность плательщика в чекауте и так ненадёжна).
+
+**Вывод по деньгам: за 7д и за всё время не зафиксировано ни одной попытки оплаты от подтверждённо чужого (non-owner) покупателя, тем более успешной.**
+
+## 5. Кейс `tarotreaderhimu@gmail.com` — числами
+
+Рега 2026-08-21 13:58:01 UTC. Полная цепочка audit (19 событий, всё за ~11 минут):
 
 ```
-13:58:01.13  SignUp              User            tarotreaderhimu@gmail.com        success
-13:58:01.15  SessionStart        Session         tarotreaderhimu@gmail.com        success
-13:58:01.73  CreateProject       Project         tarotreaderhimu-gmail-com        pending
-13:58:03.00  ViewProject         Project         tarotreaderhimu-gmail-com        success
-13:58:03.31  ViewApps            AppList         9eca0ca6-...                     success
-13:58:15.50  StartGitAppInstall  git_installation github                          pending
-13:58:21.78  FinishGitAppInstall git_installation github                          success
-13:58:48.21  ConnectGitRepo      GitRepo         best-marriage-astrologer-in-guwahati  success
-13:58:48.50  TriggerBuild        Build           best-marriage-astrologer-in-guwahati  success
-13:58:48.80  ViewBuildLogs       Build           best-marriage-astrologer-in-guwahati  success
-13:58:51.67  CreateProject       Project         tarotreaderhimu-gmail-com        success
-14:00:20.67  BuildFinished       Build           best-marriage-astrologer-in-guwahati  failure
-14:02:07.52  TriggerBuild        Build           best-marriage-astrologer-in-guwahati  success
-14:03:36.82  BuildFinished       Build           best-marriage-astrologer-in-guwahati  failure
-14:07:47.26  CreateServiceDatabase ServiceDatabaseV2 db-8f66797a                  pending
-14:07:57.62  CreateServiceDatabase ServiceDatabaseV2 db-8f66797a                  success
-14:08:05.52  TriggerBuild        Build           best-marriage-astrologer-in-guwahati  success
-14:09:07.27  SeedDatabaseDSN     ServiceDatabaseV2 db-8f66797a                    success
-14:09:36.49  BuildFinished       Build           best-marriage-astrologer-in-guwahati  failure
+13:58:01.13  SignUp
+13:58:01.15  SessionStart
+13:58:01.73  CreateProject          pending
+13:58:03.00  ViewProject
+13:58:03.31  ViewApps
+13:58:15.50  StartGitAppInstall     pending
+13:58:21.78  FinishGitAppInstall    success
+13:58:48.21  ConnectGitRepo         best-marriage-astrologer-in-guwahati
+13:58:48.50  TriggerBuild           success (build #1: 0ce47f4e)
+13:58:48.80  ViewBuildLogs
+13:58:51.67  CreateProject          success (запоздавшее success предыдущего pending)
+14:00:20.67  BuildFinished          FAILURE #1 — dockerfile_build_failed / npm install
+14:02:07.52  TriggerBuild           success (build #2: 207f9ae0)
+14:03:36.82  BuildFinished          FAILURE #2 — тот же fail_reason, та же сигнатура (нормализованная)
+14:07:47.26  CreateServiceDatabase  pending
+14:07:57.62  CreateServiceDatabase  success (db-8f66797a) — попытался подключить БД, решив что дело в ней
+14:08:05.52  TriggerBuild           success (build #3: 0f00460c)
+14:09:07.27  SeedDatabaseDSN        success
+14:09:36.49  BuildFinished          FAILURE #3 — тот же fail_reason, та же сигнатура
 ```
 
-Это **лучший путь в окне**: не осмотр, а реальная попытка деплоя за 11 минут — signup → project →
-git connect → 3× build, каждый упал на одной и той же стадии:
+**Что делал ПОСЛЕ третьего провала**: ничего. `14:09:36.49` — последняя запись в audit для этого юзера, всего. Ноль событий дальше.
 
-```
-builds.error_message (все 3): dockerfile_build_failed: [build 5/6] RUN npm install: npm error ...
-```
+**Вернулся ли**: нет, по состоянию на снятие среза (17:08:07 UTC) — тишина **2ч58мин** после третьего провала. Это меньше 24ч-порога «терминальной тишины», окно наблюдения ещё не закрыто — рано писать «ушёл навсегда», но пока НЕ вернулся.
 
-Между 2-й и 3-й попыткой юзер создал сервисную БД (`CreateServiceDatabase` → `SeedDatabaseDSN`),
-похоже решил, что причина в отсутствующей базе — это не помогло, 3-я сборка упала на том же `npm
-install`. Последнее событие 14:09:36 UTC, сейчас 15:10 UTC → **59 минут молчания, юзер ещё тёплый**
-(<24ч), терминальным по определению задания (≥24ч) не считается, но живой обрыв цикла прямо сейчас.
-Репозиторий `best-marriage-astrologer-in-guwahati` — судя по имени, SEO/контентный сайт, вероятно
-чужой шаблон с непроходящим `npm install` (битый lock-файл/приватная зависимость) — это, скорее всего,
-проблема репозитория юзера, не платформы, но пруфа этого утверждения (сам package.json) не читал —
-это `unmeasured` в части «чья вина», измерен только факт: 3 попытки, 0 успехов, юзер ушёл сразу после
-третьего провала.
+**Жив ли апп `best-marriage-astrologer-in-guwahati`**: да, строка в `git_repos` (id `efb5f77b-a53f-4f44-80bf-ff0d15f64a83`) существует, `DeleteApp` не вызывался. Апп висит в состоянии «3/3 билда failed», не задеплоен ни разу.
 
-## 2. Мёртвые сигнапы
+**Сигнатура провала все 3 раза одинаковая по сути** (`fail_reason='dockerfile_build_failed'`, `error_message` начинается с `[build 5/6] RUN npm install: npm error`), но **строкового совпадения НЕТ** — `error_message` содержит embedded-таймстемп лог-файла (`/root/.npm/_logs/2026-08-21T13_59_54_133Z-debug-0.log` и т.п.), уникальный на каждый прогон. Точное сравнение строк даёт 0 повторов; нормализованное (regex вырезает таймстемп) — даёт 3/3 совпадения. **Это отдельная находка: если фича мерит повторы точным сравнением `error_message`, она недосчитывает 100% таких случаев.**
 
-Ноль новых юзеров дельты-окна = мёртвый сигнап. 30-дневное окно не изменилось: 0 из 30 юзеров имеют
-ноль строк ВЕЗДЕ (все имеют хотя бы `SessionStart`), как и в прошлом цикле — диагноз "утечка до
-первого действия" по-прежнему не воспроизводится.
+### База по всей платформе: серии 2+ подряд одинаковых провалов на одном апп/репо, 30д
 
-## 3. Граф пути — без изменений по существу
+Считал по нормализованной сигнатуре (`fail_reason` + `error_message` с вырезанным `ISO-таймстемп` в пути лога), т.к. точное строковое сравнение занижает счёт (см. кейс tarot выше).
 
-Единственное новое ребро от дельты: `ConnectGitRepo -> TriggerBuild` (+1), `TriggerBuild ->
-ViewBuildLogs` (+1), и новая тройка `BuildFinished(failure) -> TriggerBuild` (+2, ретраи), которой не
-было в топ-40 прошлого цикла — **это первый живой пример «юзер ретраит после провала build», а не
-уходит сразу**. Раньше граф видел только `BuildFinished -> DeployImageVersion` (успех) и `BuildFinished
--> CreateApp`; паттерн «упал → ретрай ещё раз → упал → ретрай снова → сдался» появился только сейчас.
-Полный 30-дневный граф (переходы, доминирующий цикл осмотра `SessionStart → ViewProject → ViewApps →
-ViewApp` без действия) не изменился — детали см. в предыдущей версии файла (git log
-`automator/state/audit-path-graph.md`), здесь не дублирую, чтобы не раздувать файл дельта-циклом.
+- Всего репо с билд-активностью за 30д: **15**.
+- Репо, где была серия из 2+ подряд провалов с одинаковой (нормализованной) сигнатурой: **4** (27% активных репо).
+- Затронутых юзеров: **4** (по одному репо на юзера).
 
-### Терминальные точки — топ-3 (полное 30д окно, ≥24ч молчания)
-1. **`SessionStart` (фермерская волна 08-08, 14 юзеров)** — единственное событие, ~300ч молчания. Боты, не продукт.
-2. **`ViewApps`/`ViewProject`** (5-6 реальных юзеров: `cryocrm@gmail.com` 244ч, `a.meshkov@dada-tuda.ru`
-   235ч, `good.win2283@gmail.com` 168ч, `michaelharlam` 100ч) — люди уходят на осмотре консоли, ни разу
-   не нажав "создать".
-3. **`BuildFinished(failure)` после ретраев** (новый паттерн этого цикла, `tarotreaderhimu@gmail.com`,
-   пока <24ч — кандидат на следующий цикл, если не вернётся) — первый живой кейс "упёрся в билд и ушёл",
-   в прошлых циклах такого терминала не было зафиксировано вообще.
+| app_name | owner | repeat-события | окно | исход |
+|---|---|---|---|---|
+| best-marriage-astrologer-in-guwahati | tarotreaderhimu@gmail.com | 3 (все) | 2026-08-21 13:58–14:08 | **застрял** — 3/3 failed, тишина 2ч58м на момент среза, апп жив, не задеплоен |
+| gulyaev-ai-core | lifecoachrussia@yandex.ru | 6 | 2026-08-19 09:39 – 2026-08-20 07:15 | **success** — выбрался сам после серии, последний билд success 08-20 07:15 |
+| agent-orchestrator-ui | alexkekiy@dada-tuda.ru (owner, внутренний тест-аккаунт) | 4 | 2026-08-02 – 2026-08-12 | success — выбрался, исключить из продуктового счёта (staff) |
+| a2ahub-landing | tech@xn--d1acaa3cs0b.xn--p1ai | 3 | 2026-08-04 – 2026-08-12 | success — выбрался (08-12 14:03) |
 
-## 4. Деньги — 7 дней, статус после фиксов `3d6379f9` / `b49fe2a8`
+**Итого без staff-аккаунта (agent-orchestrator-ui — это owner alexkekiy@dada-tuda.ru, внутренний): 3 реальных внешних юзера за 30д словили серию 2+ повторных провалов. 2 из 3 выбрались сами (success через 1 день / 8 дней), 1 (tarot, сегодняшний) пока завис — самый свежий случай, ещё в пределах окна наблюдения, не подтверждён как потерянный.**
 
-```
-payments (created_at >= now()-7d):
-id       org_id  plan     amount  status    email                     inn         created_at (UTC)
-1671e4a8 artempro2021@bk.ru business 2900.00 canceled  artempro2021@bk.ru        -           08-15 21:45 (уже был в прошлом отчёте)
-eb4c8e48 dada    startup  990.00  canceled  sandbox-test@dada-tuda.ru 1234567894  08-18 12:42 (внутр. тест)
-a295a6e6 dada    startup  990.00  canceled  alexkekiy@dada-tuda.ru    -           08-18 13:24 (внутр., владелец)
-6ad2e12d dada    startup  990.00  canceled  alexkekiy@dada-tuda.ru    -           08-18 13:24 (внутр., владелец)
-25f07e96 dada    business 2900.00 pending   -                         7807402712  08-19 21:01 (внутр. орг-счёт, pending — норм по c56a6ce1)
-```
+## Кандидаты в беклог
 
-**Новых попыток оплаты от ВНЕШНЕГО (не dada/sandbox/owner) юзера за 7 дней НЕТ**, кроме уже известной
-`artempro2021@bk.ru` от 08-15 (без изменений с прошлого цикла — не повторял). `succeeded`-платежей за
-всё время по-прежнему один: `37a8d276` от 2026-07-25, тоже `org_id='dada'` без email/ИНН — внутренний.
+### Счётчик повторных провалов сборки сравнивает error_message как есть, теряя все реальные повторы
+`fail_reason` совпадает у последовательных провалов, но `error_message` содержит встроенный таймстемп путей npm-лога (`/root/.npm/_logs/<ISO8601>-debug-0.log`), уникальный на каждый прогон. Любая будущая метрика/алерт/фича «юзер застрял в повторе», которая сравнивает `error_message` строкой в строку, даст 0 срабатываний там, где сигнатура на самом деле идентична (кейс tarotreaderhimu 21.08 — 3/3 провала с одинаковой причиной, точное сравнение находит 0 повторов). Нормализовать сравнение (обрезать/вырезать таймстемп-путь) до того, как строить любую метрику или auto-fix триггер на этом поле.
 
-**Разобрана путаница из аудита:** `audit_events` показывает `PaymentWebhook ... outcome=success` дважды
-08-18 14:26 для платежей `a295a6e6`/`6ad2e12d`, которые сами при этом `status='canceled'`. Прочитал код —
-это не баг данных, а неймспейс-коллизия термина: `backend/internal/api/billing_payments.go:236-256`
-(`recordPaymentOutcomeAudit`) пишет `outcome=success` для ЛЮБОГО успешно обработанного вебхука (включая
-`yookassa.OutcomeCanceled`), кроме `OutcomeUnknownPayment` (строка 240: `outcome :=
-auditOutcomeSuccess`, флип на failure только `if result.Outcome == yookassa.OutcomeUnknownPayment`).
-Поле `outcome` в этой audit-строке значит «вебхук обработан», а не «платёж прошёл» — при внешнем платеже
-это будет читаться как ложный успех, если смотреть только на `audit_events.outcome` не открывая
-`payments.status`. Не переименовываю сам (вне мандата этого файла), фиксирую как находку с местом.
+### У trigger'а auto-fix/подсказки после повторного провала нет — юзер решает проблему наугад и теряет апп
+tarotreaderhimu 21.08: после 2-го провала юзер сам предположил «дело в базе», создал ServiceDatabaseV2 и заново задеплоил (14:07–14:09) — 3-й билд упал с ТОЙ ЖЕ причиной (`npm install`), т.е. гипотеза юзера была неверной, а продукт не подсказал, что причина не в БД. Апп жив, не задеплоен, юзер молчит 2ч58м на момент среза. Разово это рано считать потерей (окно тишины <24ч), но паттерн виден и на двух других юзерах за 30д (gulyaev-ai-core, a2ahub-landing) — оба тоже гоняли повторные билды вслепую, просто им повезло больше попыток до успеха. Основа для фичи: на 2-м подряд провале с одинаковой (нормализованной) сигнатурой показывать точную причину/лог-строку, а не давать юзеру гадать.
 
-**Главный вывод по деньгам без изменений:** `artempro2021@bk.ru` (самый активный юзер месяца, 611
-audit-строк, 30 билдов) остаётся единственным реальным кандидатом с деньгами на столе и нулём
-успешных платежей — без новых попыток с прошлого цикла, значит либо сдался, либо ждёт. Стоит списаться
-напрямую, пока профиль ещё не остыл окончательно (последнее событие было 8.5ч назад на момент прошлого
-замера — сейчас это уже больше суток, проверить свежий статус в следующем цикле).
-
-## Беклог-кандидаты
-
-### `PaymentWebhook` audit outcome=success маскирует отменённые платежи
-`backend/internal/api/billing_payments.go:236-256` — `recordPaymentOutcomeAudit` ставит
-`outcome=auditOutcomeSuccess` для webhook-исхода `OutcomeCanceled` (флип на failure только для
-`OutcomeUnknownPayment`, строка 240). На проде 08-18 это дало 2 строки `PaymentWebhook ... success`
-для платежей, которые сами `canceled` — при чтении графа аудита (как в этом самом разборе) это на
-секунду читается как «оплата прошла». Для внутренних тестовых платежей это безобидно, но если так
-случится с внешним клиентом, дежурный по логам увидит "success" и закроет тикет, хотя денег нет.
-Предложение: развести `outcome=success` (вебхук обработан) и отдельное поле/значение для
-`payment_status` в metadata аудита, либо минимум завести `outcome=neutral/processed` для canceled-ветки.
-
-### Первый живой ретрай-после-провала billда без выхода к успеху
-`tarotreaderhimu@gmail.com` (audit_events actor `fa1cc1aa-2554-4d1f-ba72-7e6e2bd39ac4`, 2026-08-21
-13:58-14:09 UTC) — 3 билда подряд падают на одном и том же `RUN npm install` (repo
-`best-marriage-astrologer-in-guwahati`), между попытками юзер создаёт сервисную БД, будто ищет причину
-не там. Продукт не показывает юзеру, что ошибка стабильно повторяется на том же шаге — если бы
-`ViewBuildLogs`/UI билда дедуплицировал/подсвечивал "тот же шаг падает 3-й раз подряд, вероятно не
-инфраструктура" — юзер не тратил бы 11 минут на неверную гипотезу (создание БД). Кандидат в UX
-беклог, не инженерный баг: нужен паттерн-детектор повторяющегося идентичного `error_message` на
-одном `git_repo_id` с подсказкой юзеру. Пока <24ч, следующий цикл проверить — вернулся или ушёл
-насовсем.
+### `payments.created_by_sub` пуст на 100% строк за 7д — атрибуция плательщика не работает вообще
+Ни одна из 5 записей `payments` за последние 7 дней не несёт `created_by_sub`. Это не позволяет достоверно отличить «оплата от owner» от «оплата от чужого» иначе как через `org_id`/`customer_email` эвристику (которая тоже не всегда надёжна, см. memory `project_checkout_recorded_outcome_through_payers_own_context`). Если бизнес хочет мерить конверсию НЕ-owner плательщиков, эта колонка должна реально заполняться на чекауте — сейчас измерить долю чужих платежей нельзя, только косвенно через org_id/customer_email.
