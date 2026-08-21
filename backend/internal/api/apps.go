@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
+	"github.com/dada-tuda/console/backend/internal/frameworkports"
 	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -510,23 +511,12 @@ func (h *Handler) ListApps(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"apps": apps})
 }
 
-// jsFrameworks are the detected framework labels whose serve/dev process listens
-// on :5173 by default (mirrors the helm common chart's javascript stack and
-// renderer.ChartFor). Kept local so the backend module does not depend on the
-// gitops-agent renderer package.
-var jsFrameworks = map[string]bool{
-	"javascript": true, "web": true, "nextjs": true, "nuxt": true,
-	"sveltekit": true, "react": true, "nestjs": true, "express": true,
-	"fastify": true, "remix": true, "vite": true, "node": true,
-}
-
-// defaultPortForFramework returns the servicePort to assume when a create request
-// omits one: 5173 for javascript apps, 8080 otherwise.
+// defaultPortForFramework returns the servicePort to assume when a create
+// request omits one, looked up case-insensitively from frameworkports.Ports
+// (the backend's copy of config/platform/framework-ports.json), falling
+// back to frameworkports.FallbackPort for an unrecognized framework.
 func defaultPortForFramework(framework string) int {
-	if jsFrameworks[framework] {
-		return 5173
-	}
-	return 8080
+	return frameworkports.Lookup(framework)
 }
 
 // datastorePorts are well-known TCP ports that speak a binary protocol, not

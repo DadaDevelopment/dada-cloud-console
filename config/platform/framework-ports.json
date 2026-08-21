@@ -1,0 +1,33 @@
+{
+  "_doc": "Canonical framework -> default listen port. Single source of truth for every module that has to guess an app's port when the create request omits one. Values are grounded on the start command the build-agent actually generates for each framework (build-agent/internal/server/server.go): a next/react/node process binds 3000, a `vite preview` binds 4173, and only a genuinely unknown framework falls back to 8080. Each Go module keeps its own in-code table (the modules are independent) plus a contract test that fails red when its table drifts from this file.",
+  "_fallback_port": 8080,
+  "ports": {
+    "nextjs": 3000,
+    "nuxt": 3000,
+    "sveltekit": 3000,
+    "remix": 3000,
+    "react": 3000,
+    "nestjs": 3000,
+    "express": 3000,
+    "fastify": 3000,
+    "node": 3000,
+    "javascript": 3000,
+    "web": 3000,
+    "vite": 4173,
+    "fastapi": 8000,
+    "django": 8000,
+    "python": 8000,
+    "flask": 5000,
+    "streamlit": 8501,
+    "spring": 8080,
+    "spring-maven": 8080,
+    "spring-gradle": 8080,
+    "maven": 8080,
+    "gradle": 8080,
+    "scala": 8080,
+    "sbt": 8080,
+    "go": 8080,
+    "dockerfile": 8080,
+    "static": 80
+  }
+}

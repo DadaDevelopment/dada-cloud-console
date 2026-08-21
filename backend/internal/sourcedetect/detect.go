@@ -21,6 +21,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/dada-tuda/console/backend/internal/frameworkports"
 )
 
 // Format identifies the archive container detected from magic bytes.
@@ -800,13 +802,13 @@ func parsePackageJSON(raw []byte) (framework string, port int, ok bool) {
 	}
 	switch {
 	case has("next"):
-		return "nextjs", 3000, true
+		return "nextjs", frameworkports.Lookup("nextjs"), true
 	case has("vite"):
-		return "vite", 5173, true
+		return "vite", frameworkports.Lookup("vite"), true
 	case has("react-scripts"):
-		return "react", 3000, true
+		return "react", frameworkports.Lookup("react"), true
 	default:
-		return "node", 3000, true
+		return "node", frameworkports.Lookup("node"), true
 	}
 }
 
@@ -822,17 +824,9 @@ func parsePackageJSON(raw []byte) (framework string, port int, ok bool) {
 // through to the empty framework, which the build pipeline cannot template.
 func parsePythonManifest(raw []byte) (framework string, port int, ok bool) {
 	text := strings.ToLower(string(raw))
-	for _, fw := range []struct {
-		name string
-		port int
-	}{
-		{"fastapi", 8000},
-		{"streamlit", 8501},
-		{"django", 8000},
-		{"flask", 5000},
-	} {
-		if pythonPackageRe(fw.name).MatchString(text) {
-			return fw.name, fw.port, true
+	for _, fw := range []string{"fastapi", "streamlit", "django", "flask"} {
+		if pythonPackageRe(fw).MatchString(text) {
+			return fw, frameworkports.Lookup(fw), true
 		}
 	}
 	return "python", 0, true

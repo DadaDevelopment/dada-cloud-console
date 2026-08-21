@@ -230,16 +230,61 @@ func ChartFor(framework string) string {
 	}
 }
 
-// DefaultPortForFramework is the port a framework's dev/serve process listens on
-// when no explicit port was captured, mirroring the helm common chart's
-// stack-based default ($defaultServicePort: javascript => 5173, else 8080).
-// Used so a deploy that lost its detected port does not blindly pin 8080 on a
-// javascript app that actually serves 5173.
+// defaultFrameworkFallbackPort is used when a framework label has no entry in
+// defaultFrameworkPorts, or is empty. Mirrors _fallback_port in
+// config/platform/framework-ports.json.
+const defaultFrameworkFallbackPort = 8080
+
+// defaultFrameworkPorts is gitops-agent's copy of the canonical framework ->
+// default listen port table defined in config/platform/framework-ports.json.
+// Backend, build-agent, and gitops-agent each keep their own in-code table
+// plus a contract test that fails red the moment their table drifts from
+// that file, so this map must be kept byte-for-byte in sync with the file's
+// "ports" object. Grounded on the start command build-agent actually
+// generates for each framework: a next/react/node process binds 3000, a
+// `vite preview` binds 4173, and only a genuinely unknown framework falls
+// back to 8080 -- the javascript chart class alone is not a valid port
+// signal any more, since it now spans both 3000 and 4173.
+var defaultFrameworkPorts = map[string]int{
+	"nextjs":        3000,
+	"nuxt":          3000,
+	"sveltekit":     3000,
+	"remix":         3000,
+	"react":         3000,
+	"nestjs":        3000,
+	"express":       3000,
+	"fastify":       3000,
+	"node":          3000,
+	"javascript":    3000,
+	"web":           3000,
+	"vite":          4173,
+	"fastapi":       8000,
+	"django":        8000,
+	"python":        8000,
+	"flask":         5000,
+	"streamlit":     8501,
+	"spring":        8080,
+	"spring-maven":  8080,
+	"spring-gradle": 8080,
+	"maven":         8080,
+	"gradle":        8080,
+	"scala":         8080,
+	"sbt":           8080,
+	"go":            8080,
+	"dockerfile":    8080,
+	"static":        80,
+}
+
+// DefaultPortForFramework is the port a framework's dev/serve process listens
+// on when no explicit port was captured, matched case-insensitively against
+// defaultFrameworkPorts. Used so a deploy that lost its detected port does
+// not blindly pin a wrong default: falls back to
+// defaultFrameworkFallbackPort for any framework not in the table.
 func DefaultPortForFramework(framework string) int {
-	if ChartFor(framework) == "javascript" {
-		return 5173
+	if port, ok := defaultFrameworkPorts[strings.ToLower(framework)]; ok {
+		return port
 	}
-	return 8080
+	return defaultFrameworkFallbackPort
 }
 
 var appFuncMap = template.FuncMap{
