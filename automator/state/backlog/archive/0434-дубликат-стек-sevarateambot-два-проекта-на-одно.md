@@ -1,11 +1,13 @@
 ---
 id: 0434
-status: open
+status: closed
 prio: P2
 stream: 2
 title: Дубликат-стек sevarateambot: два проекта на одно приложение, в одном потерян TELEGRAM_API_TOKEN
 created: 2026-08-21
 sess: sess-0821g
+closed_at: 2026-08-21
+closed_note: Не подтвердился класс deploystack-mismatch: это два ОТДЕЛЬНЫХ проекта одного владельца (tvkassistantbot 2026-07-23, sevarabot 2026-08-15), git_repos по одной строке на проект. Юзер сам закрыл дубликат 2026-08-21 15:32 UTC: audit DeleteApp success по tvkassistantbot-prod, через 20с TriggerBuild success по sevarabot. kubectl: tvkassistantbot-prod -- No resources found. Живая копия в sevarabot-prod падает по коду юзера (bot.polling(non_stop=True) не глотает RemoteDisconnected, exit 1, не OOM). Наш остаток вынесен в отдельный пункт про повторную отправку алерта.
 ---
 Пульс sess-0821g [live kubectl].
 
