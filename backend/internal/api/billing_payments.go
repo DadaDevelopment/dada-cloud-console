@@ -36,6 +36,17 @@ type paymentResponse struct {
 	ConfirmationURL string     `json:"confirmation_url,omitempty"`
 }
 
+// respondRecurringNotSupported answers a recurring-charge request the
+// merchant account cannot fulfill. YooKassa answers CreatePayment with 403
+// "This store can't make recurring payments" (live audit_events 2026-08-15
+// 21:45:43 UTC, error_class yk_forbidden), so both the pre-flight check in
+// BillingCheckout and the post-provider yookassa.ErrRecurringNotSupported
+// backstop resolve to this one wire shape.
+func respondRecurringNotSupported(c *gin.Context) {
+	respondErrorCode(c, http.StatusUnprocessableEntity, "recurring_not_supported",
+		"автосписание сейчас недоступно: снимите галочку «продлевать автоматически» и повторите оплату")
+}
+
 // BillingCheckout starts a YooKassa payment for a paid plan on the org owning
 // the project. Requires write role. Price is always resolved server-side
 // from the loaded plan catalog -- the client only names the plan key.
@@ -111,6 +122,11 @@ func (h *Handler) BillingCheckout(c *gin.Context) {
 		return
 	}
 
+	if body.Autopay && !h.cfg.YooKassaRecurringEnabled {
+		respondRecurringNotSupported(c)
+		return
+	}
+
 	orgID, err := h.projectOrg(c.Request.Context(), projectID)
 	if err != nil {
 		respondNotFound(c)
@@ -131,8 +147,7 @@ func (h *Handler) BillingCheckout(c *gin.Context) {
 			return
 		}
 		if errors.Is(err, yookassa.ErrRecurringNotSupported) {
-			respondErrorCode(c, http.StatusUnprocessableEntity, "recurring_not_supported",
-				"автосписание сейчас недоступно: снимите галочку «продлевать автоматически» и повторите оплату")
+			respondRecurringNotSupported(c)
 			return
 		}
 		respondError(c, http.StatusInternalServerError, "failed to start checkout")

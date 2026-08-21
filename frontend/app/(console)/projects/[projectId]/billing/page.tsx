@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { billingApi } from "@/lib/api";
 import type { BillingAccount, BillingUsage, ConsumptionResponse, BillingPlan, BillingPlanKey, Payment, PaymentStatus, CreateInvoiceRequest, InvoiceCompanySuggestion } from "@/lib/api";
+import { canOfferAutopay } from "@/lib/billing-autopay";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { ConsumptionBreakdown } from "@/components/billing/consumption-breakdown";
@@ -214,7 +215,13 @@ export default function BillingPage() {
     setCheckoutUrl(null);
     setCheckoutingPlan(plan);
     try {
-      const resp = await billingApi.checkout(projectId, plan, autopayConsent);
+      /**
+       * Force false whenever the merchant cannot do recurring charges, even
+       * if `autopayConsent` state is somehow stale/true -- a checked box
+       * left over from before this gate must never reach the checkout call.
+       */
+      const consent = canOfferAutopay(account?.autopay) && autopayConsent;
+      const resp = await billingApi.checkout(projectId, plan, consent);
       setCheckoutUrl({ plan, url: resp.confirmation_url });
       window.location.assign(resp.confirmation_url);
     } catch (err) {
@@ -557,19 +564,21 @@ export default function BillingPage() {
               ) : (
                 <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("billing.autopayOff")}</p>
               )}
-              <button
-                type="button"
-                disabled={autopayBusy}
-                onClick={() => handleAutopay(!autopay.enabled)}
-                data-ux={autopay.enabled ? "billing_autopay:disable" : "billing_autopay:enable"}
-                className="mt-2 text-sm font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-60"
-              >
-                {autopayBusy
-                  ? t("billing.autopaySaving")
-                  : autopay.enabled
-                    ? t("billing.autopayDisable")
-                    : t("billing.autopayEnable")}
-              </button>
+              {(autopay.enabled || canOfferAutopay(autopay)) && (
+                <button
+                  type="button"
+                  disabled={autopayBusy}
+                  onClick={() => handleAutopay(!autopay.enabled)}
+                  data-ux={autopay.enabled ? "billing_autopay:disable" : "billing_autopay:enable"}
+                  className="mt-2 text-sm font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-60"
+                >
+                  {autopayBusy
+                    ? t("billing.autopaySaving")
+                    : autopay.enabled
+                      ? t("billing.autopayDisable")
+                      : t("billing.autopayEnable")}
+                </button>
+              )}
               {autopayError && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{autopayError}</p>}
             </div>
           )}
@@ -607,8 +616,9 @@ export default function BillingPage() {
             </div>
           )}
 
-          {(upgradeCandidates.length > 0 ||
-            (expirySoon && currentPlanInfo?.price_rub !== null && (currentPlanInfo?.price_rub ?? 0) > 0)) && (
+          {canOfferAutopay(autopay) &&
+            (upgradeCandidates.length > 0 ||
+              (expirySoon && currentPlanInfo?.price_rub !== null && (currentPlanInfo?.price_rub ?? 0) > 0)) && (
             <label className="mt-4 flex cursor-pointer items-start gap-2.5">
               <input
                 type="checkbox"

@@ -639,6 +639,7 @@ func (h *Handler) GetBillingAccount(c *gin.Context) {
 			"methodTitle":  autopayMethodTitle,
 			"failures":     autopayFailures,
 			"nextChargeAt": autopayNextCharge(autopayEnabled, autopayMethodTitle, planExpiresAt),
+			"supported":    h.cfg.YooKassaRecurringEnabled,
 		},
 		"quotas": plan.Quotas,
 		"usage":  usage,

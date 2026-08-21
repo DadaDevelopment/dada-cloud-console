@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dada-tuda/console/backend/internal/config"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -86,7 +87,7 @@ func TestSetBillingAutopay_CanBeReenabledAfterDisable(t *testing.T) {
 	projectID := seedPaymentsProject(t, pool, orgID)
 	seedAccountWithCard(t, pool, orgID)
 
-	h := &Handler{pool: pool, billingPlans: testPlans()}
+	h := &Handler{pool: pool, billingPlans: testPlans(), cfg: &config.Config{YooKassaRecurringEnabled: true}}
 	off, _ := newBillingCtx(http.MethodPut, "/", `{"enabled":false}`, godClaims(uuid.New()), projectID)
 	h.SetBillingAutopay(off)
 

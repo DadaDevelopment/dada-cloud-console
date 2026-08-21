@@ -1936,6 +1936,14 @@ export interface AutopayState {
   failures: number;
   /** When the card is charged next, a day before the term ends. Null when autopay is off. */
   nextChargeAt: string | null;
+  /**
+   * Whether the merchant account can currently do recurring charges at all.
+   * False today -- this account gets YooKassa 403 "This store can't make
+   * recurring payments" on any checkout with autopay=true. A MISSING field
+   * (older backend, not yet deployed) must be treated as false; see
+   * lib/billing-autopay.ts.
+   */
+  supported?: boolean;
 }
 
 export interface BillingAccount {

@@ -665,6 +665,13 @@ type Config struct {
 	YooKassaReturnURL   string // YOOKASSA_RETURN_URL (default https://console.dada-tuda.ru/billing/return)
 	YooKassaSendReceipt bool   // YOOKASSA_SEND_RECEIPT (default false; 54-FZ fiscal receipt block)
 
+	// YooKassaRecurringEnabled gates the autopay/recurring-charge offer end to
+	// end. Default false because the merchant account cannot do recurring
+	// charges today: YooKassa answers CreatePayment with 403 "This store can't
+	// make recurring payments" (live audit_events 2026-08-15 21:45:43 UTC). Flip
+	// to true once the owner enables recurring at YooMoney; no code change needed.
+	YooKassaRecurringEnabled bool // YOOKASSA_RECURRING_ENABLED (default false)
+
 	// Fiscal receipt shape. Both depend on the merchant's own tax
 	// registration, so neither has a defensible hardcoded value:
 	// YooKassaVatCode 1 is "no VAT" (simplified regime), 2/3/4 are the 0/10/20
@@ -981,6 +988,7 @@ func Load() (*Config, error) {
 		YooKassaSecretKey:           getEnv("YOOKASSA_SECRET_KEY", ""),
 		YooKassaReturnURL:           getEnv("YOOKASSA_RETURN_URL", "https://console.dada-tuda.ru/billing/return"),
 		YooKassaSendReceipt:         getEnv("YOOKASSA_SEND_RECEIPT", "false") == "true",
+		YooKassaRecurringEnabled:    getEnv("YOOKASSA_RECURRING_ENABLED", "false") == "true",
 		YooKassaVatCode:             getEnvInt("YOOKASSA_VAT_CODE", 1),
 		YooKassaTaxSystemCode:       getEnvInt("YOOKASSA_TAX_SYSTEM_CODE", 0),
 		YooKassaPartnerClientID:     getEnv("YOOKASSA_PARTNER_CLIENT_ID", ""),

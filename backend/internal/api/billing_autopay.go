@@ -298,6 +298,11 @@ func (h *Handler) SetBillingAutopay(c *gin.Context) {
 		return
 	}
 
+	if *body.Enabled && !h.cfg.YooKassaRecurringEnabled {
+		respondRecurringNotSupported(c)
+		return
+	}
+
 	orgID, err := h.projectOrg(c.Request.Context(), projectID)
 	if err != nil || orgID == "" {
 		respondNotFound(c)
