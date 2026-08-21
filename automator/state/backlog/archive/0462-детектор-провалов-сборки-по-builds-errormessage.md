@@ -1,11 +1,14 @@
 ---
 id: 0462
-status: open
+status: closed
 prio: P1
 stream: 3
 title: Детектор провалов сборки по builds.error_message структурно слеп: текст ошибки живёт только в builds_logs
 created: 2026-08-21
 sess: sess-0822b
+closed_at: 2026-08-21
+closed_commit: 3d23f00c
+closed_note: error_message теперь несёт причину, а не префикс npm; новый код missing_manifest снимает счёт с юзерского Dockerfile; фикстура = дословная консоль #447, RED на старом коде
 ---
 Замер [live psql, 90д, sess-0822b]: запрос по `builds.error_message ILIKE '%package.json%ENOENT%'`
 возвращает 0 строк, хотя класс существует и стоил живого юзера. Причина: в `error_message`
