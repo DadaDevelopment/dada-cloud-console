@@ -1030,4 +1030,26 @@ export const apps: Messages = {
     en: "Permanently delete this app and everything attached to it.",
   },
   "apps.dangerZone.delete": { ru: "Удалить приложение", en: "Delete app" },
+
+  "recovery.install.title": {
+    ru: "Мы починили сбой, из-за которого не поставился шаблон",
+    en: "We fixed the bug that stopped your template install",
+  },
+  "recovery.install.body": {
+    ru: "Установка {resource} тогда не сработала из-за нашей ошибки, а не вашей. Мы всё починили {time} — можно попробовать снова.",
+    en: "Installing {resource} failed back then because of a bug on our side, not yours. We fixed it {time} — you can try again.",
+  },
+  "recovery.install.cta": { ru: "Попробовать снова", en: "Try again" },
+
+  "recovery.payment.title": {
+    ru: "Мы починили сбой с оплатой",
+    en: "We fixed the payment bug",
+  },
+  "recovery.payment.body": {
+    ru: "Ваш платёж тогда не прошёл из-за нашей ошибки. Мы починили {time} — попробуйте оплатить ещё раз.",
+    en: "Your payment failed back then because of a bug on our side. We fixed it {time} — try paying again.",
+  },
+  "recovery.payment.cta": { ru: "Перейти к оплате", en: "Go to checkout" },
+
+  "recovery.dismiss": { ru: "Скрыть", en: "Dismiss" },
 };
