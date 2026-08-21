@@ -41,6 +41,7 @@ type build struct {
 	ErrorMessage  *string    `json:"error_message,omitempty"`
 	FailReason    *string    `json:"fail_reason,omitempty"`
 	Source        string     `json:"source,omitempty"`
+	RepeatCount   int        `json:"repeat_count,omitempty"`
 }
 
 const buildSelectCols = `id, git_repo_id, environment_id, app_name, status, trigger,
@@ -166,6 +167,7 @@ func (h *Handler) ListBuilds(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "error reading builds")
 		return
 	}
+	annotateBuildRepeatCounts(builds)
 
 	c.JSON(http.StatusOK, gin.H{"builds": builds})
 }
@@ -233,6 +235,14 @@ func (h *Handler) GetBuild(c *gin.Context) {
 	} else if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to load build")
 		return
+	}
+	if b.Status == "failed" {
+		count, err := h.buildRepeatCount(c.Request.Context(), b.EnvironmentID, b.AppName, b.CreatedAt, b.ID, b.FailReason, b.ErrorMessage)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to compute build repeat count")
+			return
+		}
+		b.RepeatCount = count
 	}
 
 	c.JSON(http.StatusOK, gin.H{"build": b})

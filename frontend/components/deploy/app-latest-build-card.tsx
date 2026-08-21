@@ -11,6 +11,7 @@ import { BuildStatusBadge, isBuildActive } from "@/components/deploy/build-statu
 import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { buildFailureSummary, isRepoFixable, needsRepoReconnect } from "@/lib/build-failure";
+import { isStuckOnRepeat, repeatHintKey } from "@/lib/build-repeat";
 import { useT } from "@/lib/i18n/console/context";
 import { trackUxEvent } from "@/lib/ux-telemetry";
 import { resolveCommit, formatCommitLabel } from "@/lib/build-commit";
@@ -60,6 +61,7 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appUrlSt
   const [autofixing, setAutofixing] = useState(false);
   const viewedRef = useRef<BuildViewKey | null>(null);
   const readyCtaViewedRef = useRef<string | null>(null);
+  const repeatHintViewedRef = useRef<string | null>(null);
   const [repoFullName, setRepoFullName] = useState<string | null>(null);
 
   /**
@@ -131,6 +133,13 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appUrlSt
     readyCtaViewedRef.current = build.id;
     trackUxEvent("view", "app_ready_cta:panel");
   }, [build, appReady, appUrl]);
+
+  useEffect(() => {
+    if (!build || build.status !== "failed" || !isStuckOnRepeat(build.repeat_count)) return;
+    if (repeatHintViewedRef.current === build.id) return;
+    repeatHintViewedRef.current = build.id;
+    trackUxEvent("view", `build_repeat_hint:${build.fail_reason ?? "unknown"}`);
+  }, [build]);
 
   /**
    * Same call as the build detail page's own retry button
@@ -281,6 +290,7 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appUrlSt
 
   if (build.status === "failed") {
     const reason = failReasonFor(build, t);
+    const stuck = isStuckOnRepeat(build.repeat_count);
     return (
       <div className="mb-6 rounded-xl border border-red-100 dark:border-red-950 bg-red-50/50 dark:bg-red-950/20 px-5 py-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -345,6 +355,17 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appUrlSt
             </Link>
           </div>
         </div>
+        {stuck && (
+          <div
+            data-ux={`build_repeat_hint:${build.fail_reason ?? "unknown"}`}
+            className="mt-3 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 px-3 py-2"
+          >
+            <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+              {t("apps.latestBuild.failed.repeatHint.heading", { count: build.repeat_count ?? 0 })}
+            </p>
+            <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-400">{t(repeatHintKey(build.fail_reason))}</p>
+          </div>
+        )}
         {rebuildError && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{rebuildError}</p>}
       </div>
     );

@@ -388,6 +388,26 @@ export const apps: Messages = {
   "apps.latestBuild.success.notReady": { ru: "Приложение ещё запускается, ссылка появится, когда оно поднимется", en: "App is still starting, the link will appear once it is up" },
   "apps.latestBuild.failed.heading": { ru: "Сборка не удалась", en: "Build failed" },
   "apps.latestBuild.failed.unknown": { ru: "Причина в логе ниже", en: "See the reason in the log below" },
+  "apps.latestBuild.failed.repeatHint.heading": {
+    ru: "Это уже {count}-я подряд одинаковая ошибка",
+    en: "This is the {count}th identical failure in a row",
+  },
+  "apps.latestBuild.failed.repeatHint.dockerfileBuildFailed": {
+    ru: "Повторный запуск ничего не изменит: сборка образа падает на установке зависимостей. Откройте лог сборки и найдите первую красную строку — дело в манифесте зависимостей (package.json, requirements.txt и т.п.), а не в окружении.",
+    en: "Running it again will not change anything: the image build is failing on dependency install. Open the build log and find the first red line — the problem is in the dependency manifest (package.json, requirements.txt, etc.), not the environment.",
+  },
+  "apps.latestBuild.failed.repeatHint.gitAuthFailed": {
+    ru: "Повтор не поможет: платформа не может достучаться до репозитория. Переподключите репозиторий кнопкой ниже.",
+    en: "Retrying will not help: the platform cannot reach the repository. Reconnect it with the button below.",
+  },
+  "apps.latestBuild.failed.repeatHint.platformError": {
+    ru: "Это наша авария, не ваша: повторять сборку бессмысленно, мы уже видим ошибку и чиним её на своей стороне.",
+    en: "This is on us, not you: retrying the build will not help, we already see the failure and are fixing it on our side.",
+  },
+  "apps.latestBuild.failed.repeatHint.generic": {
+    ru: "Одна и та же ошибка повторяется — просто пересобрать не выйдет. Откройте лог сборки и разберитесь в причине, прежде чем пробовать снова.",
+    en: "The same failure keeps repeating — a plain rebuild will not fix it. Open the build log and find the cause before trying again.",
+  },
   "apps.latestBuild.canceled": { ru: "Последняя сборка отменена", en: "Last build was canceled" },
 
   "apps.compose.crumb": { ru: "compose", en: "compose" },
