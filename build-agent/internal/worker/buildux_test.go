@@ -67,8 +67,10 @@ func TestWaitForBuildNumberAdoptsEvictedQueueItem(t *testing.T) {
 }
 
 // TestWaitForBuildNumberFailsWhenEvictedItemStartedNothing keeps the adoption
-// honest: no build carries the queue id, so the build really is lost and the
-// caller must be told.
+// honest: no build carries the queue id on any poll, so once queueErrGrace is
+// exhausted the build really is lost and the caller must be told, with the
+// "resolve build number:" prefix intact (platformFailureSignatures keys off
+// it to keep this off the reporter's own code).
 func TestWaitForBuildNumberFailsWhenEvictedItemStartedNothing(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -80,9 +82,58 @@ func TestWaitForBuildNumberFailsWhenEvictedItemStartedNothing(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	r := &Runner{jenkins: jenkins.New(srv.URL, "u", "t"), cfg: &config.Config{JenkinsJob: "web"}}
-	if _, err := r.waitForBuildNumber(context.Background(), 5); err == nil {
-		t.Fatal("want an error when nothing was started from the evicted item")
+	r := &Runner{
+		jenkins:           jenkins.New(srv.URL, "u", "t"),
+		cfg:               &config.Config{JenkinsJob: "web"},
+		queueErrGrace:     20 * time.Millisecond,
+		queuePollInterval: 5 * time.Millisecond,
+	}
+	_, err := r.waitForBuildNumber(context.Background(), 5)
+	if err == nil {
+		t.Fatal("want an error once grace is exhausted and nothing was started from the evicted item")
+	}
+	if !strings.HasPrefix(err.Error(), "resolve build number:") {
+		t.Fatalf("err = %q, want the \"resolve build number:\" prefix platformFailureSignatures matches on", err.Error())
+	}
+}
+
+// TestWaitForBuildNumberAdoptsEvictedQueueItemAfterRetry proves the grace
+// window on ErrQueueItemGone: the first adoption poll misses (the build
+// hasn't shown up in the job's build list yet) but the very next one finds
+// it. Before the fix this returned an error on the first miss with no retry
+// at all.
+func TestWaitForBuildNumberAdoptsEvictedQueueItemAfterRetry(t *testing.T) {
+	var jobHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/queue/item/67585/api/json":
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte("<html><body>HTTP ERROR 404 Not Found</body></html>"))
+		case "/job/web/api/json":
+			jobHits++
+			if jobHits < 2 {
+				w.Write([]byte(`{"builds":[]}`))
+				return
+			}
+			w.Write([]byte(`{"builds":[{"number":312,"queueId":67585}]}`))
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	r := &Runner{
+		jenkins:           jenkins.New(srv.URL, "u", "t"),
+		cfg:               &config.Config{JenkinsJob: "web"},
+		queueErrGrace:     2 * time.Second,
+		queuePollInterval: 5 * time.Millisecond,
+	}
+	n, err := r.waitForBuildNumber(context.Background(), 67585)
+	if err != nil || n != 312 {
+		t.Fatalf("waitForBuildNumber = (%d,%v), want (312,nil)", n, err)
+	}
+	if jobHits < 2 {
+		t.Fatalf("jobHits = %d, want at least 2 (the fix must retry the adoption lookup)", jobHits)
 	}
 }
 

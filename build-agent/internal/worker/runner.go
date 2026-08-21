@@ -588,6 +588,9 @@ type Runner struct {
 	notify         *notify.Notifier
 	archivePresign ArchivePresigner
 	publishLog     func(buildID, line string)
+
+	queueErrGrace     time.Duration
+	queuePollInterval time.Duration
 }
 
 // capturedArtifact is one Android output parsed from a console marker.
@@ -1316,14 +1319,28 @@ const queueErrGrace = 2 * time.Minute
 
 // waitForBuildNumber polls the queue item until Jenkins assigns an executor.
 //
-// Two failures are handled rather than propagated. A transient error is
-// tolerated for queueErrGrace, because the item is almost always still in the
-// queue behind it. And an evicted item (ErrQueueItemGone) is resolved by
-// asking the job which build carries this queue id: Jenkins forgets a queue
-// item five minutes after it leaves the queue, so a 404 usually means the
-// build STARTED and is running right now -- failing on it both lost a live
-// build and, through the retry path, started a duplicate of it.
+// Two failures are handled rather than propagated, and both share one grace
+// clock (firstErrAt): a blip that flips between a transient error and an
+// evicted queue item must not reset the patience budget, and must not run
+// forever either. A transient error is tolerated for queueErrGrace, because
+// the item is almost always still in the queue behind it. An evicted item
+// (ErrQueueItemGone) is resolved by asking the job which build carries this
+// queue id: Jenkins forgets a queue item five minutes after it leaves the
+// queue, so a 404 usually means the build STARTED and is running right now --
+// failing on it both lost a live build and, through the retry path, started a
+// duplicate of it. The first miss on that lookup is just as likely to be the
+// adoption call outrunning Jenkins by one poll tick as it is to be a genuinely
+// lost item, so it gets the same grace before giving up, not an instant
+// surrender.
 func (r *Runner) waitForBuildNumber(ctx context.Context, queueID int64) (int, error) {
+	grace := r.queueErrGrace
+	if grace == 0 {
+		grace = queueErrGrace
+	}
+	poll := r.queuePollInterval
+	if poll == 0 {
+		poll = logPoll
+	}
 	var firstErrAt time.Time
 	for {
 		number, started, err := r.jenkins.ResolveBuildNumber(ctx, queueID)
@@ -1341,12 +1358,18 @@ func (r *Runner) waitForBuildNumber(ctx context.Context, queueID int64) (int, er
 				log.Info().Int64("queue_item", queueID).Int("number", n).Msg("queue item evicted; adopted its running jenkins build")
 				return n, nil
 			}
-			return 0, fmt.Errorf("resolve build number: %w", err)
+			if firstErrAt.IsZero() {
+				firstErrAt = time.Now()
+			}
+			if time.Since(firstErrAt) > grace {
+				return 0, fmt.Errorf("resolve build number: %w", err)
+			}
+			log.Warn().Err(err).Int64("queue_item", queueID).Msg("queue item evicted but not yet adopted; retrying")
 		default:
 			if firstErrAt.IsZero() {
 				firstErrAt = time.Now()
 			}
-			if time.Since(firstErrAt) > queueErrGrace {
+			if time.Since(firstErrAt) > grace {
 				return 0, fmt.Errorf("resolve build number: %w", err)
 			}
 			log.Warn().Err(err).Int64("queue_item", queueID).Msg("queue poll failed; still waiting")
@@ -1354,7 +1377,7 @@ func (r *Runner) waitForBuildNumber(ctx context.Context, queueID int64) (int, er
 		select {
 		case <-ctx.Done():
 			return 0, ctx.Err()
-		case <-time.After(logPoll):
+		case <-time.After(poll):
 		}
 	}
 }
