@@ -148,6 +148,29 @@ func validateS3BucketDescriptionCharset(desc string) error {
 	)
 }
 
+// kubeNameFromBucketName derives a kube-safe resource name from a bucket_name
+// so a caller who supplies only bucket_name is not bounced with missing_name:
+// this is the exact shape the createS3Bucket agent-chat action produces, and
+// the confirmed live defect is a 400 the console cannot recover from on its
+// own. Reuses the same fold used for project slugs (nonSlugChars,
+// projects.go): lowercase, collapse every run of non [a-z0-9] into one
+// hyphen, trim leading/trailing hyphens, cap at 63 runes for
+// reKubeName/DNS-1123. Returns "" when nothing kube-safe survives (e.g.
+// bucket_name is only punctuation), so the caller can still refuse with a
+// reason naming the actual problem.
+func kubeNameFromBucketName(bucketName string) string {
+	s := strings.ToLower(strings.TrimSpace(bucketName))
+	s = nonSlugChars.ReplaceAllString(s, "-")
+	s = strings.Trim(s, "-")
+	if len(s) > 63 {
+		s = strings.TrimRight(s[:63], "-")
+	}
+	if validateKubeName(s) != nil {
+		return ""
+	}
+	return s
+}
+
 type createS3BucketRequest struct {
 	Name          string `json:"name"`
 	BucketName    string `json:"bucket_name"`
@@ -227,16 +250,24 @@ func (h *Handler) CreateS3Bucket(c *gin.Context) {
 		reject(http.StatusBadRequest, "malformed_body", err.Error())
 		return
 	}
-	bucketAudit = req.Name
-
-	if req.Name == "" {
+	if req.Name == "" && req.BucketName == "" {
 		reject(http.StatusBadRequest, "missing_name", "name is required")
 		return
 	}
-	if req.BucketName == "" {
-		reject(http.StatusBadRequest, "missing_bucket_name", "bucket_name is required")
-		return
+	if req.Name == "" {
+		req.Name = kubeNameFromBucketName(req.BucketName)
+		if req.Name == "" {
+			bucketAudit = req.BucketName
+			reject(http.StatusBadRequest, "invalid_name",
+				fmt.Sprintf("bucket_name %q does not yield a valid resource name; provide name explicitly", req.BucketName))
+			return
+		}
 	}
+	if req.BucketName == "" {
+		req.BucketName = req.Name
+	}
+	bucketAudit = req.Name
+
 	if err := validateKubeName(req.Name); err != nil {
 		reject(http.StatusBadRequest, "invalid_name", err.Error())
 		return

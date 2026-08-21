@@ -68,6 +68,10 @@ export const agentChat: Messages = {
     ru: "Я понимаю, что это создаст ежемесячный платёж",
     en: "I understand this will create a recurring monthly charge",
   },
+  "agentChat.confirm.missingArgs": {
+    ru: "Агент не заполнил обязательное поле: {fields}. Подтвердить нельзя, попросите агента уточнить значение.",
+    en: "The agent left a required field blank: {fields}. This cannot be approved -- ask the agent to fill it in.",
+  },
   "agentChat.tool.restartApp": { ru: "Перезапустить приложение", en: "Restart app" },
   "agentChat.tool.triggerBuild": { ru: "Запустить сборку", en: "Trigger build" },
   "agentChat.tool.deployTrigger": { ru: "Запустить деплой", en: "Trigger deploy" },

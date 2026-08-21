@@ -15,6 +15,7 @@ import {
   repairConsoleLinks,
 } from "@/lib/agent-chat-links";
 import { confirmArgEntries } from "@/lib/agent-chat-redact";
+import { missingRequiredArgs } from "@/lib/agent-chat-required-args";
 import { trackUxEvent } from "@/lib/ux-telemetry";
 
 type ChatMessage =
@@ -735,7 +736,8 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
             const toolLabel = toolLabelKey ? t(toolLabelKey) : m.toolName;
             const argEntries = confirmArgEntries(m.args, m.summary);
             const isPriced = typeof m.priceRub === "number" && m.priceRub > 0;
-            const confirmBlocked = isPriced && !m.acknowledged;
+            const missingArgs = missingRequiredArgs(m.toolName, m.args);
+            const confirmBlocked = (isPriced && !m.acknowledged) || missingArgs.length > 0;
             return (
               <div key={m.id} className="flex justify-start">
                 <div className="w-full max-w-[92%] rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm dark:border-amber-900 dark:bg-amber-950/30">
@@ -750,6 +752,11 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
                         </li>
                       ))}
                     </ul>
+                  )}
+                  {!m.resolved && missingArgs.length > 0 && (
+                    <div className="mt-1.5 rounded-lg border border-red-300 bg-red-50 px-2 py-1.5 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+                      {t("agentChat.confirm.missingArgs", { fields: missingArgs.join(", ") })}
+                    </div>
                   )}
                   {isPriced && (
                     <div className="mt-1.5 rounded-lg border border-amber-300 bg-white/70 px-2 py-1.5 dark:border-amber-800 dark:bg-black/20">

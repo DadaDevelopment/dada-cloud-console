@@ -1,210 +1,98 @@
-# Audit path graph — users created last 30d / 7d
+# Audit path graph — sess-0821g (2026-08-21, live)
 
-Source: `audit_events` LEFT JOIN `users`/`builds`/`git_repos`/`agent_chat_messages`/`feedback`,
-**live psql** this cycle (sess-0821, prev 4 cycles were network-blackout `unmeasured` — see history
-below). `eval "$(bash state/ensure-proxy.sh)"` → `DIRECT-OK`, `kubectl -n databases port-forward
-pod/pg-shard-0-postgresql-0 15432:5432`, creds from secret `argocd-prod/dada-cloud-console-backend`
-(`DB_URL`). Window: `now()=2026-08-21 11:11 UTC`.
+Сеть ЗЕЛЁНАЯ весь цикл (`probe-prod-access.sh` = ЗЕЛЁНЫЙ: apiserver `/readyz=ok`, psql через
+под `postgresql-0`, консоль 307). Окно: `now()=2026-08-21 12:1x UTC`.
 
-## 0. Volume [live psql]
+## 0. Волюм [live psql]
 
-| metric | 30d | 7d |
-|---|---|---|
-| new users (`users.created_at`) | 29 | 2 |
-| audit_events rows | 5782 | 2902 |
-
-29→2 is not a funnel signal by itself — see §1, most of the 30d cohort is a single-day bot wave.
-
-## 1. New users, ordered chains [live psql]
-
-Full per-user chain pulled for all 29 (30d) and both 7d users. Two representative chains, in full:
-
-**kkartov@yandex.ru** (signed up 08-17 19:46, `yandex.ru` source) — real dev session, then a
-concrete failure-triggered drop:
-```
-08-17 19:46:33 SignUp -> SessionStart -> CreateProject -> ViewProject -> ViewApps
-08-17 20:46-20:53 second session: StartGitAppInstall(github) -> ConnectGitRepo(instatic) ->
-  TriggerBuild -> ViewBuildLogs -> ... (build path continues, 11 builds total, live loop-11)
-08-18 21:09:07 InstallSolution(instatic-il1cvo) success
-08-19 04:10:54 InstallSolution(homepage-9v9zuk) FAILURE metadata {"reason":"env_failed","status":500}
-08-19 04:11:29 InstallSolution(homepage-rkbt3o) FAILURE {"reason":"env_failed","status":500}
-08-19 04:11:38 InstallSolution(homepage-ts9on6) FAILURE {"reason":"env_failed","status":500}
-08-19 19:26:37 SessionStart -> ViewProject -> ViewApps   <- LAST EVENT, ~40h ago, no return since
-```
-Three `InstallSolution` failures 44 seconds apart, same `env_failed`/500 reason, then user comes
-back once more just to look (`ViewApps`) and never triggers another action. Terminal = passive
-look after a broken feature, not an explicit quit.
-
-**lifecoachrussia@yandex.ru** (signed up 08-19 09:37, `yandex.ru` source) — struggled but
-succeeded:
-```
-09:37:20 SignUp -> SessionStart -> CreateProject(pending) -> ViewProject -> ViewApps
-09:38-09:39 StartGitAppInstall -> FinishGitAppInstall -> CreateProject(success) ->
-  ConnectGitRepo(gulyaev-ai-core) -> TriggerBuild
-09:39:48 BuildFinished FAILURE
-09:40:05 TriggerBuild -> 09:40:23 BuildFinished FAILURE
-09:40:28 TriggerBuild -> 09:40:43 BuildFinished FAILURE
-09:40:57 ViewApp -> 09:41:19 TriggerAutofix -> 09:41:32 TriggerBuild -> 09:41:48 BuildFinished FAILURE
-11:26:50 BuildFinished SUCCESS -> CreateApp SUCCESS
-08-20 07:16:40 BuildFinished SUCCESS -> DeployImageVersion SUCCESS   <- last event
-```
-4 consecutive build failures, one `TriggerAutofix`, then success ~1h45m after signup, and a
-second deploy the next morning. This is the one live "made it through onboarding" story in the
-7d window.
-
-Remaining 27 chains in the 30d cohort: see §2 — 17 of them are a single-action bot wave, not
-real usage.
-
-## 2. Zero-activity / instrumentation-gap cross-check [live psql]
-
-Cross-checked every 30d user with `audit_rows <= 1` against `agent_chat_messages.user_sub`
-(= `users.id`, per known trap) and `feedback.user_sub` (= `users.keycloak_sub`, different column
-semantics, checked separately):
-
-| email | audit rows | chat msgs | feedback | verdict |
-|---|---|---|---|---|
-| `17ffb57d-...@keycloak.local` | 1 (`AgentChatActionDeclined`) | **179** | 0 | **instrumentation gap** |
-| bestmanskyline@gmail.com, chenlikun.18@gmail.com, clikuoo@gmail.com, dmimuser@outlook.com, dsoftru@yandex.ru, game@016818.xyz, grwang1201@outlook.com, langhakka9527@gmail.com, mail@ynotu.top, oddessc@outlook.com, zengqcyxx@gmail.com, zhisibi@163.com | 1 (`SessionStart` only) | 0 | 0 | **dead signup, confirmed** |
-
-The 12 "dead signup" accounts are real: zero rows anywhere across all four tables, single
-`SessionStart` action, e-mail domains scream throwaway (163.com, atomicmail.io, random top-level
-domains) — this is the 2026-08-08 19:49-22:56 wave (17 accounts total, 35 `SessionStart` rows,
-0 builds/repos across the whole wave) already flagged in memory
-`project_signup_farm_wave_pollutes_funnel.md`. Confirmed again live, numbers unchanged in kind.
-
-The one instrumentation-gap case is new and concrete: user `17ffb57d` ran **179 agent-chat
-messages in a 90-second window** (08-03 21:56:03 → 21:57:33 — one intensive agentic build
-session) and it produced exactly **one** `audit_events` row (`AgentChatActionDeclined`,
-resource `connectGitRepo`). Everything else the agent did in that session — tool calls, file
-edits, whatever it attempted — left no audit trail at all. This is not a dead user; it's audit
-coverage that stops at the agent-chat boundary.
-
-## 3. Transition graph, first/terminal action [live psql]
-
-First action after signup (30d cohort, distinct-on-min):
-
-| action | users |
-|---|---|
-| SessionStart | 19 |
-| SignUp | 5 |
-| CreateApp | 2 |
-| AgentChatActionDeclined | 1 |
-| CreateServiceDatabase | 1 |
-| RedeemPromo | 1 |
-
-Terminal action (last audit row overall, same cohort):
-
-| action | users |
-|---|---|
-| SessionStart | 18 |
-| ViewApps | 6 |
-| DeployImageVersion | 3 |
-| AgentChatActionDeclined | 1 |
-| ViewProject | 1 |
-
-18/29 (62%) terminal at bare `SessionStart` — mostly the farm wave (§2). Excluding those 12
-confirmed-dead accounts, terminal state is healthier: 6 stopped at `ViewApps` (browsing, no
-action — includes kkartov post-failure), 3 reached `DeployImageVersion` (shipped something).
-
-Top action_A → action_B edges, 30d cohort, all events (`n`=edge count, `distinct_users`=how many
-different users produced this edge):
-
-| action_A | action_B | n | users |
+| metric | 30d | 7d | 48h |
 |---|---|---|---|
-| SessionStart | ViewProject | 174 | 9 |
-| SeedDatabaseDSN | SeedDatabaseDSN | 168 | **1** |
-| ViewProject | ViewApps | 161 | 10 |
-| ViewApps | ViewApp | 68 | 6 |
-| UploadSourceArchive | ViewBuildLogs | 31 | 4 |
-| ViewBuildLogs | BuildFinished | 29 | 5 |
-| BuildFinished | DeployImageVersion | 24 | 4 |
-| ViewApp | UploadSourceArchive | 24 | 2 |
-| RevealEnvVar | RevealEnvVar | 22 | 2 |
+| new users | 29 | 2 | **0** |
+| audit_events rows | 5786 | — | 649 |
 
-`SeedDatabaseDSN → SeedDatabaseDSN` ×168 for a single user is a retry-burst signature (same
-shape memory already warns about for build success-rate: "raw rate inflated by onboarding
-retry-bursts" — this is that pattern showing up in a different action). Not investigated further
-this cycle; flagging so a future cycle doesn't re-discover it as new.
+**Новых регистраций за 48ч — ноль.** Последняя — `lifecoachrussia@yandex.ru` 08-19 09:37 UTC,
+до неё `kkartov@yandex.ru` (08-17), `artempro2022@yandex.ru` (08-13). Это результат замера,
+а не «нечего мерить»: верх воронки встал вторые сутки подряд.
 
-## 4. Money path since checkout fix 3d6379f9 (08-15) [live psql]
+## 1. Кто был активен за 48ч (раз новых нет — читаем существующих) [live psql]
 
-```sql
-select id, org_id, status, amount_value, created_by_sub, created_at, paid_at, customer_email
-from payments where created_at >= '2026-08-15' order by created_at;
+Owner-домен `dada-tuda.ru` исключён (админ-браузинг, не сигнал). 7 не-owner акторов:
+
+| email | events | last |
+|---|---|---|
+| michaelharlam@yandex.ru | 73 | 08-21 12:10 (в момент замера) |
+| artempro2022@yandex.ru | 45 | 08-21 05:00 |
+| bruzas.85@mail.ru | 34 | 08-20 13:59 |
+| artempro2021@bk.ru | 28 | 08-21 04:53 |
+| artemmendeleev@gmail.com | 12 | 08-21 10:22 |
+| mytake@yandex.ru | 3 | — |
+| kkartov@yandex.ru | 3 | — |
+
+### Находка цикла — `michaelharlam@yandex.ru`
+
+```
+08-19 12:16  SessionStart -> ViewProject -> ViewApps  (× 5 за день)
+08-19 22:46  ViewApp(profi) -> BuildAutoRetried -> BuildFinished SUCCESS -> DeployImageVersion SUCCESS
+08-20 00:06  ещё один деплой SUCCESS
+08-20 09:45  AgentChat, 4 отдельных чата, растущая вовлечённость
+08-20 10:44:06.327  AgentChatActionApproved createS3Bucket
+             args {"bucket_name":"dating-service-assets","public":true}   <- name ПУСТОЕ
+08-20 10:44:06.338  CreateS3Bucket FAILURE {"reason":"missing_name","status":400}
+08-20 12:05 .. 08-21 12:10  9 сессий подряд, только ViewProject/ViewApps,
+             ни одного write-действия за 25.5 часов
 ```
 
-| org_id | status | amount | created_at | customer_email |
-|---|---|---|---|---|
-| artempro2021@bk.ru | canceled | 2900 | 08-15 21:45 | artempro2021@bk.ru |
-| dada | canceled | 990 | 08-18 12:42 | sandbox-test@dada-tuda.ru |
-| dada | canceled | 990 | 08-18 13:24 | alexkekiy@dada-tuda.ru |
-| dada | canceled | 990 | 08-18 13:24 | alexkekiy@dada-tuda.ru |
-| dada | pending | 2900 | 08-19 21:01 | (empty) |
+Юзер ЖИВ (сессии идут в момент замера) и не сделал ни одной попытки после отказа.
+Ноль retry на новой фиче — retry наблюдается только на build/deploy.
 
-**Zero `succeeded` rows since the fix.** 4 canceled, 1 still pending. Two of the five are the
-owner's own org (`dada`) doing sandbox/test checkouts, not real customers. One (`artempro2021`)
-is a genuine external signed-up user's attempt — canceled, not completed.
+**Это не новый дефект.** Тот же `missing_name` стрелял 2026-08-04, но поймал его внутренний
+тестовый аккаунт `michaelharlam@dada-tuda.ru`. 16 дней без починки, затем цена — живой юзер.
+30-дневный счёт `CreateS3Bucket`: 8 success / 2 failure, оба failure — этот класс.
 
-Whole-table check (all time, not just post-fix): payments ever = 9 rows (7 canceled, 1 pending,
-**1 succeeded**). The one success is dated **2026-07-25, before the fix**, org_id `dada` (the
-owner's own org) — i.e. the metric-#1 answer is unchanged from before this cycle: **no external
-customer has ever completed a payment**, fix or no fix.
+Корень [code]: `backend/internal/api/s3buckets.go` (hard-reject `missing_name` без фолбэка на
+заполненный `bucket_name`) + `backend/internal/api/agent_chat.go:648-651` (карточка рендерит
+`%q` от пустой строки, approve остаётся активен) + фронт не валидирует обязательные поля
+карточки. Заведено **0432**, чинится этим циклом с двух сторон.
 
-Note: `payments.created_by_sub` is empty string `''` on **all 9 rows ever**, not just the recent
-ones — this column is never populated by the checkout code path, so attribution by sub is
-structurally impossible from this table; `customer_email`/`org_id` are the only usable keys.
-That's a pre-existing gap, not a post-fix regression — flagging so it's not miscounted as new
-breakage next cycle.
+### `bruzas.85@mail.ru` — не пассивность, а 12 дней борьбы
+`ConnectGitRepo repo_already_linked` ×6 (08-08/09) → пересоздание проекта → `StartGitAppInstall`
+×9 → `TriggerAutofix` failure `failed to mint install token` 502 (08-18 22:54) → 3
+`BuildFinished failure` c `fail_reason=platform_error` (08-19) → `DeployImageVersion pending`
+08-20 13:59 без видимого исхода.
 
-## 5. Backlog-relevant conclusions (each with an evidence-backed verdict)
+## 2. Zero-activity кросс-чек [live psql]
 
-1. **`InstallSolution` (template/solution gallery install) fails 73% of the time, 30d: 11
-   failures / 4 successes.** Reason breakdown: `storage_quota_exceeded` ×5 (client-blocked,
-   status 0), `env_failed` ×3 (server 500), `malformed_body` ×3 (client 400). kkartov hit the
-   `env_failed`/500 variant three times in 44 seconds and never came back except to passively
-   look. This is the single clearest "product broke, user left" chain in the whole window.
-   Backlog candidate (≤100 chars): **"InstallSolution fails 11/15 (30d): quota/env_failed/malformed_body — user leaves after 3x"**
+Новых юзеров в окне нет → новых «мёртвых сигнапов» нет. Instrumentation-gap (179 чат-сообщений
+на 1 строку аудита, пункт 0430) без изменений.
 
-2. **Agent-chat sessions are invisible to `audit_events` except at the decision boundary.**
-   User `17ffb57d` ran 179 chat messages in 90 seconds, audit recorded 1 row. Reinforces the
-   standing `frontend/components/agent-chat-panel.tsx:796` finding from the prior cycle (bare
-   "Rejected" label, no follow-up cue) with a concrete volume number this time. Backlog
-   candidate: **"Agent-chat actions (179 msgs) leave ~1 audit row — coverage stops at decision events, not tool calls"**
+**Поправка к методу прошлых циклов:** не считать провалом `outcome='pending'`. Проверка
+тестового аккаунта дала 4 «провала» по счёту `outcome != 'success'`, все четыре оказались
+парами `pending -> success` штатной async-операции. Считать провалом ТОЛЬКО `outcome='failure'`.
 
-3. **Money metric #1 is still zero.** No external customer has ever completed a payment,
-   before or after the 08-15 checkout fix (1 succeeded row ever, and it's the owner's own org,
-   pre-fix). Confirms the standing hypothesis that checkout completion, not just the "pending
-   row without payment" bug, is the open gate — the fix closed one failure mode but conversion
-   is still 0/9 lifetime, 0/5 since. This is a **kill/adjust signal for any backlog item that
-   assumes the checkout fix alone unblocks revenue** — it removed a false-negative, it did not
-   yet produce a true-positive.
+## 3. Граф переходов, 30д [live psql]
 
-4. **The farm wave (08-08, 17 accounts, 35 `SessionStart` rows, 0 downstream activity) is
-   confirmed again, unchanged in shape from the prior sighting.** No new action needed beyond
-   what memory `project_signup_farm_wave_pollutes_funnel.md` already recommends (exclude from
-   funnel denominators).
+Терминальное действие, когорта 30д минус owner минус farm-волна (≤1 строки аудита):
 
-## Network status this cycle
+| терминальное действие | юзеров | кто |
+|---|---|---|
+| SessionStart | 7 | остаток farm + michaelharlam (жив, не «сдался») |
+| DeployImageVersion | 3 | lifecoachrussia, artempro2021, artempro2022 — довезли |
+| ViewApps | 3 | mytake, good.win2283, kkartov — смотрят и не действуют |
+| ViewProject | 1 | cryocrm |
 
-Live, not blocked. `route -n get 155.212.223.198` showed `utun6` in path (VPN active),
-`ensure-proxy.sh` returned `DIRECT-OK` (default route reaches the API without the bypass
-proxy), `kubectl get nodes` returned 4/4 Ready immediately. Port-forward to
-`pg-shard-0-postgresql-0` (ns `databases`) plus `DB_URL` from secret
-`argocd-prod/dada-cloud-console-backend` gave direct psql access to `cloud-console`. Prior 4
-consecutive blackout cycles (sess-0820j/k/m/that-run) are preserved below for continuity.
+Форма графа против прошлого разбора не изменилась (было 4/7 → сейчас 3/4 живых
+non-deploy юзеров кончают на `ViewApps`).
 
----
+## 4. Что изменилось против прошлого разбора
 
-## Prior cycle (sess-0820, unmeasured — network blackout, kept for history)
+- Вывод «отвалившиеся кончают на `ViewApps`» **подтверждён и локализован**: у `kkartov`
+  причина — `InstallSolution env_failed` 500 (0431), у `michaelharlam` — `CreateS3Bucket
+  missing_name` 400 (0432). Оба — provider-side reject, после которого ноль retry.
+- **Новое:** сигнап стоит на нуле 48ч.
+- **Новое:** дефект, пойманный внутренним тестом 16 дней назад, укусил живого юзера. Класс
+  «диагноз есть, рычага нет» повторился, теперь с ценой.
 
-Source intended: same as above. That cycle's DB was unreachable — 4th consecutive attempt that
-day. `route -n get` showed `en0` direct (no utun), `ensure-proxy.sh` refused ("ОБА ПУТИ МЕРТВЫ"),
-TCP to prod LB/both k8s APIs all timed out while `1.1.1.1` control target was open, and
-`probe-external.sh` confirmed prod alive from 6 external vantage points. Diagnosed as
-local-machine-to-RU-hosted-infra routing failure, not a product incident. Remote MCP
-(`listProjects`) worked as a partial substitute but could not answer any of the five audit
-questions (single action type, no sequence data) — explicitly not counted as a result then.
-Backlog candidates raised that cycle (still open, not re-verified this cycle beyond what's
-in §5 above):
-- "Rejected label gives no cue a follow-up message is coming — user thinks turn ended" (agent-chat-panel.tsx:796, untouched since 08-07)
-- "No SQL fallback when agent's RU-egress dies; MCP-only duties survive, audit-analysis can't"
+## 5. UX-вывод цикла
+
+Чинить не класс ошибки, а момент одобрения: продукт обязан не давать подтвердить действие,
+которое он сам через 11 мс отвергнет. Отгружается в 0432 (бэк-фолбэк + гард approve на фронте).

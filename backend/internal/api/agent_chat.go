@@ -652,12 +652,24 @@ func agentChatConfirmSummary(toolName, argsJSON, projectName, envName string) st
 		public, _ := args["public"].(bool)
 		appRef, _ := args["app_ref"].(string)
 
-		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("Create an S3 storage bucket %q (bucket=%q", name, bucketName))
-		if region != "" {
-			sb.WriteString(fmt.Sprintf(", region=%q", region))
+		if name == "" {
+			name = bucketName
 		}
-		sb.WriteString(")")
+		if bucketName == "" {
+			bucketName = name
+		}
+
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("Create an S3 storage bucket %q", name))
+		if bucketName != name {
+			sb.WriteString(fmt.Sprintf(" (bucket=%q", bucketName))
+			if region != "" {
+				sb.WriteString(fmt.Sprintf(", region=%q", region))
+			}
+			sb.WriteString(")")
+		} else if region != "" {
+			sb.WriteString(fmt.Sprintf(" (region=%q)", region))
+		}
 		if projectName != "" || envName != "" {
 			sb.WriteString(fmt.Sprintf(" in project %q, environment %q", projectName, envName))
 		}

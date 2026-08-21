@@ -93,3 +93,33 @@ func TestAgentChatSummaryFor_ProjectScopedToolsResolveNames(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentChatConfirmSummary_CreateS3BucketNeverShowsAnEmptyName(t *testing.T) {
+	cases := []struct {
+		title string
+		args  string
+		want  string
+	}{
+		{
+			title: "only bucket_name, the shape michaelharlam approved on 2026-08-20",
+			args:  `{"bucket_name":"dating-service-assets","public":true}`,
+			want:  "dating-service-assets",
+		},
+		{
+			title: "only name",
+			args:  `{"name":"dating-service-assets","public":true}`,
+			want:  "dating-service-assets",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.title, func(t *testing.T) {
+			summary := agentChatConfirmSummary("createS3Bucket", tc.args, "proj", "prod")
+			if strings.Contains(summary, `""`) {
+				t.Fatalf("card offers an unnamed resource for approval: %q", summary)
+			}
+			if !strings.Contains(summary, tc.want) {
+				t.Fatalf("card does not name the bucket %q: %q", tc.want, summary)
+			}
+		})
+	}
+}
