@@ -1115,19 +1115,42 @@ func autoscaleReasonRU(reason string) string {
 	return "нехватка процессорного времени"
 }
 
-// ComposeAutoscaleCeiling reports starvation at the top of the ladder, where
-// the platform stops resizing on purpose. It says plainly that NOTHING was
-// changed and why, and points at the likelier cause: past this size the
-// problem is usually a leak or a runaway loop, not a need for more hardware.
-func ComposeAutoscaleCeiling(appName, profile, reason string, ratio float64, consoleLink string) (subject, body string) {
-	subject = fmt.Sprintf("Dada Cloud: приложению %s не хватает ресурсов на максимальном профиле", appName)
+// ComposeAutoscaleCeiling reports starvation the platform refused to answer with
+// more resources. There are two entirely different pieces of news here and they
+// must never share one text.
+//
+// refusal "at_ceiling": the app really is at the top of the platform ladder, so
+// past this size the cause is usually a leak or a runaway loop in the app.
+//
+// refusal "limitrange_capped" / "quota_blocked": the app is nowhere near the
+// platform ceiling -- OUR namespace policy stopped the growth. Telling that
+// owner to go hunt a memory leak in their own code is a false accusation: the
+// starving app would have grown fine if the platform had let it.
+func ComposeAutoscaleCeiling(appName, profile, reason, refusal string, ratio float64, consoleLink string) (subject, body string) {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Приложение %s испытывает нехватку ресурсов, но уже работает на максимальном профиле (%s), поэтому платформа НИЧЕГО не меняла.\n\n", appName, profile)
-	fmt.Fprintf(&b, "Причина: %s (показатель %.0f%%).\n\n", autoscaleReasonRU(reason), ratio*100)
-	b.WriteString("На таком размере причина обычно не в нехватке железа, а в утечке памяти или зациклившейся задаче в самом приложении. Стоит посмотреть логи и метрики.\n\n")
+	if refusal == "limitrange_capped" || refusal == "quota_blocked" {
+		subject = fmt.Sprintf("Dada Cloud: приложению %s не дал вырасти лимит платформы", appName)
+		fmt.Fprintf(&b, "Приложение %s испытывает нехватку ресурсов на размере %s, и платформа НИЧЕГО не меняла.\n\n", appName, profile)
+		fmt.Fprintf(&b, "Причина: %s (показатель %.0f%%). Рост остановил не потолок вашего тарифа и не максимальный профиль, а ограничение самой платформы на этот проект (%s).\n\n", autoscaleReasonRU(reason), ratio*100, autoscaleRefusalRU(refusal))
+		b.WriteString("Это ограничение на нашей стороне, а не ошибка в вашем коде: разбирать приложение сейчас не нужно. Событие записано у нас, потолок пересматривается.\n\n")
+	} else {
+		subject = fmt.Sprintf("Dada Cloud: приложению %s не хватает ресурсов на максимальном профиле", appName)
+		fmt.Fprintf(&b, "Приложение %s испытывает нехватку ресурсов, но уже работает на максимальном профиле (%s), поэтому платформа НИЧЕГО не меняла.\n\n", appName, profile)
+		fmt.Fprintf(&b, "Причина: %s (показатель %.0f%%).\n\n", autoscaleReasonRU(reason), ratio*100)
+		b.WriteString("На таком размере причина обычно не в нехватке железа, а в утечке памяти или зациклившейся задаче в самом приложении. Стоит посмотреть логи и метрики.\n\n")
+	}
 	fmt.Fprintf(&b, "Открыть приложение в консоли: %s\n\n", consoleLink)
 	b.WriteString("Это письмо приходит не чаще раза в 6 часов на приложение.\n")
 	return subject, b.String()
+}
+
+// autoscaleRefusalRU names the platform-side limit that stopped the growth, so
+// the owner can repeat it back to us instead of guessing.
+func autoscaleRefusalRU(refusal string) string {
+	if refusal == "quota_blocked" {
+		return "исчерпана квота проекта"
+	}
+	return "потолок на один контейнер в namespace проекта"
 }
 
 // Dada Box notifications.

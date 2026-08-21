@@ -1663,7 +1663,7 @@ func (w *appAutoscaleWatcher) maybeResize(ctx context.Context, projectID uuid.UU
 			reason = "limitrange_capped"
 		}
 		w.auditRefusal(ctx, projectID, st, namespace, appName, reason, s, map[string]any{"envelope": from.String()})
-		w.notifyCeiling(ctx, projectID, namespace, appName, from, s)
+		w.notifyCeiling(ctx, projectID, namespace, appName, reason, from, s)
 		return
 	}
 
@@ -1683,7 +1683,7 @@ func (w *appAutoscaleWatcher) maybeResize(ctx context.Context, projectID uuid.UU
 		if fits, why := quotaHeadroom(quota.Status.Hard, quota.Status.Used, from, to); !fits {
 			log.Printf("app-autoscale: %s/%s needs %s -> %s but quota blocks it (%s)", namespace, appName, from, to, why)
 			w.auditRefusal(ctx, projectID, st, namespace, appName, "quota_blocked", s, map[string]any{"to_envelope": to.String(), "detail": why})
-			w.notifyCeiling(ctx, projectID, namespace, appName, from, s)
+			w.notifyCeiling(ctx, projectID, namespace, appName, "quota_blocked", from, s)
 			return
 		}
 	}
@@ -1796,8 +1796,11 @@ func (w *appAutoscaleWatcher) auditRefusal(ctx context.Context, projectID uuid.U
 	})
 }
 
-// notifyCeiling tells the owner their app is starved but cannot grow: either it
-// already sits at the platform cap or the project quota has no headroom left.
+// notifyCeiling tells the owner their app is starved but cannot grow. The
+// refusal code decides which of two different stories the email tells: a real
+// platform ceiling ("at_ceiling") points at the owner's own code, while
+// "limitrange_capped"/"quota_blocked" is our namespace policy refusing a growth
+// the app was entitled to, and must never be dressed up as the former.
 // Gated by the same cooldown so it cannot become a 15-minute mail loop.
 //
 // It is the ONLY email this watcher sends, and deliberately so. A resize that
@@ -1805,9 +1808,9 @@ func (w *appAutoscaleWatcher) auditRefusal(ctx context.Context, projectID uuid.U
 // nothing to do about it, so announcing "we gave you another gigabyte" is spam
 // that also invites the wrong worry about the bill. Successful resizes leave a
 // log line and an audit row and nothing else. This one is different because the
-// platform gave up: the app is degraded, nothing was changed, and the fix is in
-// the owner's code. Do not add resize notifications back.
-func (w *appAutoscaleWatcher) notifyCeiling(ctx context.Context, projectID uuid.UUID, namespace, appName string, at resourceEnvelope, s starvedPod) {
+// platform gave up: the app is degraded and nothing was changed. Do not add
+// resize notifications back.
+func (w *appAutoscaleWatcher) notifyCeiling(ctx context.Context, projectID uuid.UUID, namespace, appName, refusal string, at resourceEnvelope, s starvedPod) {
 	if w.h.auditNotifier == nil {
 		return
 	}
@@ -1824,7 +1827,7 @@ func (w *appAutoscaleWatcher) notifyCeiling(ctx context.Context, projectID uuid.
 		return
 	}
 	link := fmt.Sprintf("%s/projects/%s/apps/%s/settings", w.h.cfg.PublicBaseURL, projectID, appName)
-	subject, body := notify.ComposeAutoscaleCeiling(appName, top, s.Reason, s.Ratio, link)
+	subject, body := notify.ComposeAutoscaleCeiling(appName, top, s.Reason, refusal, s.Ratio, link)
 	if source == alertSourceOperator {
 		subject, body = notify.ComposeNoOwnerFallback(projectID.String(), w.h.projectDisplayName(ctx, projectID), subject, body)
 	}
