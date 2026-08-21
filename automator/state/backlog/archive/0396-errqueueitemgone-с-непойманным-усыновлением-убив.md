@@ -1,11 +1,14 @@
 ---
 id: 0396
-status: open
+status: closed
 prio: P1
 stream: reliability
 title: ErrQueueItemGone с непойманным усыновлением убивает сборку сразу, без грейса
 created: 2026-08-20
 sess: sess-0820d
+closed_at: 2026-08-21
+closed_commit: 04a37bb4
+closed_note: Общий грейс-таймер на обе ветки waitForBuildNumber; префикс resolve build number: сохранён (fail_reason=platform_error).
 ---
 build-agent/internal/worker/runner.go:1336-1345: на ErrQueueItemGone, если FindBuildByQueueID
 вернул ошибку или ok=false, функция возвращает ошибку немедленно — без ретрая и грейса,

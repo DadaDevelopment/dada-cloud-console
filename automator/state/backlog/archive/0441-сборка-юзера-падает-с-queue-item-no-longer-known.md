@@ -1,11 +1,14 @@
 ---
 id: 0441
-status: open
+status: closed
 prio: P1
 stream: 2
 title: Сборка юзера падает с "queue item no longer known to jenkins" -- три билда у двух живых юзеров за 48ч
 created: 2026-08-21
 sess: sess-0821d
+closed_at: 2026-08-21
+closed_commit: 04a37bb4
+closed_note: Причина 0396: ветка ErrQueueItemGone не имела грейса. 3 из 13 platform_error за 30д, 2 живых юзера, все в окне 63 мин 08-19; каждый вылечился ретраем. Фикс + мутационный RED/GREEN.
 ---
 Замечено в пульсе sess-0821d [live psql `builds`, окно 48ч].
 
