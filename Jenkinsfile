@@ -146,6 +146,16 @@ spec:
   # postgresql does not fence the agent out of a node. Today this leaves two
   # eligible nodes; if a future postgres replica lands on both, agents go
   # Pending (visible) instead of silently starving a database (not).
+  #
+  # POD MEMORY TOTAL IS SIZED AGAINST THOSE TWO NODES, NOT THE CLUSTER'S BIGGEST.
+  # Both 15Gi nodes carry a databases/postgresql pod, so this fence removes them
+  # both; what is left are the two 12Gi nodes, whose free (unrequested) memory was
+  # 4104Mi and 3828Mi when this was measured. Build #1285 reserved 4672Mi and sat
+  # Pending forever; #1286 reserved 4512Mi after a trim measured against the 15Gi
+  # node (4666Mi free) — a node this fence forbids — and was Pending just the same.
+  # The container requests below now total 3840Mi. Anything that raises the pod
+  # total must be checked against the free memory of the SMALLEST eligible node,
+  # or the build stops starting rather than starts failing.
   affinity:
     podAntiAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:
@@ -220,7 +230,7 @@ spec:
       resources:
         requests:
           cpu: "100m"
-          memory: "256Mi"
+          memory: "192Mi"
         limits:
           cpu: "1500m"
           memory: "1536Mi"
@@ -262,7 +272,7 @@ spec:
       resources:
         requests:
           cpu: "100m"
-          memory: "256Mi"
+          memory: "192Mi"
         limits:
           cpu: "1000m"
           memory: "512Mi"
@@ -290,12 +300,15 @@ spec:
       resources:
         requests:
           cpu: "100m"
-          # request == limit: next build spikes to ~2Gi. With request 256Mi the
-          # container sits far over request during the build and is the kubelet's
-          # first eviction victim under node MemoryPressure (pod evicted, dind
-          # SIGTERM-exit-0, others 137 — builds #136/#139). Reserving the full 2Gi
-          # protects it from node-pressure eviction.
-          memory: "2Gi"
+          # 1792Mi (was 2Gi == limit). request == limit was chosen because at
+          # request 256Mi this container sat far over request during the build and
+          # was the kubelet's first eviction victim under node MemoryPressure
+          # (#136/#139). That protection is kept in substance: NODE_OPTIONS caps
+          # the heap at 1536Mi, so 1792Mi still covers heap + runtime overhead and
+          # the container is not meaningfully over request. The 256Mi given back is
+          # part of the 672Mi the pod had to shed to fit an eligible node at all —
+          # see the pod-total note on the anti-affinity block above.
+          memory: "1792Mi"
         limits:
           cpu: "1500m"
           memory: "2Gi"
@@ -325,7 +338,7 @@ spec:
           # headroom without touching node-builder/dind, whose request==limit is
           # load-bearing (see #136/#139 and #138/#141 below).
           cpu: "50m"
-          memory: "128Mi"
+          memory: "96Mi"
         limits:
           cpu: "1000m"
           memory: "1536Mi"
@@ -373,12 +386,13 @@ spec:
       resources:
         requests:
           cpu: "250m"
-          # request == limit (1536Mi): dind burns memory building/exporting the
-          # 4 images. With request 512Mi it runs over request and is evicted
-          # under node MemoryPressure (#138/#141 die in the docker stage).
-          # 1536Mi reserved protects it; 4Gi over-commits the node (caused the
-          # next-build eviction in #136). Root crash was docker:29, now pinned 24.
-          memory: "1536Mi"
+          # 1280Mi (limit stays 1536Mi). dind burns memory building/exporting the
+          # 4 images; at request 512Mi it ran far over request and was evicted
+          # under node MemoryPressure (#138/#141 die in the docker stage). 1280Mi
+          # keeps the reservation within 256Mi of the limit — the eviction ranking
+          # is by usage-over-request, and at this ratio dind is no longer the
+          # cheapest victim. Part of the 672Mi the pod shed to become schedulable.
+          memory: "1280Mi"
           # ephemeral-storage: every build dies the moment dind extracts the 2nd
           # image's base layers (#143: golang:1.25-alpine extract -> channel drop).
           # The docker-graph-storage emptyDir counts as pod ephemeral storage; with
