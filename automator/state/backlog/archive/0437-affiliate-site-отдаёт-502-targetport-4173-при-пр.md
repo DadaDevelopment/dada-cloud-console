@@ -1,11 +1,14 @@
 ---
 id: 0437
-status: open
+status: closed
 prio: P1
 stream: 2
 title: affiliate-site отдаёт 502: targetPort 4173 при процессе на 3000 -- живой носитель класса 0433, фикс закрывает только будущие create
 created: 2026-08-21
 sess: sess-0821h
+closed_at: 2026-08-21
+closed_commit: 666131b9
+closed_note: Замер sess-0821g [live]: носитель вылечился сам -- affiliate-site отдаёт http=200, service target=named http -> containerPort 3000, расхождения нет. Свип по кластеру: numeric targetPort, не совпадающий с containerPort, ровно у 3 сервисов, все -- KServe-предикторы в ml-prod со своим роутингом; юзерских аппов с расхождением НОЛЬ. Разовый свип не нужен, класс закрывается рычагом 0449.
 ---
 Замечено в пульсе sess-0821h [live]. Namespace `a5-testuser-ccea53c1-prod`, апп `affiliate-site`:
 URL отдаёт 502, под Ready, service targetPort=4173 при процессе на 3000.

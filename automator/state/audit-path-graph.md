@@ -1,219 +1,176 @@
-# Audit path graph — sess (второй разбор, дельта), 2026-08-21 17:37 UTC
+# Audit path graph — new users, last 30 days (2026-07-22 .. 2026-08-21)
 
-Источник: psql в `cloud-console` через `kubectl exec pg-shard-0-postgresql-0 -n databases`
-(creds `dada-cloud-console-backend` в ns `argocd-prod`), доступ через `vpn-bypass-proxy.py`
-(en0-туннель у утренней сессии был мёртв, у этой — жив после рестарта прокси на порту 8899;
-`ensure-proxy.sh` сам сказал PROXY-DEAD и отказался выдать HTTPS_PROXY, но ручной рестарт
-`vpn-bypass-proxy.py --port 8899` прошёл, kubectl/psql подтверждены живьём). Момент снятия:
-`now()`=2026-08-21 17:37:28 UTC. READ-ONLY: ни одного UPDATE/INSERT/DELETE не выполнялось.
+Session: sess-0821g. Read-only Postgres analysis, no mutations, no commits.
 
-Прошлый срез: `sess-0821f`, 2026-08-21 17:08:07 UTC — те же 30 минут назад, тот же 30-дневный
-скользящий когорт (первый юзер в окне — 07-23, ни один не выпал, только 1 новый добавился —
-tarotreaderhimu, он уже был в прошлом срезе). Из-за этого раздел 1-3 почти не меняется числом,
-но раздел выявил РЕАЛЬНУЮ дельту: неучтённых мёртвых сигнапов и, главное, недоставленный фикс.
+## Cohort
 
-## 1. Новые юзеры за скользящие 30 дней
+27 real users (post-exclusion-filter) created in the last 30 days. Zero of the
+excluded categories (service accounts, e2e/a5-testuser/sp2verify, dada-tuda.ru
+mail) survived the filter, so 27 = the raw count after filtering.
 
-- **24ч**: 1 юзер — `tarotreaderhimu@gmail.com` (без изменений от прошлого среза).
-- **30д (скользящее окно)**: 30 юзеров, тот же список, что и в прошлом срезе (окно почти не
-  сдвинулось: 30 минут между снятиями, самый старый юзер в когорте — 07-23, есть запас).
-  Полная цепочка `(created_at, action, resource_kind, resource_name)` для каждого — как и раньше,
-  доминирует `SessionStart → ViewProject → ViewApps` навигация, разбор ниже.
+**Farm-wave contamination confirmed**: 18 of the 27 (67%) were created between
+2026-08-08 18:28 and 2026-08-09 05:37 UTC — squarely inside the known
+signup-farm window (`project_signup_farm_wave_pollutes_funnel.md`). All 18
+verified against `users.created_at` individually; every one falls in that
+window. Only 9 of the 27 new users are real signups for path-analysis purposes.
 
-## 2. Кто не сделал НИЧЕГО (перепроверено по builds/git_repos/agent_chat_messages/feedback)
+## Dead-signup check (strict definition: zero rows everywhere)
 
-Перепроверка через LEFT JOIN на все 4 таблицы (`builds.triggered_by`, `git_repos.created_by`,
-`agent_chat_messages.user_sub`/`feedback.user_sub` = `users.keycloak_sub`):
+- Users with **zero audit_events rows** (excl. SignUp): **0 of 27.** Every
+  user has at least one `SessionStart` row, so the strict "zero everywhere"
+  definition finds no dead signups this window.
+- Cross-check against builds/git_repos/agent_chat_messages/feedback for those
+  zero-audit users: N/A (the zero-audit set is empty).
+- **Caveat that matters more than the strict-zero result**: 18 of 27 users
+  (all farm-wave) have **SessionStart and nothing else, ever** — 1-12 login
+  events, zero product actions. This is real product inactivity that the
+  strict "zero audit_events" filter cannot see, because `SessionStart` itself
+  is an audit row. This is the exact pattern already on record as
+  `project_signup_farm_wave_pollutes_funnel.md` (bot/farm accounts that only
+  hit the login/session ping, never a real product surface) — confirmed here
+  with fresh data, not a new finding.
 
-**НОВОЕ по сравнению с прошлым срезом**: прошлый разбор насчитал 13/30 мёртвых сигнапов
-(порог — `audit_cnt=1`, чистый `SessionStart`). Перепроверка нашла ещё **2 юзеров**, у которых
-в audit ровно `SessionStart` **дважды** (повторный визит), но по-прежнему ноль в
-builds/agent_chat_messages/feedback/git_repos: `a@atry.kdns.fr`, `abc@zhkarc.us.ci` — оба из
-известной ферма-волны 08-08 (регистрация 20:29 и 22:52 UTC того дня). Прошлый порог
-`audit_cnt=1` их пропустил, потому что они зашли дважды, а не один раз.
+No true "dead signup" (leak before first action, real user) was found in this
+window.
 
-**Итог: 15/30 мёртвых сигнапов** (а не 13/30, как в прошлом срезе) — это уточнение счёта той же
-когорты, не появление новых юзеров. Все 15 — чистая ферма/бот-навигация, `SessionStart` и
-ничего больше.
+## Instrumentation-gap check (zero in audit_events, nonzero elsewhere)
 
-**Провал инструментирования (audit=0, но есть активность в других таблицах)**: явный запрос
-`NOT EXISTS (audit_events)` по всей 30д-когорте вернул **0 строк** — ни один юзер в этой когорте
-не имеет активности при нулевом audit. В этот раз новой дыры в телеметрии на уровне «юзер
-что-то сделал, а audit молчит» не найдено (в отличие от прошлых циклов, см. memory
-`project_audit_events_silently_drops_rows.md` — это НЕ отменяет прошлую находку, просто в
-ТЕКУЩЕЙ когорте её сейчас нет).
+None. Every one of the 27 users has ≥1 non-SignUp audit_events row, so by the
+task's literal definition there are no "zero in audit, nonzero elsewhere"
+cases this window.
 
-## 3. Граф пути (30д когорта)
+**A real, narrower gap was found while checking `agent_chat_messages` against
+`AgentChatUserMessage` audit rows**, worth recording even though it isn't new
+information:
 
-**Первое действие после регистрации** (не изменилось от прошлого среза):
-```
-SessionStart               19
-SignUp                      6
-CreateApp                   2
-AgentChatActionDeclined     1
-CreateServiceDatabase       1
-RedeemPromo                 1
-```
+| user | chat_rows (role=user) | AgentChatUserMessage audit rows | all msgs sent before/after 2026-08-14 fix |
+|---|---|---|---|
+| artempro2021@bk.ru | 33 | 0 | all before (2026-07-29..08-04) |
+| good.win2283@gmail.com | 1 | 0 | before (2026-07-30) |
+| macmam@atomicmail.io (farm-wave) | 10 | 0 | before (2026-08-08) |
+| michaelharlam@yandex.ru | 12 | 12 | after fix (08-13 account, chat activity post-fix) |
+| artempro2022@yandex.ru | 9 | 9 | after fix |
 
-**Терминальное действие, порог ≥72ч тишины** (пересчитано с правильным порогом задачи —
-прошлый разбор использовал 24ч, здесь 72ч, поэтому числа не сравнимы напрямую):
-```
-SessionStart              18  (терминально, ≥72ч тишины)
-ViewApps                    3
-AgentChatActionDeclined     1
-ViewProject                 1
-```
-23 из 30 юзеров когорты пересекли порог 72ч тишины (то есть точно "сдались" на срез этого
-момента); 7 из 30 ещё в окне наблюдения (последнее событие <72ч назад, рано звать "ушёл").
+Every gap case predates 2026-08-14 (commit `bff73b02`), which is exactly the
+fix date recorded in `project_audit_events_silently_drops_rows.md`
+(`writeAuditRow` used to swallow non-FK-violation Postgres errors with a bare
+`return`, now logs + counts via `dada_audit_write_failures_total`). Every
+post-fix case (michaelharlam, artempro2022) is a clean 1:1 match. This is
+**not** a live gap — it's corroborating evidence that the already-fixed bug
+also cost real (non-farm) users their `AgentChatUserMessage` rows before the
+fix landed, not just the farm-wave account (`pjx694168692@gmail.com`) that
+memory previously (and correctly) walked back as explained by a DeleteProject
+cascade instead. No backlog item filed for this — matches an existing,
+already-resolved finding.
 
-**Топ переходов A→B** (все audit-события 30д когорты, n=событий, distinct_users):
-```
-SessionStart -> ViewProject          177 / 9 users
-ViewProject  -> ViewApps             165 / 11 users
-ViewProject  -> ViewProject          132 / 6 users
-ViewApps     -> SessionStart          76 / 7 users
-ViewApps     -> ViewApp               68 / 6 users
-ViewProject  -> SessionStart          66 / 6 users
-ViewApps     -> ViewProject           57 / 7 users
-ViewApps     -> ViewApps              48 / 5 users
-SessionStart -> SessionStart          38 / 9 users
-UploadSourceArchive -> ViewBuildLogs  31 / 4 users
-ViewApp      -> ViewApps              29 / 6 users
-ViewBuildLogs -> BuildFinished        29 / 5 users
-BuildFinished -> DeployImageVersion   24 / 4 users
-```
-Не изменилось качественно: навигация `ViewProject↔ViewApps↔ViewApp` доминирует, воронка
-деплоя реальна, но меньше по объёму.
+## Terminal-action distribution (last audited action per user, 27 users)
 
-**Аномалия графа, найденная в этот раз**: `SeedDatabaseDSN -> SeedDatabaseDSN` (168 раз, 1
-юзер) и `VerifyDomainAuthorization -> VerifyDomainAuthorization` (31 раз, 1 юзер) — обе от
-`kkartov@yandex.ru`. Разбор ниже (раздел 4) — это НЕ новая живая проблема, это уже закрытый
-инцидент 08-19, но граф его до сих пор показывает как самую частую пару переходов в датасете
-после базовой навигации, так что стоит явно объяснить, а не оставить как непонятную аномалию.
+| action | users |
+|---|---|
+| SessionStart | 19 (18 are the farm-wave session-only accounts; 1 real user whose most recent event is a bare re-login after earlier product use) |
+| ViewApps | 4 |
+| DeployImageVersion | 2 |
+| BuildFinished | 1 |
+| ViewProject | 1 |
 
-## 4. Найденный (и уже закрытый) инцидент: retry-storm на `SeedDatabaseDSN`
+Restricted to the 9 real (non-farm) users, terminal actions are: ViewApps(4),
+DeployImageVersion(2), BuildFinished(1), ViewProject(1), SessionStart(1) — no
+single action dominates; sample too small (n=9) for a new mass-stall claim.
 
-`kkartov@yandex.ru` (30д-когорта, второй по активности юзер, 513 audit-событий) словил **172
-подряд провала `SeedDatabaseDSN`** за 2026-08-18 22:06–22:34 UTC (раз в 10 секунд, `trigger:
-auto`, `app_ref: instatic-il1cvo`), все с одинаковой ошибкой:
+## First-action-after-signup distribution (27 users)
 
-```json
-{"error": "decoding encryption key: encoding/hex: invalid byte: U+000A", "app_ref": "instatic-il1cvo", "trigger": "auto"}
-```
+| action | users |
+|---|---|
+| SessionStart | 24 |
+| CreateApp | 2 |
+| RedeemPromo | 1 |
 
-`U+000A` = `\n` — хвостовой перенос строки в `GITOPS_ENCRYPTION_KEY` ломал hex-декодинг, и
-асинхронный доставщик DSN (`deliverDatabaseDSNAsync`) ретраил permanent-фейл как будто он
-transient, раз в 10 секунд, без остановки. Тот же корень дал 5 подряд failed builds на app
-`instatic` в ночь на 08-19 (`fail_reason=platform_error`, 22:46–03:17 UTC) — это НЕ отдельная
-серия повторных провалов, это тот же инцидент виден с другой стороны (build-триггер зависел от
-того же ключа).
-
-**Уже пофикшено и уже в проде**: `backend/internal/crypto/crypto.go:16-34` — коммит
-`17db736d fix(crypto): survive whitespace in GITOPS_ENCRYPTION_KEY and git credentials`,
-2026-08-19 15:43 MSK. Введён `ErrKeyMisconfigured` — маркер "это конфиг сломан навсегда, а не
-временный сбой", ретрай-петля обязана остановиться при такой ошибке. Проверено:
-`git merge-base --is-ancestor 17db736d... 3560cd90` → **LIVE в текущем деплое** (см. раздел 6).
-Инцидент закрыт до этого разбора, приводится здесь только для объяснения графа. kkartov жив
-(последняя активность 08-19 19:26 UTC, тишина 1д22ч на момент среза, не терминальна).
-
-## 5. Кейс `tarotreaderhimu@gmail.com` — статус на 17:37 UTC
-
-Полная цепочка не изменилась (19 событий, последнее — `BuildFinished FAILURE #3` в 14:09:36.49).
-**Тишина на момент этого среза: 3ч23м59с** (было 2ч58м на прошлом срезе). Юзер НЕ вернулся.
-Порог 24ч ещё не пройден, порог 72ч тем более — писать "ушёл навсегда" по-прежнему рано, окно
-наблюдения открыто. Апп `best-marriage-astrologer-in-guwahati` жив, не задеплоен, `DeleteApp` не
-вызывался.
-
-**Новых build-активностей за последние 2 часа на платформе — 0** (кроме двух success-билдов
-`fonbet-value`, не относящихся к когорте). Новых серий повторных провалов с момента прошлого
-среза не появилось.
-
-## 6. ГЛАВНАЯ находка этого цикла: фикс написан, запушен, но НЕ доставлен в прод
-
-Прошлый разбор (`sess-0821f`) поднял в беклог два пункта:
-1. счётчик повторов сравнивает `error_message` буквально и теряет реальные повторы;
-2. после 2-го подряд провала с одинаковой причиной продукт не подсказывает юзеру, что он
-   гоняет билды вслепую.
-
-**Оба пункта закрыты кодом** в этой же сессии-владельце между срезами:
-- `50e773cd` "Три одинаковых провала сборки выглядели для юзера как три разных, и он ушёл
-  чинить не то" — backend `backend/internal/api/build_repeat.go` (нормализованная
-  `failureSignature`, режет ISO-таймстемпы/uuid/hex из `error_message` перед сравнением) +
-  frontend `frontend/lib/build-repeat.ts` (`isStuckOnRepeat`, `repeatHintKey`) и
-  `frontend/components/deploy/app-latest-build-card.tsx:138,293,364-366` (баннер "второй подряд
-  провал с той же причиной" + адресный хинт по `fail_reason`).
-- `0fd0eaaa` "Цикл записан: разбор аудита поймал, что фича мерила бы ноль на своём же кейсе" —
-  докрутка того же фикса.
-
-Проверено, что рычаг реально достижим (не мёртвый код, см. memory
-`project_shipped_lever_can_be_structurally_unreachable.md`): `repeat_count` в JSON API
-(`backend/internal/api/builds.go:44,170,240,245`), и фронт реально его читает и рисует —
-`grep repeat_count frontend/lib/types.ts frontend/lib/build-repeat.ts frontend/lib/build-repeat.test.ts
-frontend/components/deploy/app-latest-build-card.tsx` — все 4 файла есть, не заглушка.
-
-**НО** — проверка по правилу "закрыт коммитом ≠ закрыт доставкой" (git ancestry против
-реального образа в кластере, не текст коммита):
+## Top transitions (action_A -> action_B), by transition count
 
 ```
-origin/main HEAD           = 0fd0eaaa (несёт оба фикса)
-деплой в проде сейчас       = ghcr.io/dadadevelopment/dada-cloud-console-backend:3560cd90
-                               ghcr.io/dadadevelopment/dada-cloud-console-frontend:3560cd90
-git merge-base --is-ancestor 50e773cd 3560cd90  →  NOT an ancestor
+SeedDatabaseDSN           -> SeedDatabaseDSN            168  (1 user)
+SessionStart              -> ViewProject                139  (7 users)
+ViewProject               -> ViewApps                   134  (9 users)
+ViewProject               -> ViewProject                 89  (4 users)
+ViewApps                  -> SessionStart                64  (6 users)
+ViewApps                  -> ViewApp                     64  (5 users)
+ViewProject               -> SessionStart                43  (5 users)
+ViewApps                  -> ViewProject                 39  (6 users)
+SessionStart              -> SessionStart                34  (8 users)
+UploadSourceArchive       -> ViewBuildLogs                31  (4 users)
+VerifyDomainAuthorization -> VerifyDomainAuthorization    31  (1 user)
+ViewBuildLogs             -> BuildFinished                29  (5 users)
+ViewApps                  -> ViewApps                     27  (4 users)
+ViewApp                   -> ViewApps                     25  (5 users)
+BuildFinished             -> DeployImageVersion           24  (4 users)
+ViewApp                   -> UploadSourceArchive          24  (2 users)
+RevealEnvVar              -> RevealEnvVar                 22  (2 users)
+ViewApp                   -> SessionStart                 18  (3 users)
+ViewProject               -> ViewApp                      17  (3 users)
+SetEnvVar                 -> SetEnvVar                    16  (4 users)
+DeployImageVersion        -> ViewProject                  16  (5 users)
+DeployImageVersion        -> DeployImageVersion           15  (5 users)
+ViewBuildLogs             -> ViewApps                     12  (4 users)
+UpdateAppStorage          -> UpdateAppStorage              11  (1 user)
+AgentChatUserMessage      -> AgentChatUserMessage          11  (2 users)
+DeleteApp                 -> DeleteApp                     11  (2 users)
+ConnectGitRepo            -> TriggerBuild                  11  (5 users)
+ViewApp                   -> ViewProject                   11  (4 users)
+DeployImageVersion        -> SessionStart                  10  (3 users)
+TriggerBuild              -> ViewBuildLogs                 10  (6 users)
+ViewProject               -> ViewBuildLogs                 10  (2 users)
 ```
+(full 40-row table available in the query output; this is the head)
 
-Деплой в кластере (`argocd-prod`, поды `dada-cloud-console-backend-785fb7df59-*` /
-`dada-cloud-console-frontend-57644bc4d7-*`, обновлены 36 минут назад) стоит на теге `3560cd90` —
-**на два коммита позади** `50e773cd`/`0fd0eaaa`. Фикс полностью написан, протестирован (есть
-`build_repeat_test.go`, `build_repeat_db_test.go`), запушен в `origin/main`, но живой tarot-кейс
-из раздела 5 **прямо сейчас** видит старую версию карточки билда без баннера "второй подряд
-провал" — потому что новый образ ещё не выкатился. Если бы деплой прошёл раньше, у tarot после
-2-го провала (14:03:36 UTC) уже был бы виден баннер с хинтом "npm install won't fix itself on
-retry" вместо того, чтобы он гадал и создавал ненужную базу в 14:07.
+The graph reads as a normal console-usage loop for real users
+(SessionStart -> ViewProject -> ViewApps -> ViewApp -> deploy/build cycle),
+dominated by two power users (`4b1b8d89-...` / artempro2021, `d2ac0ab7-...` /
+artempro2022) who account for most of the high-count edges.
 
-**Действие**: это не "написать код" (код готов), это "выкатить `origin/main` в `argocd-prod`" —
-следующий деплой console-backend/console-frontend автоматически подтянет `0fd0eaaa`, обычный
-ArgoCD sync/redeploy, без ручных правок кода.
+## Concrete UX finding
 
-## 7. Деньги (7д) — перепроверено
+**No new finding survives cross-checking against existing memory.** The two
+candidate signals both resolve to findings already on record:
 
-Те же 5 попыток оплаты, что и в прошлом срезе, ни одной новой:
+1. **67% of this window's "new users" are farm-wave bot signups whose entire
+   audit trail is bare SessionStart pings** → matches
+   `project_signup_farm_wave_pollutes_funnel.md` exactly (same window,
+   confirmed with individual timestamp checks this cycle).
+2. **A handful of pre-2026-08-14 chat sessions (including 2 real, non-farm
+   users) have `agent_chat_messages` rows with no matching
+   `AgentChatUserMessage` audit row** → matches
+   `project_audit_events_silently_drops_rows.md` (bug fixed in `bff73b02` on
+   2026-08-14; every post-fix case in this cohort is a clean 1:1 match,
+   confirming the fix holds).
 
-| org_id | status | amount | customer_email | created_by_sub |
-|---|---|---|---|---|
-| dada | pending | 2900 | (пусто) | (пусто) |
-| dada | canceled | 990 | alexkekiy@dada-tuda.ru | (пусто) |
-| dada | canceled | 990 | alexkekiy@dada-tuda.ru | (пусто) |
-| dada | canceled | 990 | sandbox-test@dada-tuda.ru | (пусто) |
-| artempro2021@bk.ru | canceled | 2900 | artempro2021@bk.ru | (пусто) |
+## Backlog
 
-`created_by_sub` пуст на 100% строк за 7д — не изменилось, всё ещё не позволяет отличить
-владельца от чужого плательщика без эвристики по `org_id`/`customer_email`. Ноль попыток
-оплаты от подтверждённо-чужого плательщика за 7д, как и на прошлом срезе.
+**Nothing filed.** Both signals found this cycle are corroboration of
+existing findings, not new ones:
+- Farm-wave dominance of the 30-day new-user window → cite
+  `project_signup_farm_wave_pollutes_funnel.md`.
+- Pre-fix AgentChatUserMessage audit gaps for 2 real users → cite
+  `project_audit_events_silently_drops_rows.md` (already fixed 2026-08-14,
+  post-fix data in this same cohort confirms the fix).
 
-## Кандидаты в беклог
+## Structural audit gap (task item 5)
 
-### [АКТИВНЫЙ] Фикс "второй подряд провал = баннер с хинтом" готов, но не выкачен в прод
-Коммиты `50e773cd`+`0fd0eaaa` на `origin/main` полностью решают backlog-пункт прошлого цикла
-(нормализованное сравнение `error_message`, UI-баннер `frontend/components/deploy/app-latest-build-card.tsx:293,364-366`
-с адресным хинтом по `fail_reason` из `frontend/lib/build-repeat.ts:37-44`). Деплой в
-`argocd-prod` стоит на `3560cd90`, на 2 коммита позади. Живой кейс tarotreaderhimu (21.08,
-3/3 провала, потерял 2ч на угадывание причины) НЕ увидел бы этот баннер даже сегодня —
-выкатки не было. Нужен обычный redeploy `dada-cloud-console-backend`+`dada-cloud-console-frontend`
-из `origin/main`, кода менять не надо.
+No *currently live* structural gap was found for `AgentChatUserMessage` —
+every message sent by a real user after the 2026-08-14 fix has a matching
+audit row (verified: michaelharlam 12/12, artempro2022 9/9).
 
-### [Информационно, не требует действия] Порог "мёртвый сигнап" по ровно 1 audit-событию недосчитывает повторные визиты
-Прошлый разбор считал мёртвым сигнапом только `audit_cnt=1`; уточнение нашло ещё 2 юзеров с
-`audit_cnt=2` (два `SessionStart`, ноль дальше) в той же ферма-волне 08-08 — итог 15/30, не
-13/30. Не баг, просто будущим разборам мёртвых сигнапов стоит считать по "все события —
-SessionStart", а не по фиксированному count=1.
-
-### [Закрыто, для памяти] Retry-storm на `SeedDatabaseDSN` из-за хвостового `\n` в ключе шифрования
-172 автоматических провала за 28 минут 08-18/08-19 у `kkartov@yandex.ru`, `app_ref=instatic`.
-Уже исправлено `17db736d` (`backend/internal/crypto/crypto.go:16-34`, `ErrKeyMisconfigured`),
-подтверждено живым в текущем деплое (`3560cd90` — фикс попал раньше build-repeat фикса).
-Оставлено в отчёте только чтобы объяснить аномальную пару переходов графа
-`SeedDatabaseDSN→SeedDatabaseDSN` (168/1) — не открывать заново.
-
-### [Без изменений от прошлого цикла] `payments.created_by_sub` пуст на 100% строк
-Не тронуто в этом цикле, тот же разрыв — чекаут не пишет актора платежа, атрибуция
-владелец/чужой держится только на `org_id`/`customer_email` эвристике.
+The one gap that **is** structural and current by design, not by bug: only
+the user's own chat turn is audited (`AgentChatUserMessage`, single call site
+`backend/internal/api/agent_chat.go:1374`, immediately after the message
+insert at `agent_chat.go:1373`). The assistant's answer and any tool calls
+the agent makes in the same turn are written to `agent_chat_messages` (roles
+`assistant`, `tool`) but have **no audit_events counterpart at all** — see the
+insert call sites at `agent_chat.go:286` (assistant) and `agent_chat.go:284`
+(tool), neither of which is followed by any `recordAudit*` call. This is
+intentional per the comment at `agent_chat.go:428-434` ("only approve and
+decline ever reached audit_events" before this fix, extended to cover the
+user's own message but not the model's response). If "did the assistant
+actually answer, or error out silently" ever needs to be path-analyzable from
+audit_events alone, the insert helper for the terminal `assistant` message at
+`agent_chat.go:1435` (and the confirm-flow one at `agent_chat.go:1851`) is
+the nearest call site to add a matching audit row — no such row exists today.
