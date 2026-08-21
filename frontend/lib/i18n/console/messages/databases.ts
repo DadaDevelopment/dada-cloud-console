@@ -131,8 +131,16 @@ export const databases: Messages = {
 
   "databases.delete.modal.title": { ru: "Удалить базу данных", en: "Delete database" },
   "databases.delete.modal.body": {
-    ru: "Это необратимо удалит базу данных «{name}» и все её данные. Отменить это действие нельзя.",
-    en: "This permanently deletes the database \"{name}\" and all its data. This action cannot be undone.",
+    ru: "База данных «{name}» будет отключена от проекта: доступ и учётные данные перестанут работать, база пропадёт из консоли, а квота освободится. Сами данные остаются на сервере до ручной очистки оператором — если их нужно стереть окончательно, напишите в поддержку. Вернуть базу в консоль самостоятельно нельзя.",
+    en: "The database \"{name}\" will be detached from the project: access and credentials stop working, it disappears from the console, and its quota is freed. The data itself is retained on the server until an operator clears it — contact support if it must be erased for good. You cannot re-attach the database yourself.",
+  },
+  "databases.delete.modal.confirmLabel": {
+    ru: "Введите «{name}», чтобы подтвердить",
+    en: "Type \"{name}\" to confirm",
+  },
+  "databases.delete.modal.mismatch": {
+    ru: "Имя не совпадает",
+    en: "Name does not match",
   },
   "databases.delete.error": { ru: "Не удалось удалить базу данных", en: "Failed to delete database" },
 

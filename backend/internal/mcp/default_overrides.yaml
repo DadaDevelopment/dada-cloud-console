@@ -38,6 +38,14 @@ keep:
   - listDatabases
   - createDatabase
   - getDatabaseCredentials
+  # deleteDatabase stays out, unlike deleteBox: an agent that creates a database
+  # and cannot release it leaks paid shard capacity, so the box argument applies
+  # here too — but the lever does not work yet. Deleting a database removes its
+  # ServiceDatabaseV2 from git and ArgoCD prunes the CR, while the Crossplane
+  # Database and Role behind it carry deletionPolicy: Orphan (MoveApp depends on
+  # that policy), and nothing issues a DROP. The row leaves the console, the data
+  # stays on the shard, visible only in /admin/db-shards as orphan=true. Exposing
+  # the tool before the reclaim path exists would hand agents a delete that lies.
   # Domains
   - addDomainAuthorization
   - verifyDomainAuthorization

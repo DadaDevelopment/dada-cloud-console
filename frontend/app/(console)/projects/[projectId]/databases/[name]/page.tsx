@@ -147,6 +147,7 @@ export default function DatabaseDetailPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [deleteConfirmName, setDeleteConfirmName] = useState("");
   const [isDeleteSubmitting, setIsDeleteSubmitting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -319,13 +320,20 @@ export default function DatabaseDetailPage() {
     }
   }
 
+  function closeDelete() {
+    setIsDeleteOpen(false);
+    setDeleteConfirmName("");
+    setDeleteError(null);
+  }
+
   async function submitDelete(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (deleteConfirmName !== name) return;
     setDeleteError(null);
     setIsDeleteSubmitting(true);
     try {
       await databasesApi.remove(projectId, envId, name);
-      setIsDeleteOpen(false);
+      closeDelete();
       router.push(`/projects/${projectId}/databases`);
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : t("databases.delete.error"));
@@ -619,15 +627,37 @@ export default function DatabaseDetailPage() {
 
       <Modal
         isOpen={isDeleteOpen}
-        onClose={() => { setIsDeleteOpen(false); setDeleteError(null); }}
+        onClose={closeDelete}
         title={t("databases.delete.modal.title")}
       >
         <form onSubmit={submitDelete} className="space-y-4">
           <p className="text-sm text-gray-600 dark:text-gray-400">
             {t("databases.delete.modal.body", { name: db.name })}
           </p>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
+              {t("databases.delete.modal.confirmLabel", { name })}
+            </label>
+            <input
+              type="text"
+              required
+              value={deleteConfirmName}
+              onChange={(e) => setDeleteConfirmName(e.target.value)}
+              placeholder={name}
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            {deleteConfirmName.length > 0 && deleteConfirmName !== name && (
+              <p className="mt-1 text-xs text-red-600 dark:text-red-400">{t("databases.delete.modal.mismatch")}</p>
+            )}
+          </div>
           {deleteError && <ErrorBox text={deleteError} />}
-          <ModalFooter onCancel={() => setIsDeleteOpen(false)} submitting={isDeleteSubmitting} submitLabel={t("common.delete")} tone="red" />
+          <ModalFooter
+            onCancel={closeDelete}
+            submitting={isDeleteSubmitting}
+            submitLabel={t("common.delete")}
+            tone="red"
+            disabled={deleteConfirmName !== name}
+          />
         </form>
       </Modal>
 
