@@ -163,4 +163,30 @@ export const billing: Messages = {
     ru: "Автосписание сейчас недоступно. Снимите галочку «продлевать автоматически» и повторите оплату — она пройдёт.",
     en: "Automatic renewal is not available right now. Untick \"renew automatically\" and try again - the payment will go through.",
   },
+
+  "billing.promo.title": { ru: "Промокод", en: "Promo code" },
+  "billing.promo.placeholder": { ru: "Введите код", en: "Enter code" },
+  "billing.promo.submit": { ru: "Активировать", en: "Redeem" },
+  "billing.promo.submitting": { ru: "Активируем...", en: "Redeeming..." },
+  "billing.promo.success": {
+    ru: "Готово! Тариф {plan} активирован на {days} дней.",
+    en: "Done! The {plan} plan is active for {days} days.",
+  },
+  "billing.promo.successNotApplied": {
+    ru: "Код принят, но у вас уже оплаченный тариф выше промо - он не тронут, срок вашей оплаты не сократится.",
+    en: "Code accepted, but your current paid plan already covers this - it stays untouched and your paid term is not shortened.",
+  },
+  "billing.promo.error.promo_code_required": { ru: "Укажите промокод", en: "Enter a promo code" },
+  "billing.promo.error.promo_code_not_found": { ru: "Промокод не найден", en: "Promo code not found" },
+  "billing.promo.error.promo_code_expired": { ru: "Срок действия промокода истёк", en: "This promo code has expired" },
+  "billing.promo.error.promo_code_exhausted": { ru: "Промокод исчерпан", en: "This promo code has been fully redeemed" },
+  "billing.promo.error.promo_already_redeemed": {
+    ru: "Этот промокод уже активирован для вашей организации",
+    en: "This promo code was already redeemed for your organization",
+  },
+  "billing.promo.error.promo_org_unresolved": {
+    ru: "Нет проекта, на который можно начислить тариф. Создайте проект и повторите.",
+    en: "No project to grant the plan to. Create a project first, then try again.",
+  },
+  "billing.promo.error.generic": { ru: "Не удалось активировать промокод", en: "Could not redeem the promo code" },
 };

@@ -11,6 +11,8 @@ import { ConsumptionBreakdown } from "@/components/billing/consumption-breakdown
 import { useT } from "@/lib/i18n/console/context";
 import { resumablePaymentUrl } from "@/lib/checkout-status";
 import { trackUxEvent } from "@/lib/ux-telemetry";
+import { reachGoal } from "@/lib/metrika";
+import { promoErrorMessageKey, normalizePromoCode } from "@/lib/billing-promo";
 import { clsx } from "clsx";
 
 const PLAN_ORDER: BillingPlanKey[] = ["free", "startup", "business", "enterprise"];
@@ -110,6 +112,11 @@ export default function BillingPage() {
   const [companySuggestions, setCompanySuggestions] = useState<InvoiceCompanySuggestion[]>([]);
   const [companyLookupBusy, setCompanyLookupBusy] = useState(false);
   const [companyLookupError, setCompanyLookupError] = useState<string | null>(null);
+
+  const [promoCode, setPromoCode] = useState("");
+  const [promoBusy, setPromoBusy] = useState(false);
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [promoResult, setPromoResult] = useState<{ plan: string; days: number; applied: boolean } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -274,6 +281,35 @@ export default function BillingPage() {
       }
     } finally {
       setInvoiceBusy(false);
+    }
+  }
+
+  /**
+   * Redeems a promo code and, on success, re-reads the account so the plan
+   * card reflects the grant immediately -- the endpoint itself never touches
+   * `payments`, so nothing else on this page would otherwise notice a change.
+   */
+  async function handleRedeemPromo() {
+    const code = normalizePromoCode(promoCode);
+    setPromoError(null);
+    setPromoResult(null);
+    if (!code) {
+      setPromoError(t("billing.promo.error.promo_code_required"));
+      return;
+    }
+    setPromoBusy(true);
+    try {
+      const resp = await billingApi.redeemPromo(code);
+      setPromoResult(resp);
+      setPromoCode("");
+      reachGoal("billing_promo:redeemed", { plan: resp.plan, applied: String(resp.applied) });
+      const refreshed = await billingApi.getAccount(projectId);
+      setAccount(refreshed);
+    } catch (err) {
+      const errCode = (err as { code?: string } | undefined)?.code;
+      setPromoError(t(promoErrorMessageKey(errCode)));
+    } finally {
+      setPromoBusy(false);
     }
   }
 
@@ -691,6 +727,39 @@ export default function BillingPage() {
               ))}
             </div>
           )}
+
+          <div className="mt-5 space-y-2 border-t border-gray-100 dark:border-gray-800 pt-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+              {t("billing.promo.title")}
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={promoCode}
+                onChange={(e) => setPromoCode(e.target.value)}
+                placeholder={t("billing.promo.placeholder")}
+                disabled={promoBusy}
+                className="min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+              />
+              <button
+                type="button"
+                disabled={promoBusy}
+                onClick={handleRedeemPromo}
+                data-ux="billing_promo:redeem"
+                className="shrink-0 rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-60 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+              >
+                {promoBusy ? t("billing.promo.submitting") : t("billing.promo.submit")}
+              </button>
+            </div>
+            {promoError && <p className="text-xs text-red-600 dark:text-red-400">{promoError}</p>}
+            {promoResult && (
+              <p className="text-xs text-green-600 dark:text-green-400">
+                {promoResult.applied
+                  ? t("billing.promo.success", { plan: promoResult.plan, days: promoResult.days })
+                  : t("billing.promo.successNotApplied")}
+              </p>
+            )}
+          </div>
         </div>
 
         {account.invoicePreview && (

@@ -743,6 +743,7 @@ func SetupRouterWithHandler(pool *pgxpool.Pool, cfg *config.Config) (*gin.Engine
 		api.POST("/projects/:projectId/billing/invoice", h.CreateInvoice)
 		api.GET("/projects/:projectId/billing/company-suggestions", h.SuggestInvoiceCompanies)
 		api.GET("/billing/invoice/:paymentId", h.GetInvoice)
+		api.POST("/billing/promo/redeem", h.RedeemBillingPromo)
 
 		registerPayGatewayRoutes(r, api, h)
 
