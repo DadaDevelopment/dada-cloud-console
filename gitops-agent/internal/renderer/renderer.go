@@ -287,6 +287,21 @@ func DefaultPortForFramework(framework string) int {
 	return defaultFrameworkFallbackPort
 }
 
+// IsFrameworkDefaultPort reports whether port is a value defaultFrameworkPorts
+// itself hands out. It is the shape test for "the platform guessed this port",
+// used on snapshots written before the port's provenance was recorded.
+func IsFrameworkDefaultPort(port int) bool {
+	if port == defaultFrameworkFallbackPort {
+		return true
+	}
+	for _, p := range defaultFrameworkPorts {
+		if p == port {
+			return true
+		}
+	}
+	return false
+}
+
 var appFuncMap = template.FuncMap{
 	"chartFor":        ChartFor,
 	"workloadRepoURL": func() string { return WorkloadRepoURL },

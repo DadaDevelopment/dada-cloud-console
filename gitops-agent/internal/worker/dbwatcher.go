@@ -2175,6 +2175,52 @@ func deployPortAndWorker(cur map[string]any) (port float64, worker bool) {
 	return port, false
 }
 
+// appPortSourceUser is the summary_json "port_source" value the console writes
+// when the user typed the port (CreateApp with an explicit port, or
+// UpdateAppPort). Any other value -- including a missing key on a snapshot
+// older than the field -- means the platform guessed it.
+const (
+	appPortSourceUser             = "user"
+	appPortSourceFrameworkDefault = "framework_default"
+)
+
+// adoptBuildDetectedPort decides whether a build's freshly detected port may
+// replace the port already in the snapshot.
+//
+// The case it exists for: a repo changes framework between commits (Vite ->
+// Next.js), the build detects the new framework and its port, but the deploy
+// kept reading the port frozen at CreateApp time. The snapshot then carried an
+// incoherent pair -- framework nextjs, port 4173 -- and the next render pointed
+// the Service at a port nothing listens on, so the app answered 502 with no
+// lever in the product to fix it.
+//
+// It refuses in three cases: worker apps have no HTTP port at all, a build that
+// reports no port has nothing to offer, and a port the user chose is a contract
+// the platform does not get to revise. For snapshots predating port_source the
+// stored port is treated as a guess ONLY when it equals some framework's
+// default -- a shape only the platform produces -- so a bespoke port set by
+// hand on an older app is still preserved.
+func adoptBuildDetectedPort(cur map[string]any, worker bool, detected int) (float64, bool) {
+	if worker || detected <= 0 {
+		return 0, false
+	}
+	stored, _ := cur["port"].(float64)
+	if int(stored) == detected {
+		return 0, false
+	}
+	source, present := cur["port_source"].(string)
+	if present {
+		if source == appPortSourceUser {
+			return 0, false
+		}
+		return float64(detected), true
+	}
+	if !renderer.IsFrameworkDefaultPort(int(stored)) {
+		return 0, false
+	}
+	return float64(detected), true
+}
+
 func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) error {
 	var p struct {
 		AppName   string `json:"app_name"`
@@ -2218,7 +2264,13 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 	}
 	// A later build may detect a different port, but it must not silently
 	// override the application's configured public-route contract. The current
-	// snapshot is authoritative, including an explicit zero (no HTTP service).
+	// snapshot stays authoritative for every port the user chose, including an
+	// explicit zero (no HTTP service); only a port the platform itself guessed
+	// from a framework follows the framework when the repo changes one.
+	if adopted, ok := adoptBuildDetectedPort(cur, workerVal, p.Port); ok {
+		portVal = adopted
+		cur["port_source"] = appPortSourceFrameworkDefault
+	}
 	if replicasVal == 0 {
 		replicasVal = 1
 	}

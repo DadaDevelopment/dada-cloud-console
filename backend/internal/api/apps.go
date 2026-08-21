@@ -511,6 +511,22 @@ func (h *Handler) ListApps(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"apps": apps})
 }
 
+// appPortSourceUser and appPortSourceAuto are the two values of the
+// resource_snapshots.summary_json "port_source" key. They record WHO chose the
+// app's servicePort, which is the only thing that lets a later deploy tell a
+// deliberate public-route contract from a guess: a port the platform derived
+// from the detected framework may be re-derived when a repo changes framework
+// between commits, a port the user typed may not.
+//
+// Snapshots created before this key existed carry neither value; gitops-agent
+// treats a missing key as auto only when the stored port is itself one of the
+// framework defaults (see adoptBuildDetectedPort), so a bespoke port set by
+// hand on a legacy app is still never overwritten.
+const (
+	appPortSourceUser = "user"
+	appPortSourceAuto = "framework_default"
+)
+
 // defaultPortForFramework returns the servicePort to assume when a create
 // request omits one, looked up case-insensitively from frameworkports.Ports
 // (the backend's copy of config/platform/framework-ports.json), falling
@@ -806,6 +822,7 @@ func (h *Handler) createAppOp(c *gin.Context, claims *auth.Claims, projectID, en
 		return nil, "", rejectCreate(http.StatusBadRequest, "invalid_name", err.Error())
 	}
 
+	portChosenByUser := req.Port != 0
 	if !isCompose {
 		// Helm app validation + defaults.
 		if req.Port == 0 && !req.Worker {
@@ -967,9 +984,13 @@ func (h *Handler) createAppOp(c *gin.Context, claims *auth.Claims, projectID, en
 	}
 
 	optimisticSummary := map[string]any{
-		"profile":  req.Profile,
-		"replicas": req.Replicas,
-		"port":     req.Port,
+		"profile":     req.Profile,
+		"replicas":    req.Replicas,
+		"port":        req.Port,
+		"port_source": appPortSourceAuto,
+	}
+	if portChosenByUser {
+		optimisticSummary["port_source"] = appPortSourceUser
 	}
 	if req.Worker {
 		optimisticSummary["worker"] = true
@@ -1679,6 +1700,7 @@ func (h *Handler) UpdateAppPort(c *gin.Context) {
 		return
 	}
 	cur["port"] = req.Port
+	cur["port_source"] = appPortSourceUser
 	updatedJSON, err := json.Marshal(cur)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to marshal snapshot")
