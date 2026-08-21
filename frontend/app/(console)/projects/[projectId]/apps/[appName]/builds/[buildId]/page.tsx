@@ -90,6 +90,16 @@ export default function BuildDetailPage() {
 
   const canDeploy = canMutate(role);
   const failureDetail = buildFailureDetail(build?.fail_reason, build?.error_message);
+  /**
+   * Hoisted because both failure buttons read it: when auto-fix is on offer it
+   * takes the primary weight and Rebuild drops to secondary. Rebuild repeats
+   * the run that just failed, so leaving it the loudest control on the page
+   * would keep steering the user back into the loop the lever exists to break
+   * -- the same ordering app-latest-build-card.tsx already settled on.
+   */
+  const autofixOffered = Boolean(
+    envId && canOfferAutofix({ status: build?.status, failReason: build?.fail_reason, hasGitRepo, canDeploy })
+  );
 
   const load = useCallback(
     async (silent = false) => {
@@ -367,7 +377,7 @@ export default function BuildDetailPage() {
                 {canceling ? t("apps.builds.canceling") : t("apps.builds.cancel")}
               </button>
             )}
-            {canOfferAutofix({ status: build.status, failReason: build.fail_reason, hasGitRepo, canDeploy }) && envId && (
+            {autofixOffered && (
               <button
                 onClick={handleAutofix}
                 disabled={autofixing || rebuilding}
@@ -383,7 +393,11 @@ export default function BuildDetailPage() {
                 onClick={handleRebuild}
                 disabled={rebuilding}
                 data-ux="apps_build_detail:rebuild"
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                className={
+                  autofixOffered
+                    ? "rounded-lg border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 transition-colors"
+                    : "rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                }
               >
                 {rebuilding ? t("apps.builds.rebuilding") : t("apps.builds.rebuild")}
               </button>
