@@ -148,7 +148,7 @@ STEP 7 — box up — one call, and it returns only once a command has run INSID
                   "mcpServers": {
                       "dada-box-box-0cf0acf5": {
                           "headers": {
-                              "Authorization": "Bearer dadabox_a09f4f858b0fbb12da11f0b53cc54363d3b62024"
+                              "Authorization": "Bearer dadabox_a09f4fREDACTED-ONE-TIME-TOKEN"
                           },
                           "type": "http",
                           "url": "http://127.0.0.1:42185/mcp"
@@ -192,7 +192,7 @@ STEP 7 — box up — one call, and it returns only once a command has run INSID
       "session": {
           "expires_at": "2026-07-31T02:45:54.615017Z",
           "note": "shown exactly once; only its sha256 and prefix are stored",
-          "token": "dadabox_a09f4f858b0fbb12da11f0b53cc54363d3b62024",
+          "token": "dadabox_a09f4fREDACTED-ONE-TIME-TOKEN",
           "token_prefix": "dadabox_a09f4f"
       }
   }
