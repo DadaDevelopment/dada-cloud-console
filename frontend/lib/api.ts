@@ -2084,6 +2084,12 @@ export const billingApi = {
     setTimeout(() => URL.revokeObjectURL(url), 30_000);
   },
 
+  redeemPromo: (code: string) =>
+    apiFetch<{ plan: string; days: number; applied: boolean }>(
+      "/api/v1/billing/promo/redeem",
+      { method: "POST", body: { code } },
+    ),
+
   getAccount: (projectId: string) =>
     apiFetch<BillingAccount>(`/api/v1/projects/${projectId}/billing/account`),
 
