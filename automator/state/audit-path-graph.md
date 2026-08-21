@@ -1,176 +1,120 @@
-# Audit path graph — new users, last 30 days (2026-07-22 .. 2026-08-21)
+# audit_events разбор — sess-0821h, 2026-08-21
 
-Session: sess-0821g. Read-only Postgres analysis, no mutations, no commits.
+Гейт: `probe-prod-access.sh` ЗЕЛЁНЫЙ (k8s /readyz ok, psql exec ok, console 307). Все числа ниже измерены, не unmeasured.
 
-## Cohort
+DSN: `argocd-prod/dada-cloud-console-backend#DATABASE_URL`, exec через `postgresql-0` в ns `databases`.
 
-27 real users (post-exclusion-filter) created in the last 30 days. Zero of the
-excluded categories (service accounts, e2e/a5-testuser/sp2verify, dada-tuda.ru
-mail) survived the filter, so 27 = the raw count after filtering.
+## 1. Новые юзеры за окно (2026-08-20 → 2026-08-21)
 
-**Farm-wave contamination confirmed**: 18 of the 27 (67%) were created between
-2026-08-08 18:28 and 2026-08-09 05:37 UTC — squarely inside the known
-signup-farm window (`project_signup_farm_wave_pollutes_funnel.md`). All 18
-verified against `users.created_at` individually; every one falls in that
-window. Only 9 of the 27 new users are real signups for path-analysis purposes.
+Ровно **1** новый юзер: `tarotreaderhimu@gmail.com` (id `fa1cc1aa-2554-4d1f-ba72-7e6e2bd39ac4`, signup_source=awesome_webhosting, канал yandex), создан 2026-08-21 13:58:01.
 
-## Dead-signup check (strict definition: zero rows everywhere)
+Контекст 30 дней: 30 новых юзеров всего (см. §2 — большинство мёртвые).
 
-- Users with **zero audit_events rows** (excl. SignUp): **0 of 27.** Every
-  user has at least one `SessionStart` row, so the strict "zero everywhere"
-  definition finds no dead signups this window.
-- Cross-check against builds/git_repos/agent_chat_messages/feedback for those
-  zero-audit users: N/A (the zero-audit set is empty).
-- **Caveat that matters more than the strict-zero result**: 18 of 27 users
-  (all farm-wave) have **SessionStart and nothing else, ever** — 1-12 login
-  events, zero product actions. This is real product inactivity that the
-  strict "zero audit_events" filter cannot see, because `SessionStart` itself
-  is an audit row. This is the exact pattern already on record as
-  `project_signup_farm_wave_pollutes_funnel.md` (bot/farm accounts that only
-  hit the login/session ping, never a real product surface) — confirmed here
-  with fresh data, not a new finding.
+### Цепочка нового юзера (полная, из audit_events, хронологически)
 
-No true "dead signup" (leak before first action, real user) was found in this
-window.
+```
+13:58:01.135  SignUp                User          tarotreaderhimu@gmail.com          success (user)
+13:58:01.146  SessionStart          Session       tarotreaderhimu@gmail.com          success (user)
+13:58:01.726  CreateProject         Project       tarotreaderhimu-gmail-com          pending (user)
+13:58:03.003  ViewProject           Project       tarotreaderhimu-gmail-com          success (user)
+13:58:03.310  ViewApps              AppList       9eca0ca6-...                       success (user)
+13:58:15.503  StartGitAppInstall    git_installation  github                          pending (user)
+13:58:21.780  FinishGitAppInstall   git_installation  github                          success (user)
+13:58:48.208  ConnectGitRepo        GitRepo       best-marriage-astrologer-in-guwahati success (user)
+13:58:48.504  TriggerBuild          Build         best-marriage-astrologer-in-guwahati success (user)   [build #1: 0ce47f4e]
+13:58:48.797  ViewBuildLogs         Build         best-marriage-astrologer-in-guwahati success (user)
+13:58:51.669  CreateProject         Project       tarotreaderhimu-gmail-com          success (system)
+14:00:20.671  BuildFinished         Build         best-marriage-astrologer-in-guwahati failure (system)  [build #1 FAILED: npm install]
+14:02:07.519  TriggerBuild          Build         best-marriage-astrologer-in-guwahati success (user)   [build #2: 207f9ae0]
+14:03:36.823  BuildFinished         Build         best-marriage-astrologer-in-guwahati failure (system)  [build #2 FAILED: npm install]
+14:07:47.259  CreateServiceDatabase ServiceDatabaseV2 db-8f66797a                     pending (user)   ← пробует чинить БАЗОЙ, не связано с ошибкой
+14:07:57.624  CreateServiceDatabase ServiceDatabaseV2 db-8f66797a                     success (system)
+14:08:05.524  TriggerBuild          Build         best-marriage-astrologer-in-guwahati success (user)   [build #3: 0f00460c]
+14:09:07.273  SeedDatabaseDSN       ServiceDatabaseV2 db-8f66797a                     success (user)   ← ПОСЛЕДНЕЕ действие юзера
+14:09:36.486  BuildFinished         Build         best-marriage-astrologer-in-guwahati failure (system) [build #3 FAILED: npm install]
+--- тишина (>8ч на момент разбора) ---
+```
 
-## Instrumentation-gap check (zero in audit_events, nonzero elsewhere)
+Все 3 билда — идентичный `fail_reason=dockerfile_build_failed`, шаг `[build 5/6] RUN npm install`, разные timestamp-логи но одна и та же причина (репо `tarotwithhimu/Best-Marriage-Astrologer-in-Guwahati` — SEO-контентный сайт, вероятно шаблон с битым package-lock/зависимостью).
 
-None. Every one of the 27 users has ≥1 non-SignUp audit_events row, so by the
-task's literal definition there are no "zero in audit, nonzero elsewhere"
-cases this window.
+**Диагноз пути:** юзер трижды повторил TriggerBuild с одной и той же ошибкой npm install, между 2-й и 3-й попыткой создал и засеял сервисную базу данных — это НЕ имеет отношения к npm-ошибке, юзер гадал вслепую, куда копать. После 3-го провала — тишина. Это классический "ошибка не действенна → юзер чинит не то → уходит".
 
-**A real, narrower gap was found while checking `agent_chat_messages` against
-`AgentChatUserMessage` audit rows**, worth recording even though it isn't new
-information:
+## 2. Кто не сделал ничего / провалы инструментирования
 
-| user | chat_rows (role=user) | AgentChatUserMessage audit rows | all msgs sent before/after 2026-08-14 fix |
-|---|---|---|---|
-| artempro2021@bk.ru | 33 | 0 | all before (2026-07-29..08-04) |
-| good.win2283@gmail.com | 1 | 0 | before (2026-07-30) |
-| macmam@atomicmail.io (farm-wave) | 10 | 0 | before (2026-08-08) |
-| michaelharlam@yandex.ru | 12 | 12 | after fix (08-13 account, chat activity post-fix) |
-| artempro2022@yandex.ru | 9 | 9 | after fix |
+Проверка: SignUp **всегда** пишет ≥1 строку в audit_events (проверено на 30 юзерах за 30д — ни одного с audit_cnt=0). Значит "ноль в audit" здесь не встречается — но встречается "audit ≈ только SignUp, реальная активность в другом месте".
 
-Every gap case predates 2026-08-14 (commit `bff73b02`), which is exactly the
-fix date recorded in `project_audit_events_silently_drops_rows.md`
-(`writeAuditRow` used to swallow non-FK-violation Postgres errors with a bare
-`return`, now logs + counts via `dada_audit_write_failures_total`). Every
-post-fix case (michaelharlam, artempro2022) is a clean 1:1 match. This is
-**not** a live gap — it's corroborating evidence that the already-fixed bug
-also cost real (non-farm) users their `AgentChatUserMessage` rows before the
-fix landed, not just the farm-wave account (`pjx694168692@gmail.com`) that
-memory previously (and correctly) walked back as explained by a DeleteProject
-cascade instead. No backlog item filed for this — matches an existing,
-already-resolved finding.
+Таблица по всем 30 юзерам за 30 дней (audit_cnt / build_cnt / git_repo_cnt / chat_cnt(user_sub=users.id) / feedback_cnt(user_sub=keycloak_sub)):
 
-## Terminal-action distribution (last audited action per user, 27 users)
+**Мёртвые сигнапы (0 builds, 0 repos, 0 chat — утечка ДО первого продуктового действия), 20 из 30:**
+cryocrm@gmail.com, mytake@yandex.ru, dmimuser@outlook.com, jacksun950212@gmail.com, langhakka9527@gmail.com, game@016818.xyz, pjx694168692@gmail.com, grwang1201@outlook.com, zengqcyxx@gmail.com, clikuoo@gmail.com, oddessc@outlook.com, mail@ynotu.top, zhisibi@163.com, abc@zhkarc.us.ci, bestmanskyline@gmail.com, mmccok998@gmail.com, a@atry.kdns.fr, dsoftru@yandex.ru, chenlikun.18@gmail.com, a.meshkov@dada-tuda.ru (внутренний).
 
-| action | users |
+18 из этих 20 зарегистрировались 2026-08-08 в окне 19:49–22:56 — это уже задокументированная ботоволна (`project_signup_farm_wave_pollutes_funnel.md`), не новая находка, но подтверждаю масштаб: **60% новых сигнапов за 30д — фермерский спам**, воронку это искажает если считать "сигнап→активация" без фильтра волны.
+
+**Провал инструментирования (найдено, не тривиально):** юзер `17ffb57d-ae86-4ebb-b6f0-9678aea011c0@keycloak.local` (тестовый keycloak-аккаунт) имеет **1** строку в audit_events (только `AgentChatActionDeclined`), но **179** строк в `agent_chat_messages` (полноценный диалог с ассистентом 2026-08-03, включая реальную жалобу "за что списали 2900? нужен акт"). Похожий разрыв у `macmam@atomicmail.io` (audit=3, chat=34).
+
+Копнул глубже: аудит-хук на `AgentChatUserMessage` **существует и подключён** (`backend/internal/api/agent_chat.go:1374`, `agentChatRecordUserMessageAudit`, добавлен намеренно — комментарий на 428–439 прямо говорит "assistant was a hole in the graph"). Но по факту:
+- `agent_chat_messages` (role='user') с 2026-08-07 (дата вайринга) по 2026-08-20: **50** строк
+- `audit_events(action='AgentChatUserMessage')` за тот же период: **37** строк
+- **26% сообщений не долетают до audit** даже после того как хук был добавлен.
+
+Это совпадает с уже задокументированной ловушкой `project_audit_events_silently_drops_rows.md` (`recordAuditAsync` роняет строки под нагрузкой/очередью) — не новый баг, но свежее подтверждение цифрами, что дыра ещё живая и на chat-пути тоже.
+
+## 3. Граф пути (60 дней, actor_type='user', 43 уникальных актора)
+
+### (a) Первое ЗНАЧИМОЕ действие после SignUp (SignUp/SessionStart исключены)
+| action | юзеров |
 |---|---|
-| SessionStart | 19 (18 are the farm-wave session-only accounts; 1 real user whose most recent event is a bare re-login after earlier product use) |
-| ViewApps | 4 |
-| DeployImageVersion | 2 |
-| BuildFinished | 1 |
-| ViewProject | 1 |
-
-Restricted to the 9 real (non-farm) users, terminal actions are: ViewApps(4),
-DeployImageVersion(2), BuildFinished(1), ViewProject(1), SessionStart(1) — no
-single action dominates; sample too small (n=9) for a new mass-stall claim.
-
-## First-action-after-signup distribution (27 users)
-
-| action | users |
-|---|---|
-| SessionStart | 24 |
-| CreateApp | 2 |
+| ConnectGitRepo | 8 |
+| CreateProject | 8 |
+| CreateApp | 3 |
+| CreateServiceDatabase | 1 |
 | RedeemPromo | 1 |
+| AgentChatActionDeclined | 1 |
+| ViewProject | 1 |
+| BuildFinished | 1 |
+| CreateMonitoringApp | 1 |
 
-## Top transitions (action_A -> action_B), by transition count
+### (b) Терминальное действие (последнее действие юзера, событие старше 24ч на момент замера — т.е. "юзер реально замолчал")
+| action | outcome | юзеров |
+|---|---|---|
+| **ViewApps** | success | **5** |
+| **TriggerBuild** | success | **4** |
+| **CreateApp** | success | **3** |
+| ViewProject | success | 1 |
+| DeployImageVersion | success | 1 |
+| CreateProject | failure | 1 |
+| AgentChatActionDeclined | success | 1 |
 
-```
-SeedDatabaseDSN           -> SeedDatabaseDSN            168  (1 user)
-SessionStart              -> ViewProject                139  (7 users)
-ViewProject               -> ViewApps                   134  (9 users)
-ViewProject               -> ViewProject                 89  (4 users)
-ViewApps                  -> SessionStart                64  (6 users)
-ViewApps                  -> ViewApp                     64  (5 users)
-ViewProject               -> SessionStart                43  (5 users)
-ViewApps                  -> ViewProject                 39  (6 users)
-SessionStart              -> SessionStart                34  (8 users)
-UploadSourceArchive       -> ViewBuildLogs                31  (4 users)
-VerifyDomainAuthorization -> VerifyDomainAuthorization    31  (1 user)
-ViewBuildLogs             -> BuildFinished                29  (5 users)
-ViewApps                  -> ViewApps                     27  (4 users)
-ViewApp                   -> ViewApps                     25  (5 users)
-BuildFinished             -> DeployImageVersion           24  (4 users)
-ViewApp                   -> UploadSourceArchive          24  (2 users)
-RevealEnvVar              -> RevealEnvVar                 22  (2 users)
-ViewApp                   -> SessionStart                 18  (3 users)
-ViewProject               -> ViewApp                      17  (3 users)
-SetEnvVar                 -> SetEnvVar                    16  (4 users)
-DeployImageVersion        -> ViewProject                  16  (5 users)
-DeployImageVersion        -> DeployImageVersion           15  (5 users)
-ViewBuildLogs             -> ViewApps                     12  (4 users)
-UpdateAppStorage          -> UpdateAppStorage              11  (1 user)
-AgentChatUserMessage      -> AgentChatUserMessage          11  (2 users)
-DeleteApp                 -> DeleteApp                     11  (2 users)
-ConnectGitRepo            -> TriggerBuild                  11  (5 users)
-ViewApp                   -> ViewProject                   11  (4 users)
-DeployImageVersion        -> SessionStart                  10  (3 users)
-TriggerBuild              -> ViewBuildLogs                 10  (6 users)
-ViewProject               -> ViewBuildLogs                 10  (2 users)
-```
-(full 40-row table available in the query output; this is the head)
+16 из 43 акторов молчат >24ч на момент замера (остальные активны в последние сутки — не терминальны, рано делать вывод).
 
-The graph reads as a normal console-usage loop for real users
-(SessionStart -> ViewProject -> ViewApps -> ViewApp -> deploy/build cycle),
-dominated by two power users (`4b1b8d89-...` / artempro2021, `d2ac0ab7-...` /
-artempro2022) who account for most of the high-count edges.
+**Ключевой сигнал:** топ-2 терминальные точки — `ViewApps` (5) и `TriggerBuild` (4) = **56% "сдавшихся"**. Юзер либо смотрит на список аппов и уходит (пусто/непонятно что дальше), либо запускает билд и не возвращается проверить результат — билд потом падает системным `BuildFinished failure`, но это уже `actor_type=system`, юзер этого события никогда не видел (не залогинился снова). Это совпадает 1:1 с цепочкой нового юзера из §1 — TriggerBuild как терминальная user-точка, за которой следует failure, о котором юзер не узнаёт синхронно.
 
-## Concrete UX finding
+## 4. Деньги
 
-**No new finding survives cross-checking against existing memory.** The two
-candidate signals both resolve to findings already on record:
+Все строки `payments` (9 всего, вся история):
 
-1. **67% of this window's "new users" are farm-wave bot signups whose entire
-   audit trail is bare SessionStart pings** → matches
-   `project_signup_farm_wave_pollutes_funnel.md` exactly (same window,
-   confirmed with individual timestamp checks this cycle).
-2. **A handful of pre-2026-08-14 chat sessions (including 2 real, non-farm
-   users) have `agent_chat_messages` rows with no matching
-   `AgentChatUserMessage` audit row** → matches
-   `project_audit_events_silently_drops_rows.md` (bug fixed in `bff73b02` on
-   2026-08-14; every post-fix case in this cohort is a clean 1:1 match,
-   confirming the fix holds).
+| id | org_id | status | amount | yk_payment_id | payment_method | payer_org_name/email | created_at |
+|---|---|---|---|---|---|---|---|
+| 37a8d276 | dada | **succeeded** | 990 | 31f6cafd... | — | (пусто) | 2026-07-25 |
+| 272512f3 | dada | canceled | 990 | — | — | — | 2026-08-13 |
+| e7b9a4d0 | artempro2021@bk.ru | canceled | 990 | — | — | artempro2021@bk.ru | 2026-08-14 |
+| b0ff5c9c | artempro2021@bk.ru | canceled | 2900 | — | — | artempro2021@bk.ru | 2026-08-14 |
+| 1671e4a8 | artempro2021@bk.ru | canceled | 2900 | — | — | artempro2021@bk.ru | 2026-08-15 |
+| eb4c8e48 | dada | canceled | 990 | — | — | sandbox-test@dada-tuda.ru | 2026-08-18 |
+| a295a6e6 | dada | canceled | 990 | 321670d8... | — | alexkekiy@dada-tuda.ru | 2026-08-18 |
+| 6ad2e12d | dada | canceled | 990 | 321670da... | — | alexkekiy@dada-tuda.ru | 2026-08-18 |
+| 25f07e96 | dada | **pending** | 2900 | **NULL** | **invoice** | ООО "ДАДА ДЕВЕЛОПМЕНТ" (payer_inn=7807402712, invoice=INV-2026-00002) | 2026-08-19 |
 
-## Backlog
+**Реальный внешний платящий клиент: НЕТ.** Единственный `succeeded` (37a8d276, 990₽, 2026-07-25) — org_id='dada', пустой customer_email, пустой payer_inn — по всем признакам внутренний/тестовый платёж владельца, не сторонний клиент. Остальные внешние попытки (artempro2021@bk.ru — 3 штуки) все `canceled`.
 
-**Nothing filed.** Both signals found this cycle are corroboration of
-existing findings, not new ones:
-- Farm-wave dominance of the 30-day new-user window → cite
-  `project_signup_farm_wave_pollutes_funnel.md`.
-- Pre-fix AgentChatUserMessage audit gaps for 2 real users → cite
-  `project_audit_events_silently_drops_rows.md` (already fixed 2026-08-14,
-  post-fix data in this same cohort confirms the fix).
+**Новый `pending` без `yk_payment_id` (25f07e96, создан 2026-08-19 21:01, ПОСЛЕ фикса 3d6379f9 от 2026-08-15 16:57):** проверил сигнатуру против закрытого бага — НЕ совпадает. Закрытый баг = `pending AND yk_payment_id IS NULL AND payer_inn IS NULL` (карточный чекаут без юрлица). Эта строка имеет `payment_method='invoice'`, `payer_inn` ЗАПОЛНЕН, `payer_org_name` = собственное юрлицо Dada Development — это счёт-инвойс-флоу (банковский перевод), где `yk_payment_id` пуст ПО ДИЗАЙНУ (не через ЮKassa). Регрессии закрытого бага нет. Но: pending висит уже 2 дня без движения — если это тестовый прогон инвойс-флоу, он не завершён; если реальный — тоже стоит проверить, кто должен был подтвердить оплату.
 
-## Structural audit gap (task item 5)
+## 5. UX-вывод / беклог
 
-No *currently live* structural gap was found for `AgentChatUserMessage` —
-every message sent by a real user after the 2026-08-14 fix has a matching
-audit row (verified: michaelharlam 12/12, artempro2022 9/9).
+**Кандидат №1 (сильнейший, подтверждён и цепочкой §1, и графом §3b):** ошибка сборки `dockerfile_build_failed: npm install` не даёт юзеру достаточно контекста, чтобы понять причину — юзер трижды повторил идентичный неудачный билд и параллельно завёл БД (не связанную с ошибкой), т.е. диагностировал неправильно, потратил ~11 минут и ушёл. Это тот же паттерн, что топ терминальная точка `TriggerBuild`(4 юзера из 16 "сдавшихся" за 60д) — юзер жмёт билд и не возвращается, потому что не видит фейл синхронно/понятно.
 
-The one gap that **is** structural and current by design, not by bug: only
-the user's own chat turn is audited (`AgentChatUserMessage`, single call site
-`backend/internal/api/agent_chat.go:1374`, immediately after the message
-insert at `agent_chat.go:1373`). The assistant's answer and any tool calls
-the agent makes in the same turn are written to `agent_chat_messages` (roles
-`assistant`, `tool`) but have **no audit_events counterpart at all** — see the
-insert call sites at `agent_chat.go:286` (assistant) and `agent_chat.go:284`
-(tool), neither of which is followed by any `recordAudit*` call. This is
-intentional per the comment at `agent_chat.go:428-434` ("only approve and
-decline ever reached audit_events" before this fix, extended to cover the
-user's own message but not the model's response). If "did the assistant
-actually answer, or error out silently" ever needs to be path-analyzable from
-audit_events alone, the insert helper for the terminal `assistant` message at
-`agent_chat.go:1435` (and the confirm-flow one at `agent_chat.go:1851`) is
-the nearest call site to add a matching audit row — no such row exists today.
+Правка: в UI билд-лога/уведомления показывать хвост реального `npm error` (не только generic `dockerfile_build_failed`), и/или присылать push/email-уведомление о падении билда сразу, а не полагаться на то что юзер вернётся и посмотрит `ViewBuildLogs`. Смотреть код рендера ошибки билда в консоли: `frontend` компонент карточки билда/лога (искать по `fail_reason`/`dockerfile_build_failed` в `frontend/`) — не успел найти точный file:line в этом разборе, это следующий шаг для dada-engineer.
+
+**Кандидат №2 (готовый code-level фикс):** `agent_chat.go:1374` — хук `agentChatRecordUserMessageAudit` подключён, но 26% chat-сообщений всё равно не долетают до `audit_events` (50 vs 37 за 08-07..08-20), подтверждая живую дыру `recordAuditAsync` (memory `project_audit_events_silently_drops_rows.md`). Беклог-пункт: сделать запись `AgentChatUserMessage` (и остальных `recordAuditAsync`-вызовов) синхронной или с retry/dead-letter вместо fire-and-forget — иначе граф пути в §3 систематически недооценивает chat-путь как способ ухода/жалобы (пример: юзер `keycloak.local` написал "за что списали 2900? нужен акт" в чат — это billing-жалоба, которая НЕ попала в audit вообще, только в chat-таблицу).
+
+**Кандидат №3 (наблюдение, не блокер):** 60% новых сигнапов за 30д — ботоволна 08-08 (уже задокументирована), реальных новых людей за последний цикл — 1 (§1). Воронку/конверсию считать нужно за вычетом волны, иначе знаменатель врёт (уже известное правило `feedback_admin_numbers_business_meaning` + `project_signup_farm_wave_pollutes_funnel.md`).
