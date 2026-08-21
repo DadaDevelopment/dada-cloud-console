@@ -1392,6 +1392,11 @@ definitions:
       image:
         type: string
     type: object
+  api.updateAppPortRequest:
+    properties:
+      port:
+        type: integer
+    type: object
   api.updateAppProfileRequest:
     properties:
       profile:
@@ -9911,6 +9916,69 @@ paths:
       summary: Start the YooKassa payments connect flow for an app
       tags:
       - payments
+  /projects/{projectId}/environments/{envId}/apps/{appName}/port:
+    patch:
+      consumes:
+      - application/json
+      description: Changes the container port the app's service routes traffic to.
+        Fixes an app stuck behind a wrong framework-autodetected port (permanent 502).
+        Synchronous; always enqueues an immediate re-render of the app's current image
+        in the same transaction as the config write, so the fix reaches the running
+        pods right away. The response includes the queued operation when one was queued.
+      operationId: updateAppPort
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: New port
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.updateAppPortRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Change an app's container port
+      tags:
+      - app
   /projects/{projectId}/environments/{envId}/apps/{appName}/profile:
     patch:
       consumes:

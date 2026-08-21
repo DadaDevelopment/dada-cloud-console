@@ -12065,6 +12065,95 @@ const docTemplate = `{
                 }
             }
         },
+        "/projects/{projectId}/environments/{envId}/apps/{appName}/port": {
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Changes the container port the app's service routes traffic to. Fixes an app stuck behind a wrong framework-autodetected port (permanent 502). Synchronous; always enqueues an immediate re-render of the app's current image in the same transaction as the config write, so the fix reaches the running pods right away. The response includes the queued operation when one was queued.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "app"
+                ],
+                "summary": "Change an app's container port",
+                "operationId": "updateAppPort",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "App name",
+                        "name": "appName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "New port",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.updateAppPortRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/environments/{envId}/apps/{appName}/profile": {
             "patch": {
                 "security": [
@@ -23178,6 +23267,14 @@ const docTemplate = `{
             "properties": {
                 "image": {
                     "type": "string"
+                }
+            }
+        },
+        "api.updateAppPortRequest": {
+            "type": "object",
+            "properties": {
+                "port": {
+                    "type": "integer"
                 }
             }
         },

@@ -1547,6 +1547,195 @@ func (h *Handler) UpdateAppStartCommand(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+type updateAppPortRequest struct {
+	Port int `json:"port"`
+}
+
+// UpdateAppPort changes the container port a running app's service routes
+// traffic to, so an app whose framework autodetect picked the wrong default
+// (backend/internal/frameworkports/ports.go -- vite:4173, nextjs:3000,
+// fallback 8080) can be pointed at the port the process actually listens on
+// without recreating the app. Before this endpoint there was no lever for it
+// at all: CreateApp bakes the detected port into the service's TargetPort
+// once, and a wrong guess left the app permanently 502ing with nothing the
+// user could do inside the product (the affiliate-site app in
+// a5-testuser-ccea53c1-prod is the live case -- targetPort 4173 against a
+// process on 3000).
+//
+// The value is written to resource_snapshots.summary_json under "port" --
+// the same field gitops-agent's move_app.go and doDeployImageVersion both
+// read (deployPortAndWorker) to set renderer.AppSpec.Port, which
+// RenderAppValues renders as values.yaml's ServicePort. There is no durable
+// git_repos column for port the way start-command has one for
+// start_command: CreateApp's only other source of a port is the
+// framework-default computed at creation time, so the snapshot is the sole
+// record and this write is authoritative going forward.
+//
+// Unlike start-command's redeploy, which is opt-in because a plain config
+// edit must not force a re-render out from under an app the console does
+// not fully own (see UpdateAppStartCommand's doc comment), a port fix is
+// useless without one: the whole point is repairing a service that is
+// already sending traffic to the wrong container port, so this endpoint
+// always enqueues the same DeployImageVersion re-render UpdateAppStartCommand
+// uses for its opt-in redeploy, carrying the app's CURRENT image, inside the
+// SAME transaction as the config write. Apps with no deployed image yet are
+// skipped the same way -- there is nothing to redeploy -- and the port write
+// still succeeds so the value takes effect on the app's first deploy.
+//
+// Worker apps have no HTTP service (worker=true clears the port at deploy
+// time regardless of what is stored -- see deployPortAndWorker) so changing
+// their port is rejected rather than silently accepted and then ignored by
+// the renderer.
+//
+// @ID          updateAppPort
+// @Summary     Change an app's container port
+// @Description Changes the container port the app's service routes traffic to. Fixes an app stuck behind a wrong framework-autodetected port (permanent 502). Synchronous; always enqueues an immediate re-render of the app's current image in the same transaction as the config write, so the fix reaches the running pods right away. The response includes the queued operation when one was queued.
+// @Tags        app
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string                  true "Project UUID"
+// @Param       envId     path     string                  true "Environment UUID"
+// @Param       appName   path     string                  true "App name"
+// @Param       body      body     updateAppPortRequest    true "New port"
+// @Success     200       {object} map[string]interface{}
+// @Failure     400       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/apps/{appName}/port [patch]
+func (h *Handler) UpdateAppPort(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	envID, err := uuid.Parse(c.Param("envId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	appName := c.Param("appName")
+
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		return
+	}
+	if !canWrite(role) {
+		respondForbidden(c)
+		return
+	}
+	if !h.requireK8sRuntime(c, projectID, envID) {
+		return
+	}
+
+	var req updateAppPortRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondErrorCode(c, http.StatusBadRequest, "invalid_body", err.Error())
+		return
+	}
+	if req.Port < 1 || req.Port > 65535 {
+		respondErrorCode(c, http.StatusBadRequest, "invalid_port", "port must be between 1 and 65535")
+		return
+	}
+
+	ctx := c.Request.Context()
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to update app")
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var summaryRaw []byte
+	err = tx.QueryRow(ctx,
+		`SELECT summary_json FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3
+		 FOR UPDATE`,
+		projectID, envID, appName,
+	).Scan(&summaryRaw)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to load app")
+		return
+	}
+
+	var cur map[string]any
+	_ = json.Unmarshal(summaryRaw, &cur)
+	if worker, _ := cur["worker"].(bool); worker {
+		respondErrorCode(c, http.StatusBadRequest, "app_is_worker", "worker apps have no HTTP port to change")
+		return
+	}
+	cur["port"] = req.Port
+	updatedJSON, err := json.Marshal(cur)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to marshal snapshot")
+		return
+	}
+	if _, err = tx.Exec(ctx,
+		`UPDATE resource_snapshots SET summary_json = $1
+		 WHERE project_id = $2 AND environment_id = $3 AND kind = 'App' AND name = $4`,
+		updatedJSON, projectID, envID, appName,
+	); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to update app")
+		return
+	}
+
+	var redeployOp *models.Operation
+	if image, imgErr := h.lastDeployedImage(ctx, tx, projectID, envID, appName); imgErr == nil && image != "" {
+		redeployOp, err = enqueueRedeployOp(ctx, tx, claims.UserID, projectID, envID, appName, image)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to queue redeploy")
+			return
+		}
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to update app")
+		return
+	}
+
+	auditMetadata := map[string]string{"port": strconv.Itoa(req.Port)}
+	message := "Port updated; takes effect on the app's next deploy"
+	if redeployOp != nil {
+		auditMetadata["redeploy_operation_id"] = redeployOp.ID.String()
+		message = "Port updated; redeploy queued"
+	} else {
+		auditMetadata["redeploy_skipped_reason"] = "no_deployed_image"
+	}
+
+	h.recordAudit(ctx, claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		Action:        "UpdateAppPort",
+		ResourceKind:  "App",
+		ResourceName:  appName,
+		Outcome:       auditOutcomeSuccess,
+		Metadata:      auditMetadata,
+	})
+
+	resp := gin.H{
+		"port":    req.Port,
+		"message": message,
+	}
+	if redeployOp != nil {
+		resp["operation"] = redeployOp
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
 // quantityBytes converts a restricted k8s quantity (Mi/Gi/Ti, validated by
 // volumeSizeRe) to a byte count for grow-only comparisons. It returns 0 for any
 // value that does not match the expected shape.
