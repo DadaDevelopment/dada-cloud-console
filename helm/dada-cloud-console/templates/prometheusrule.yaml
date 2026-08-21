@@ -116,8 +116,13 @@ spec:
         # loudly. The rules below cover the two ways it fails quietly: the row
         # goes pending and nothing ever moves it (dead webhook, dead sweeper),
         # or the sweeper is the only thing moving it (leaking webhook path).
+        # stage="awaiting_invoice" is excluded on purpose: a legal-entity invoice
+        # is pending with no yk_payment_id BY DESIGN and settles against a bank
+        # statement over a corporate payment cycle, so it crosses any
+        # card-checkout threshold while nothing is wrong. Its own timeout is the
+        # sweeper's pendingInvoiceAbandonAfter (14 days), not this alert.
         - alert: DadaPaymentStuckPending
-          expr: max by (stage) (dada_payments_pending_age_seconds) > {{ .Values.metrics.alerts.paymentStuckSeconds }}
+          expr: max by (stage) (dada_payments_pending_age_seconds{stage!="awaiting_invoice"}) > {{ .Values.metrics.alerts.paymentStuckSeconds }}
           for: 10m
           # The oldest pending row only gets older, so this cannot flap while
           # the incident lasts; the hold covers the gap between the row being
