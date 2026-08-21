@@ -82,6 +82,24 @@ const appSnapshotFreshnessWindow = "10 minutes"
 // -- so a wedged prober reads as blindness rather than as a wave of healthy apps.
 const liveURLProbeFreshnessWindow = 30 * time.Minute
 
+// liveURLNeverHTTPMinAge is the age resource_snapshots.first_seen_at (the
+// resource's own immutable birth stamp, migration 049) must clear before a
+// row that has never once answered HTTP is allowed to leave Dead for
+// NeverHTTP. It exists to keep two very different failures from collapsing
+// into one bucket: an app with no app_url_http_seen row is EITHER a bot that
+// was never a web app (fanvk, sevarateambot -- both weeks old, long-lived,
+// never intended to answer HTTP) OR a real web app that has been broken
+// since the moment it was created and has therefore never once answered
+// either. The panel is the owner's only inventory of what is broken, so the
+// second case must stay red -- a week-old app still showing dead-from-birth
+// is exactly the outage this panel exists to surface, not noise to file
+// away next to the long-lived bots. Seven days is chosen because every
+// worker-shaped app measured on prod 2026-08-15 had been alive for weeks,
+// while a real deploy-time failure is expected to be caught and fixed on the
+// order of hours to days -- a week of silence with zero HTTP responses is
+// long past the point where "still building" is a plausible excuse.
+const liveURLNeverHTTPMinAge = 7 * 24 * time.Hour
+
 // internalOwnerEmailPrefix and internalOwnerEmailSuffix are the two shapes of
 // an in-house owner email: the operator's own address (any alexkekiy@... form)
 // and any @dada-tuda.ru staff mailbox. Everyone else is an external customer.
@@ -244,12 +262,35 @@ type overviewMoney struct {
 // line. Dead == DeadExternal + DeadInternal and Checked == CheckedExternal +
 // CheckedInternal always hold; the aggregate fields are kept for backward
 // compatibility with existing callers.
+//
+// NeverHTTP is a row that isDeadProbeResult would otherwise sentence to Dead,
+// but which app_url_http_seen (see hasServedHTTP, app_url_watcher.go) has
+// never once seen answer HTTP AND whose resource_snapshots.first_seen_at is
+// older than liveURLNeverHTTPMinAge (7 days). summary_json.worker=true is a
+// declaration the owner or the framework default made at create time;
+// app_url_http_seen is an observation gitops-agent writes on every passing
+// probe. They are kept apart on purpose: fanvk and sevarateambot (long-lived
+// Telegram bots with no listening socket, measured 2026-08-15) were created
+// without the worker flag, so folding NeverHTTP into Workers would hide that
+// the flag itself is wrong for them. The age gate exists because "never
+// answered HTTP" alone cannot tell a bot that was never a web app apart from
+// a real web app that has been broken since the moment it was born and has
+// therefore also never answered -- collapsing both into NeverHTTP would hide
+// a genuine day-one outage from the one inventory the owner has. A row only
+// ever lands in NeverHTTP, never in Dead or DeadApps -- but only when
+// app_url_http_seen is actually reachable for it and the row has cleared the
+// age gate; see overviewLiveURLs for the degrade-to-Dead rule when the
+// lookup is not reachable, and for the young-row case, which stays Dead. An
+// app that DID once answer and has since gone dark keeps landing in Dead and
+// DeadApps unconditionally, regardless of age, because that is a real
+// outage, not an app that was never a web app.
 type overviewLiveURLs struct {
 	Checked         int               `json:"checked"`
 	OK              int               `json:"ok"`
 	Dead            int               `json:"dead"`
 	AppResponded    int               `json:"app_responded"`
 	Workers         int               `json:"workers"`
+	NeverHTTP       int               `json:"never_http"`
 	Stale           int               `json:"stale"`
 	DeadApps        []overviewDeadApp `json:"dead_apps"`
 	DeadExternal    int               `json:"dead_external"`
@@ -1066,6 +1107,28 @@ const overviewDeadAppCap = 20
 // AppResponded. DeadApps only ever names Dead rows --
 // an app answering 404/401/etc is not in it -- sorted external-owner-first
 // (see isInternalOwnerEmail) and capped at overviewDeadAppCap.
+//
+// A row that would otherwise be Dead is reclassified as NeverHTTP only when
+// BOTH hold: app_url_http_seen (LEFT JOIN environments e, LEFT JOIN
+// app_url_http_seen ahs ON ahs.namespace = e.namespace AND ahs.app_name =
+// rs.name) has no row for it -- this app has never once answered an HTTP
+// probe -- AND rs.first_seen_at is older than liveURLNeverHTTPMinAge (7
+// days). Age alone is not the gate and never-served alone is not the gate;
+// both are required because "never answered HTTP" by itself cannot tell a
+// bot that was never a web app (fanvk, sevarateambot -- weeks old) apart
+// from a real web app broken from birth, which has also, by definition,
+// never answered. A young row that has never served HTTP stays Dead: it is
+// either a brand-new bot too young to trust yet or a same-day deploy
+// failure, and either way the owner must see it while it is fresh, not have
+// it silently reclassified out of the one inventory that would show it. This
+// is a re-labeling of a subset of what the isDeadProbeResult predicate above
+// already flags as dead; it must never widen which statuses count as dead in
+// the first place. If the join cannot resolve a namespace for the row
+// (rs.environment_id has no matching environments row), ever-served-http is
+// treated as true and the row stays Dead regardless of age -- the same
+// fail-loud-not-silent rule hasServedHTTP applies to its own database
+// errors, so a lookup this handler cannot answer never quietly clears a real
+// alert.
 func (h *Handler) overviewLiveURLs(ctx context.Context) (overviewLiveURLs, error) {
 	out := overviewLiveURLs{DeadApps: []overviewDeadApp{}}
 
@@ -1075,10 +1138,15 @@ func (h *Handler) overviewLiveURLs(ctx context.Context) (overviewLiveURLs, error
 		       COALESCE(rs.summary_json->>'http_status', ''),
 		       COALESCE(rs.summary_json->>'http_reason', ''),
 		       COALESCE(rs.summary_json->>'http_checked_at', ''),
-		       COALESCE(rs.summary_json->>'worker', '') = 'true'
+		       COALESCE(rs.summary_json->>'worker', '') = 'true',
+		       CASE WHEN e.namespace IS NULL THEN true ELSE (ahs.namespace IS NOT NULL) END,
+		       rs.first_seen_at
 		FROM resource_snapshots rs
-		JOIN projects p     ON p.id = rs.project_id
-		LEFT JOIN users u   ON u.id = p.owner_id
+		JOIN projects p            ON p.id = rs.project_id
+		LEFT JOIN users u          ON u.id = p.owner_id
+		LEFT JOIN environments e   ON e.id = rs.environment_id
+		LEFT JOIN app_url_http_seen ahs
+		       ON ahs.namespace = e.namespace AND ahs.app_name = rs.name
 		WHERE rs.kind = 'App'
 		  AND COALESCE(rs.summary_json->>'url', '') <> ''
 		  AND rs.summary_json->>'url_status' = 'active'`,
@@ -1092,8 +1160,9 @@ func (h *Handler) overviewLiveURLs(ctx context.Context) (overviewLiveURLs, error
 	now := time.Now()
 	for rows.Next() {
 		var name, projectName, ownerEmail, url, httpStatusRaw, httpReason, checkedAtRaw string
-		var worker bool
-		if err := rows.Scan(&name, &projectName, &ownerEmail, &url, &httpStatusRaw, &httpReason, &checkedAtRaw, &worker); err != nil {
+		var worker, everServedHTTP bool
+		var firstSeenAt time.Time
+		if err := rows.Scan(&name, &projectName, &ownerEmail, &url, &httpStatusRaw, &httpReason, &checkedAtRaw, &worker, &everServedHTTP, &firstSeenAt); err != nil {
 			return out, err
 		}
 
@@ -1124,6 +1193,11 @@ func (h *Handler) overviewLiveURLs(ctx context.Context) (overviewLiveURLs, error
 
 		if !isDeadProbeResult(httpStatus, httpReason) {
 			out.AppResponded++
+			continue
+		}
+
+		if !everServedHTTP && now.Sub(firstSeenAt) >= liveURLNeverHTTPMinAge {
+			out.NeverHTTP++
 			continue
 		}
 
