@@ -2791,3 +2791,15 @@ inode против 65536 при старом дефолте. Ровно ×4. PVC
 - metric: `sevarateambot` при `ever_served_http=f` уходит из `dead_apps` в `never_http` после пересечения гейта ~2026-08-23 11:52 UTC. Если НЕ ушёл — вот это и есть настоящий баг.
 - measure_after: 2026-08-24
 - status=open
+
+### E192 — вырастет ли приложение теперь, когда потолок выше стартового профиля (sess-0821i, 2026-08-21)
+- hypothesis: H11
+- shipped: 2026-08-21, `b8b42b23` (argo-infra `helm/project-defaults/values.yaml`, `maxMemory` 2Gi -> 4Gi, ветка console-migration) + `6ea67d9b` (dada-cloud, текст письма по коду отказа)
+- гипотеза: автоскейл памяти не «редко срабатывает» — он был мёртв у всей платформы, потому что `LimitRange.max.memory=2Gi` совпадал с лимитом профиля `large` (`mem 1Gi/2Gi`), с которого приложения стартуют, а `growEnvelope` берёт более тесный из LimitRange и платформенного капа 16Gi. Голодающему приложению вместо гигабайта уходило письмо «вы на максимальном профиле, ищите утечку в своём коде».
+- baseline [live, 2026-08-21]: `fonbet-value` — 2 OOMKilled за 2ч14м, `audit_events` `AutoscaleApp` outcome=failure, `refusal:"limitrange_capped"`, ratio 1.94, envelope `cpu 500m/2, mem 1Gi/2Gi`, при `ResourceQuota` 2Gi из 12Gi. Перебор ~40 пользовательских namespace: `max.memory=2Gi` у ВСЕХ. Успешных `AutoscaleApp` по памяти выше 2Gi за всю историю — ноль.
+- source_of_truth: `audit_events` action=`AutoscaleApp` — доля outcome=success против outcome=failure с `refusal:"limitrange_capped"`, и фактический `to_envelope`.
+- metric: (а) появляется хотя бы одна строка `AutoscaleApp` outcome=success с `to_envelope` памяти выше 2Gi; (б) `refusal:"limitrange_capped"` перестаёт быть причиной отказа ниже 4Gi; (в) `fonbet-value` перестаёт ловить OOMKilled.
+- measure_after: 2026-08-23
+- M2-доказательство: живое, не сборка. `helm template` -> `max.memory: 4Gi` при сохранённом per-project `maxStorage: 20Gi`; после синка Argo `kubectl get limitrange default-limits` вернул `{"cpu":"4","memory":"4Gi"}` в ДВУХ разных пользовательских namespace (`artemmendeleev-gmail-com-prod`, `sevarabot-prod`) — то есть доехало не точечно, а классом. Тест письма сначала УПАЛ на собственном новом тексте, RED показан выводом, затем GREEN; `probe-main-build.sh` зелёный на `origin/main = 6ea67d9b`.
+- ЧЕСТНЫЙ ПРЕДЕЛ: под `fonbet-value` всё ещё несёт `limits.memory: 2Gi` в своём спеке — потолок поднят, рост ещё не произошёл. Слот кулдауна взят в 18:31 на 6 часов, так что раньше ~00:31 UTC роста не будет по дизайну. Отрицательный (а) читать как «есть вторая стена», а НЕ как «потолок не поднялся»: последнее опровергается kubectl выше. (в) при знаменателе в одно приложение не отличает «хватило 4Gi» от «юзер сам что-то поменял».
+- status=open
