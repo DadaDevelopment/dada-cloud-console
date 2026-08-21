@@ -5966,3 +5966,26 @@ ABORTED, ни одна не начиналась). Прод на `659e9f53`, в�
 несёт `limits.memory: 2Gi` в собственном спеке, слот кулдауна взят в 18:31 на
 6 часов. Замер следующего цикла: строка `AutoscaleApp` outcome=success с
 `to_envelope` выше 2Gi в `audit_events` по этому аппу.
+
+## sess-0821j — порт аппа не ехал за сменой фреймворка (задача от владельца)
+
+Владелец: «в логе другой порт, они поменяйли фреймворк одним из коммитов а мы
+не подхватили» — affiliate-site в a5-testuser-ccea53c1.
+
+Grounded: сборка от 2026-08-19 23:06 принесла в пейлоаде `framework=nextjs,
+port=3000`; `doDeployImageVersion` брал фреймворк из пейлоада, а порт — из
+снапшота (4173, замороженного на CreateApp 08-18). В снапшоте осела пара
+`nextjs` + `4173`. Апп был жив только потому, что `values.yaml` поправили
+руками (7f892eeb в argo-infra, servicePort 3000) — следующий деплой из консоли
+перерендерил бы 4173 и уронил его в 502.
+
+Отгружено 1502e67a: `port_source` (`user` | `framework_default`) в
+summary_json, CreateApp/UpdateAppPort его пишут, `adoptBuildDetectedPort`
+пускает детект сборки только на угаданный порт. Легаси-строки без поля —
+только если порт совпадает с дефолтом из таблицы фреймворков. RED показан
+(заглушка `return 0, false` роняет TestAdoptBuildDetectedPortFollowsAFrameworkChange),
+затем GREEN: renderer + worker пакеты ok.
+
+Живой снапшот affiliate-site выровнен: port 4173 → 3000, port_source
+framework_default. Заведено 0459 (git_repos.framework_override — третье,
+устаревшее мнение о фреймворке).
