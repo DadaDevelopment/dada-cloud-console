@@ -21,11 +21,17 @@ export const shell: Messages = {
     en: "MCP server: drive the cloud from an AI agent",
   },
   "shell.palette.docs": { ru: "Документация", en: "Docs" },
+  "shell.palette.app": { ru: "Приложение", en: "App" },
+  "shell.palette.searching": { ru: "Ищем…", en: "Searching…" },
 
   "shell.project.select": { ru: "Выберите проект", en: "Select project" },
   "shell.project.none": { ru: "Нет проектов", en: "No projects" },
   "shell.project.viewAll": { ru: "Все проекты →", en: "View all projects →" },
   "shell.project.create": { ru: "Создать проект", en: "Create project" },
+  "shell.project.filter": { ru: "Фильтр проектов…", en: "Filter projects…" },
+  "shell.project.noMatches": { ru: "Ничего не найдено", en: "No matches" },
+  "shell.project.appCount": { ru: "прил.", en: "apps" },
+  "shell.project.emptyGroup": { ru: "Без приложений", en: "No apps" },
 
   "shell.nav.openMenu": { ru: "Открыть меню", en: "Open menu" },
   "shell.nav.closeMenu": { ru: "Закрыть меню", en: "Close menu" },

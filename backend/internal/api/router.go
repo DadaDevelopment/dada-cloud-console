@@ -407,6 +407,9 @@ func SetupRouterWithHandler(pool *pgxpool.Pool, cfg *config.Config) (*gin.Engine
 		// Platform recovery
 		api.GET("/recovery-prompt", h.GetRecoveryPrompt)
 
+		// Cross-project search
+		api.GET("/search", h.Search)
+
 		// Projects
 		api.GET("/projects", h.ListProjects)
 		api.POST("/projects", h.CreateProject)

@@ -21005,6 +21005,51 @@
                 }
             }
         },
+        "/search": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Case-insensitive substring search over the projects the caller can access and the apps inside them. Returns at most 20 hits per group. Queries shorter than 2 characters return empty groups.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "project"
+                ],
+                "summary": "Search projects and apps by name",
+                "operationId": "search",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "search term (min 2 characters)",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with projects and apps arrays",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/solutions": {
             "get": {
                 "security": [

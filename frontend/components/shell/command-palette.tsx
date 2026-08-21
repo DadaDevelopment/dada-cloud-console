@@ -1,7 +1,9 @@
 "use client";
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useProjectContext } from "@/lib/project-context";
+import { searchApi } from "@/lib/api";
+import type { SearchAppHit, SearchProjectHit } from "@/lib/types";
 import { visibleNavItems, projectHref, type IconName } from "@/lib/resources";
 import { useT } from "@/lib/i18n/console/context";
 import { ResourceIcon } from "./icons";
@@ -22,11 +24,38 @@ interface Command {
   run: () => void;
 }
 
+/** Debounce before the palette asks the server, in milliseconds. */
+const SEARCH_DEBOUNCE_MS = 200;
+
+/** Minimum query length the search endpoint answers. */
+const SEARCH_MIN_CHARS = 2;
+
 /**
- * ⌘K / Ctrl+K command palette. A fast keyboard path to any project or — when
- * inside a project — any resource section, mirroring the GCP `/` search and AWS
- * search bar. Client-side over already-loaded lists; a server-backed search can
- * slot in later behind the same UI.
+ * The last answered search, tagged with the query it answers. Keeping the query
+ * alongside the hits lets the palette tell "results for what you typed" from
+ * "results for what you typed three keystrokes ago" without clearing state from
+ * inside the effect.
+ */
+interface SearchResult {
+  query: string;
+  apps: SearchAppHit[];
+  projects: SearchProjectHit[];
+}
+
+const EMPTY_APPS: SearchAppHit[] = [];
+const EMPTY_PROJECTS: SearchProjectHit[] = [];
+
+/**
+ * ⌘K / Ctrl+K command palette. A fast keyboard path to any project, any app in
+ * any project, or — when inside a project — any resource section, mirroring the
+ * GCP `/` search and AWS search bar.
+ *
+ * Projects and nav sections are matched client-side over already-loaded lists.
+ * Apps cannot be: the console only ever loads the app list of the project and
+ * environment currently open, so "where does app X live?" was unanswerable and
+ * an admin looking at dozens of projects had to open them one by one. Typing two
+ * characters therefore also fires a debounced /search call, whose hits are
+ * merged in below the local ones.
  */
 export function CommandPalette({ initialOpen = false }: { initialOpen?: boolean }) {
   const router = useRouter();
@@ -35,11 +64,14 @@ export function CommandPalette({ initialOpen = false }: { initialOpen?: boolean 
   const [open, setOpen] = useState(initialOpen);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
+  const [result, setResult] = useState<SearchResult | null>(null);
+  const seqRef = useRef(0);
 
   const close = useCallback(() => {
     setOpen(false);
     setQuery("");
     setActive(0);
+    setResult(null);
   }, []);
 
   useEffect(() => {
@@ -53,6 +85,31 @@ export function CommandPalette({ initialOpen = false }: { initialOpen?: boolean 
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [close]);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (!open || q.length < SEARCH_MIN_CHARS) return;
+    const seq = ++seqRef.current;
+    const timer = setTimeout(() => {
+      searchApi
+        .query(q)
+        .then((res) => {
+          if (seqRef.current !== seq) return;
+          setResult({ query: q, apps: res.apps, projects: res.projects });
+        })
+        .catch(() => {
+          if (seqRef.current !== seq) return;
+          setResult({ query: q, apps: [], projects: [] });
+        });
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [query, open]);
+
+  const trimmed = query.trim();
+  const fresh = result && result.query === trimmed ? result : null;
+  const remoteApps = fresh?.apps ?? EMPTY_APPS;
+  const remoteProjects = fresh?.projects ?? EMPTY_PROJECTS;
+  const searching = open && trimmed.length >= SEARCH_MIN_CHARS && !fresh;
 
   const commands: Command[] = useMemo(() => {
     const cmds: Command[] = [];
@@ -85,11 +142,43 @@ export function CommandPalette({ initialOpen = false }: { initialOpen?: boolean 
     return cmds;
   }, [projectId, role, projects, router, t]);
 
+  const remoteCommands: Command[] = useMemo(() => {
+    const cmds: Command[] = [];
+    for (const a of remoteApps) {
+      const where = a.project_display_name || a.project_name;
+      const env = a.environment_name ? ` / ${a.environment_name}` : "";
+      const href = `/projects/${a.project_id}/apps/${encodeURIComponent(a.name)}${
+        a.environment_id ? `?env=${a.environment_id}` : ""
+      }`;
+      cmds.push({
+        id: `app-${a.project_id}-${a.environment_id}-${a.name}`,
+        label: a.name,
+        hint: `${t("shell.palette.app")} · ${where}${env}`,
+        icon: "apps",
+        run: () => router.push(href),
+      });
+    }
+    const known = new Set(projects.map((p) => p.id));
+    for (const p of remoteProjects) {
+      if (known.has(p.id)) continue;
+      cmds.push({
+        id: `remote-proj-${p.id}`,
+        label: p.display_name || p.name,
+        hint: t("shell.palette.project"),
+        run: () => router.push(`/projects/${p.id}`),
+      });
+    }
+    return cmds;
+  }, [remoteApps, remoteProjects, projects, router, t]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return commands.slice(0, 8);
-    return commands.filter((c) => c.label.toLowerCase().includes(q)).slice(0, 8);
-  }, [commands, query]);
+    const local = commands.filter((c) => c.label.toLowerCase().includes(q));
+    const localIds = new Set(local.map((c) => c.id));
+    const remote = remoteCommands.filter((c) => !localIds.has(c.id));
+    return [...local, ...remote].slice(0, 12);
+  }, [commands, remoteCommands, query]);
 
   if (!open) return null;
 
@@ -130,7 +219,9 @@ export function CommandPalette({ initialOpen = false }: { initialOpen?: boolean 
         />
         <ul className="max-h-80 overflow-y-auto py-1">
           {filtered.length === 0 ? (
-            <li className="px-4 py-6 text-center text-sm text-gray-500">{t("shell.palette.noMatches")}</li>
+            <li className="px-4 py-6 text-center text-sm text-gray-500">
+              {searching ? t("shell.palette.searching") : t("shell.palette.noMatches")}
+            </li>
           ) : (
             filtered.map((c, idx) => (
               <li key={c.id}>

@@ -16136,6 +16136,37 @@ paths:
       summary: Get the caller's platform-recovery prompt, if any
       tags:
       - recovery
+  /search:
+    get:
+      description: Case-insensitive substring search over the projects the caller
+        can access and the apps inside them. Returns at most 20 hits per group. Queries
+        shorter than 2 characters return empty groups.
+      operationId: search
+      parameters:
+      - description: search term (min 2 characters)
+        in: query
+        name: q
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with projects and apps arrays
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Search projects and apps by name
+      tags:
+      - project
   /solutions:
     get:
       description: Returns the catalog of open-source projects the console can deploy
