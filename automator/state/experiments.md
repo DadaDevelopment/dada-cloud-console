@@ -2693,3 +2693,14 @@ inode против 65536 при старом дефолте. Ровно ×4. PVC
 
 ### Долг замеров этого цикла — НЕ ЗАКРЫТ, помечен `unmeasured`
 Созревшие `status=open` (E73, E81, E93, E113, E115, E117, E118, E119, E120, E121, E123, E124, E125, E138, E149) в четвёртый цикл подряд НЕ замерены: их `source_of_truth` — прод-psql, kubectl или прод-HTTP, а машина цикла до прода не доходит. Это `unmeasured`, а не «чисто»: ни один из них нельзя читать как успех или провал. Причина и требуемое действие владельца — в `state/owner-actions.md` (эскалация B5 ниже).
+
+### E150 — карточка одобрения не должна предлагать то, что бэк отвергнет (sess-0821g, 2026-08-21)
+- hypothesis: H08
+- shipped: 2026-08-21, commit `3537b645` (backend `s3buckets.go`+`agent_chat.go`, frontend гард `agent-chat-required-args.ts`)
+- source_of_truth: прод-psql, `audit_events` где `action='CreateS3Bucket' AND outcome='failure'`, плюс доля юзеров с `AgentChatActionApproved`, за которым в течение минуты идёт `failure`.
+- baseline: 30д до фикса — `CreateS3Bucket` 8 success / 2 failure, ОБА failure = `missing_name`; один из них по живому юзеру (`michaelharlam@yandex.ru`, 08-20 10:44:06), после которого 25.5 часов и 9 сессий без единого write-действия.
+- metric: (а) число `CreateS3Bucket outcome=failure reason=missing_name` за 14д — ожидание 0; (б) число одобренных карточек, за которыми в минуту идёт `failure` любого инструмента — ожидание падения, поскольку гард теперь общий для 9 инструментов.
+- measure_after: 2026-09-04
+- M2-доказательство: RED карточки на точной форме юзера — `card offers an unnamed resource for approval: "Create an S3 storage bucket \"\" (bucket=\"dating-service-assets\") ..."`. RED хендлера — `status = 400, want 202; body={"error":"name is required"}`. GREEN — `go test ./...` backend exit 0 (real-DB риг 55432/console2), frontend `# pass 386 # fail 0` (было 374), `npx tsc --noEmit` exit 0.
+- ЧЕСТНЫЙ ПРЕДЕЛ: замер (а) сильный, но знаменатель крошечный (10 вызовов за 30д). Замер (б) — настоящая проверка гипотезы, и он же слабее: гард покрывает 9 инструментов из таблицы, а не все write-инструменты, и таблица ведётся руками. Если (б) не сдвинется, вывод «одобрение-в-отказ не было массовым», а не «фикс не работает».
+- status=open

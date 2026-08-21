@@ -1,14 +1,15 @@
 ---
 id: 0432
-status: open
+status: closed
 prio: P1
 stream: 3
 hypothesis: H08
 title: Agent-chat: карточка createS3Bucket с пустым name одобряется и мгновенно ловит 400 missing_name
 created: 2026-08-21
 sess: sess-0821g
-locked_by: sess-0821g
-locked_until: 2026-08-21T14:16Z
+closed_at: 2026-08-21
+closed_commit: 3537b645
+closed_note: Три полюса закрыты одним коммитом; RED карточки показан на точной форме args michaelharlam. Радиус: 1 живой юзер заблокирован 25.5ч, 2 failure из 10 CreateS3Bucket за 30д -- оба этот класс.
 ---
 Разбор аудита sess-0821g [live psql + code].
 
