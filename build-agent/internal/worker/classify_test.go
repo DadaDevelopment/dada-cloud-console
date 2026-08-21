@@ -130,6 +130,28 @@ func TestClassifyFailure(t *testing.T) {
 			wantDetail: "ERROR: failed to solve: process \"/bin/sh -c make\" did not complete successfully: exit code: 1",
 		},
 		{
+			name: "npm log-file trailer never outranks the real ENOENT cause (backlog 0455)",
+			console: "[2026-08-19T00:11:40.000Z] #12 [5/6] RUN npm install\n" +
+				"[2026-08-19T00:11:41.000Z] #12 1.100 npm error code ENOENT\n" +
+				"[2026-08-19T00:11:41.000Z] #12 1.100 npm error syscall open\n" +
+				"[2026-08-19T00:11:41.000Z] #12 1.100 npm error path /app/package.json\n" +
+				"[2026-08-19T00:11:41.000Z] #12 1.100 npm error enoent Could not read package.json: Error: ENOENT: no such file or directory, open '/app/package.json'\n" +
+				"[2026-08-19T00:11:41.000Z] #12 1.100 npm error A complete log of this run can be found in: /root/.npm/_logs/2026-08-19T00_11_41_100Z-debug-0.log\n" +
+				"[2026-08-19T00:11:41.000Z] #12 ERROR: process \"/bin/sh -c npm install\" did not complete successfully: exit code: 1\n" +
+				"[2026-08-19T00:11:42.000Z] ------\n" +
+				"[2026-08-19T00:11:42.000Z]  > [5/6] RUN npm install:\n" +
+				"[2026-08-19T00:11:42.000Z] 1.100 npm error code ENOENT\n" +
+				"[2026-08-19T00:11:42.000Z] 1.100 npm error syscall open\n" +
+				"[2026-08-19T00:11:42.000Z] 1.100 npm error path /app/package.json\n" +
+				"[2026-08-19T00:11:42.000Z] 1.100 npm error enoent Could not read package.json: Error: ENOENT: no such file or directory, open '/app/package.json'\n" +
+				"[2026-08-19T00:11:42.000Z] 1.100 npm error A complete log of this run can be found in: /root/.npm/_logs/2026-08-19T00_11_41_100Z-debug-0.log\n" +
+				"[2026-08-19T00:11:42.000Z] ------\n" +
+				"[2026-08-19T00:11:43.000Z] ERROR: failed to solve: process \"/bin/sh -c npm install\" did not complete successfully: exit code: 1\n" +
+				"Finished: FAILURE\n",
+			wantCode:   buildFailDockerfileBuild,
+			wantDetail: "[5/6] RUN npm install: npm error enoent Could not read package.json: Error: ENOENT: no such file or directory, open '/app/package.json'",
+		},
+		{
 			name:       "no error lines at all",
 			console:    "[2026-07-24T03:00:00.000Z] something odd\nFinished: FAILURE\n",
 			wantCode:   "",
