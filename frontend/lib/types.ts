@@ -1770,6 +1770,8 @@ export interface Build {
   updated_at: string;
   error_message?: string;
   fail_reason?: string;
+  /** Count of consecutive builds, ending with this one, that failed with the same `fail_reason` signature. Absent on older backends and on any non-failed build. */
+  repeat_count?: number;
 }
 
 export interface BuildLogFrame {
