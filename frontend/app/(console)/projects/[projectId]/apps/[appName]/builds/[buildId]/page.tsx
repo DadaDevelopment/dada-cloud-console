@@ -516,6 +516,13 @@ export default function BuildDetailPage() {
                 <div className="mt-1 space-y-2">
                   <p>{t("apps.builds.fail.reason.appDeleted")}</p>
                 </div>
+              ) : build.fail_reason === "missing_manifest" ? (
+                <div className="mt-1 space-y-2">
+                  <p>{t("apps.builds.fail.reason.missingManifest")}</p>
+                  {failureDetail ? (
+                    <p className="whitespace-pre-wrap break-words font-mono text-xs opacity-80">{failureDetail}</p>
+                  ) : null}
+                </div>
               ) : build.fail_reason === "dockerfile_build_failed" || build.fail_reason === "build_failed" ? (
                 <div className="mt-1 space-y-2">
                   <p>

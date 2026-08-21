@@ -130,7 +130,7 @@ func TestClassifyFailure(t *testing.T) {
 			wantDetail: "ERROR: failed to solve: process \"/bin/sh -c make\" did not complete successfully: exit code: 1",
 		},
 		{
-			name: "npm log-file trailer never outranks the real ENOENT cause (backlog 0455)",
+			name: "npm without a package.json is billed to the generated Dockerfile, not to the user (backlog 0455, 0462)",
 			console: "[2026-08-19T00:11:40.000Z] #12 [5/6] RUN npm install\n" +
 				"[2026-08-19T00:11:41.000Z] #12 1.100 npm error code ENOENT\n" +
 				"[2026-08-19T00:11:41.000Z] #12 1.100 npm error syscall open\n" +
@@ -148,8 +148,8 @@ func TestClassifyFailure(t *testing.T) {
 				"[2026-08-19T00:11:42.000Z] ------\n" +
 				"[2026-08-19T00:11:43.000Z] ERROR: failed to solve: process \"/bin/sh -c npm install\" did not complete successfully: exit code: 1\n" +
 				"Finished: FAILURE\n",
-			wantCode:   buildFailDockerfileBuild,
-			wantDetail: "[5/6] RUN npm install: npm error enoent Could not read package.json: Error: ENOENT: no such file or directory, open '/app/package.json'",
+			wantCode:   buildFailMissingManifest,
+			wantDetail: missingManifestNpmDetail,
 		},
 		{
 			name:       "no error lines at all",

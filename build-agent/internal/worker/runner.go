@@ -137,6 +137,42 @@ const frameworkUndetectedDetail = "could not determine the app's stack: no known
 // build/buildx step (a bad Dockerfile, missing base image, failed RUN, etc).
 const buildFailDockerfileBuild = "dockerfile_build_failed"
 
+// buildFailMissingManifest marks a build whose generated Dockerfile ran a
+// package manager against a repo that carries no manifest for it: `npm
+// install` with no package.json, `pip install -r` with no requirements.txt.
+//
+// It is not dockerfile_build_failed even though it fails inside the docker
+// build: the Dockerfile is OURS, generated from what detection believed the
+// stack to be, so "your Dockerfile broke" bills the failure to a file the
+// user never wrote. Either detection guessed wrong or the manifest lives
+// somewhere the template does not look, and both readings are ours to act on.
+// Its own code is also what makes the class countable -- on 2026-08-21 three
+// builds of one repo died here and no query could find them, because
+// dockerfile_build_failed is also every genuinely broken user Dockerfile.
+const buildFailMissingManifest = "missing_manifest"
+
+// missingManifestSignatures map the line a package manager prints when the
+// manifest is absent to the manifest the generated Dockerfile expected.
+var missingManifestSignatures = []struct{ signature, manifest, step string }{
+	{"Could not read package.json", "package.json", "npm install"},
+	{"Could not open requirements file", "requirements.txt", "pip install -r requirements.txt"},
+	{"go.mod file not found", "go.mod", "go build"},
+}
+
+// missingManifestDetail names the missing file and says whose Dockerfile ran,
+// because the user's next move differs by which of the two is true: add the
+// manifest, or tell us the stack was detected wrong.
+func missingManifestDetail(cause string) (string, bool) {
+	for _, sig := range missingManifestSignatures {
+		if strings.Contains(cause, sig.signature) {
+			return "the Dockerfile Dada generated for this app runs `" + sig.step +
+				"`, but the repo has no " + sig.manifest + " at its root -- add it, " +
+				"or the app's stack was detected wrong and needs a Dockerfile of your own", true
+		}
+	}
+	return "", false
+}
+
 // buildFailGitAuth marks a build that never got as far as reading the repo:
 // git could not authenticate to the remote.
 //
@@ -292,6 +328,9 @@ func classifyFailure(console string) (code string, detail string) {
 			(strings.Contains(line, "docker build") && strings.Contains(line, "exit code") && !strings.Contains(line, "exit code 0")) ||
 			(strings.Contains(line, "buildx") && strings.Contains(line, "exit code") && !strings.Contains(line, "exit code 0")) {
 			if cause := buildkitCause(lines, i); cause != "" {
+				if detail, ok := missingManifestDetail(cause); ok {
+					return buildFailMissingManifest, detail
+				}
 				return buildFailDockerfileBuild, cause
 			}
 			return buildFailDockerfileBuild, line
@@ -502,7 +541,7 @@ func pickCause(body []string) string {
 		clean = append(clean, line)
 	}
 	for i := len(clean) - 1; i >= 0; i-- {
-		if causeErrorRe.MatchString(clean[i]) {
+		if causeErrorRe.MatchString(clean[i]) && carriesDiagnostic(clean[i]) {
 			return clean[i]
 		}
 	}
@@ -510,6 +549,45 @@ func pickCause(body []string) string {
 		return clean[len(clean)-1]
 	}
 	return ""
+}
+
+// carriesDiagnostic reports whether an error line says anything beyond its own
+// diagnostic prefix.
+//
+// npm closes an error block with continuation lines that repeat the prefix and
+// add nothing -- `npm error enoent This is related to npm not being able to
+// find a file.` and then a bare `npm error enoent`. Both match causeErrorRe
+// through the prefix alone, and both sit BELOW the line that names the cause,
+// so picking the last matching line handed tarotreaderhimu@gmail.com the
+// string "npm error enoent" three times on 2026-08-21 while the real line --
+// "Could not read package.json" -- sat two rows above it. Judge the payload,
+// not the prefix: an empty payload is punctuation, and a payload that only
+// explains the tool's own vocabulary is guidance.
+func carriesDiagnostic(line string) bool {
+	payload := strings.TrimSpace(diagPrefixRe.ReplaceAllString(line, ""))
+	if payload == "" {
+		return false
+	}
+	for _, g := range diagnosticGuidance {
+		if strings.HasPrefix(payload, g) {
+			return false
+		}
+	}
+	return true
+}
+
+// diagPrefixRe matches the prefix a package manager stamps on every line of an
+// error block: the tool's name, its severity word, and (npm) a lowercase error
+// code such as `enoent` repeated on each continuation line.
+var diagPrefixRe = regexp.MustCompile(`^(?:npm (?:error|ERR!)|yarn error|pnpm ERR!)\s*(?:[a-z]+(?:\s+|$))?`)
+
+// diagnosticGuidance are payload openings that explain the tool rather than
+// the failure. Kept as a short list of observed phrases for the same reason
+// isAdvisoryLine is: these are fixed sign-offs of the tools we run, not an
+// attempt to enumerate everything that can break inside a build.
+var diagnosticGuidance = []string{
+	"This is related to",
+	"For help, run",
 }
 
 // isAdvisoryLine reports whether a line is a package manager talking about
