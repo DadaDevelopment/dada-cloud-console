@@ -1334,8 +1334,13 @@ export interface AdminOverviewLiveUrlDeadApp {
  * all), app_responded is the application itself answering with a non-2xx/3xx
  * status (a 404 on the wrong path is not the same failure as a proxy with no
  * pod behind it -- see evaluateLastMile), workers is apps that serve no HTTP
- * at all and only carry a leftover domain, and stale is how many were skipped
- * this round and carry no fresh verdict either way. A low dead count next to
+ * at all and only carry a leftover domain, never_http is apps a dead-looking
+ * status would otherwise condemn but which have never once answered an HTTP
+ * probe in their whole life (long-poll bots that were never web apps -- the
+ * backend reads this from app_url_http_seen, an observation, not from the
+ * worker flag, which such an app was usually created without), and stale is
+ * how many were skipped this round and carry no fresh verdict either way.
+ * An app that DID once answer and has since gone dark stays in dead. A low dead count next to
  * a high stale count is not good news, it is missing information.
  *
  * dead/checked mix two owner classes: external customer apps (the product
@@ -1351,6 +1356,7 @@ export interface AdminOverviewLiveUrls {
   dead: number;
   app_responded: number;
   workers: number;
+  never_http?: number;
   stale: number;
   dead_apps: AdminOverviewLiveUrlDeadApp[];
   dead_external: number;
