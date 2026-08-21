@@ -36,7 +36,7 @@ import (
 var (
 	paymentsPending = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "dada_payments_pending",
-		Help: "Payments still in status='pending', by stage. stage=\"awaiting_provider\" has no yk_payment_id -- the YooKassa payment was never created, so no webhook is ever coming and the customer is looking at a dead button. stage=\"awaiting_payment\" is a real YooKassa payment the customer has not finished yet.",
+		Help: "Payments still in status='pending', by stage. stage=\"awaiting_provider\" has no yk_payment_id -- the YooKassa payment was never created, so no webhook is ever coming and the customer is looking at a dead button. stage=\"awaiting_payment\" is a real YooKassa payment the customer has not finished yet. stage=\"awaiting_invoice\" is a legal-entity invoice, which has no yk_payment_id BY DESIGN and settles against a bank statement, so it must never be read as a dead button.",
 	}, []string{"stage"})
 
 	paymentsPendingAge = promauto.NewGaugeVec(prometheus.GaugeOpts{
@@ -130,9 +130,21 @@ func refreshSweepAge() {
 // exists behind them, because the two states are different incidents with the
 // same status column: one is our checkout call failing, the other is the
 // customer not having finished, or a webhook that never arrived.
+//
+// Invoices are a third population and must be split off before that test is
+// applied at all. A legal-entity invoice is inserted pending with no
+// yk_payment_id BY DESIGN -- it never goes through YooKassa and is matched
+// against a bank statement -- so the yk_payment_id test read every one of them
+// as a dead button. The sweeper already knows this (billing_pending_reconcile.go
+// excludes payment_method = 'invoice' from abandonment and gives invoices their
+// own 14-day timeout); this collector did not, so a healthy invoice waiting on a
+// normal corporate payment cycle pinned dada_payments_pending_age_seconds{stage=
+// "awaiting_provider"} and held DadaPaymentStuckPending on for days over a
+// payment path that was working exactly as designed.
 func collectPendingPayments(c context.Context, pool *pgxpool.Pool) {
 	rows, err := pool.Query(c, `
-		SELECT CASE WHEN yk_payment_id IS NULL OR yk_payment_id = ''
+		SELECT CASE WHEN payment_method = 'invoice' THEN 'awaiting_invoice'
+		            WHEN yk_payment_id IS NULL OR yk_payment_id = ''
 		            THEN 'awaiting_provider' ELSE 'awaiting_payment' END AS stage,
 		       count(*),
 		       COALESCE(EXTRACT(EPOCH FROM (now() - min(created_at))), 0)
@@ -149,7 +161,7 @@ func collectPendingPayments(c context.Context, pool *pgxpool.Pool) {
 
 	paymentsPending.Reset()
 	paymentsPendingAge.Reset()
-	for _, stage := range []string{"awaiting_provider", "awaiting_payment"} {
+	for _, stage := range []string{"awaiting_provider", "awaiting_payment", "awaiting_invoice"} {
 		paymentsPending.WithLabelValues(stage).Set(0)
 		paymentsPendingAge.WithLabelValues(stage).Set(0)
 	}
