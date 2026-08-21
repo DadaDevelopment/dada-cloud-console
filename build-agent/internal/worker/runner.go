@@ -513,9 +513,15 @@ func pickCause(body []string) string {
 }
 
 // isAdvisoryLine reports whether a line is a package manager talking about
-// itself rather than about the failure.
+// itself rather than about the failure. This also covers the npm "log file"
+// trailer (`npm error`/`npm ERR! A complete log of this run can be found
+// in: ...`), which npm always prints last and which contains the word
+// "error", so without this filter it would structurally outrank the real
+// cause line above it under causeErrorRe.
 func isAdvisoryLine(line string) bool {
-	return strings.HasPrefix(line, "[notice]") || strings.HasPrefix(line, "npm notice")
+	return strings.HasPrefix(line, "[notice]") ||
+		strings.HasPrefix(line, "npm notice") ||
+		strings.Contains(line, "A complete log of this run can be found in")
 }
 
 // buildkitStepTail is the fallback for consoles without an excerpt block (a
