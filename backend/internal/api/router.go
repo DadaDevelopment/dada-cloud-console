@@ -404,6 +404,9 @@ func SetupRouterWithHandler(pool *pgxpool.Pool, cfg *config.Config) (*gin.Engine
 		// Feedback
 		api.GET("/feedback/mine", h.ListMyFeedback)
 
+		// Platform recovery
+		api.GET("/recovery-prompt", h.GetRecoveryPrompt)
+
 		// Projects
 		api.GET("/projects", h.ListProjects)
 		api.POST("/projects", h.CreateProject)

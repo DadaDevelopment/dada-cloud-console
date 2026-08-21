@@ -20792,6 +20792,42 @@ const docTemplate = `{
                 }
             }
         },
+        "/recovery-prompt": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns a prompt when the caller was hit by a now-fixed platform bug (not their own mistake) and has not already recovered on their own. Returns {\"prompt\": null} otherwise.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "recovery"
+                ],
+                "summary": "Get the caller's platform-recovery prompt, if any",
+                "operationId": "getRecoveryPrompt",
+                "responses": {
+                    "200": {
+                        "description": "object with a nullable prompt field",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/solutions": {
             "get": {
                 "security": [

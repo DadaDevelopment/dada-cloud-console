@@ -120,6 +120,7 @@ import type {
   BoxConnectionResponse,
   BoxExposeResponse,
   BoxCatalogResponse,
+  RecoveryPromptResponse,
 } from "./types";
 import type { OnboardingStatus } from "./onboarding/types";
 
@@ -1601,6 +1602,11 @@ export const diagnoseApi = {
       `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/diagnose`,
       { method: "POST", body: {}, timeoutMs: 60_000 }
     ),
+};
+
+export const recoveryApi = {
+  /** GET /api/v1/recovery-prompt -- see backend/internal/api/platform_recovery.go. */
+  get: () => apiFetch<RecoveryPromptResponse>(`/api/v1/recovery-prompt`),
 };
 
 export const envVarsApi = {

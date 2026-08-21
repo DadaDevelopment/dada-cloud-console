@@ -2080,6 +2080,29 @@ export interface AppDiagnosis {
 }
 
 /**
+ * One narrow, backend-eligibility-checked offer to make up for a platform
+ * bug that broke the user's own action: GET /api/v1/recovery-prompt (see
+ * backend/internal/api/platform_recovery.go). The frontend renders this
+ * verbatim and never re-derives eligibility -- the backend already confirmed
+ * the failure predates the fix, the user has not recovered on their own, and
+ * (for the install kind) the user still has zero apps.
+ */
+export type RecoveryPromptKind = "solution_install_env_failed" | "payment_recurring_forbidden";
+
+export interface RecoveryPrompt {
+  kind: RecoveryPromptKind;
+  failed_at: string;
+  fixed_at: string;
+  project_id: string;
+  environment_id: string;
+  resource_name: string;
+}
+
+export interface RecoveryPromptResponse {
+  prompt: RecoveryPrompt | null;
+}
+
+/**
  * One entry of the ready-made project catalog: a public open-source repository
  * the console can build and deploy in one click, plus the build spec verified
  * for it. Mirrors the backend's `internal/solutions` catalog.

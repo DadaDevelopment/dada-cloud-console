@@ -17,6 +17,7 @@ import { DemoAppChip } from "@/components/console/demo-app-chip";
 import { MetricSparkline } from "@/components/metrics/fixed-metrics-dashboard";
 import { EmptyState } from "@/components/ui/empty-state";
 import { DeployChooser } from "@/components/deploy/deploy-chooser";
+import { RecoveryPrompt } from "@/components/deploy/recovery-prompt";
 import { TemplateDeployCards } from "@/components/console/template-deploy-cards";
 import { UploadDeployCard } from "@/components/deploy/upload-deploy";
 import { useT } from "@/lib/i18n/console/context";
@@ -560,6 +561,7 @@ function GroupBlock({ title, primaryEnv, projectId, entries, infra, canCreate, o
 
       {entries.length === 0 ? (
         <>
+          <RecoveryPrompt placement="apps-empty" />
           {(!isVM || primaryEnv.app_server_id) && (
             <div data-onboarding="first-deploy" className="mb-6 grid gap-4 lg:grid-cols-2">
               <div className="contents" data-ux="empty-apps-cta-template">
