@@ -690,6 +690,22 @@ export const appsApi = {
       { method: "PATCH", body: { start_command: startCommand, redeploy: !!redeploy } }
     ),
 
+  /**
+   * Overrides the port the app's container listens on. This is the fix for
+   * apps where framework autodetection picked the wrong port at creation
+   * time (e.g. the Vite default 4173 for a process actually bound to 3000):
+   * before this endpoint the value was fixed forever and a wrong detection
+   * meant a permanent 502 with no in-product lever. `operation` is present
+   * only when the server queues a redeploy to apply the new port; the caller
+   * must await it to a terminal status rather than reporting success off the
+   * PATCH response alone (optimistic-but-ACID UI, same rule as start-command).
+   */
+  updatePort: (projectId: string, envId: string, appName: string, port: number) =>
+    apiFetch<{ port: number; message: string; operation?: Operation }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/port`,
+      { method: "PATCH", body: { port } }
+    ),
+
   // Roll a compose (VM) app back to its previous committed compose.yaml + redeploy.
   rollback: (projectId: string, envId: string, appName: string) =>
     apiFetch<{ operation: Operation; message: string }>(

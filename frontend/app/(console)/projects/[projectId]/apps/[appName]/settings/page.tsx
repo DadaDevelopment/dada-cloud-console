@@ -15,6 +15,7 @@ import { ResourceManager } from "@/components/deploy/resource-manager";
 import { PaymentsManager } from "@/components/payments/payments-manager";
 import { CommonConfigEditor } from "@/components/deploy/common-config-editor";
 import { StartCommandEditor } from "@/components/deploy/start-command-editor";
+import { PortEditor } from "@/components/deploy/port-editor";
 import { ComposeConfigEditor } from "@/components/deploy/compose-config-editor";
 import { ComposeVolumeEditor } from "@/components/deploy/compose-volume-editor";
 import { ArchiveReuploadControl } from "@/components/deploy/archive-reupload";
@@ -235,6 +236,7 @@ export default function AppSettingsPage() {
               canEdit={canEdit}
               isUploadedSource={isUploadedSource}
             />
+            <PortEditor projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} />
             <StartCommandEditor
               projectId={projectId}
               envId={envId}
