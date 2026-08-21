@@ -109,6 +109,62 @@ func TestCollectPendingPaymentsSeparatesTheDeadButton(t *testing.T) {
 	}
 }
 
+// seedPendingInvoice inserts one pending legal-entity invoice: no YooKassa
+// payment id, payment_method = 'invoice'. This is a healthy row, not a broken
+// one -- it settles against a bank statement, not a webhook.
+func seedPendingInvoice(t *testing.T, pool *pgxpool.Pool, age time.Duration) uuid.UUID {
+	t.Helper()
+	ctx := context.Background()
+	id := uuid.New()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO payments (id, org_id, plan, amount_value, currency, status, yk_payment_id, payment_method, created_by_sub, created_at, updated_at)
+		VALUES ($1, $2, 'startup', 990, 'RUB', 'pending', NULL, 'invoice', 'money-collector-test', now() - $3::interval, now())
+	`, id, "money-collector-"+id.String()[:8], age.String()); err != nil {
+		t.Fatalf("seed pending invoice: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM payments WHERE id = $1`, id)
+	})
+	return id
+}
+
+// TestCollectPendingPaymentsKeepsInvoicesOutOfTheDeadButton is the second half
+// of the same incident. The sweeper learned that an invoice is pending with no
+// yk_payment_id by design and gave it a 14-day timeout; this collector kept
+// testing yk_payment_id alone, so one legal-entity invoice in a normal
+// corporate payment cycle read as awaiting_provider and held
+// DadaPaymentStuckPending on for days over a working payment path.
+func TestCollectPendingPaymentsKeepsInvoicesOutOfTheDeadButton(t *testing.T) {
+	pool := testCollectorPool(t)
+	ctx := context.Background()
+
+	collectPendingPayments(ctx, pool)
+	baseProvider, _ := gaugeVecValue(t, paymentsPending, map[string]string{"stage": "awaiting_provider"})
+	baseInvoice, _ := gaugeVecValue(t, paymentsPending, map[string]string{"stage": "awaiting_invoice"})
+
+	seedPendingInvoice(t, pool, 40*time.Hour)
+	collectPendingPayments(ctx, pool)
+
+	gotProvider, _ := gaugeVecValue(t, paymentsPending, map[string]string{"stage": "awaiting_provider"})
+	if gotProvider != baseProvider {
+		t.Errorf("awaiting_provider went %v -> %v, want unchanged: an invoice has no yk_payment_id "+
+			"by design and must not be counted as a payment that never reached YooKassa", baseProvider, gotProvider)
+	}
+	gotInvoice, ok := gaugeVecValue(t, paymentsPending, map[string]string{"stage": "awaiting_invoice"})
+	if !ok {
+		t.Fatal("no dada_payments_pending series for stage=awaiting_invoice")
+	}
+	if gotInvoice-baseInvoice != 1 {
+		t.Errorf("awaiting_invoice went %v -> %v, want +1", baseInvoice, gotInvoice)
+	}
+
+	age, _ := gaugeVecValue(t, paymentsPendingAge, map[string]string{"stage": "awaiting_provider"})
+	if age >= 40*3600 {
+		t.Errorf("awaiting_provider age = %vs, want below the 40h invoice: the invoice must not drive "+
+			"the stuck-payment alert", age)
+	}
+}
+
 // TestCollectPendingPaymentsZeroesSettledStages guards the explicit zeroing.
 // A stage with no rows must report 0, not vanish: an alert on a missing series
 // is an alert that never fires, and "no pending payments" is exactly the state
