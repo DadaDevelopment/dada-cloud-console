@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
-import { buildsApi, appsApi } from "@/lib/api";
+import { buildsApi, appsApi, gitApi, cloudTasksApi } from "@/lib/api";
 import type { Build } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
@@ -15,7 +15,7 @@ import { useT } from "@/lib/i18n/console/context";
 import { trackUxEvent } from "@/lib/ux-telemetry";
 import { formatCommitLabel, resolveCommit } from "@/lib/build-commit";
 import { trackBuildStart } from "@/lib/build-watch";
-import { buildFailureDetail } from "@/lib/build-failure";
+import { buildFailureDetail, buildFailureSummary, canOfferAutofix } from "@/lib/build-failure";
 import { getAppAlerts, type AppAlert } from "@/lib/app-alerts";
 
 /**
@@ -77,6 +77,8 @@ export default function BuildDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [canceling, setCanceling] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
+  const [autofixing, setAutofixing] = useState(false);
+  const [hasGitRepo, setHasGitRepo] = useState(false);
   const [appUrl, setAppUrl] = useState<string | null>(null);
   const [appReady, setAppReady] = useState(false);
   const [appCrashing, setAppCrashing] = useState(false);
@@ -211,6 +213,65 @@ export default function BuildDetailPage() {
     trackUxEvent("view", "app_ready_cta:panel");
   }, [build?.status, appReady, appUrl]);
 
+  /**
+   * Resolves whether the app still has a git repository connected, which is
+   * the auto-fix agent's only working surface: it repairs a build by pushing
+   * a commit, so an upload-deployed app has nothing for it to edit. Read once
+   * per failed build rather than on the 3s status poll -- the git link does
+   * not change while a user reads a log -- and a failure here leaves the flag
+   * false, which hides the lever instead of offering a run that would 409.
+   */
+  useEffect(() => {
+    if (!envId || build?.status !== "failed") return;
+    let canceled = false;
+    gitApi
+      .listRepos(projectId, envId)
+      .then((data) => {
+        if (canceled) return;
+        setHasGitRepo((data.repos ?? []).some((r) => r.app_name === appName));
+      })
+      .catch(() => {});
+    return () => {
+      canceled = true;
+    };
+  }, [projectId, envId, appName, build?.status]);
+
+  /**
+   * Hands the failed build to the auto-fix agent from the page the user
+   * actually lands on after following "view logs".
+   *
+   * The lever already existed twice over -- in the deployments feed and on
+   * the app page's build card -- and both times it sat on a surface the
+   * failing user was not looking at. Sixty days of audit rows measured the
+   * gap: `ViewBuildLogs` 91 against `TriggerAutofix` 7, while most failed
+   * builds were not the user's own code. Reading the log is exactly the
+   * moment the user has the failure in front of them and no way to act on
+   * it, so the lever belongs here. Sends the same one-line summary the other
+   * two surfaces send and lands on the agent panel where the run reports back.
+   */
+  async function handleAutofix() {
+    if (!envId || !build) return;
+    setAutofixing(true);
+    setError(null);
+    try {
+      const resolved = resolveCommit(build);
+      const ref = resolved.kind === "sha" ? resolved.sha.slice(0, 12) : formatCommitLabel(resolved, t);
+      const summary = buildFailureSummary({
+        branch: build.branch,
+        commitRef: ref,
+        commitMessage: build.commit_message,
+        failReason: build.fail_reason,
+        errorMessage: build.error_message,
+      });
+      await cloudTasksApi.triggerAutofix(projectId, envId, appName, summary);
+      router.push(`/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}#agent`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : t("apps.deployments.error.autofix");
+      setError(/no connected git repo/i.test(msg) ? t("apps.deployments.error.noRepo") : msg);
+      setAutofixing(false);
+    }
+  }
+
   async function handleRebuild() {
     if (!envId || !build) return;
     setRebuilding(true);
@@ -304,6 +365,17 @@ export default function BuildDetailPage() {
                 className="rounded-lg border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 transition-colors"
               >
                 {canceling ? t("apps.builds.canceling") : t("apps.builds.cancel")}
+              </button>
+            )}
+            {canOfferAutofix({ status: build.status, failReason: build.fail_reason, hasGitRepo, canDeploy }) && envId && (
+              <button
+                onClick={handleAutofix}
+                disabled={autofixing || rebuilding}
+                data-ux="apps_build_detail:autofix"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+              >
+                {autofixing && <Spinner size="sm" />}
+                {autofixing ? t("apps.deployments.autofixing") : t("apps.deployments.autofix")}
               </button>
             )}
             {canDeploy && (build.status === "failed" || build.status === "canceled") && envId && (

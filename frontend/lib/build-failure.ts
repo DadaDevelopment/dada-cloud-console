@@ -77,3 +77,32 @@ export function isRepoFixable(failReason?: string | null): boolean {
 export function needsRepoReconnect(failReason?: string | null): boolean {
   return failReason === "git_auth_failed";
 }
+
+/**
+ * Reports whether the auto-fix lever may be offered for a build.
+ *
+ * Exists so every surface that shows a failed build gates the lever the same
+ * way. The lever kept being written into one surface at a time and kept
+ * landing where the user was not: it was first built into the deployments
+ * feed, which measured zero visits, then moved onto the app page's build
+ * card. Meanwhile the page a user actually reaches by following "view logs"
+ * -- the build detail page -- offered only Rebuild. Sixty days of production
+ * audit rows show the cost: `ViewBuildLogs` 91 and `TriggerBuild` 133 against
+ * `TriggerAutofix` 7 from four actors, while 61% of failed builds were not
+ * the user's code. A shipped lever nobody can reach is indistinguishable
+ * from a lever that was never built.
+ *
+ * @param input - the build's status and failure, the app's git link, and
+ *   whether this member may mutate the app at all
+ */
+export function canOfferAutofix(input: {
+  status?: string | null;
+  failReason?: string | null;
+  hasGitRepo: boolean;
+  canDeploy: boolean;
+}): boolean {
+  if (!input.canDeploy) return false;
+  if (!input.hasGitRepo) return false;
+  if (input.status !== "failed") return false;
+  return isRepoFixable(input.failReason);
+}

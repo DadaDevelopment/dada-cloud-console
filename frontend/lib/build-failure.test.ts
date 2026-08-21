@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { buildFailureDetail, buildFailureSummary, isRepoFixable, needsRepoReconnect } from "./build-failure.ts";
+import { buildFailureDetail, buildFailureSummary, canOfferAutofix, isRepoFixable, needsRepoReconnect } from "./build-failure.ts";
 
 test("drops the fail_reason prefix the build agent writes", () => {
   assert.equal(
@@ -86,4 +86,42 @@ test("the failed-build card gates the reconnect CTA on the git link, not on the 
     false,
     "negating isRepoFixable sends platform_error and app_deleted to a reconnect that cannot help",
   );
+});
+
+test("the autofix lever is offered only where it can actually work", () => {
+  const base = { status: "failed", failReason: "dockerfile_build_failed", hasGitRepo: true, canDeploy: true };
+  assert.equal(canOfferAutofix(base), true);
+  assert.equal(canOfferAutofix({ ...base, failReason: null }), true);
+  assert.equal(canOfferAutofix({ ...base, canDeploy: false }), false);
+  assert.equal(canOfferAutofix({ ...base, hasGitRepo: false }), false);
+  assert.equal(canOfferAutofix({ ...base, status: "success" }), false);
+  assert.equal(canOfferAutofix({ ...base, status: "running" }), false);
+  assert.equal(canOfferAutofix({ ...base, failReason: "git_auth_failed" }), false);
+  assert.equal(canOfferAutofix({ ...base, failReason: "platform_error" }), false);
+  assert.equal(canOfferAutofix({ ...base, failReason: "app_deleted" }), false);
+});
+
+test("the build detail page carries the autofix lever, not only Rebuild", () => {
+  const page = fs.readFileSync(
+    path.join(
+      import.meta.dirname,
+      "..",
+      "app",
+      "(console)",
+      "projects",
+      "[projectId]",
+      "apps",
+      "[appName]",
+      "builds",
+      "[buildId]",
+      "page.tsx",
+    ),
+    "utf8",
+  );
+  assert.match(
+    page,
+    /data-ux="apps_build_detail:autofix"/,
+    "the page a user reaches from 'view logs' must offer auto-fix, not only Rebuild",
+  );
+  assert.match(page, /canOfferAutofix\(/, "the page must gate the lever through the shared predicate");
 });
