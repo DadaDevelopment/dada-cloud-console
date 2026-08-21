@@ -1241,38 +1241,64 @@ func TestRenderAppServiceFragment(t *testing.T) {
 	}
 }
 
-// TestChartForAndDefaultPort locks the framework->chart/port mapping the deploy
-// path relies on: javascript-family frameworks must select the javascript chart
-// (common stack => :5173), never the generic app chart's :8080 default.
+// TestChartForAndDefaultPort locks the framework->chart mapping the deploy
+// path relies on: javascript-family frameworks must select the javascript
+// chart, never the generic app chart. Port expectations are asserted
+// per-framework (not per-chart) since the javascript chart class now spans
+// two different default ports (3000 and vite's 4173).
 func TestChartForAndDefaultPort(t *testing.T) {
 	js := []string{"javascript", "web", "nextjs", "nuxt", "sveltekit", "react", "nestjs", "express", "fastify", "remix", "vite", "node"}
 	for _, fw := range js {
 		if got := renderer.ChartFor(fw); got != "javascript" {
 			t.Errorf("ChartFor(%q) = %q, want javascript", fw, got)
 		}
-		if got := renderer.DefaultPortForFramework(fw); got != 5173 {
-			t.Errorf("DefaultPortForFramework(%q) = %d, want 5173", fw, got)
+	}
+	port3000 := []string{"javascript", "web", "nextjs", "nuxt", "sveltekit", "react", "nestjs", "express", "fastify", "remix", "node"}
+	for _, fw := range port3000 {
+		if got := renderer.DefaultPortForFramework(fw); got != 3000 {
+			t.Errorf("DefaultPortForFramework(%q) = %d, want 3000", fw, got)
 		}
 	}
-	for _, fw := range []string{"python", "fastapi", "django", "flask"} {
+	if got := renderer.DefaultPortForFramework("vite"); got != 4173 {
+		t.Errorf("DefaultPortForFramework(vite) = %d, want 4173", got)
+	}
+	for _, fw := range []string{"python", "fastapi", "django"} {
 		if got := renderer.ChartFor(fw); got != "python" {
 			t.Errorf("ChartFor(%q) = %q, want python", fw, got)
 		}
-		if got := renderer.DefaultPortForFramework(fw); got != 8080 {
-			t.Errorf("DefaultPortForFramework(%q) = %d, want 8080", fw, got)
+		if got := renderer.DefaultPortForFramework(fw); got != 8000 {
+			t.Errorf("DefaultPortForFramework(%q) = %d, want 8000", fw, got)
 		}
+	}
+	if got := renderer.ChartFor("flask"); got != "python" {
+		t.Errorf("ChartFor(flask) = %q, want python", got)
+	}
+	if got := renderer.DefaultPortForFramework("flask"); got != 5000 {
+		t.Errorf("DefaultPortForFramework(flask) = %d, want 5000", got)
 	}
 	for _, fw := range []string{"spring", "spring-gradle", "maven", "gradle"} {
 		if got := renderer.ChartFor(fw); got != "spring" {
 			t.Errorf("ChartFor(%q) = %q, want spring", fw, got)
 		}
+		if got := renderer.DefaultPortForFramework(fw); got != 8080 {
+			t.Errorf("DefaultPortForFramework(%q) = %d, want 8080", fw, got)
+		}
 	}
-	for _, fw := range []string{"", "go", "scala", "static", "dockerfile", "auto"} {
+	for _, fw := range []string{"", "go", "scala", "dockerfile", "auto"} {
 		if got := renderer.ChartFor(fw); got != "app" {
 			t.Errorf("ChartFor(%q) = %q, want app", fw, got)
 		}
 		if got := renderer.DefaultPortForFramework(fw); got != 8080 {
 			t.Errorf("DefaultPortForFramework(%q) = %d, want 8080", fw, got)
+		}
+	}
+	if got := renderer.DefaultPortForFramework("static"); got != 80 {
+		t.Errorf("DefaultPortForFramework(static) = %d, want 80", got)
+	}
+	for _, fw := range []string{"NEXTJS", "Vite", "FastAPI"} {
+		want := renderer.DefaultPortForFramework(strings.ToLower(fw))
+		if got := renderer.DefaultPortForFramework(fw); got != want {
+			t.Errorf("DefaultPortForFramework(%q) = %d, want case-insensitive match %d", fw, got, want)
 		}
 	}
 }

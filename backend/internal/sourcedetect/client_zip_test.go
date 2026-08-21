@@ -36,8 +36,8 @@ func TestDetectClientPackedZip(t *testing.T) {
 	if res.Framework != "vite" {
 		t.Errorf("Framework = %q, want vite", res.Framework)
 	}
-	if res.Port != 5173 {
-		t.Errorf("Port = %d, want 5173", res.Port)
+	if res.Port != 4173 {
+		t.Errorf("Port = %d, want 4173", res.Port)
 	}
 
 	entries, _, err := listZipEntries(data)

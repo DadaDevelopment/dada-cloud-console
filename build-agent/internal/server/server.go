@@ -2003,7 +2003,7 @@ func detectionWithStrings(framework, build, install, output string) frameworkDet
 
 func frameworkDefaultPort(framework string) *int {
 	switch strings.ToLower(framework) {
-	case "nextjs", "nuxt", "sveltekit", "remix", "react", "nestjs", "node", "express", "fastify":
+	case "nextjs", "nuxt", "sveltekit", "remix", "react", "nestjs", "node", "express", "fastify", "javascript", "web":
 		return ptrInt(3000)
 	case "vite":
 		return ptrInt(4173)
@@ -2011,6 +2011,8 @@ func frameworkDefaultPort(framework string) *int {
 		return ptrInt(8000)
 	case "flask":
 		return ptrInt(5000)
+	case "streamlit":
+		return ptrInt(8501)
 	case "spring", "spring-maven", "spring-gradle", "maven", "gradle", "scala", "sbt", "go", "dockerfile":
 		return ptrInt(8080)
 	case "static":
