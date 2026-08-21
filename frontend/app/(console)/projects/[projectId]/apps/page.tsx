@@ -318,6 +318,8 @@ export default function AppsPage() {
         </div>
       )}
 
+      <RecoveryPrompt placement="apps" />
+
       {isLoadingApps ? (
         <div className="flex h-40 items-center justify-center">
           <Spinner />
@@ -561,7 +563,6 @@ function GroupBlock({ title, primaryEnv, projectId, entries, infra, canCreate, o
 
       {entries.length === 0 ? (
         <>
-          <RecoveryPrompt placement="apps-empty" />
           {(!isVM || primaryEnv.app_server_id) && (
             <div data-onboarding="first-deploy" className="mb-6 grid gap-4 lg:grid-cols-2">
               <div className="contents" data-ux="empty-apps-cta-template">
