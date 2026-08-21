@@ -316,8 +316,16 @@ spec:
           value: /tmp
       resources:
         requests:
+          # 128Mi (was 256Mi): the container idles outside the e2e stages and has
+          # never been an eviction victim -- its limit is 12x its request and it
+          # survived every build at that ratio. The pod's total reservation
+          # (4672Mi) exceeded the free memory of the largest schedulable node
+          # (4666Mi) by 6Mi, so build #1285 sat Pending indefinitely with the
+          # console promo fix undelivered. Trimmed here and on docker to buy
+          # headroom without touching node-builder/dind, whose request==limit is
+          # load-bearing (see #136/#139 and #138/#141 below).
           cpu: "50m"
-          memory: "256Mi"
+          memory: "128Mi"
         limits:
           cpu: "1000m"
           memory: "1536Mi"
@@ -340,7 +348,9 @@ spec:
       resources:
         requests:
           cpu: "50m"
-          memory: "64Mi"
+          # 32Mi (was 64Mi): this is the docker CLI, not the daemon -- it execs a
+          # short-lived client and the daemon's memory lives in dind.
+          memory: "32Mi"
         limits:
           cpu: "250m"
           memory: "128Mi"
