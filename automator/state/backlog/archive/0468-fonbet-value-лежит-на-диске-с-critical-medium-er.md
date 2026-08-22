@@ -1,10 +1,13 @@
 ---
 id: 0468
-status: open
+status: closed
 prio: P0
 title: fonbet-value лежит на диске с critical medium error: реплика Longhorn без резерва
 created: 2026-08-21
 sess: sess-0822c
+closed_at: 2026-08-22
+closed_commit: 8de3edf
+closed_note: апп поднят: e2fsck чист (EXIT=0, 0 исправлений), сплошное чтение 20ГБ без ошибок — диагноз «аппаратные бэд-секторы» ОПРОВЕРГНУТ; причина ухода реплики открыта в 0472, отсутствие резерва данных в 0471
 ---
 [live dmesg ноды d5c373-client-b2a7cd-7qwnw-rt7fr, 2026-08-21]
 
