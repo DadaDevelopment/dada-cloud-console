@@ -75,20 +75,18 @@ def NEXT_PUBLIC_CONSOLE_URL     = 'https://console.dada-tuda.ru'
 def podLabel  = 'dada-cloud-console-agent'
 def agentName = "kubeagent-${env.JOB_BASE_NAME}-${env.BUILD_NUMBER}-${UUID.randomUUID().toString().take(6)}"
 
-// disableConcurrentBuilds WITHOUT abortPrevious: queue concurrent main pushes
-// behind the running build instead of aborting it. abortPrevious starved the
-// deploy — when main is pushed more often than a build takes (~11 min), every
-// build was superseded (NOT_BUILT) before its GitOps write-back ran, so nothing
-// ever deployed. Queueing lets each build finish + write back its tag in order.
-//
-// It regressed to abortPrevious: true and starved the deploy again: builds #813
-// through #818 covered six pushed commits and four of them died as ERROR "This
-// commit cannot be built" — superseded before the GitOps write-back — so prod sat
-// on the tag of #812 while six commits' worth of work was already on main. The
-// flag now matches the paragraph above it, and this note exists so the next person
-// who reaches for abortPrevious sees what it costs here.
+// abortPrevious was reverted once (builds #813-#818 — see git blame on this
+// line): it killed queued builds before their GitOps write-back ran, so 4 of 6
+// pushed commits never reached the tag pin and prod sat 3 commits behind main.
+// Re-enabled now that write-back moved right after "Docker push" — the slow
+// internal/api DB test suite runs AFTER write-back (see the standalone
+// "Backend tests" stage near the bottom), so a queued build is superseded
+// mostly BEFORE it starts, or AFTER it already wrote its tag — the window
+// where an abort throws away a completed write-back is now just Toolchain
+// through Docker push, not the whole pipeline. If starvation recurs, check
+// whether that ordering assumption still holds before reverting again.
 properties([
-        disableConcurrentBuilds(),
+        disableConcurrentBuilds(abortPrevious: true),
         parameters([
                 booleanParam(
                         name: 'RUN_E2E_AUTHED',
@@ -428,6 +426,7 @@ spec:
         def commitMessage = ''
         def resolvedTag   = ''
         def currentStageName = 'bootstrap'
+        def deployedThisBuild = false
 
         def runStage = { String name, Closure body ->
             currentStageName = name
@@ -518,23 +517,11 @@ spec:
                             '''
                         }
 
-                        stage('Backend tests') {
-                            dir('backend') {
-                                // TEST_DATABASE_URL points at the postgres sidecar in the pod
-                                // template. Before it existed, every DB-backed test in
-                                // internal/api hit its t.Skip and this stage went green while
-                                // testing none of them; TestCIRequiresDatabase now fails if that
-                                // regresses.
-                                //
-                                // cmd/migrate retries the connection itself, so there is no
-                                // sleep guess here and the build image needs no psql: Jenkins
-                                // does not wait for sidecar readiness before running steps.
-                                withEnv(['TEST_DATABASE_URL=postgres://dada:dada@localhost:5432/dada_test?sslmode=disable']) {
-                                    sh 'go run ./cmd/migrate'
-                                    sh 'go test ./... -count=1'
-                                }
-                            }
-                        }
+                        // Backend tests moved out of this lane: they now run AFTER
+                        // GitOps write-back, non-blocking to the deploy (see the
+                        // standalone "Backend tests" stage near the bottom of this
+                        // file). go test does not gate go build, so nothing here
+                        // depended on it running first.
 
                         stage('Backend build') {
                             dir('backend') {
@@ -771,7 +758,15 @@ spec:
                 )
 
                 if (shouldPush) {
+                    // retry(2) wraps the whole login+push+tag block: this is the
+                    // scripted-pipeline stand-in for stage-level restart (declarative
+                    // "Restart from Stage" isn't available here — see the try/catch
+                    // note at the bottom of this file). Safe to retry as a whole:
+                    // docker push/tag/login are idempotent, and the images are
+                    // already built and sitting in the local docker daemon, so a
+                    // retry re-pushes rather than re-building anything upstream.
                     runStage('Docker push') {
+                        retry(2) {
                         withCredentials([usernamePassword(
                                 credentialsId: 'gh-token',
                                 usernameVariable: 'GITHUB_USERNAME',
@@ -821,12 +816,23 @@ ${PUSH_WITH_RETRY_SH}
                                 """
                             }
                         }
+                        }
                     }
 
                     // GitOps write-back: pin the built tag into the ArgoCD source
                     // so prod rolls. No image-updater exists — this commit IS the
                     // deploy trigger. Uses the same gh-token PAT as the registry push.
+                    //
+                    // retry(3): wraps the FULL clone-edit-commit-push, not just the
+                    // push. A bare push retry would replay a stale commit against a
+                    // branch that moved under it (two builds writing console-migration
+                    // concurrently); re-cloning first means each attempt re-diffs
+                    // against the CURRENT branch head, so the retry is racing the
+                    // branch correctly instead of fighting it (mirrors the empty-diff
+                    // guard already in this block, which makes a second successful
+                    // attempt a no-op instead of a duplicate commit).
                     runStage('GitOps write-back') {
+                        retry(3) {
                         withCredentials([usernamePassword(
                                 credentialsId: 'gh-token',
                                 usernameVariable: 'GIT_USERNAME',
@@ -853,7 +859,9 @@ ${PUSH_WITH_RETRY_SH}
                                 fi
                             """
                         }
+                        }
                     }
+                    deployedThisBuild = true
 
                     runStage('E2E smoke') {
                         container('playwright') {
@@ -892,10 +900,33 @@ ${PUSH_WITH_RETRY_SH}
                 }
             }
 
+            // Runs AFTER GitOps write-back on push branches: prod is already
+            // rolling on the tag this build produced by the time internal/api's
+            // 92s DB-integration suite starts. That is the deliberate trade for
+            // abortPrevious above — moving the slowest gate off the front of the
+            // pipeline shrinks the window where an abort throws away a build that
+            // had already written back its tag. A red result here means bad code
+            // is already deployed, not that it was caught in time; the catch
+            // block below labels that case explicitly instead of the misleading
+            // "FAILED AT PUBLISH". On PR/non-push branches this is just the
+            // ordinary test gate — nothing is deployed either way.
+            container('go-builder') {
+                runStage('Backend tests') {
+                    dir('backend') {
+                        withEnv(['TEST_DATABASE_URL=postgres://dada:dada@localhost:5432/dada_test?sslmode=disable']) {
+                            sh 'go run ./cmd/migrate'
+                            sh 'go test ./... -count=1'
+                        }
+                    }
+                }
+            }
+
         } catch (err) {
             currentBuild.description = (currentStageName == 'Docker push' || currentStageName == 'GitOps write-back')
                     ? "FAILED AT PUBLISH (${currentStageName}) — code and tests passed"
-                    : "FAILED AT ${currentStageName}"
+                    : (currentStageName == 'Backend tests' && deployedThisBuild)
+                            ? "DEPLOYED ${resolvedTag} — Backend tests failed after write-back, check prod"
+                            : "FAILED AT ${currentStageName}"
             throw err
         }
 
