@@ -78,12 +78,12 @@ def agentName = "kubeagent-${env.JOB_BASE_NAME}-${env.BUILD_NUMBER}-${UUID.rando
 // abortPrevious was reverted once (builds #813-#818 — see git blame on this
 // line): it killed queued builds before their GitOps write-back ran, so 4 of 6
 // pushed commits never reached the tag pin and prod sat 3 commits behind main.
-// Re-enabled now that write-back moved right after "Docker push" — the slow
-// internal/api DB test suite runs AFTER write-back (see the standalone
+// Re-enabled now that write-back moved right after "Docker build+push" — the
+// slow internal/api DB test suite runs AFTER write-back (see the standalone
 // "Backend tests" stage near the bottom), so a queued build is superseded
 // mostly BEFORE it starts, or AFTER it already wrote its tag — the window
 // where an abort throws away a completed write-back is now just Toolchain
-// through Docker push, not the whole pipeline. If starvation recurs, check
+// through Docker build+push, not the whole pipeline. If starvation recurs, check
 // whether that ordering assumption still holds before reverting again.
 properties([
         disableConcurrentBuilds(abortPrevious: true),
@@ -702,61 +702,6 @@ spec:
             }
 
             container('docker') {
-                runStage('Docker build') {
-                    sh """
-                        set -eux
-                        docker version
-                        docker build \\
-                          -t ${BACKEND_IMAGE}:${resolvedTag} \\
-                          -f backend/Dockerfile backend
-                        docker build \\
-                          -t ${GATEWAY_IMAGE}:${resolvedTag} \\
-                          -f backend/Dockerfile.gateway backend
-                        docker build \\
-                          -t ${EMBED_GATEWAY_IMAGE}:${resolvedTag} \\
-                          -f backend/Dockerfile.grafana-embed-gateway backend
-                        docker build \\
-                          -t ${GITOPS_AGENT_IMAGE}:${resolvedTag} \\
-                          -f gitops-agent/Dockerfile gitops-agent
-                        docker build \\
-                          -t ${PORTAINER_AGENT_IMAGE}:${resolvedTag} \\
-                          -f portainer-agent/Dockerfile portainer-agent
-                        docker build \\
-                          -t ${BUILD_AGENT_IMAGE}:${resolvedTag} \\
-                          -f build-agent/Dockerfile build-agent
-                    """
-                    if (params.BUILD_BOX_IMAGE) {
-                        sh """
-                            set -eux
-                            docker build \\
-                              -t ${BOX_WARM_IMAGE}:${resolvedTag} \\
-                              -f backend/Dockerfile.box-warm backend
-                        """
-                    }
-                    // Frontend image: npm ci inside the build pulls @dada/* from
-                    // Nexus. Auth is passed as a BuildKit secret (never baked into
-                    // a layer). NEXT_PUBLIC_* are build args (baked — they are public).
-                    withCredentials([usernamePassword(
-                            credentialsId: 'docker-nexus-admin-psws',
-                            usernameVariable: 'NEXUS_USER',
-                            passwordVariable: 'NEXUS_PASS'
-                    )]) {
-                        sh """
-                            set -eu
-                            printf '%s:%s' "\${NEXUS_USER}" "\${NEXUS_PASS}" | base64 | tr -d '\\n' > /tmp/nexus_npm_auth
-                            DOCKER_BUILDKIT=1 docker build \\
-                              --secret id=nexus_npm_auth,src=/tmp/nexus_npm_auth \\
-                              --build-arg NEXT_PUBLIC_AUTH_MODE=${NEXT_PUBLIC_AUTH_MODE} \\
-                              --build-arg NEXT_PUBLIC_KEYCLOAK_ISSUER=${NEXT_PUBLIC_KEYCLOAK_ISSUER} \\
-                              --build-arg NEXT_PUBLIC_OIDC_CLIENT_ID=${NEXT_PUBLIC_OIDC_CLIENT_ID} \\
-                              --build-arg NEXT_PUBLIC_CONSOLE_URL=${NEXT_PUBLIC_CONSOLE_URL} \\
-                              -t ${FRONTEND_IMAGE}:${resolvedTag} \\
-                              -f frontend/Dockerfile frontend
-                            rm -f /tmp/nexus_npm_auth
-                        """
-                    }
-                }
-
                 // Push only on integration branches, not PRs
                 def isPullRequest = (env.CHANGE_ID != null && env.CHANGE_ID != '')
                 def shouldPush = !isPullRequest && (
@@ -765,68 +710,133 @@ spec:
                         env.BRANCH_NAME == 'develop'
                 )
 
-                if (shouldPush) {
-                    // retry(2) wraps the whole login+push+tag block: this is the
-                    // scripted-pipeline stand-in for stage-level restart (declarative
-                    // "Restart from Stage" isn't available here — see the try/catch
-                    // note at the bottom of this file). Safe to retry as a whole:
-                    // docker push/tag/login are idempotent, and the images are
-                    // already built and sitting in the local docker daemon, so a
-                    // retry re-pushes rather than re-building anything upstream.
-                    runStage('Docker push') {
-                        retry(2) {
+                // Per-image build-then-push, all images in parallel (user call:
+                // waiting for all 6-7 builds before pushing any is pure
+                // serialization when each image is independent). Traded away the
+                // earlier caution here on purpose — one shared dind daemon backs
+                // ALL of this (limits: cpu 1500m / memory 1536Mi, see the pod
+                // template above, and see incidents #138/#141/#143 in that
+                // comment). If builds start dying OOM/ENOSPC/channel-drop under
+                // this concurrency, that dind limit is the first thing to check,
+                // not the Jenkinsfile logic.
+                runStage('Docker build+push') {
+                    if (shouldPush) {
                         withCredentials([usernamePassword(
                                 credentialsId: 'gh-token',
                                 usernameVariable: 'GITHUB_USERNAME',
                                 passwordVariable: 'GITHUB_TOKEN'
                         )]) {
-                            sh """
-                                set -eux
-                                echo "\${GITHUB_TOKEN}" | docker login ${GITHUB_REGISTRY} -u \${GITHUB_USERNAME} --password-stdin
-${PUSH_WITH_RETRY_SH}
-                                push_with_retry ${BACKEND_IMAGE}:${resolvedTag}
-                                push_with_retry ${FRONTEND_IMAGE}:${resolvedTag}
-                                push_with_retry ${GITOPS_AGENT_IMAGE}:${resolvedTag}
-                                push_with_retry ${PORTAINER_AGENT_IMAGE}:${resolvedTag}
-                                push_with_retry ${BUILD_AGENT_IMAGE}:${resolvedTag}
-                                push_with_retry ${GATEWAY_IMAGE}:${resolvedTag}
-                                push_with_retry ${EMBED_GATEWAY_IMAGE}:${resolvedTag}
-                                docker tag ${BACKEND_IMAGE}:${resolvedTag} ${BACKEND_IMAGE}:latest
-                                docker tag ${FRONTEND_IMAGE}:${resolvedTag} ${FRONTEND_IMAGE}:latest
-                                docker tag ${GITOPS_AGENT_IMAGE}:${resolvedTag} ${GITOPS_AGENT_IMAGE}:latest
-                                docker tag ${PORTAINER_AGENT_IMAGE}:${resolvedTag} ${PORTAINER_AGENT_IMAGE}:latest
-                                docker tag ${BUILD_AGENT_IMAGE}:${resolvedTag} ${BUILD_AGENT_IMAGE}:latest
-                                docker tag ${GATEWAY_IMAGE}:${resolvedTag} ${GATEWAY_IMAGE}:latest
-                                docker tag ${EMBED_GATEWAY_IMAGE}:${resolvedTag} ${EMBED_GATEWAY_IMAGE}:latest
-                                push_with_retry ${BACKEND_IMAGE}:latest
-                                push_with_retry ${FRONTEND_IMAGE}:latest
-                                push_with_retry ${GITOPS_AGENT_IMAGE}:latest
-                                push_with_retry ${PORTAINER_AGENT_IMAGE}:latest
-                                push_with_retry ${BUILD_AGENT_IMAGE}:latest
-                                push_with_retry ${GATEWAY_IMAGE}:latest
-                                push_with_retry ${EMBED_GATEWAY_IMAGE}:latest
-                                docker rmi ${BACKEND_IMAGE}:${resolvedTag} ${FRONTEND_IMAGE}:${resolvedTag} ${GITOPS_AGENT_IMAGE}:${resolvedTag} ${PORTAINER_AGENT_IMAGE}:${resolvedTag} ${BUILD_AGENT_IMAGE}:${resolvedTag} ${GATEWAY_IMAGE}:${resolvedTag} ${EMBED_GATEWAY_IMAGE}:${resolvedTag} || true
-                            """
-                            // The box image carries BOTH the build tag and :v1. The
-                            // catalog entry names :v1, so a box pod pulls whatever :v1
-                            // last pointed at; the build tag exists so an operator can
-                            // say which build a live box actually came from. It is
-                            // NOT tagged :latest — nothing pulls :latest, and a third
-                            // moving tag is a third thing to disagree.
-                            if (params.BUILD_BOX_IMAGE) {
-                                sh """
-                                    set -eux
-${PUSH_WITH_RETRY_SH}
-                                    push_with_retry ${BOX_WARM_IMAGE}:${resolvedTag}
-                                    docker tag ${BOX_WARM_IMAGE}:${resolvedTag} ${BOX_WARM_IMAGE}:v1
-                                    push_with_retry ${BOX_WARM_IMAGE}:v1
-                                    docker rmi ${BOX_WARM_IMAGE}:${resolvedTag} || true
-                                """
-                            }
-                        }
+                            sh "echo \"\${GITHUB_TOKEN}\" | docker login ${GITHUB_REGISTRY} -u \${GITHUB_USERNAME} --password-stdin"
                         }
                     }
 
+                    def targets = [
+                            [name: 'backend', image: BACKEND_IMAGE, dockerfile: 'backend/Dockerfile', context: 'backend'],
+                            [name: 'gateway', image: GATEWAY_IMAGE, dockerfile: 'backend/Dockerfile.gateway', context: 'backend'],
+                            [name: 'embed-gateway', image: EMBED_GATEWAY_IMAGE, dockerfile: 'backend/Dockerfile.grafana-embed-gateway', context: 'backend'],
+                            [name: 'gitops-agent', image: GITOPS_AGENT_IMAGE, dockerfile: 'gitops-agent/Dockerfile', context: 'gitops-agent'],
+                            [name: 'portainer-agent', image: PORTAINER_AGENT_IMAGE, dockerfile: 'portainer-agent/Dockerfile', context: 'portainer-agent'],
+                            [name: 'build-agent', image: BUILD_AGENT_IMAGE, dockerfile: 'build-agent/Dockerfile', context: 'build-agent'],
+                    ]
+
+                    def branches = [:]
+                    // def target = t rebind is required: Groovy/CPS closures
+                    // capture the loop VARIABLE, not its value — without the
+                    // rebind every branch below would build/push whatever
+                    // target the loop landed on last.
+                    for (t in targets) {
+                        def target = t
+                        branches[target.name] = {
+                            sh """
+                                set -eux
+                                docker build -t ${target.image}:${resolvedTag} -f ${target.dockerfile} ${target.context}
+                            """
+                            if (shouldPush) {
+                                retry(2) {
+                                    sh """
+                                        set -eux
+${PUSH_WITH_RETRY_SH}
+                                        push_with_retry ${target.image}:${resolvedTag}
+                                        docker tag ${target.image}:${resolvedTag} ${target.image}:latest
+                                        push_with_retry ${target.image}:latest
+                                        docker rmi ${target.image}:${resolvedTag} || true
+                                    """
+                                }
+                            }
+                        }
+                    }
+
+                    // Frontend image: npm ci inside the build pulls @dada/* from
+                    // Nexus. Auth is passed as a BuildKit secret (never baked into
+                    // a layer). NEXT_PUBLIC_* are build args (baked — they are
+                    // public). Own branch: different secret/build-arg shape than
+                    // the prebuilt-binary images above, and its own auth temp
+                    // file (parallel branches share the container filesystem).
+                    branches['frontend'] = {
+                        withCredentials([usernamePassword(
+                                credentialsId: 'docker-nexus-admin-psws',
+                                usernameVariable: 'NEXUS_USER',
+                                passwordVariable: 'NEXUS_PASS'
+                        )]) {
+                            sh """
+                                set -eu
+                                printf '%s:%s' "\${NEXUS_USER}" "\${NEXUS_PASS}" | base64 | tr -d '\\n' > /tmp/nexus_npm_auth_frontend
+                                DOCKER_BUILDKIT=1 docker build \\
+                                  --secret id=nexus_npm_auth,src=/tmp/nexus_npm_auth_frontend \\
+                                  --build-arg NEXT_PUBLIC_AUTH_MODE=${NEXT_PUBLIC_AUTH_MODE} \\
+                                  --build-arg NEXT_PUBLIC_KEYCLOAK_ISSUER=${NEXT_PUBLIC_KEYCLOAK_ISSUER} \\
+                                  --build-arg NEXT_PUBLIC_OIDC_CLIENT_ID=${NEXT_PUBLIC_OIDC_CLIENT_ID} \\
+                                  --build-arg NEXT_PUBLIC_CONSOLE_URL=${NEXT_PUBLIC_CONSOLE_URL} \\
+                                  -t ${FRONTEND_IMAGE}:${resolvedTag} \\
+                                  -f frontend/Dockerfile frontend
+                                rm -f /tmp/nexus_npm_auth_frontend
+                            """
+                        }
+                        if (shouldPush) {
+                            retry(2) {
+                                sh """
+                                    set -eux
+${PUSH_WITH_RETRY_SH}
+                                    push_with_retry ${FRONTEND_IMAGE}:${resolvedTag}
+                                    docker tag ${FRONTEND_IMAGE}:${resolvedTag} ${FRONTEND_IMAGE}:latest
+                                    push_with_retry ${FRONTEND_IMAGE}:latest
+                                    docker rmi ${FRONTEND_IMAGE}:${resolvedTag} || true
+                                """
+                            }
+                        }
+                    }
+
+                    if (params.BUILD_BOX_IMAGE) {
+                        // The box image carries BOTH the build tag and :v1. The
+                        // catalog entry names :v1, so a box pod pulls whatever :v1
+                        // last pointed at; the build tag exists so an operator can
+                        // say which build a live box actually came from. It is
+                        // NOT tagged :latest — nothing pulls :latest, and a third
+                        // moving tag is a third thing to disagree.
+                        branches['box-warm'] = {
+                            sh """
+                                set -eux
+                                docker build -t ${BOX_WARM_IMAGE}:${resolvedTag} -f backend/Dockerfile.box-warm backend
+                            """
+                            if (shouldPush) {
+                                retry(2) {
+                                    sh """
+                                        set -eux
+${PUSH_WITH_RETRY_SH}
+                                        push_with_retry ${BOX_WARM_IMAGE}:${resolvedTag}
+                                        docker tag ${BOX_WARM_IMAGE}:${resolvedTag} ${BOX_WARM_IMAGE}:v1
+                                        push_with_retry ${BOX_WARM_IMAGE}:v1
+                                        docker rmi ${BOX_WARM_IMAGE}:${resolvedTag} || true
+                                    """
+                                }
+                            }
+                        }
+                    }
+
+                    parallel branches
+                }
+
+                if (shouldPush) {
                     // GitOps write-back: pin the built tag into the ArgoCD source
                     // so prod rolls. No image-updater exists — this commit IS the
                     // deploy trigger. Uses the same gh-token PAT as the registry push.
@@ -970,7 +980,7 @@ ${PUSH_WITH_RETRY_SH}
                     echo "auto-revert of ${writebackSha} failed: ${rollbackErr}"
                 }
             }
-            currentBuild.description = (currentStageName == 'Docker push' || currentStageName == 'GitOps write-back')
+            currentBuild.description = (currentStageName == 'Docker build+push' || currentStageName == 'GitOps write-back')
                     ? "FAILED AT PUBLISH (${currentStageName}) — code and tests passed"
                     : (currentStageName == 'Backend tests' && deployedThisBuild)
                             ? (autoReverted
