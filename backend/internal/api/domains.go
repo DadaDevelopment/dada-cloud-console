@@ -1670,6 +1670,35 @@ func appStillNeedsDefaultDomain(ctx context.Context, pool *pgxpool.Pool, environ
 	return appNeedsDefaultDomain(summary)
 }
 
+// appPortSourceAdopted is the summary_json "port_source" gitops-agent writes
+// when adopt-config learned the port from a hand-maintained gitops tree rather
+// than from anybody deciding it in the console (see adoptAppShape).
+const appPortSourceAdopted = "adopted"
+
+// appMayGetDefaultDomain gates the creation of a NEW public route, which is
+// strictly narrower than appNeedsDefaultDomain's "is this an HTTP app".
+//
+// appNeedsDefaultDomain used to double as the origin check by accident: only
+// apps created through CreateApp carried a port at all, so a port implied the
+// console had decided to publish the app. Adoption broke that implication.
+// Adopting the 53 hand-maintained apps taught the console their ports, and the
+// backfill promptly minted public hostnames with TLS for three internal-only
+// services -- one of whose values.yaml says in words that it must never be
+// exposed, because it trusts the caller identity in a header. Being reachable
+// over HTTP inside the cluster is not consent to being reachable from the
+// internet, and adoption is a read of git, not a request to publish.
+//
+// Re-driving an EXISTING domain_hostnames row (ReattachOrphanedHostnames) is
+// deliberately not gated on this: that row is a route somebody already asked
+// for, and repairing it for an adopted app is exactly right.
+func appMayGetDefaultDomain(summary map[string]any) bool {
+	if !appNeedsDefaultDomain(summary) {
+		return false
+	}
+	source, _ := summary["port_source"].(string)
+	return source != appPortSourceAdopted
+}
+
 func appNeedsDefaultDomain(summary map[string]any) bool {
 	if worker, _ := summary["worker"].(bool); worker {
 		return false
@@ -1737,7 +1766,7 @@ func BackfillMissingDefaultDomains(ctx context.Context, pool *pgxpool.Pool, cfg 
 	for _, a := range apps {
 		var summary map[string]any
 		_ = json.Unmarshal(a.summaryRaw, &summary)
-		if !appNeedsDefaultDomain(summary) {
+		if !appMayGetDefaultDomain(summary) {
 			continue
 		}
 		suffix, sErr := randomHostSuffix()
