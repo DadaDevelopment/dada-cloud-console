@@ -24,10 +24,24 @@ type adoptAppConfigPayload struct {
 // adoptedValues is what one app's values.yaml says about the things the console
 // claims ownership of: the environment and the service port.
 type adoptedValues struct {
-	Plain       map[string]string
-	Refs        []renderer.SecretRefEnvVar
-	ServicePort int
-	UseDotEnv   string
+	Plain        map[string]string
+	Refs         []renderer.SecretRefEnvVar
+	ServicePort  int
+	UseDotEnv    string
+	Image        string
+	Replicas     *int
+	Resources    *renderer.AppResources
+	WorkloadType string
+	StartCommand string
+	Volume       *adoptedVolume
+}
+
+// adoptedVolume is the persistent directory an app already has in git.
+type adoptedVolume struct {
+	Path         string `json:"path"`
+	Size         string `json:"size"`
+	StorageClass string `json:"storage_class,omitempty"`
+	FSGroup      int64  `json:"fs_group,omitempty"`
 }
 
 // adoptReport is written to operations.validation_result so the caller learns
@@ -42,6 +56,7 @@ type adoptReport struct {
 	PortAdopted      *int     `json:"port_adopted,omitempty"`
 	PortWas          *int     `json:"port_was,omitempty"`
 	UseDotEnv        string   `json:"use_dot_env,omitempty"`
+	AdoptedShape     []string `json:"adopted_shape"`
 	Summary          string   `json:"summary"`
 }
 
@@ -140,24 +155,21 @@ func (w *DBWatcher) doAdoptAppConfig(ctx context.Context, op db.Operation) error
 	}
 	sort.Strings(report.AlreadyInConsole)
 
-	if adopted.ServicePort > 0 {
-		was, changed, err := w.adoptServicePort(ctx, op, p.AppName, adopted.ServicePort)
-		if err != nil {
-			return err
-		}
-		if changed {
-			port := adopted.ServicePort
-			report.PortAdopted = &port
-			if was > 0 {
-				prev := was
-				report.PortWas = &prev
-			}
-		}
+	shapeChanges, portAdopted, portWas, err := w.adoptAppShape(ctx, op, p.AppName, adopted)
+	if err != nil {
+		return err
 	}
+	report.AdoptedShape = shapeChanges
+	if report.AdoptedShape == nil {
+		report.AdoptedShape = []string{}
+	}
+	report.PortAdopted = portAdopted
+	report.PortWas = portWas
 
 	report.Summary = fmt.Sprintf(
-		"adopted %d plain and %d secret-reference variables from %s; %d already known to the console",
-		len(report.AdoptedPlain), len(report.AdoptedSecretRef), valuesPath, len(report.AlreadyInConsole),
+		"adopted %d plain and %d secret-reference variables plus %d shape keys (%s) from %s; %d variables already known to the console",
+		len(report.AdoptedPlain), len(report.AdoptedSecretRef), len(report.AdoptedShape),
+		describeShape(report.AdoptedShape), valuesPath, len(report.AlreadyInConsole),
 	)
 	result, err := json.Marshal(report)
 	if err != nil {
@@ -210,51 +222,149 @@ func (w *DBWatcher) insertAdoptedValue(ctx context.Context, envID uuid.UUID, app
 // is what lets an app keep credentials the console must never see.
 func (w *DBWatcher) insertAdoptedSecretRef(ctx context.Context, envID uuid.UUID, appName string, ref renderer.SecretRefEnvVar, actorID uuid.UUID) error {
 	_, err := w.pool.Exec(ctx, `
-		INSERT INTO env_vars (environment_id, app_name, key, value_encrypted, is_secret, scope, created_by, secret_ref_name, secret_ref_key)
-		VALUES ($1, $2, $3, NULL, true, 'runtime', $4, $5, $6)
+		INSERT INTO env_vars (environment_id, app_name, key, value_encrypted, is_secret, scope, created_by, secret_ref_name, secret_ref_key, secret_ref_optional)
+		VALUES ($1, $2, $3, NULL, true, 'runtime', $4, $5, $6, $7)
 		ON CONFLICT (environment_id, app_name, key) DO NOTHING
-	`, envID, appName, ref.Name, actorID, ref.SecretName, ref.SecretKey)
+	`, envID, appName, ref.Name, actorID, ref.SecretName, ref.SecretKey, ref.Optional)
 	if err != nil {
 		return fmt.Errorf("insert adopted secret ref %s: %w", ref.Name, err)
 	}
 	return nil
 }
 
-// adoptServicePort makes the console's snapshot agree with the port the app is
-// actually served on. Without it the console keeps a guess (telemost-bot's
-// snapshot said 8080 while git and the running pod said 8000) and the first
-// deploy that is allowed to write the port would break the app.
-func (w *DBWatcher) adoptServicePort(ctx context.Context, op db.Operation, appName string, port int) (was int, changed bool, err error) {
+// adoptAppShape makes the console's snapshot agree with the app that git
+// already describes, for every key the console CLAIMS ownership of and would
+// therefore write over on its next render.
+//
+// The values merge protects only keys the console has never heard of. For an
+// owned key the merge replaces whatever git holds -- and the clobber guard is
+// blind to a replacement, because it measures deletions. So an app whose
+// snapshot disagrees with git is one console write away from being changed
+// without a word: telemost-bot's snapshot said port 8080 while git and the pod
+// said 8000, and its image tag, its resource envelope and its replica count are
+// exactly as capable of drifting. Adoption settles the disagreement in git's
+// favour, because git is what Argo applies and therefore what is running.
+//
+// The port additionally records port_source "adopted": a port learned from git
+// is a report, not a decision, and the deploy path treats a decided port
+// differently from a guessed one.
+func (w *DBWatcher) adoptAppShape(ctx context.Context, op db.Operation, appName string, adopted adoptedValues) ([]string, *int, *int, error) {
 	var summary []byte
-	err = w.pool.QueryRow(ctx, `
+	if err := w.pool.QueryRow(ctx, `
 		SELECT summary_json FROM resource_snapshots
 		WHERE environment_id = $1 AND kind = 'App' AND name = $2
-	`, op.EnvironmentID, appName).Scan(&summary)
-	if err != nil {
-		return 0, false, fmt.Errorf("read app snapshot: %w", err)
+	`, op.EnvironmentID, appName).Scan(&summary); err != nil {
+		return nil, nil, nil, fmt.Errorf("read app snapshot: %w", err)
 	}
 	cur := map[string]any{}
 	_ = json.Unmarshal(summary, &cur)
-	if p, ok := cur["port"].(float64); ok {
-		was = int(p)
+
+	patch := map[string]any{}
+	changes := []string{}
+	var portAdopted, portWas *int
+
+	if adopted.ServicePort > 0 {
+		was := 0
+		if p, ok := cur["port"].(float64); ok {
+			was = int(p)
+		}
+		if was != adopted.ServicePort {
+			patch["port"] = adopted.ServicePort
+			patch["port_source"] = appPortSourceAdopted
+			port := adopted.ServicePort
+			portAdopted = &port
+			if was > 0 {
+				prev := was
+				portWas = &prev
+			}
+			changes = append(changes, fmt.Sprintf("port %s -> %d", describeWas(was > 0, was), adopted.ServicePort))
+		}
 	}
-	if was == port {
-		return was, false, nil
+	if adopted.Image != "" {
+		if was, _ := cur["image"].(string); was != adopted.Image {
+			patch["image"] = adopted.Image
+			changes = append(changes, fmt.Sprintf("image %s -> %s", describeWasString(was), adopted.Image))
+		}
 	}
-	patch, _ := json.Marshal(map[string]any{
-		"port":          port,
-		"port_source":   appPortSourceAdopted,
-		"adopted_at":    time.Now().UTC().Format(time.RFC3339),
-		"adopted_by_op": op.ID.String(),
-	})
+	if adopted.Replicas != nil {
+		was := 0
+		if r, ok := cur["replicas"].(float64); ok {
+			was = int(r)
+		}
+		if was != *adopted.Replicas {
+			patch["replicas"] = *adopted.Replicas
+			changes = append(changes, fmt.Sprintf("replicas %s -> %d", describeWas(was > 0, was), *adopted.Replicas))
+		}
+	}
+	if adopted.Resources != nil {
+		if !sameResources(resourcesFromSummary(cur), adopted.Resources) {
+			patch["resources"] = adopted.Resources
+			changes = append(changes, fmt.Sprintf("resources -> requests %s/%s, limits %s/%s",
+				adopted.Resources.CPURequest, adopted.Resources.MemoryRequest,
+				adopted.Resources.CPULimit, adopted.Resources.MemoryLimit))
+		}
+	}
+	if adopted.WorkloadType != "" {
+		if was := workloadTypeFromSummary(cur); was != adopted.WorkloadType {
+			patch["workload_type"] = adopted.WorkloadType
+			changes = append(changes, fmt.Sprintf("workload_type %s -> %s", describeWasString(was), adopted.WorkloadType))
+		}
+	}
+	if adopted.StartCommand != "" {
+		if was, _ := cur["start_command"].(string); was != adopted.StartCommand {
+			patch["start_command"] = adopted.StartCommand
+			changes = append(changes, "start_command adopted from git")
+		}
+	}
+	if v := adopted.Volume; v != nil {
+		path, size, class, fsGroup := volumeFromSummary(cur)
+		if path != v.Path || size != v.Size || class != v.StorageClass || fsGroup != v.FSGroup {
+			patch["volume"] = v
+			changes = append(changes, fmt.Sprintf("volume %s (%s) adopted from git", v.Path, v.Size))
+		}
+	}
+	if len(patch) == 0 {
+		return changes, portAdopted, portWas, nil
+	}
+	patch["adopted_at"] = time.Now().UTC().Format(time.RFC3339)
+	patch["adopted_by_op"] = op.ID.String()
+	encoded, err := json.Marshal(patch)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	if _, err := w.pool.Exec(ctx, `
 		UPDATE resource_snapshots
 		SET summary_json = COALESCE(summary_json, '{}'::jsonb) || $1::jsonb
 		WHERE environment_id = $2 AND kind = 'App' AND name = $3
-	`, patch, op.EnvironmentID, appName); err != nil {
-		return was, false, fmt.Errorf("write adopted port: %w", err)
+	`, encoded, op.EnvironmentID, appName); err != nil {
+		return nil, nil, nil, fmt.Errorf("write adopted app shape: %w", err)
 	}
-	return was, true, nil
+	return changes, portAdopted, portWas, nil
+}
+
+// sameResources compares two resource envelopes, treating a missing one as
+// different from any present one.
+func sameResources(a, b *renderer.AppResources) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+// describeWas names the console's previous value for the adoption report, or
+// says the console had none.
+func describeWas(known bool, was int) string {
+	if !known {
+		return "(unset)"
+	}
+	return fmt.Sprintf("%d", was)
+}
+
+func describeWasString(was string) string {
+	if was == "" {
+		return "(unset)"
+	}
+	return was
 }
 
 // appPortSourceAdopted marks a port the console learned from git rather than
@@ -268,15 +378,35 @@ const appPortSourceAdopted = "adopted"
 func parseAdoptableValues(raw string) (adoptedValues, error) {
 	var doc struct {
 		Common struct {
-			ServicePort int    `yaml:"servicePort"`
-			UseDotEnv   string `yaml:"useDotEnv"`
-			ExtraEnv    []struct {
+			ServicePort  int    `yaml:"servicePort"`
+			UseDotEnv    string `yaml:"useDotEnv"`
+			Replicas     *int   `yaml:"replicas"`
+			WorkloadType string `yaml:"workloadType"`
+			StartCommand string `yaml:"startCommand"`
+			Image        *struct {
+				Name string `yaml:"name"`
+				Tag  string `yaml:"tag"`
+			} `yaml:"image"`
+			Resources *struct {
+				Requests map[string]string `yaml:"requests"`
+				Limits   map[string]string `yaml:"limits"`
+			} `yaml:"resources"`
+			Pvc *struct {
+				Size         string `yaml:"size"`
+				StorageClass string `yaml:"storageClass"`
+				Path         string `yaml:"path"`
+			} `yaml:"pvc"`
+			PodSecurityContext *struct {
+				FSGroup int64 `yaml:"fsGroup"`
+			} `yaml:"podSecurityContext"`
+			ExtraEnv []struct {
 				Name      string  `yaml:"name"`
 				Value     *string `yaml:"value"`
 				ValueFrom *struct {
 					SecretKeyRef *struct {
-						Name string `yaml:"name"`
-						Key  string `yaml:"key"`
+						Name     string `yaml:"name"`
+						Key      string `yaml:"key"`
+						Optional bool   `yaml:"optional"`
 					} `yaml:"secretKeyRef"`
 				} `yaml:"valueFrom"`
 			} `yaml:"extraEnv"`
@@ -286,9 +416,38 @@ func parseAdoptableValues(raw string) (adoptedValues, error) {
 		return adoptedValues{}, fmt.Errorf("parsing values.yaml: %w", err)
 	}
 	out := adoptedValues{
-		Plain:       map[string]string{},
-		ServicePort: doc.Common.ServicePort,
-		UseDotEnv:   doc.Common.UseDotEnv,
+		Plain:        map[string]string{},
+		ServicePort:  doc.Common.ServicePort,
+		UseDotEnv:    doc.Common.UseDotEnv,
+		Replicas:     doc.Common.Replicas,
+		WorkloadType: doc.Common.WorkloadType,
+		StartCommand: doc.Common.StartCommand,
+	}
+	if img := doc.Common.Image; img != nil && img.Name != "" {
+		out.Image = img.Name
+		if img.Tag != "" {
+			out.Image = img.Name + ":" + img.Tag
+		}
+	}
+	if r := doc.Common.Resources; r != nil {
+		env := renderer.AppResources{
+			CPURequest:       r.Requests["cpu"],
+			MemoryRequest:    r.Requests["memory"],
+			CPULimit:         r.Limits["cpu"],
+			MemoryLimit:      r.Limits["memory"],
+			EphemeralRequest: r.Requests["ephemeral-storage"],
+			EphemeralLimit:   r.Limits["ephemeral-storage"],
+		}
+		if env.Complete() {
+			out.Resources = &env
+		}
+	}
+	if v := doc.Common.Pvc; v != nil && v.Path != "" {
+		vol := adoptedVolume{Path: v.Path, Size: v.Size, StorageClass: v.StorageClass}
+		if sc := doc.Common.PodSecurityContext; sc != nil {
+			vol.FSGroup = sc.FSGroup
+		}
+		out.Volume = &vol
 	}
 	for _, e := range doc.Common.ExtraEnv {
 		if e.Name == "" {
@@ -299,6 +458,7 @@ func parseAdoptableValues(raw string) (adoptedValues, error) {
 				Name:       e.Name,
 				SecretName: e.ValueFrom.SecretKeyRef.Name,
 				SecretKey:  e.ValueFrom.SecretKeyRef.Key,
+				Optional:   e.ValueFrom.SecretKeyRef.Optional,
 			})
 			continue
 		}
@@ -318,4 +478,12 @@ func sortedEnvKeys(m map[string]string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// describeShape renders the adopted app-shape changes for the one-line summary.
+func describeShape(changes []string) string {
+	if len(changes) == 0 {
+		return "the console already agreed with git"
+	}
+	return strings.Join(changes, "; ")
 }

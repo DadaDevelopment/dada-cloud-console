@@ -1,0 +1,11 @@
+-- 139_env_vars_secret_ref_optional.sql
+-- Carries the `optional: true` flag of an adopted secretKeyRef.
+--
+-- An optional reference means "start the pod even when this Secret or key is
+-- absent". internal/prod/telemost-bot marks ASSEMBLYAI_API_KEY optional so
+-- transcription stays off when the key is missing instead of the pod refusing
+-- to start. The values merge replaces an extraEnv entry the render also names,
+-- so a console that adopted the reference without the flag would delete the
+-- flag from git on its next write -- turning a degraded feature into an app
+-- that never comes up.
+ALTER TABLE env_vars ADD COLUMN IF NOT EXISTS secret_ref_optional BOOLEAN NOT NULL DEFAULT false;

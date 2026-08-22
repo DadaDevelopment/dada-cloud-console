@@ -1,0 +1,155 @@
+common:
+  metrics: "false"
+  image:
+    name: nexus.dada-tuda.ru/dada/telemost-bot
+    tag: master-1.0.0-6
+  # App listens on 8000 (uvicorn). Chart python default is 8080 — override.
+  # WARNING: a console re-render resets this to the chart default and flips
+  # useDotEnv to "false". Both are fatal: the startup probe then knocks on 8080
+  # (pod never goes ready) and /app/.env is not mounted, so TELEGRAM_BOT_TOKEN
+  # disappears and the bot starts with Telegram disabled. Re-check these two
+  # lines after any console-driven change to this app.
+  servicePort: 8000
+  healthcheck: "true"
+  # ── env (.env mounted at /app/.env; app calls load_dotenv) ──────────────────
+  useDotEnv: "true"
+  envFileValue:
+    TELEMOST_BOT_EMAIL: "development@dada-tuda.ru"
+    IMAP_HOST: "imap.yandex.ru"
+    # SECRETS (plaintext per repo convention; rotate if leaked).
+    # One Yandex OAuth token carries BOTH telemost-api:conferences.* and
+    # mail:imap_full (verified live 2026-06-11: Telemost 201, IMAP auth OK).
+    YANDEX_OAUTH_TOKEN: "REDACTED-IN-FIXTURE"
+    YANDEX_MAIL_OAUTH_TOKEN: "REDACTED-IN-FIXTURE"
+    # GROQ_API_KEY / ASSEMBLYAI_API_KEY are injected via extraEnv secretKeyRef
+    # (secret telemost-bot-llm-keys) — not plaintext here.
+    # Telegram bot (@dada_development_telemost_bot) — inline "Начать звонок" button
+    TELEGRAM_BOT_TOKEN: "REDACTED-IN-FIXTURE"
+    # Agent-orchestration: POST konspekt -> AgentSync meeting-summary event.
+    # Points at agent-sync-hub (successor to the retired dada-agent). app.main's
+    # /v1/agentsync/events/* require a real Keycloak OIDC JWT: the bot fetches a
+    # client_credentials token (telemost-bot M2M client) and sends it as Bearer.
+    # Secret is injected out-of-band via extraEnv (telemost-bot-keycloak).
+    AGENTSYNC_MEETING_WEBHOOK_URL: "https://agent-sync-hub.dada-tuda.ru/v1/agentsync/events/meeting-summary"
+    AGENTSYNC_OIDC_TOKEN_URL: "https://id.dada-tuda.ru/realms/master/protocol/openid-connect/token"
+    AGENTSYNC_CLIENT_ID: "telemost-bot"
+    # REST base for the PM integration (pull /v1/workflows + /v1/projects, push
+    # /v1/features + artifacts). MUST match the deployed backend host — the same
+    # agent-sync-hub the webhook targets, NOT the code default agent.dada-tuda.ru.
+    AGENTSYNC_BASE_URL: "https://agent-sync-hub.dada-tuda.ru"
+    AGENTSYNC_DEFAULT_REPO: "agent_sync_hub"
+    # Groq drives the free-text ReAct agent + note summaries, but the bot no
+    # longer talks to api.groq.com directly: everything goes through the platform
+    # AI Gateway (ADR-015), which holds the Groq credential for project
+    # "internal" and egresses through the platform proxy. GROQ_MODEL is a
+    # gateway alias, not an upstream model id.
+    # GROQ_API_KEY is NOT here: it is this app's ServiceIdentity token and
+    # arrives via secretKeyRef in extraEnv (ADR-021). This block renders into a
+    # ConfigMap, so a credential written here is plaintext in git AND readable
+    # by anyone with get on the namespace.
+    GROQ_BASE_URL: "http://ai-gateway-service.argocd-prod.svc.cluster.local/v1"
+    GROQ_MODEL: "groq-gpt-oss"
+  # ── state store (Postgres via ServiceDatabaseV2) ────────────────────────────
+  # Holds CREATORS/INLINE_MSGS/PENDING/admin-chat that were in-memory before
+  # (lost on every rollout — fatal for konspekts that arrive an hour later and
+  # for pending approvals). Provisions DB `telemost_bot` + secret
+  # telemost-bot-db-credentials (keys endpoint/port/username/password).
+  serviceDatabase:
+    enabled: true
+    name: telemost-bot
+    # Шард, на котором база физически лежит. Без него композиция берёт
+    # defaultShard и целит ProviderConfig с бэкапом в инстанс, который
+    # базу уже отдал: после переезда там молча вырастает пустышка.
+    shard: shard-0
+    # DB name becomes a k8s MR name -> must be RFC1123 (no underscores/hyphens
+    # are fine but keep it plain lowercase like the other apps: reels/parser).
+    schemaName: telemostbot
+    backup:
+      enabled: false
+  # Inject the generated DB creds as PG* env (app reads PGHOST/PORT/USER/PASSWORD;
+  # no PGHOST => app falls back to volatile in-memory state). Mirrors dada-agent.
+  # Inject the generated DB creds as PG* env (app reads PGHOST/PORT/USER/PASSWORD;
+  # no PGHOST => app falls back to volatile in-memory state).
+  # WARNING: the console's env writer REPLACES this whole list when it sets a
+  # variable through the platform API, which is how these entries were lost once
+  # already (bot came up with no Postgres and no Telegram token). Re-check this
+  # block after any console-driven env change until that writer merges instead.
+  extraEnv:
+    - name: PGHOST
+      valueFrom:
+        secretKeyRef:
+          name: telemost-bot-db-credentials
+          key: endpoint
+    - name: PGPORT
+      valueFrom:
+        secretKeyRef:
+          name: telemost-bot-db-credentials
+          key: port
+    - name: PGUSER
+      valueFrom:
+        secretKeyRef:
+          name: telemost-bot-db-credentials
+          key: username
+    - name: PGPASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: telemost-bot-db-credentials
+          key: password
+    - name: PGDATABASE
+      value: telemostbot
+    - name: AGENTSYNC_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: telemost-bot-keycloak
+          key: attribute.client_secret
+    # GROQ_API_KEY is the app's ServiceIdentity token (ADR-021), written into
+    # internal-prod by the console's delivery loop — not the old telemost-bot-llm-keys
+    # Groq key, which would send the bot straight back at api.groq.com.
+    - name: GROQ_API_KEY
+      valueFrom:
+        secretKeyRef:
+          name: telemost-bot-identity-credentials
+          key: DADA_SERVICE_TOKEN
+    # optional:true so the pod still starts when the secret/key is absent — that
+    # capability just stays off (the ASSEMBLYAI gate in app.py handles empties).
+    - name: ASSEMBLYAI_API_KEY
+      valueFrom:
+        secretKeyRef:
+          name: telemost-bot-llm-keys
+          key: ASSEMBLYAI_API_KEY
+          optional: true
+    - name: AGENTSYNC_BASE_URL
+      value: https://agent-sync-hub.dada-tuda.ru
+    # Journal service key (role bot, scope impersonate). The bot names the person it
+    # acts for in X-On-Behalf-Of; the key alone opens no board.
+    - name: AGENTSYNC_JOURNAL_KEY
+      valueFrom:
+        secretKeyRef:
+          name: telemost-bot-env
+          key: AGENTSYNC_JOURNAL_KEY
+    # Адрес агента рантайма. Пока он задан, бот шлёт вопрос туда по A2A и
+    # отвечает его текстом; при любой ошибке молча падает обратно на свой
+    # встроенный цикл, так что откат - удаление этой пары строк.
+    - name: AGENT_A2A_URL
+      value: http://telemost-poc.kagent.svc.cluster.local:8080
+  # ── resources (idle API: tiny) ──────────────────────────────────────────────
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  # Single Telegram long-poller: two pods => getUpdates 409 Conflict.
+  # recreate (not rolling) keeps exactly one pod alive at a time.
+  recreate: true
+  priorityClassName: "python"
+  goldilocks:
+    vpaUpdateMode: ""
+  service:
+    enabled: true
+  replicas: 1
+  hostAliases:
+    - ip: 10.96.139.238
+      hostnames:
+        - db.pv.dada-tuda.ru

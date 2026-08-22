@@ -59,7 +59,7 @@ func (w *DBWatcher) resolveRuntimeEnv(ctx context.Context, environmentID *uuid.U
 		return out, nil
 	}
 	rows, err := w.pool.Query(ctx, `
-		SELECT key, value_encrypted, is_secret, secret_ref_name, secret_ref_key
+		SELECT key, value_encrypted, is_secret, secret_ref_name, secret_ref_key, secret_ref_optional
 		FROM env_vars
 		WHERE environment_id = $1 AND app_name = $2 AND scope IN ('runtime', 'both')
 		ORDER BY key
@@ -76,13 +76,14 @@ func (w *DBWatcher) resolveRuntimeEnv(ctx context.Context, environmentID *uuid.U
 			isSecret bool
 			refName  *string
 			refKey   *string
+			refOpt   bool
 		)
-		if err := rows.Scan(&key, &enc, &isSecret, &refName, &refKey); err != nil {
+		if err := rows.Scan(&key, &enc, &isSecret, &refName, &refKey, &refOpt); err != nil {
 			return out, fmt.Errorf("scan env_var: %w", err)
 		}
 		if refName != nil && refKey != nil {
 			out.Refs = append(out.Refs, renderer.SecretRefEnvVar{
-				Name: key, SecretName: *refName, SecretKey: *refKey,
+				Name: key, SecretName: *refName, SecretKey: *refKey, Optional: refOpt,
 			})
 			continue
 		}

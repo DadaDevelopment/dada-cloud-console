@@ -111,6 +111,23 @@ type SecretRefEnvVar struct {
 	Name       string
 	SecretName string
 	SecretKey  string
+	Optional   bool
+}
+
+// optionalFlag renders `optional: true` and omits the field otherwise.
+//
+// An optional reference means "start the pod even when this Secret or key is
+// absent", and losing the flag turns a degraded capability into a pod that
+// never starts: internal/prod/telemost-bot marks ASSEMBLYAI_API_KEY optional so
+// transcription simply stays off when the key is missing. Because the merge
+// replaces an extraEnv entry the render also names, a render that forgets the
+// flag deletes it from git even though the variable itself survives.
+func optionalFlag(optional bool) *bool {
+	if !optional {
+		return nil
+	}
+	v := true
+	return &v
 }
 
 // AppSpec holds parameters for an App manifest.
@@ -371,8 +388,9 @@ type commonImage struct {
 }
 
 type commonSecretKeyRef struct {
-	Name string `yaml:"name"`
-	Key  string `yaml:"key"`
+	Name     string `yaml:"name"`
+	Key      string `yaml:"key"`
+	Optional *bool  `yaml:"optional,omitempty"`
 }
 
 type commonEnvValueRef struct {
@@ -590,8 +608,12 @@ func RenderAppValues(spec AppSpec) (string, error) {
 	sort.Slice(refs, func(i, j int) bool { return refs[i].Name < refs[j].Name })
 	for _, r := range refs {
 		values.Common.ExtraEnv = append(values.Common.ExtraEnv, commonEnvVar{
-			Name:      r.Name,
-			ValueFrom: &commonEnvValueRef{SecretKeyRef: commonSecretKeyRef{Name: r.SecretName, Key: r.SecretKey}},
+			Name: r.Name,
+			ValueFrom: &commonEnvValueRef{SecretKeyRef: commonSecretKeyRef{
+				Name:     r.SecretName,
+				Key:      r.SecretKey,
+				Optional: optionalFlag(r.Optional),
+			}},
 		})
 	}
 
