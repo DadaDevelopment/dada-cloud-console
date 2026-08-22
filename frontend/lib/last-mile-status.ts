@@ -108,6 +108,26 @@ export function evaluateWorkerNoHTTP(summary: LastMileSummary | null | undefined
   return { status: summary.http_status, checkedAt: summary.http_checked_at };
 }
 
+/**
+ * Folds the last-mile verdict into the phase string shown to the app owner.
+ * Lives here, not in the page components that render it, for one reason:
+ * the single frontend unit-test rig (`package.json` `test:unit`) globs
+ * `lib/**` only -- there is no JSX render test in this repo -- so any rule
+ * that needs a mutation-tested RED/GREEN has to sit in a plain function this
+ * rig can import. The detail page (`apps/[appName]/page.tsx`) already computed
+ * this inline; the list page (`apps/page.tsx`) rendered `app.phase` raw, so a
+ * dead app that was still `Ready` at the pod level showed a green "Ready"
+ * badge on the very first screen its owner sees. Both surfaces now call this
+ * one function so they can never disagree again.
+ */
+export function phaseWithLastMile(
+  phase: string | undefined,
+  summary: LastMileSummary | null | undefined,
+): string | undefined {
+  if ((phase ?? "").toLowerCase() !== "ready") return phase;
+  return evaluateLastMile(summary) ? "Unreachable" : phase;
+}
+
 export function evaluateLastMile(summary: LastMileSummary | null | undefined): LastMileVerdict | null {
   if (!summary) return null;
   if (summary.worker === true) return null;

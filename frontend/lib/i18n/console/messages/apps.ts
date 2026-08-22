@@ -1076,6 +1076,8 @@ export const apps: Messages = {
   "apps.alerts.volume.cta": { ru: "Открыть Storage", en: "Open Storage" },
   "apps.alerts.chip.volume": { ru: "Диск", en: "Disk" },
   "apps.alerts.chip.url": { ru: "Не веб", en: "Not web" },
+  "apps.alerts.chip.lastMile": { ru: "URL не отвечает", en: "URL not responding" },
+  "apps.alerts.chip.lastMile.action": { ru: "Открыть", en: "Open" },
   "apps.alerts.url.text": {
     ru: "Приложение запущено, но не отвечает по HTTP — публичный адрес будет отдавать 502. Если это бот, воркер или не-веб сервис, это нормально.",
     en: "The app is running but is not answering HTTP requests — its public address will return 502. This is expected if the app is a bot, worker, or other non-web service.",

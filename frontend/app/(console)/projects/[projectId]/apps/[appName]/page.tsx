@@ -25,7 +25,7 @@ import { AppNextStepCard } from "@/components/deploy/app-next-step-card";
 import { AppLiveBanner } from "@/components/deploy/app-live-banner";
 import { AppTwinBanner } from "@/components/deploy/app-twin-banner";
 import { AppLastMileBanner } from "@/components/deploy/app-last-mile-banner";
-import { evaluateLastMile } from "@/lib/last-mile-status";
+import { phaseWithLastMile } from "@/lib/last-mile-status";
 import { AppDeployDriftBanner } from "@/components/deploy/app-deploy-drift-banner";
 import { AppLatestBuildCard } from "@/components/deploy/app-latest-build-card";
 import { AppCurrentDeployCard } from "@/components/deploy/app-current-deploy-card";
@@ -288,8 +288,7 @@ export default function AppDetailPage() {
   const isResource = resType !== "app";
   const alerts = getAppAlerts(app);
   const appPhaseReady = (app.phase ?? "").toLowerCase() === "ready";
-  const lastMileVerdict = evaluateLastMile(summary);
-  const displayPhase = appPhaseReady && lastMileVerdict ? "Unreachable" : app.phase;
+  const displayPhase = phaseWithLastMile(app.phase, summary);
   const isReadyNoAlerts = appPhaseReady && alerts.length === 0;
   const observedCpu = summary.observed_resources?.cpu_limit ?? summary.observed_resources?.cpu_request;
   const observedMem = summary.observed_resources?.memory_limit ?? summary.observed_resources?.memory_request;

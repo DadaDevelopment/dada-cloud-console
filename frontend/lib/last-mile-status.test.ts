@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { evaluateLastMile, evaluateWorkerNoHTTP, isDeadHTTPStatus, isDeadLastMile } from "./last-mile-status.ts";
+import {
+  evaluateLastMile,
+  evaluateWorkerNoHTTP,
+  isDeadHTTPStatus,
+  isDeadLastMile,
+  phaseWithLastMile,
+} from "./last-mile-status.ts";
 
 test("no verdict when the probe never ran", () => {
   assert.equal(evaluateLastMile(undefined), null);
@@ -151,6 +157,60 @@ test("a worker whose leftover address answers an error gets an explanation, not 
     }),
     { status: 0, checkedAt: "2026-08-15T10:00:00Z" },
   );
+});
+
+/**
+ * phaseWithLastMile is the app-list page's twin of the detail page's inline
+ * `displayPhase` computation -- the list rendered `app.phase` raw and kept
+ * showing a green "Ready" badge for sevarateambot (502) and fonbet-value
+ * (503) on the very first screen their owners see. Both surfaces must now
+ * agree, so this is tested against the same shapes evaluateLastMile already
+ * covers above.
+ */
+test("phaseWithLastMile: Ready app with a dead non-worker probe reads as Unreachable", () => {
+  assert.equal(
+    phaseWithLastMile("Ready", { http_status: 502, http_reason: "status_502", http_checked_at: "2026-08-15T10:00:00Z" }),
+    "Unreachable",
+  );
+});
+
+test("phaseWithLastMile: a worker stays Ready even behind a dead leftover address", () => {
+  assert.equal(
+    phaseWithLastMile("Ready", {
+      worker: true,
+      http_status: 502,
+      http_reason: "status_502",
+      http_checked_at: "2026-08-15T10:00:00Z",
+    }),
+    "Ready",
+  );
+});
+
+test("phaseWithLastMile: a 404 the app itself answered stays Ready", () => {
+  assert.equal(
+    phaseWithLastMile("Ready", { http_status: 404, http_reason: "status_404", http_checked_at: "2026-08-15T10:00:00Z" }),
+    "Ready",
+  );
+});
+
+test("phaseWithLastMile: no probe data stays Ready", () => {
+  assert.equal(phaseWithLastMile("Ready", null), "Ready");
+  assert.equal(phaseWithLastMile("Ready", {}), "Ready");
+});
+
+test("phaseWithLastMile: a non-Ready phase passes through untouched, case-insensitively too", () => {
+  assert.equal(
+    phaseWithLastMile("Failed", { http_status: 502, http_reason: "status_502", http_checked_at: "2026-08-15T10:00:00Z" }),
+    "Failed",
+  );
+  assert.equal(
+    phaseWithLastMile("READY", { http_status: 502, http_reason: "status_502", http_checked_at: "2026-08-15T10:00:00Z" }),
+    "Unreachable",
+  );
+});
+
+test("phaseWithLastMile: undefined phase passes through as undefined", () => {
+  assert.equal(phaseWithLastMile(undefined, { http_status: 502, http_checked_at: "2026-08-15T10:00:00Z" }), undefined);
 });
 
 test("nothing to explain when the app is not a worker, or its address serves, or no probe ran", () => {

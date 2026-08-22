@@ -29,6 +29,7 @@ import { classifyVMResource, extractIngressSpec, extractDatabaseSpec } from "@/l
 import { alertChipAction, getAppAlerts, hasAlertType, type AppAlert } from "@/lib/app-alerts";
 import { normalizeAppUrlStatus, appUrlReasonMessageKey } from "@/lib/app-url-status";
 import { Tooltip } from "@/components/ui/tooltip";
+import { evaluateLastMile, phaseWithLastMile } from "@/lib/last-mile-status";
 
 interface CreateAppForm {
   name: string;
@@ -665,6 +666,8 @@ function AppRow({ app, env, projectId, expanded, onToggle, t }: AppRowProps) {
   const hasCrashAlert = hasAlertType(alerts, "crash");
   const hasVolumeAlert = hasAlertType(alerts, "volume");
   const hasURLAlert = hasAlertType(alerts, "url");
+  const lastMileVerdict = evaluateLastMile(summary);
+  const displayPhase = phaseWithLastMile(app.phase, summary);
   const urlStatus = normalizeAppUrlStatus(summary.url_status);
   const urlReason = urlReasonText(summary.url_reason, t);
   const subtitle =
@@ -705,7 +708,7 @@ function AppRow({ app, env, projectId, expanded, onToggle, t }: AppRowProps) {
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <p className="font-mono text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{app.name}</p>
-              <PhaseBadge phase={app.phase} />
+              <PhaseBadge phase={displayPhase} />
               {app.demo_expires_at && (
                 <DemoAppChip projectId={projectId} envId={env.id} appName={app.name} expiresAt={app.demo_expires_at} />
               )}
@@ -743,6 +746,17 @@ function AppRow({ app, env, projectId, expanded, onToggle, t }: AppRowProps) {
                   {t("apps.alerts.chip.url")}
                   <span aria-hidden="true">·</span>
                   {t(alertChipAction(urlAlert).labelKey)}
+                </Link>
+              )}
+              {lastMileVerdict && (
+                <Link
+                  href={appHref}
+                  onClick={(e) => e.stopPropagation()}
+                  className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-950/60 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900 transition-colors"
+                >
+                  {t("apps.alerts.chip.lastMile")}
+                  <span aria-hidden="true">·</span>
+                  {t("apps.alerts.chip.lastMile.action")}
                 </Link>
               )}
             </div>
