@@ -632,14 +632,6 @@ spec:
 
                         stage('Frontend typecheck + tests') {
                             dir('frontend') {
-                                // No `npm run build` here on purpose: frontend/Dockerfile's own
-                                // multi-stage build runs `npm run build` again from the same
-                                // source (see COPY . . / RUN npm run build there) — this stage's
-                                // build output was never copied into the image, just compiled
-                                // and thrown away. Running it twice per pipeline was pure wasted
-                                // wall-clock; a Next.js build failure now surfaces in the "Docker
-                                // build" stage instead of here. typecheck/lint/test:unit still
-                                // catch the large majority of that class of error earlier.
                                 withEnv([
                                     "NEXT_PUBLIC_AUTH_MODE=${NEXT_PUBLIC_AUTH_MODE}",
                                     "NEXT_PUBLIC_KEYCLOAK_ISSUER=${NEXT_PUBLIC_KEYCLOAK_ISSUER}",
@@ -662,6 +654,33 @@ spec:
                                         if has_script typecheck; then npm run typecheck; else echo "No typecheck script — skip"; fi
                                         if has_script lint;      then npm run lint;      else echo "No lint script — skip";      fi
                                         if has_script test:unit; then npm run test:unit; else echo "No test:unit script — skip"; fi
+                                    '''
+                                }
+                            }
+                        }
+
+                        stage('Frontend build') {
+                            dir('frontend') {
+                                // Moved out of frontend/Dockerfile's builder stage (2026-08-22):
+                                // that made the frontend Docker branch the slowest of the 7-way
+                                // parallel Docker build+push (npm ci + next build inside dind,
+                                // ~2m30s vs ~1m30s for the prebuilt-binary Go images), so it set
+                                // the pace for the whole stage every build. Built here instead,
+                                // concurrently with the Go lane above (this parallel() block is a
+                                // barrier the Docker stage waits on regardless) — net wall-clock
+                                // wash, but it stops being the long pole once Docker build+push
+                                // starts. Dockerfile now just COPYs .next/standalone from this
+                                // same shared workspace-volume (node-builder and the docker/dind
+                                // containers all mount it) instead of rebuilding from source.
+                                withEnv([
+                                    "NEXT_PUBLIC_AUTH_MODE=${NEXT_PUBLIC_AUTH_MODE}",
+                                    "NEXT_PUBLIC_KEYCLOAK_ISSUER=${NEXT_PUBLIC_KEYCLOAK_ISSUER}",
+                                    "NEXT_PUBLIC_OIDC_CLIENT_ID=${NEXT_PUBLIC_OIDC_CLIENT_ID}",
+                                    "NEXT_PUBLIC_CONSOLE_URL=${NEXT_PUBLIC_CONSOLE_URL}",
+                                ]) {
+                                    sh '''
+                                        set -eux
+                                        npm run build
                                     '''
                                 }
                             }
@@ -784,25 +803,16 @@ ${PUSH_WITH_RETRY_SH}
                     // the prebuilt-binary images above, and its own auth temp
                     // file (parallel branches share the container filesystem).
                     branches['frontend'] = {
-                        withCredentials([usernamePassword(
-                                credentialsId: 'docker-nexus-admin-psws',
-                                usernameVariable: 'NEXUS_USER',
-                                passwordVariable: 'NEXUS_PASS'
-                        )]) {
-                            sh """
-                                set -eu
-                                printf '%s:%s' "\${NEXUS_USER}" "\${NEXUS_PASS}" | base64 | tr -d '\\n' > /tmp/nexus_npm_auth_frontend
-                                DOCKER_BUILDKIT=1 docker build \\
-                                  --secret id=nexus_npm_auth,src=/tmp/nexus_npm_auth_frontend \\
-                                  --build-arg NEXT_PUBLIC_AUTH_MODE=${NEXT_PUBLIC_AUTH_MODE} \\
-                                  --build-arg NEXT_PUBLIC_KEYCLOAK_ISSUER=${NEXT_PUBLIC_KEYCLOAK_ISSUER} \\
-                                  --build-arg NEXT_PUBLIC_OIDC_CLIENT_ID=${NEXT_PUBLIC_OIDC_CLIENT_ID} \\
-                                  --build-arg NEXT_PUBLIC_CONSOLE_URL=${NEXT_PUBLIC_CONSOLE_URL} \\
-                                  -t ${FRONTEND_IMAGE}:${resolvedTag} \\
-                                  -f frontend/Dockerfile frontend
-                                rm -f /tmp/nexus_npm_auth_frontend
-                            """
-                        }
+                        // Build already happened in the 'Frontend build' stage (node-builder,
+                        // parallel with the Go backend lane) — this is copy-only now, no
+                        // npm ci/build inside dind, no Nexus secret, no NEXT_PUBLIC_* args
+                        // (baked in at npm build time already). See frontend/Dockerfile.
+                        sh """
+                            set -eu
+                            docker build \\
+                              -t ${FRONTEND_IMAGE}:${resolvedTag} \\
+                              -f frontend/Dockerfile frontend
+                        """
                         if (shouldPush) {
                             retry(2) {
                                 sh """
