@@ -5,15 +5,18 @@ import { useEffect, useState } from "react";
 import { timeAgo } from "@/lib/format";
 import { useT } from "@/lib/i18n/console/context";
 import { Spinner } from "@/components/ui/spinner";
-import { diagnoseApi, cloudTasksApi, databasesApi, envVarsApi } from "@/lib/api";
+import { diagnoseApi, cloudTasksApi, databasesApi, envVarsApi, appsApi } from "@/lib/api";
 import {
+  formatVolumeSize,
+  isQuotaExceededError,
   missingEnvVarKey,
   offersStartCommandFix,
   parseBadConnCauseLine,
+  proposeVolumeSizeGi,
   suggestSSLModeDisable,
   type AppAlert,
 } from "@/lib/app-alerts";
-import type { AppDiagnosis, ResourceSnapshot } from "@/lib/types";
+import type { AppDiagnosis, AppVolume, ResourceSnapshot } from "@/lib/types";
 
 /**
  * Maps the watcher's raw container reason to the message key, so an
@@ -435,6 +438,117 @@ function MissingEnvVarRepair({
   );
 }
 
+type StorageRepairState =
+  | { status: "idle" }
+  | { status: "pending" }
+  | { status: "error"; message: string }
+  | { status: "quota" }
+  | { status: "done" };
+
+/**
+ * The one-click fix for a `platform_storage` alert (the platform's own
+ * volume ran out of gigabyte capacity): proposes a bigger size for the
+ * app's EXISTING persistent volume (same `path` and `storage_class` --
+ * neither can change once a volume exists, see the backend's
+ * UpdateAppStorage doc comment) and calls the same
+ * `PUT .../apps/{appName}/storage` endpoint the manual Storage tab uses.
+ *
+ * `volume` comes from the app's own resource snapshot (AppAlertsBanner's
+ * caller reads it off the same summary the rest of the page already
+ * renders); without a known current size there is nothing honest to
+ * propose, so the component renders no lever at all rather than a guess --
+ * the alert's existing "view logs" link is still there either way.
+ *
+ * A plan-quota rejection (403 quota_exceeded, see the backend's
+ * respondQuotaExceeded) reads as a way out, not a wall: the same wording
+ * and the same /billing link `db_read_only`'s upgrade CTA already uses,
+ * because it is the identical plan-limit story. Branches only on the typed
+ * `err.status` / `err.code` the API client already parses, never on error
+ * prose.
+ */
+function PlatformStorageRepair({
+  projectId,
+  envId,
+  appName,
+  volume,
+}: {
+  projectId: string;
+  envId: string;
+  appName: string;
+  volume?: AppVolume;
+}) {
+  const { t } = useT();
+  const [repair, setRepair] = useState<StorageRepairState>({ status: "idle" });
+  const proposal = proposeVolumeSizeGi(volume?.size);
+
+  if (!volume || !proposal) return null;
+
+  async function handleRepair() {
+    setRepair({ status: "pending" });
+    try {
+      await appsApi.updateStorage(projectId, envId, appName, {
+        path: volume!.path,
+        size: formatVolumeSize(proposal!.proposedGi),
+        storage_class: volume!.storage_class,
+      });
+      setRepair({ status: "done" });
+    } catch (err) {
+      if (isQuotaExceededError(err)) {
+        setRepair({ status: "quota" });
+        return;
+      }
+      setRepair({
+        status: "error",
+        message: err instanceof Error ? err.message : t("apps.alerts.crash.cause.platformStorage.repair.error"),
+      });
+    }
+  }
+
+  if (repair.status === "quota") {
+    return (
+      <div className="space-y-1">
+        <p className="text-xs text-red-700 dark:text-red-300">
+          {t("apps.alerts.crash.cause.platformStorage.repair.quotaExceeded")}
+        </p>
+        <Link
+          href={`/projects/${projectId}/billing`}
+          className="inline-flex items-center gap-1 text-xs font-semibold text-red-700 dark:text-red-300 underline underline-offset-2 hover:text-red-800 dark:hover:text-red-200"
+        >
+          {t("apps.alerts.crash.cause.dbReadOnly.upgradeCta")}
+        </Link>
+      </div>
+    );
+  }
+
+  if (repair.status === "done") {
+    return (
+      <p className="text-xs font-semibold text-red-800 dark:text-red-200">
+        {t("apps.alerts.crash.cause.platformStorage.repair.done")}
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        onClick={handleRepair}
+        disabled={repair.status === "pending"}
+        className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+      >
+        {repair.status === "pending" && <Spinner size="sm" />}
+        {repair.status === "pending"
+          ? t("apps.alerts.crash.cause.platformStorage.repair.pending")
+          : t("apps.alerts.crash.cause.platformStorage.repair.cta", {
+              from: formatVolumeSize(proposal.currentGi),
+              to: formatVolumeSize(proposal.proposedGi),
+            })}
+      </button>
+      {repair.status === "error" && <span className="text-xs text-red-600 dark:text-red-400">{repair.message}</span>}
+    </div>
+  );
+}
+
 /**
  * Surfaces pull requests the platform's own agent opened for this app while
  * the owner was not looking. Autofix runs as a cloud task: it clones the
@@ -512,6 +626,7 @@ interface AppAlertsBannerProps {
   projectId: string;
   envId: string;
   appName: string;
+  volume?: AppVolume;
 }
 
 /**
@@ -522,7 +637,7 @@ interface AppAlertsBannerProps {
  * a follow-up autofix action once a diagnosis names a fixable cause.
  * Renders nothing when `alerts` is empty or absent.
  */
-export function AppAlertsBanner({ alerts, logsHref, storageHref, startCommandHref, envVarsHref, projectId, envId, appName }: AppAlertsBannerProps) {
+export function AppAlertsBanner({ alerts, logsHref, storageHref, startCommandHref, envVarsHref, projectId, envId, appName, volume }: AppAlertsBannerProps) {
   const { t } = useT();
   const [diagnose, setDiagnose] = useState<DiagnoseState>({ status: "idle" });
   const [autofix, setAutofix] = useState<AutofixState>({ status: "idle" });
@@ -629,6 +744,14 @@ export function AppAlertsBanner({ alerts, logsHref, storageHref, startCommandHre
                         causeLine={alert.cause_line}
                       />
                     </>
+                  )}
+                  {alert.cause_kind === "platform_storage" && (
+                    <PlatformStorageRepair
+                      projectId={projectId}
+                      envId={envId}
+                      appName={appName}
+                      volume={volume}
+                    />
                   )}
                   {alert.cause_line &&
                     alert.cause_kind !== "bad_connection_string" &&

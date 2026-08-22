@@ -3,10 +3,13 @@ import test from "node:test";
 
 import {
   alertChipAction,
+  formatVolumeSize,
   getOperationalAppAlerts,
+  isQuotaExceededError,
   missingEnvVarKey,
   offersStartCommandFix,
   parseBadConnCauseLine,
+  proposeVolumeSizeGi,
   suggestSSLModeDisable,
   type AppAlert,
 } from "./app-alerts.ts";
@@ -154,4 +157,43 @@ test("alertChipAction never invents a lever for a crash cause it cannot name", (
   const empty: AppAlert = { type: "crash", detected_at: "2026-08-20T00:00:00Z" };
   assert.equal(alertChipAction(appCode).labelKey, "apps.alerts.crash.cta");
   assert.equal(alertChipAction(empty).labelKey, "apps.alerts.crash.cta");
+});
+
+test("proposeVolumeSizeGi doubles a small volume and rounds to whole Gi", () => {
+  assert.deepEqual(proposeVolumeSizeGi("1Gi"), { currentGi: 1, proposedGi: 2 });
+  assert.deepEqual(proposeVolumeSizeGi("5Gi"), { currentGi: 5, proposedGi: 10 });
+});
+
+test("proposeVolumeSizeGi converts a Mi-sized volume up to whole Gi before doubling", () => {
+  assert.deepEqual(proposeVolumeSizeGi("512Mi"), { currentGi: 1, proposedGi: 2 });
+});
+
+test("proposeVolumeSizeGi clamps the proposal to the platform's absolute ceiling", () => {
+  assert.deepEqual(proposeVolumeSizeGi("60Gi"), { currentGi: 60, proposedGi: 100 });
+});
+
+test("proposeVolumeSizeGi refuses to propose a no-op once the volume is already at the ceiling", () => {
+  assert.equal(proposeVolumeSizeGi("100Gi"), null);
+});
+
+test("proposeVolumeSizeGi returns null for a missing or malformed size", () => {
+  assert.equal(proposeVolumeSizeGi(undefined), null);
+  assert.equal(proposeVolumeSizeGi(""), null);
+  assert.equal(proposeVolumeSizeGi("not-a-size"), null);
+});
+
+test("formatVolumeSize renders a Gi quantity string", () => {
+  assert.equal(formatVolumeSize(2), "2Gi");
+});
+
+test("isQuotaExceededError recognizes the backend's 403 quota_exceeded shape", () => {
+  assert.equal(isQuotaExceededError({ status: 403, code: "quota_exceeded" }), true);
+});
+
+test("isQuotaExceededError never branches on error prose", () => {
+  assert.equal(isQuotaExceededError({ status: 403, code: "quota_exceeded", message: "something else entirely" }), true);
+  assert.equal(isQuotaExceededError(new Error("quota_exceeded")), false);
+  assert.equal(isQuotaExceededError({ status: 403, code: "other_error" }), false);
+  assert.equal(isQuotaExceededError({ status: 400, code: "quota_exceeded" }), false);
+  assert.equal(isQuotaExceededError(undefined), false);
 });
