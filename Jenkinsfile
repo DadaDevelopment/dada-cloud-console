@@ -427,6 +427,7 @@ spec:
         def resolvedTag   = ''
         def currentStageName = 'bootstrap'
         def deployedThisBuild = false
+        def writebackSha = ''
 
         def runStage = { String name, Closure body ->
             currentStageName = name
@@ -627,8 +628,16 @@ spec:
                             }
                         }
 
-                        stage('Frontend typecheck + tests + build') {
+                        stage('Frontend typecheck + tests') {
                             dir('frontend') {
+                                // No `npm run build` here on purpose: frontend/Dockerfile's own
+                                // multi-stage build runs `npm run build` again from the same
+                                // source (see COPY . . / RUN npm run build there) — this stage's
+                                // build output was never copied into the image, just compiled
+                                // and thrown away. Running it twice per pipeline was pure wasted
+                                // wall-clock; a Next.js build failure now surfaces in the "Docker
+                                // build" stage instead of here. typecheck/lint/test:unit still
+                                // catch the large majority of that class of error earlier.
                                 withEnv([
                                     "NEXT_PUBLIC_AUTH_MODE=${NEXT_PUBLIC_AUTH_MODE}",
                                     "NEXT_PUBLIC_KEYCLOAK_ISSUER=${NEXT_PUBLIC_KEYCLOAK_ISSUER}",
@@ -651,7 +660,6 @@ spec:
                                         if has_script typecheck; then npm run typecheck; else echo "No typecheck script — skip"; fi
                                         if has_script lint;      then npm run lint;      else echo "No lint script — skip";      fi
                                         if has_script test:unit; then npm run test:unit; else echo "No test:unit script — skip"; fi
-                                        npm run build
                                     '''
                                 }
                             }
@@ -854,6 +862,7 @@ ${PUSH_WITH_RETRY_SH}
                                 else
                                     git add ${ARGO_VALUES_PATH}
                                     git commit -m "deploy(cloud-console): pin to ${resolvedTag} (build #${env.BUILD_NUMBER})"
+                                    git rev-parse HEAD > /tmp/argo-infra/.CI_WROTE_SHA
                                     git push origin ${ARGO_BRANCH}
                                     echo "Wrote ${resolvedTag} -> ${ARGO_VALUES_PATH} on ${ARGO_BRANCH}"
                                 fi
@@ -862,6 +871,14 @@ ${PUSH_WITH_RETRY_SH}
                         }
                     }
                     deployedThisBuild = true
+                    // Only set when this build actually wrote a NEW commit (the
+                    // empty-diff no-op branch above never creates .CI_WROTE_SHA) —
+                    // the catch block below reverts by this SHA, and reverting a
+                    // stale/foreign SHA left over from nothing-to-do is wrong.
+                    writebackSha = sh(
+                            script: 'test -f /tmp/argo-infra/.CI_WROTE_SHA && cat /tmp/argo-infra/.CI_WROTE_SHA || true',
+                            returnStdout: true
+                    ).trim()
 
                     runStage('E2E smoke') {
                         container('playwright') {
@@ -922,10 +939,43 @@ ${PUSH_WITH_RETRY_SH}
             }
 
         } catch (err) {
+            def autoReverted = false
+            if (currentStageName == 'Backend tests' && deployedThisBuild && writebackSha) {
+                // Backend tests failed AFTER the tag was already pinned and prod
+                // started rolling: revert just that write-back commit so prod
+                // rolls back to whatever tag was live before this build, instead
+                // of sitting on code its own tests just failed. Scoped to the
+                // single commit this build made (writebackSha), not a hard reset
+                // — safe even if another build's commit landed on the branch
+                // after ours, same reasoning as the empty-diff guard above.
+                try {
+                    container('docker') {
+                        withCredentials([usernamePassword(
+                                credentialsId: 'gh-token',
+                                usernameVariable: 'GIT_USERNAME',
+                                passwordVariable: 'GIT_TOKEN'
+                        )]) {
+                            sh """
+                                set -eu
+                                cd /tmp/argo-infra
+                                git config user.email 'platform-bot@dada-tuda.ru'
+                                git config user.name  'DADA Platform Bot'
+                                git revert --no-edit ${writebackSha}
+                                git push https://\${GIT_USERNAME}:\${GIT_TOKEN}@${ARGO_REPO} HEAD:${ARGO_BRANCH}
+                            """
+                        }
+                    }
+                    autoReverted = true
+                } catch (rollbackErr) {
+                    echo "auto-revert of ${writebackSha} failed: ${rollbackErr}"
+                }
+            }
             currentBuild.description = (currentStageName == 'Docker push' || currentStageName == 'GitOps write-back')
                     ? "FAILED AT PUBLISH (${currentStageName}) — code and tests passed"
                     : (currentStageName == 'Backend tests' && deployedThisBuild)
-                            ? "DEPLOYED ${resolvedTag} — Backend tests failed after write-back, check prod"
+                            ? (autoReverted
+                                    ? "DEPLOYED ${resolvedTag} then REVERTED — Backend tests failed after write-back"
+                                    : "DEPLOYED ${resolvedTag} — Backend tests failed after write-back, auto-revert FAILED, check prod")
                             : "FAILED AT ${currentStageName}"
             throw err
         }
