@@ -2878,3 +2878,32 @@ inode против 65536 при старом дефолте. Ровно ×4. PVC
   секторов на томе нет — «бэд-сектор» опровергнут не рассуждением, а сплошным чтением.
 - measure_after: 2026-08-29
 - status: open
+
+## E187 — жертву закрытого класса отказа размораживает сама платформа, а не письмо и не кнопка (sess-0822e, 2026-08-22)
+- **hypothesis:** H01
+- **Дефект [code+live]:** класс отказа чинится на нашей стороне, но `builds.status='failed'`
+  у того, кто в него упёрся, не меняется никогда. Живой случай: tarotreaderhimu@gmail.com,
+  апп `best-marriage-astrologer-in-guwahati`, три сборки 2026-08-21 13:58→14:08 на
+  `npm install` внутри Dockerfile, который сгенерировали МЫ; фикс шаблона уехал
+  `jenkins-pipelines ad8ff3a` 2026-08-21T22:18:46Z; апп по-прежнему не собран. Письма
+  запрещены, ручная пересборка чужого проекта запрещена, «нажмите Rebuild» адресовано
+  человеку, который уже ушёл (0457: отгруженный рычаг может быть структурно недостижим).
+- **Отгружено:** `398f791f` — `backend/internal/api/build_classfix_sweeper.go`. Реестр
+  закрытых классов (`buildClassFixRegistry`, первая запись `static-npm-template-20260821`);
+  раз в 15 минут переочередь ставится САМАЯ СВЕЖАЯ провалившаяся сборка аппа, если совпал
+  `fail_reason`, `error_message` несёт сигнатуру, совпал `git_repos.framework_override`,
+  падение случилось ДО `FixedAt`, моложе 7 суток, `attempt < 3` и сверху нет более новой
+  сборки. Сборка и `audit_events.action='BuildAutoRetried'` пишутся одним CTE.
+- **М2 [code]:** 8 тестов на real-DB риге; RED показан выводом — мутация фильтра
+  `g.framework_override` в no-op даёт
+  `--- FAIL: TestClassFixCandidateSkipsFrameworkMismatch ... was detected as a different
+  framework and must not be re-queued`. Полный пакет `internal/api` зелёный (26.9с).
+- **source_of_truth:** строки `audit_events` с `action='BuildAutoRetried'` и
+  `metadata->>'class_fix_id'='static-npm-template-20260821'`, плюс `builds.status='success'`
+  у `best-marriage-astrologer-in-guwahati`. Ноль строк на горизонте = свипер не нашёл
+  кандидата (проверять окно 7 суток: сборки 08-21 выпадают из него 08-28).
+- **ЧЕСТНЫЙ ПРЕДЕЛ:** живого прогона нет — 08-22 на платформе ноль сборок, и в прод код
+  попадёт только со следующей сборкой бэкенда. Первая переочередь свипера сама и станет
+  доказательством; до неё это доставленный код, а не доказанный эффект.
+- measure_after: 2026-08-27
+- status: open

@@ -1,11 +1,14 @@
 ---
 id: 0467
-status: open
+status: closed
 prio: P1
 stream: 2
 title: Платёж от 19.08 висит pending без yk_payment_id — та же сигнатура, что закрывали 3d6379f9
 created: 2026-08-21
 sess: sess-0822c
+closed_at: 2026-08-22
+closed_commit: 479843d3
+closed_note: Ложная тревога: pending-строка INV-2026-00002 несёт payer_inn=7807402712 (наше же ООО, счёт от 19.08 ждёт банковского перевода владельца), а сигнатура дефекта 3d6379f9 требует payer_inn IS NULL. Заземлено [live psql, пульс sess-0822e]: succeeded за 7д = 0, pending = 1 (та самая строка), canceled = 4. Счётчик уже научили не считать счёт юрлица мёртвой кнопкой (479843d3). Перевод — в owner-actions, рутина деньги не двигает.
 ---
 Замер [live psql, пульс sess-0822c]: `payments` — succeeded=1 (25.07, свой тестовый,
 `customer_email` пуст), canceled=7, **pending=1 от 2026-08-19 21:01 с заполненным
