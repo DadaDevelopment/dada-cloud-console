@@ -901,6 +901,7 @@ var agentChatConsoleRoutes = []string{
 	"/projects",
 	"/projects/{projectId}",
 	"/projects/{projectId}/ai",
+	"/projects/{projectId}/agents",
 	"/projects/{projectId}/app-servers",
 	"/projects/{projectId}/app-servers/{serverName}",
 	"/projects/{projectId}/apps",

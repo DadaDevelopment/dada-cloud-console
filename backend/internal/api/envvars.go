@@ -27,9 +27,20 @@ type envVar struct {
 	Key           string    `json:"key"`
 	Value         *string   `json:"value,omitempty"`
 	IsSecret      bool      `json:"is_secret"`
-	Scope         string    `json:"scope,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	// SecretRef is set for a variable whose value lives in a k8s Secret the
+	// console does not own -- an app adopted from git reaches its credentials
+	// that way. The console shows and re-renders the reference; it never reads
+	// the Secret, so such a row has no value and none can be revealed.
+	SecretRef *envSecretRef `json:"secret_ref,omitempty"`
+	Scope     string        `json:"scope,omitempty"`
+	CreatedAt time.Time     `json:"created_at"`
+	UpdatedAt time.Time     `json:"updated_at"`
+}
+
+// envSecretRef names a k8s Secret and the key inside it.
+type envSecretRef struct {
+	Secret string `json:"secret"`
+	Key    string `json:"key"`
 }
 
 // queueEnvApply re-deploys an app so an env var change actually reaches its
@@ -293,7 +304,8 @@ func (h *Handler) ListEnvVars(c *gin.Context) {
 	}
 
 	rows, err := h.pool.Query(c.Request.Context(),
-		`SELECT id, environment_id, app_name, key, value_encrypted, is_secret, scope, created_at, updated_at
+		`SELECT id, environment_id, app_name, key, value_encrypted, is_secret, scope, created_at, updated_at,
+		        secret_ref_name, secret_ref_key
 		 FROM env_vars
 		 WHERE environment_id = $1 AND app_name = $2
 		 ORDER BY key`,
@@ -309,14 +321,19 @@ func (h *Handler) ListEnvVars(c *gin.Context) {
 	for rows.Next() {
 		var ev envVar
 		var encrypted []byte
+		var refName, refKey *string
 		if err := rows.Scan(&ev.ID, &ev.EnvironmentID, &ev.AppName, &ev.Key,
-			&encrypted, &ev.IsSecret, &ev.Scope, &ev.CreatedAt, &ev.UpdatedAt); err != nil {
+			&encrypted, &ev.IsSecret, &ev.Scope, &ev.CreatedAt, &ev.UpdatedAt,
+			&refName, &refKey); err != nil {
 			respondError(c, http.StatusInternalServerError, "failed to scan env var")
 			return
 		}
+		if refName != nil && refKey != nil {
+			ev.SecretRef = &envSecretRef{Secret: *refName, Key: *refKey}
+		}
 		// Never return secret plaintext in the list. Non-secret values are decrypted
 		// so the editor can show them inline.
-		if !ev.IsSecret {
+		if ev.SecretRef == nil && !ev.IsSecret {
 			if plain, derr := crypto.DecryptToken(h.cfg.GitopsEncryptionKey, encrypted); derr == nil {
 				v := string(plain)
 				ev.Value = &v
@@ -887,11 +904,23 @@ func (h *Handler) RevealEnvVar(c *gin.Context) {
 	}
 
 	var encrypted []byte
+	var refName, refKey *string
 	err = h.pool.QueryRow(c.Request.Context(),
-		`SELECT value_encrypted FROM env_vars
+		`SELECT value_encrypted, secret_ref_name, secret_ref_key FROM env_vars
 		 WHERE environment_id = $1 AND app_name = $2 AND key = $3`,
 		envID, appName, key,
-	).Scan(&encrypted)
+	).Scan(&encrypted, &refName, &refKey)
+	if err == nil && refName != nil && refKey != nil {
+		audit(auditOutcomeFailure, map[string]any{"reason": "value_lives_in_foreign_secret", "status": http.StatusConflict})
+		respondErrorCode(c, http.StatusConflict, "value_lives_in_foreign_secret",
+			"this variable points at k8s secret "+*refName+" key "+*refKey+", which the console does not read")
+		return
+	}
+	if err == nil && encrypted == nil {
+		audit(auditOutcomeFailure, map[string]any{"reason": "var_has_no_value", "status": http.StatusConflict})
+		respondErrorCode(c, http.StatusConflict, "var_has_no_value", "this variable carries no value the console can reveal")
+		return
+	}
 	if err == pgx.ErrNoRows {
 		audit(auditOutcomeFailure, map[string]any{"reason": "var_not_found", "status": http.StatusNotFound})
 		respondErrorCode(c, http.StatusNotFound, "var_not_found", "not found")
@@ -1052,6 +1081,8 @@ func (h *Handler) upsertEnvVar(ctx context.Context, envID uuid.UUID, appName, ke
 		 DO UPDATE SET value_encrypted = EXCLUDED.value_encrypted,
 		               is_secret = EXCLUDED.is_secret,
 		               scope = EXCLUDED.scope,
+		               secret_ref_name = NULL,
+		               secret_ref_key = NULL,
 		               updated_at = NOW()
 		 RETURNING id, environment_id, app_name, key, is_secret, scope, created_at, updated_at`,
 		envID, appName, key, encrypted, secret, scope, createdBy,

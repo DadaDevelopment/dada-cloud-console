@@ -176,12 +176,7 @@ func (w *DBWatcher) doMoveApp(ctx context.Context, op db.Operation) error {
 		Env:                env.Plain,
 		ArgoName:           argoName,
 	}
-	if env.hasSecret() {
-		appSpec.SecretEnvName = renderer.AppEnvSecretName(p.AppName)
-		for k := range env.Secret {
-			appSpec.SecretEnvKeys = append(appSpec.SecretEnvKeys, k)
-		}
-	}
+	env.applyTo(&appSpec, p.AppName)
 	appYAML, err := renderer.RenderApp(appSpec)
 	if err != nil {
 		return err

@@ -330,6 +330,8 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 		return w.doDeletePreviewEnv(ctx, op)
 	case "ImportComposeStack":
 		return w.doImportComposeStack(ctx, op)
+	case "AdoptAppConfig":
+		return w.doAdoptAppConfig(ctx, op)
 	case "AdoptComposeStack":
 		return w.doAdoptComposeStack(ctx, op)
 	case "RollbackStack":
@@ -1069,12 +1071,7 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 		appSpec.VolumeStorageClass = p.Volume.StorageClass
 		appSpec.VolumeFSGroup = p.Volume.FSGroup
 	}
-	if env.hasSecret() {
-		appSpec.SecretEnvName = renderer.AppEnvSecretName(p.Name)
-		for k := range env.Secret {
-			appSpec.SecretEnvKeys = append(appSpec.SecretEnvKeys, k)
-		}
-	}
+	env.applyTo(&appSpec, p.Name)
 	argoName := renderer.ScopedArgoName(p.Name, envName, op.ProjectID.String())
 	appSpec.ArgoName = argoName
 	yaml, err := renderer.RenderApp(appSpec)
@@ -2340,12 +2337,7 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 	appSpec.ArgoName, _ = cur["argo_name"].(string)
 	appSpec.WorkloadType, _ = cur["workload_type"].(string)
 	appSpec.StartCommand, _ = cur["start_command"].(string)
-	if env.hasSecret() {
-		appSpec.SecretEnvName = renderer.AppEnvSecretName(p.AppName)
-		for k := range env.Secret {
-			appSpec.SecretEnvKeys = append(appSpec.SecretEnvKeys, k)
-		}
-	}
+	env.applyTo(&appSpec, p.AppName)
 	yaml, err := renderer.RenderApp(appSpec)
 	if err != nil {
 		return err
@@ -2442,6 +2434,9 @@ type valuesDryRunPlan struct {
 	Removed    []string `json:"removed"`
 	WouldBlock []string `json:"would_block"`
 	Verdict    string   `json:"verdict"`
+	// Remedy names the lever that turns a refusal into a working write, so the
+	// answer to "the deploy would be refused" is never a dead end.
+	Remedy string `json:"remedy,omitempty"`
 }
 
 // buildValuesPlan turns the file in git and the file a deploy would write into
@@ -2469,9 +2464,12 @@ func buildValuesPlan(existing string, readErr error, mergedValues, valuesPath st
 		plan.Verdict = "this app has no values.yaml in git yet; the deploy would create it"
 	case len(plan.WouldBlock) > 0:
 		plan.Verdict = fmt.Sprintf(
-			"THE REAL DEPLOY WOULD BE REFUSED: it deletes configuration that exists only in git (%s). "+
-				"Import those keys into the console, or edit %s directly, before writing",
-			renderer.DescribeDropped(plan.WouldBlock), valuesPath)
+			"THE REAL DEPLOY WOULD BE REFUSED: it deletes configuration that exists only in git (%s)",
+			renderer.DescribeDropped(plan.WouldBlock))
+		plan.Remedy = fmt.Sprintf(
+			"adopt the app first (POST /api/v1/projects/{project}/environments/{env}/apps/%s/adopt-config, MCP adoptAppConfig): "+
+				"it records what %s already holds as the console's own state, after which this write edits the app instead of stripping it",
+			plan.appNameHint(), valuesPath)
 	case len(plan.Added) == 0 && len(plan.Changed) == 0 && len(plan.Removed) == 0:
 		plan.Verdict = "the deploy would leave " + valuesPath + " unchanged"
 	default:
@@ -2479,6 +2477,16 @@ func buildValuesPlan(existing string, readErr error, mergedValues, valuesPath st
 			len(plan.Added), len(plan.Changed), len(plan.Removed), valuesPath)
 	}
 	return plan
+}
+
+// appNameHint recovers the app name from the values path so the remedy can name
+// the exact call to make. The path ends in <app>/values.yaml.
+func (p valuesDryRunPlan) appNameHint() string {
+	parts := strings.Split(strings.TrimSuffix(p.ValuesPath, "/values.yaml"), "/")
+	if len(parts) == 0 {
+		return "<app>"
+	}
+	return parts[len(parts)-1]
 }
 
 // mergeAppValues folds a rendered values.yaml into the one already in git so a
@@ -2577,8 +2585,9 @@ func (w *DBWatcher) guardValuesClobber(mgr *git.Manager, appName, valuesPath, me
 	return fmt.Errorf(
 		"this change would delete configuration that exists only in git: %s in %s. "+
 			"Those keys are not in the console's database, so re-rendering removes them. "+
-			"Import them into the console first (or edit values.yaml directly), then retry",
-		renderer.DescribeDropped(dropped), valuesPath)
+			"Adopt the app first (POST /api/v1/projects/{project}/environments/{env}/apps/%s/adopt-config, MCP adoptAppConfig) "+
+			"to record what git already holds as the console's own state, then retry",
+		renderer.DescribeDropped(dropped), valuesPath, appName)
 }
 
 // unexpectedDrops subtracts the paths an operation declared it means to remove
@@ -2758,12 +2767,7 @@ func (w *DBWatcher) doUpdateAppStorage(ctx context.Context, op db.Operation) err
 		VolumeFSGroup:      p.Volume.FSGroup,
 	}
 	appSpec.ArgoName, _ = cur["argo_name"].(string)
-	if env.hasSecret() {
-		appSpec.SecretEnvName = renderer.AppEnvSecretName(p.AppName)
-		for k := range env.Secret {
-			appSpec.SecretEnvKeys = append(appSpec.SecretEnvKeys, k)
-		}
-	}
+	env.applyTo(&appSpec, p.AppName)
 
 	yaml, err := renderer.RenderApp(appSpec)
 	if err != nil {

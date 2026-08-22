@@ -18,9 +18,32 @@ import (
 type resolvedEnv struct {
 	Plain  map[string]string
 	Secret map[string]string
+	// Refs are variables whose value lives in a k8s Secret the console does not
+	// own (env_vars rows carrying secret_ref_name/secret_ref_key and no value).
+	// They exist so an app that was never created through the console can be
+	// adopted without moving anyone's credentials: the reference travels, the
+	// value never does.
+	Refs []renderer.SecretRefEnvVar
 }
 
 func (e resolvedEnv) hasSecret() bool { return len(e.Secret) > 0 }
+
+// applyTo puts a resolved environment onto an app spec: plain vars inline,
+// sensitive vars behind the per-app console Secret, and adopted vars as the
+// foreign references they already were. Every render path shares it so a new
+// kind of variable cannot reach three of four callers and silently vanish from
+// the fourth.
+func (e resolvedEnv) applyTo(spec *renderer.AppSpec, appName string) {
+	spec.Env = e.Plain
+	spec.SecretRefEnv = e.Refs
+	if !e.hasSecret() {
+		return
+	}
+	spec.SecretEnvName = renderer.AppEnvSecretName(appName)
+	for k := range e.Secret {
+		spec.SecretEnvKeys = append(spec.SecretEnvKeys, k)
+	}
+}
 
 // resolveRuntimeEnv loads env_vars for (environment_id, app_name) with scope IN
 // ('runtime','both'), decrypts each value with the gitops encryption key, and
@@ -36,7 +59,7 @@ func (w *DBWatcher) resolveRuntimeEnv(ctx context.Context, environmentID *uuid.U
 		return out, nil
 	}
 	rows, err := w.pool.Query(ctx, `
-		SELECT key, value_encrypted, is_secret
+		SELECT key, value_encrypted, is_secret, secret_ref_name, secret_ref_key
 		FROM env_vars
 		WHERE environment_id = $1 AND app_name = $2 AND scope IN ('runtime', 'both')
 		ORDER BY key
@@ -51,9 +74,17 @@ func (w *DBWatcher) resolveRuntimeEnv(ctx context.Context, environmentID *uuid.U
 			key      string
 			enc      []byte
 			isSecret bool
+			refName  *string
+			refKey   *string
 		)
-		if err := rows.Scan(&key, &enc, &isSecret); err != nil {
+		if err := rows.Scan(&key, &enc, &isSecret, &refName, &refKey); err != nil {
 			return out, fmt.Errorf("scan env_var: %w", err)
+		}
+		if refName != nil && refKey != nil {
+			out.Refs = append(out.Refs, renderer.SecretRefEnvVar{
+				Name: key, SecretName: *refName, SecretKey: *refKey,
+			})
+			continue
 		}
 		val, err := crypto.DecryptToken(w.cfg.EncryptionKey, enc)
 		if err != nil {

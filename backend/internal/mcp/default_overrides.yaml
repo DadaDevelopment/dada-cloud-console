@@ -38,6 +38,9 @@ keep:
   - createApp
   - updateAppImage
   - updateAppStorage
+  # adoptAppConfig teaches the console what an app created outside it already
+  # is, so a later setEnvVar edits that app instead of overwriting it.
+  - adoptAppConfig
   # Environment variables (get-all / put / delete — delete is safe, scoped to a key)
   - listEnvVars
   - setEnvVar

@@ -24,7 +24,7 @@ func (h *Handler) appEnvVarsByNamespace(ctx context.Context, namespace, appName 
 		`SELECT ev.key, ev.value_encrypted
 		 FROM env_vars ev
 		 JOIN environments e ON e.id = ev.environment_id
-		 WHERE e.namespace = $1 AND ev.app_name = $2`,
+		 WHERE e.namespace = $1 AND ev.app_name = $2 AND ev.value_encrypted IS NOT NULL`,
 		namespace, appName,
 	)
 	if err != nil {

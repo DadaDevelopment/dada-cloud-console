@@ -133,7 +133,7 @@ func (h *Handler) attemptDatabaseDSNDelivery(ctx context.Context, projectID, env
 func (h *Handler) appEnvVarValue(ctx context.Context, envID uuid.UUID, appName, key string) (string, bool, error) {
 	var encrypted []byte
 	err := h.pool.QueryRow(ctx,
-		`SELECT value_encrypted FROM env_vars WHERE environment_id = $1 AND app_name = $2 AND key = $3`,
+		`SELECT value_encrypted FROM env_vars WHERE environment_id = $1 AND app_name = $2 AND key = $3 AND value_encrypted IS NOT NULL`,
 		envID, appName, key,
 	).Scan(&encrypted)
 	if err == pgx.ErrNoRows {
@@ -232,7 +232,7 @@ func dsnHostForAudit(dsn string) string {
 func (h *Handler) appEnvVarIsSet(ctx context.Context, envID uuid.UUID, appName, key string) (bool, error) {
 	var encrypted []byte
 	err := h.pool.QueryRow(ctx,
-		`SELECT value_encrypted FROM env_vars WHERE environment_id = $1 AND app_name = $2 AND key = $3`,
+		`SELECT value_encrypted FROM env_vars WHERE environment_id = $1 AND app_name = $2 AND key = $3 AND value_encrypted IS NOT NULL`,
 		envID, appName, key,
 	).Scan(&encrypted)
 	if err == pgx.ErrNoRows {

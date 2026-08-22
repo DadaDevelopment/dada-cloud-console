@@ -104,6 +104,15 @@ func ServiceDatabaseResourcesValuesGitPath(projectSlug, envSlug, appRef string) 
 	return AppResourcesValuesGitPath(projectSlug, envSlug, ServiceDatabaseOwnerApp(appRef, projectSlug))
 }
 
+// SecretRefEnvVar is one environment variable sourced from a foreign k8s
+// Secret: Name is the variable as the container sees it, SecretName/SecretKey
+// name the Secret and the key inside it.
+type SecretRefEnvVar struct {
+	Name       string
+	SecretName string
+	SecretKey  string
+}
+
 // AppSpec holds parameters for an App manifest.
 type AppSpec struct {
 	Name               string
@@ -135,6 +144,15 @@ type AppSpec struct {
 	// scope runtime|both and is_secret=false). Emitted verbatim into values.yaml's
 	// env: block — safe to commit to git.
 	Env map[string]string
+	// SecretRefEnv carries variables whose value lives in a k8s Secret the
+	// console does not own: an app that was never created through the console
+	// (a hand-written app-of-apps entry) reaches its database and API keys
+	// through valueFrom.secretKeyRef pointing at a Secret made by hand. The
+	// console adopts such an app by recording the REFERENCE, never the value:
+	// nothing is read out of that Secret and no plaintext enters git, and a
+	// render reproduces the entry the app already had byte for byte.
+	SecretRefEnv []SecretRefEnvVar
+
 	// SecretEnvName, when non-empty, is the name of the per-app k8s Secret holding
 	// the sensitive runtime env (is_secret=true). The app-resources chart envFrom's
 	// it. The Secret manifest itself is rendered separately (RenderAppEnvSecret)
@@ -566,6 +584,15 @@ func RenderAppValues(spec AppSpec) (string, error) {
 	sort.Strings(keys)
 	for _, k := range keys {
 		values.Common.ExtraEnv = append(values.Common.ExtraEnv, commonEnvVar{Name: k, Value: spec.Env[k]})
+	}
+
+	refs := append([]SecretRefEnvVar(nil), spec.SecretRefEnv...)
+	sort.Slice(refs, func(i, j int) bool { return refs[i].Name < refs[j].Name })
+	for _, r := range refs {
+		values.Common.ExtraEnv = append(values.Common.ExtraEnv, commonEnvVar{
+			Name:      r.Name,
+			ValueFrom: &commonEnvValueRef{SecretKeyRef: commonSecretKeyRef{Name: r.SecretName, Key: r.SecretKey}},
+		})
 	}
 
 	secretKeys := append([]string(nil), spec.SecretEnvKeys...)

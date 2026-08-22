@@ -8213,6 +8213,56 @@ paths:
       summary: Adopt a compose app into per-service Applications
       tags:
       - app
+  /projects/{projectId}/environments/{envId}/apps/{appName}/adopt-config:
+    post:
+      description: Reads the app's values.yaml from git and records what it finds
+        (environment variables, including ones pointing at Secrets the console does
+        not own, and the service port) as the console's own state. Nothing is committed
+        to git and the running app is untouched. Use it on apps that were created
+        outside the console before editing them through it. Asynchronous; the queued
+        operation's validation_result names every key adopted.
+      operationId: adoptAppConfig
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Adopt an app's existing configuration into the console
+      tags:
+      - app
   /projects/{projectId}/environments/{envId}/apps/{appName}/autofix:
     post:
       consumes:
