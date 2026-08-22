@@ -18,6 +18,8 @@ func TestIsRetryable(t *testing.T) {
 		{"nil", nil, false},
 		{"jenkins aborted", errBuildAborted, true},
 		{"wrapped aborted", fmt.Errorf("bridge: %w", errBuildAborted), true},
+		{"build not in flight", errBuildNotInFlight, false},
+		{"wrapped build not in flight", fmt.Errorf("attach: %w", errBuildNotInFlight), false},
 		{"ingress 503", errors.New(`github contents: status 503`), true},
 		{"resolve build number 503", errors.New("resolve build number: queue item 6201: 503 Service Temporarily Unavailable"), true},
 		{"context deadline", errors.New("poll build: context deadline exceeded"), true},

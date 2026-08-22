@@ -390,3 +390,66 @@ func (c *Client) FindBuildByQueueID(ctx context.Context, jobFullName string, que
 // is evicted five minutes after it leaves the queue, so the build that took
 // it is always among the most recent ones on a job of this throughput.
 const buildScanDepth = 60
+
+// StopBuild asks Jenkins to stop a running build. It is the counterpart to a
+// canceled or superseded build row: without this call, the row moves to a
+// terminal status in our own database while the Jenkins job it started keeps
+// running, finishes, and pushes an image nobody will ever deploy -- burning
+// CI capacity a real build is queued behind.
+//
+// A 404/409 (build already gone, already finished, or never existed) is not
+// an error at build level: by the time this is called, the outcome we asked
+// for -- the job no longer running unattended -- may already hold, so the
+// caller should not fail the build over it. Only a genuine transport/gateway
+// failure is returned.
+func (c *Client) StopBuild(ctx context.Context, jobFullName string, number int) error {
+	hdr := map[string]string{}
+	if field, value, err := c.crumb(ctx); err != nil {
+		return fmt.Errorf("get crumb: %w", err)
+	} else if field != "" {
+		hdr[field] = value
+	}
+	u := fmt.Sprintf("%s%s/%d/stop", c.baseURL, jobPath(jobFullName), number)
+	resp, err := c.doRetry(ctx, http.MethodPost, u, nil, hdr, false)
+	if err != nil {
+		return fmt.Errorf("stop build: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusConflict {
+		return nil
+	}
+	if resp.StatusCode >= 300 && resp.StatusCode != http.StatusFound {
+		return fmt.Errorf("stop build %s#%d: %s", jobFullName, number, readErr(resp))
+	}
+	return nil
+}
+
+// CancelQueueItem asks Jenkins to cancel a queued item that has not yet been
+// assigned an executor. Used for the narrower window between TriggerBuild
+// and the queue item resolving to a build number: canceling the row before
+// Jenkins even started it should not let that item start a build at all.
+//
+// Like StopBuild, a 404 (the item already left the queue -- started, was
+// canceled already, or was evicted) is not an error: the queue no longer
+// holding it is exactly the state being asked for.
+func (c *Client) CancelQueueItem(ctx context.Context, queueID int64) error {
+	hdr := map[string]string{}
+	if field, value, err := c.crumb(ctx); err != nil {
+		return fmt.Errorf("get crumb: %w", err)
+	} else if field != "" {
+		hdr[field] = value
+	}
+	u := fmt.Sprintf("%s/queue/cancelItem?id=%d", c.baseURL, queueID)
+	resp, err := c.doRetry(ctx, http.MethodPost, u, nil, hdr, false)
+	if err != nil {
+		return fmt.Errorf("cancel queue item: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	if resp.StatusCode >= 300 && resp.StatusCode != http.StatusFound {
+		return fmt.Errorf("cancel queue item %d: %s", queueID, readErr(resp))
+	}
+	return nil
+}

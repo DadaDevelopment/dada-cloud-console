@@ -34,6 +34,20 @@ const logPoll = 2 * time.Second
 // existing canceled state instead of failed.
 var errBuildAborted = errors.New("jenkins build aborted")
 
+// errBuildNotInFlight is the sentinel for a build row that left the open
+// states (queued/detecting/building/pushing) out from under the goroutine
+// still watching its Jenkins job -- the user canceled it, a newer push
+// superseded it, or another worker already finished reconciling it. It is
+// deliberately distinct from errBuildAborted: that sentinel means "Jenkins
+// itself reported ABORTED" and nothing else, so a caller can still trust it
+// as a real Jenkins verdict. errBuildNotInFlight means the opposite -- our
+// own database, not Jenkins, said the row is done -- and Jenkins may report
+// SUCCESS, FAILURE, or ABORTED for the same job depending on exactly when it
+// was stopped. Collapsing the two used to translate a canceled build's own
+// successful Jenkins job into "BUILD FAILED: jenkins build aborted" plus a
+// failure email to the user who canceled it.
+var errBuildNotInFlight = errors.New("build row is no longer in flight")
+
 // classifiedFailure wraps a jenkins FAILURE result with a machine-readable
 // code and a human detail line, so the console can point at a specific,
 // actionable cause instead of a bare "result FAILURE".
@@ -849,6 +863,18 @@ func (r *Runner) run(ctx context.Context, b *db.Build) {
 // supersession are genuine cancels. A plain context cancel from agent shutdown
 // is NOT a failure: the Jenkins job keeps running and startup reconciliation
 // re-attaches to it, so the row is left in-flight rather than failed or canceled.
+//
+// errBuildNotInFlight is handled before isRetryable/failFromCurrent on
+// purpose: the build row is already terminal by the time this error reaches
+// here, closed by a cancel, a supersession, or another worker's
+// reconciliation. Falling through to the generic failure path used to write
+// "BUILD FAILED: jenkins build aborted" into the log of a build the user
+// themselves canceled -- right under a Jenkins console tail ending in
+// "Finished: SUCCESS" -- and mail them a failure notice for it. The truthful
+// line for the reader is already emitted at the point of detection (bridge's
+// mid-stream stop, or the MarkPushing race in attach); this branch only
+// records the outcome and returns without touching postStatus, RequeueForRetry,
+// failFromCurrent, or notifyResult.
 func (r *Runner) handleBuildError(ctx context.Context, b *db.Build, repo *db.Repo, err error, llog *zerologLogger) {
 	if errors.Is(err, context.Canceled) {
 		// The build context is done, so DB writes on it would fail — use a
@@ -863,6 +889,11 @@ func (r *Runner) handleBuildError(ctx context.Context, b *db.Build, repo *db.Rep
 			r.emit(dctx, b.ID, "build-agent restarting; jenkins build continues and will be reattached")
 			llog.Info().Msg("build interrupted by shutdown; left in-flight for reconciliation")
 		}
+		return
+	}
+	if errors.Is(err, errBuildNotInFlight) {
+		metrics.BuildTotal.WithLabelValues("canceled").Inc()
+		llog.Info().Msg("build row already terminal; jenkins job stopped, no failure verdict sent")
 		return
 	}
 	if isRetryable(err) {
@@ -940,8 +971,18 @@ const maxBuildAttempts = db.InflightMaxAttempts
 // that job and starting a duplicate. The watch-budget path re-attaches to the
 // live job instead (see execute's grace attempt and Reconcile on restart), so
 // this failure is never a case for "try the whole build again".
+//
+// errBuildNotInFlight is excluded for a related but distinct reason: the row
+// is not stuck or transient, it is already terminal (canceled/superseded/
+// closed by another worker), so RequeueForRetry's CAS would either no-op or
+// race whichever actor already closed it. It must also never be confused
+// with errBuildAborted, which stays retryable -- that sentinel means Jenkins
+// itself reported ABORTED for a build our own row still considers open.
 func isRetryable(err error) bool {
 	if err == nil {
+		return false
+	}
+	if errors.Is(err, errBuildNotInFlight) {
 		return false
 	}
 	if errors.Is(err, errBuildAborted) {
@@ -1378,11 +1419,16 @@ func (r *Runner) attach(ctx context.Context, b *db.Build, repo *db.Repo, number 
 	// building → pushing (Jenkins already pushed; this marks the boundary).
 	// Tolerant of an already-pushing row so a reconciled build that died mid
 	// confirm can finish; a no-op means the row is no longer in-flight
-	// (superseded/canceled) so we stop without deploying.
+	// (superseded/canceled) so we stop without deploying. Jenkins already
+	// finished by this point (bridge only returns once bi.Building is
+	// false), so there is no job left to stop -- this is errBuildNotInFlight,
+	// never errBuildAborted, so the caller never mistakes our own database
+	// catching up for Jenkins reporting ABORTED.
 	if ok, err := db.MarkPushing(ctx, r.pool, b.ID); err != nil {
 		return buildOutcome{}, fmt.Errorf("transition building→pushing: %w", err)
 	} else if !ok {
-		return buildOutcome{}, errBuildAborted
+		r.emit(ctx, b.ID, "сборка отменена; сборка в jenkins уже завершилась, результат не будет использован")
+		return buildOutcome{}, errBuildNotInFlight
 	}
 
 	// --- confirm what the markers claimed actually exists in Nexus ---
@@ -1466,14 +1512,51 @@ func (r *Runner) waitForBuildNumber(ctx context.Context, queueID int64) (int, er
 	}
 }
 
+// terminalCheckInterval bounds how often bridge asks the database whether the
+// build row it is streaming is still open. Checking on every logPoll tick
+// would double the query load every running build already puts on the
+// database for no benefit; every terminalCheckInterval is close enough to
+// stop a canceled build's Jenkins job within a few seconds of the cancel
+// landing in the row, without hammering the pool.
+const terminalCheckInterval = 5 * time.Second
+
+// buildStillInFlight reports whether the build row is still open (queued,
+// detecting, building, or pushing). A user pressing "cancel" or a newer push
+// superseding this build both move the row to a terminal status while this
+// goroutine is still watching a live Jenkins job; that is the signal telling
+// bridge to stop chasing a job whose result nobody wants any more. A lookup
+// error is treated as still-in-flight -- a DB blip must never stop a live
+// Jenkins job that might otherwise finish cleanly.
+func buildStillInFlight(ctx context.Context, pool *pgxpool.Pool, buildID uuid.UUID) bool {
+	status, err := db.CurrentStatus(ctx, pool, buildID)
+	if err != nil {
+		return true
+	}
+	switch status {
+	case db.StatusSuccess, db.StatusFailed, db.StatusCanceled:
+		return false
+	default:
+		return true
+	}
+}
+
 // bridge streams the console (progressiveText, incremental offset) into the WS
 // hub + builds_logs and parses output markers, until the build is no longer
 // building. Returns the parsed outcome and the final Jenkins result string.
+//
+// It also watches the build row itself, not just Jenkins: a cancel or a
+// supersession updates the row directly and never touches the Jenkins job,
+// so without this check the job runs to completion, pushes an image nobody
+// will deploy, and the user who canceled it gets told their build failed
+// (see errBuildNotInFlight). When the row goes terminal mid-stream, bridge
+// stops the Jenkins job itself and hands back errBuildNotInFlight instead of
+// a parsed result.
 func (r *Runner) bridge(ctx context.Context, b *db.Build, number int) (buildOutcome, string, error) {
 	var (
-		out     buildOutcome
-		offset  int64
-		pending string
+		out              buildOutcome
+		offset           int64
+		pending          string
+		lastLivenessScan time.Time
 	)
 	for {
 		text, next, _, err := r.jenkins.ProgressiveText(ctx, r.cfg.JenkinsJob, number, offset)
@@ -1531,6 +1614,17 @@ func (r *Runner) bridge(ctx context.Context, b *db.Build, number int) (buildOutc
 				r.parseFullConsole(ctx, number, &out)
 			}
 			return out, bi.Result, nil
+		}
+
+		if time.Since(lastLivenessScan) >= terminalCheckInterval {
+			lastLivenessScan = time.Now()
+			if !buildStillInFlight(ctx, r.pool, b.ID) {
+				if serr := r.jenkins.StopBuild(ctx, r.cfg.JenkinsJob, number); serr != nil {
+					log.Warn().Err(serr).Int("number", number).Msg("stop jenkins build after build row went terminal")
+				}
+				r.emit(ctx, b.ID, "сборка отменена; задача в jenkins остановлена")
+				return out, "", errBuildNotInFlight
+			}
 		}
 
 		select {
