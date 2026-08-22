@@ -148,7 +148,14 @@ backend:
     # Recipient for the new-user-signup email (fires once per fresh Keycloak
     # provisioning, never on repeat logins or service accounts). Empty disables
     # the feature outright.
-    SIGNUP_NOTIFY_EMAIL: ""
+    SIGNUP_NOTIFY_EMAIL: "development@dada-tuda.ru"
+    # Single recipient for significant owner emails: signup is above, this one
+    # covers resource create/delete (CreateApp/CreateProject/DeleteApp/etc, see
+    # backend/internal/api/audit_notify.go's significantAuditActions) AND the
+    # payment-success operator copy (billing_payments.go notifyPaymentSuccess).
+    # Was the operator's personal icloud address — duplicated development@'s
+    # own copy of the same events, so consolidated onto development@ only.
+    AUDIT_NOTIFY_EMAIL: "development@dada-tuda.ru"
     # Server-side registration gate. "false" (the default in code as well) means
     # a Keycloak identity with no local users row is refused with 403
     # signup_closed instead of being provisioned on its first authenticated

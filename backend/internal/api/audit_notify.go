@@ -20,7 +20,6 @@ var significantAuditActions = map[string]bool{
 	"CreateProject":         true,
 	"CreateServiceDatabase": true,
 	"ConnectGitRepo":        true,
-	"TriggerBuild":          true,
 	"AttachCustomHostname":  true,
 	"DeleteApp":             true,
 }

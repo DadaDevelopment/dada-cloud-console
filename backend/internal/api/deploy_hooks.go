@@ -573,8 +573,6 @@ func (h *Handler) DeployTrigger(c *gin.Context) {
 		ResourceName:  hook.AppName,
 		Metadata:      payload,
 	})
-	h.notifyDeployHook(hook.ProjectID, "DeployImageVersion", hook.AppName, "CI (deploy-hook)")
-
 	_, _ = h.pool.Exec(c.Request.Context(),
 		`UPDATE app_deploy_hooks SET last_used_at = now() WHERE id = $1`, hook.ID,
 	)
