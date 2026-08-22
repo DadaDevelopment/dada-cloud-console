@@ -14,6 +14,7 @@ export const nav: Messages = {
   "nav.boxes": { ru: "Боксы", en: "Boxes" },
   "nav.domains": { ru: "Домены", en: "Domains" },
   "nav.monitoring": { ru: "Мониторинг", en: "Monitoring" },
+  "nav.agents": { ru: "Агенты", en: "Agents" },
   "nav.ai": { ru: "LLM-провайдеры", en: "LLM providers" },
   "nav.models": { ru: "Инференс", en: "Inference" },
   "nav.app-servers": { ru: "Managed VM", en: "Managed VM" },

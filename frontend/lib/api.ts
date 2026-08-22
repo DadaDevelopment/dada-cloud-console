@@ -15,6 +15,11 @@ import type {
   DBBackupsResponse,
   DBBackupDownloadResponse,
   S3BucketsResponse,
+  AgentsResponse,
+  AgentDraft,
+  AgentToolsResponse,
+  AgentValidateResponse,
+  AgentState,
   CreateS3BucketResponse,
   S3BucketCredentialsResponse,
   DatabaseCredentialsResponse,
@@ -234,14 +239,17 @@ export async function apiFetch<T>(
       resource?: string;
       limit?: number;
       provisioning_since?: string;
+      errors?: { field: string; message: string }[];
     };
-    const apiError = new Error(body.message ?? body.error ?? "API error") as Error & {
+    const fieldErrorText = body.errors?.map((e) => `${e.field}: ${e.message}`).join("; ");
+    const apiError = new Error(body.message ?? body.error ?? fieldErrorText ?? "API error") as Error & {
       status?: number;
       code?: string;
       upgrade?: boolean;
       resource?: string;
       limit?: number;
       provisioningSince?: string;
+      fieldErrors?: { field: string; message: string }[];
     };
     apiError.status = res.status;
     apiError.code = body.code ?? body.error;
@@ -249,6 +257,7 @@ export async function apiFetch<T>(
     apiError.resource = body.resource;
     apiError.limit = body.limit;
     apiError.provisioningSince = body.provisioning_since;
+    apiError.fieldErrors = body.errors;
     throw apiError;
   }
 
@@ -451,6 +460,36 @@ export const s3bucketsApi = {
       `/api/v1/projects/${projectId}/environments/${envId}/s3buckets/${name}`,
       { method: "DELETE" }
     ),
+};
+
+/**
+ * Agents. The list is the git-side view -- what was ordered -- while `state`
+ * reads the runtime, which is the only place that knows whether the agent is
+ * actually answering and which prompt version it loaded. They are separate
+ * calls because they diverge on every rollout.
+ */
+export const agentsApi = {
+  list: (projectId: string, envId: string) =>
+    apiFetch<AgentsResponse>(`/api/v1/projects/${projectId}/environments/${envId}/agents`),
+
+  save: (projectId: string, envId: string, draft: AgentDraft) =>
+    apiFetch<OperationResponse>(`/api/v1/projects/${projectId}/environments/${envId}/agents`, {
+      method: "POST", body: draft,
+    }),
+
+  remove: (projectId: string, envId: string, name: string) =>
+    apiFetch<OperationResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/agents/${encodeURIComponent(name)}`,
+      { method: "DELETE" }
+    ),
+
+  tools: () => apiFetch<AgentToolsResponse>("/api/v1/agents/tools"),
+
+  validate: (draft: { name: string; prompt: string; tools: string[]; allowed_headers: string[] }) =>
+    apiFetch<AgentValidateResponse>("/api/v1/agents/validate", { method: "POST", body: draft }),
+
+  state: (name: string) =>
+    apiFetch<AgentState>(`/api/v1/agents/${encodeURIComponent(name)}/state`),
 };
 
 export const databasesApi = {

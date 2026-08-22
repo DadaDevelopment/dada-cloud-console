@@ -49,6 +49,7 @@ export const CONSOLE_ROUTES: readonly string[] = [
   "/deploy",
   "/projects",
   "/projects/[projectId]",
+  "/projects/[projectId]/agents",
   "/projects/[projectId]/ai",
   "/projects/[projectId]/app-servers",
   "/projects/[projectId]/app-servers/[serverName]",

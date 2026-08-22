@@ -2268,3 +2268,93 @@ export interface InstallSolutionResponse {
   database?: Operation | null;
   installed: boolean;
 }
+
+/** One MCP server reference on an agent, as the editor holds it. */
+export interface AgentToolRef {
+  name: string;
+  url?: string;
+  description?: string;
+  timeout?: string;
+  allowed_headers?: string[];
+}
+
+/** One plain environment variable of the agent runtime. */
+export interface AgentEnvVar {
+  name: string;
+  value: string;
+}
+
+/** One whole agent as the console posts it. A save re-states every field. */
+export interface AgentDraft {
+  name: string;
+  display_name?: string;
+  description?: string;
+  prompt: string;
+  prompt_version?: string;
+  model_config?: string;
+  runtime?: string;
+  tools?: AgentToolRef[];
+  env?: AgentEnvVar[];
+}
+
+export interface AgentsResponse {
+  agents: ResourceSnapshot[];
+}
+
+/** One tool an MCP server reported after the runtime connected to it. */
+export interface AgentDiscoveredTool {
+  name: string;
+  description: string;
+}
+
+/** One MCP server the agent form can point an agent at. */
+export interface AgentToolServer {
+  name: string;
+  description: string;
+  url?: string;
+  ready: boolean;
+  discovered_tools: AgentDiscoveredTool[];
+}
+
+export interface AgentToolsResponse {
+  tools: AgentToolServer[];
+}
+
+/** One pod serving an agent. */
+export interface AgentPodState {
+  name: string;
+  phase: string;
+  ready: boolean;
+  restarts: number;
+}
+
+/**
+ * Live state of one agent, read from the runtime rather than from git.
+ *
+ * `exists: false` is the normal answer between the save and the first sync, not
+ * an error: the claim is in git and the cluster has not composed it yet.
+ */
+export interface AgentState {
+  name: string;
+  namespace: string;
+  exists: boolean;
+  accepted: boolean;
+  ready: boolean;
+  reason?: string;
+  message?: string;
+  prompt_version?: string;
+  pods: AgentPodState[];
+  url?: string;
+  traces_url?: string;
+}
+
+/** Field-level refusal of a draft agent, returned by validate and by save. */
+export interface AgentFieldError {
+  field: string;
+  message: string;
+}
+
+export interface AgentValidateResponse {
+  valid: boolean;
+  errors: AgentFieldError[];
+}

@@ -37,6 +37,7 @@ import { deployHooks } from "./deploy-hooks";
 import { previews } from "./previews";
 import { starterNext } from "./starter-next";
 import { agentChat } from "./agent-chat";
+import { agents } from "./agents";
 import { onboarding } from "./onboarding";
 import { passkey } from "./passkey";
 import { payments } from "./payments";
@@ -88,6 +89,7 @@ export const messages: Messages = {
   ...previews,
   ...starterNext,
   ...agentChat,
+  ...agents,
   ...onboarding,
   ...passkey,
   ...payments,

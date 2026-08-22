@@ -69,6 +69,7 @@ export const PROJECT_NAV: ResourceNavItem[] = [
   { key: "apps", label: "Applications", icon: "apps", segment: "/apps", group: "resources" },
   { key: "data", label: "Databases & S3", icon: "databases", segment: "/databases", alsoMatches: ["/storage"], group: "resources" },
   { key: "ai", label: "AI API", icon: "ai", segment: "/ai", group: "resources" },
+  { key: "agents", label: "Agents", icon: "ai", segment: "/agents", group: "resources" },
   { key: "domains", label: "Domains", icon: "domains", segment: "/domains", group: "infra" },
   { key: "models", label: "AI Models", icon: "models", segment: "/models", group: "infra" },
   { key: "app-servers", label: "App Servers", icon: "app-servers", segment: "/app-servers", group: "infra" },
