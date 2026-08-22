@@ -254,15 +254,18 @@ func TestRequeueClassFixedBuildWritesBuildAndAudit(t *testing.T) {
 		t.Fatalf("requeueClassFixedBuild: %v", err)
 	}
 
-	var status string
+	var status, trigger string
 	var attempt int
 	if err := pool.QueryRow(ctx,
-		`SELECT status, attempt FROM builds WHERE git_repo_id = $1 AND id <> $2`, gitRepoID, buildID,
-	).Scan(&status, &attempt); err != nil {
+		`SELECT status, attempt, trigger FROM builds WHERE git_repo_id = $1 AND id <> $2`, gitRepoID, buildID,
+	).Scan(&status, &attempt, &trigger); err != nil {
 		t.Fatalf("read re-queued build: %v", err)
 	}
 	if status != "queued" || attempt != 2 {
 		t.Fatalf("re-queued build = (%s, attempt %d), want (queued, attempt 2)", status, attempt)
+	}
+	if trigger != "class_fix" {
+		t.Fatalf("re-queued build trigger = %q, want %q -- an auto-retry must not read as the user clicking rebuild", trigger, "class_fix")
 	}
 
 	var classFixID, prevFailReason string

@@ -1716,7 +1716,8 @@ export type DeployTrigger =
   | "pr"
   | "manual"
   | "rollback"
-  | "promote";
+  | "promote"
+  | "class_fix";
 
 export type GitProvider = "github" | "gitlab" | "archive";
 

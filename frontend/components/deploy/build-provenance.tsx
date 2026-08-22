@@ -98,6 +98,8 @@ export function buildTriggerLabel(
       return t("apps.build.trigger.rollback");
     case "promote":
       return t("apps.build.trigger.promote");
+    case "class_fix":
+      return t("apps.build.trigger.classFix");
     default:
       return trigger;
   }
