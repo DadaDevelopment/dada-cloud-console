@@ -20,6 +20,8 @@ export interface Project {
   id: string;
   name: string;
   display_name: string;
+  /** Non-orphaned apps inside the project; lets the switcher sink empty leftovers. */
+  app_count?: number;
   owner_type: string;
   org_id?: string; // IAM org that owns the project (ADR-009); source for org-scoped actions
   default_environment: string;
@@ -291,6 +293,30 @@ export interface LoginResponse {
 
 export interface ProjectsResponse {
   projects: Project[];
+}
+
+/** One project hit from the cross-project search endpoint. */
+export interface SearchProjectHit {
+  id: string;
+  name: string;
+  display_name: string;
+  app_count: number;
+}
+
+/** One app hit from the cross-project search endpoint, with its location. */
+export interface SearchAppHit {
+  name: string;
+  phase: string;
+  project_id: string;
+  project_name: string;
+  project_display_name: string;
+  environment_id: string;
+  environment_name: string;
+}
+
+export interface SearchResponse {
+  projects: SearchProjectHit[];
+  apps: SearchAppHit[];
 }
 
 export interface ProjectDetailResponse {
@@ -1699,7 +1725,8 @@ export type DeployTrigger =
   | "pr"
   | "manual"
   | "rollback"
-  | "promote";
+  | "promote"
+  | "class_fix";
 
 export type GitProvider = "github" | "gitlab" | "archive";
 

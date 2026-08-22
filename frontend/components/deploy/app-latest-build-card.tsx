@@ -12,6 +12,7 @@ import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { buildFailureSummary, isRepoFixable, needsRepoReconnect } from "@/lib/build-failure";
 import { isStuckOnRepeat, repeatHintKey } from "@/lib/build-repeat";
+import { isClassFixBuild } from "@/lib/build-classfix";
 import { useT } from "@/lib/i18n/console/context";
 import { trackUxEvent } from "@/lib/ux-telemetry";
 import { resolveCommit, formatCommitLabel } from "@/lib/build-commit";
@@ -232,6 +233,14 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appUrlSt
           <div className="min-w-0">
             <p className="text-sm font-semibold text-green-700 dark:text-green-400">{t("apps.latestBuild.success.heading")}</p>
             <BuildProvenance build={build} className="mt-0.5 min-w-0" />
+            {isClassFixBuild(build.trigger) && (
+              <p
+                data-ux="app_latest_build:class_fix_banner"
+                className="mt-1.5 rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/30 px-3 py-2 text-xs text-blue-800 dark:text-blue-300"
+              >
+                {t("apps.latestBuild.success.classFix")}
+              </p>
+            )}
             {appUrl && appReady && (appUrlStatus === "active" || appUrlStatus === "unknown" || !appUrlStatus) && (
               <a
                 href={appUrl}

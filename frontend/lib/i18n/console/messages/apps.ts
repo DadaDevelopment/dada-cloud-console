@@ -384,12 +384,17 @@ export const apps: Messages = {
   "apps.build.trigger.manual": { ru: "запущено вручную", en: "triggered manually" },
   "apps.build.trigger.rollback": { ru: "откат", en: "rollback" },
   "apps.build.trigger.promote": { ru: "продвижение версии", en: "promote" },
+  "apps.build.trigger.classFix": { ru: "автоматически платформой", en: "automatically by the platform" },
 
   "apps.latestBuild.running": { ru: "Собираю…", en: "Building…" },
   "apps.latestBuild.viewLogs": { ru: "Логи сборки", en: "Build logs" },
   "apps.latestBuild.success.heading": { ru: "Сборка готова", en: "Build ready" },
   "apps.latestBuild.success.openApp": { ru: "Открыть приложение", en: "Open application" },
   "apps.latestBuild.success.notReady": { ru: "Приложение ещё запускается, ссылка появится, когда оно поднимется", en: "App is still starting, the link will appear once it is up" },
+  "apps.latestBuild.success.classFix": {
+    ru: "Сборка запущена платформой автоматически: мы нашли и устранили причину прошлых ошибок. От вас ничего не требовалось.",
+    en: "This build was started by the platform automatically: we found and fixed what was causing the earlier failures. Nothing was required from you.",
+  },
   "apps.latestBuild.failed.heading": { ru: "Сборка не удалась", en: "Build failed" },
   "apps.latestBuild.failed.unknown": { ru: "Причина в логе ниже", en: "See the reason in the log below" },
   "apps.latestBuild.failed.repeatHint.heading": {

@@ -4,6 +4,7 @@ import type {
   LoginResponse,
   User,
   ProjectsResponse,
+  SearchResponse,
   ProjectDetailResponse,
   CreateProjectResponse,
   OperationsResponse,
@@ -417,6 +418,15 @@ export const projectsApi = {
 
   remove: (projectId: string) =>
     apiFetch<OperationResponse>(`/api/v1/projects/${projectId}`, { method: "DELETE" }),
+};
+
+/**
+ * Cross-project search. The console cannot answer "where does app X live?" from
+ * already-loaded state - the app lists are per project-and-environment - so the
+ * palette asks the server, which searches every project the caller can see.
+ */
+export const searchApi = {
+  query: (q: string) => apiFetch<SearchResponse>(`/api/v1/search?q=${encodeURIComponent(q)}`),
 };
 
 export const s3bucketsApi = {

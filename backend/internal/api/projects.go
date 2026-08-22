@@ -27,6 +27,9 @@ var projectSlugRe = regexp.MustCompile(`^[a-z][a-z0-9-]{1,38}[a-z0-9]$`)
 type projectWithRole struct {
 	models.Project
 	Role models.MemberRole `json:"role"`
+	// AppCount is how many non-orphaned apps the project holds. The switcher
+	// shows it so a list dominated by empty test leftovers stays readable.
+	AppCount int `json:"app_count"`
 }
 
 // ListProjects returns all projects the authenticated user has access to.
@@ -59,12 +62,18 @@ func (h *Handler) ListProjects(c *gin.Context) {
 	adminOrgs := adminOrgIDs(claims)
 
 	rows, err := h.pool.Query(c.Request.Context(),
-		`SELECT id, name, display_name, owner_type, owner_id, COALESCE(org_id, ''),
-		        default_environment, quotas, created_at, updated_at
-		 FROM projects
+		`SELECT p.id, p.name, p.display_name, p.owner_type, p.owner_id, COALESCE(p.org_id, ''),
+		        p.default_environment, p.quotas, p.created_at, p.updated_at, COALESCE(ac.n, 0)
+		 FROM projects p
+		 LEFT JOIN (
+		      SELECT project_id, count(*) AS n
+		        FROM resource_snapshots
+		       WHERE kind = 'App' AND phase <> 'Orphaned'
+		       GROUP BY project_id
+		 ) ac ON ac.project_id = p.id
 		 WHERE $1
-		    OR id = ANY($2)
-		    OR org_id = ANY($3)
+		    OR p.id = ANY($2)
+		    OR p.org_id = ANY($3)
 		 ORDER BY name`,
 		god, explicitIDs, adminOrgs,
 	)
@@ -78,7 +87,7 @@ func (h *Handler) ListProjects(c *gin.Context) {
 		var p projectWithRole
 		if err := rows.Scan(
 			&p.ID, &p.Name, &p.DisplayName, &p.OwnerType, &p.OwnerID, &p.OrgID,
-			&p.DefaultEnvironment, &p.Quotas, &p.CreatedAt, &p.UpdatedAt,
+			&p.DefaultEnvironment, &p.Quotas, &p.CreatedAt, &p.UpdatedAt, &p.AppCount,
 		); err != nil {
 			respondError(c, http.StatusInternalServerError, "failed to scan project")
 			return

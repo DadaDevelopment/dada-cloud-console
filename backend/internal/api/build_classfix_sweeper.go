@@ -207,7 +207,7 @@ func (h *Handler) requeueClassFixedBuild(ctx context.Context, c classFixCandidat
 		WITH queued AS (
 			INSERT INTO builds
 			  (git_repo_id, environment_id, app_name, commit_sha, branch, head_sha, triggered_by, trigger, status, attempt)
-			SELECT $1, $2, $3, $4, $5, b.head_sha, $6, 'manual', 'queued', b.attempt + 1
+			SELECT $1, $2, $3, $4, $5, b.head_sha, $6, 'class_fix', 'queued', b.attempt + 1
 			FROM   builds b WHERE b.id = $7
 			RETURNING id, attempt
 		)
