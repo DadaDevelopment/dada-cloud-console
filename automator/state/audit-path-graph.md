@@ -1,108 +1,217 @@
-# audit_events разбор — новые юзеры за 7д, замер 2026-08-22
+# audit_events — путь пользователя, новые юзеры 7д/30д (sess-0822j)
 
-Источник: psql напрямую в `pg-shard-0-postgresql.databases.svc.cluster.local`,
-база `cloud-console`, DSN взят из env пода `argocd-prod/dada-cloud-console-backend`
-(`DATABASE_URL`), под `pg-shard-0-postgresql-0` в ns `databases`. Все запросы
-[live], без прокси-сигналов.
+Источник: live psql, `kubectl exec -n databases pg-shard-0-postgresql-0`, db `cloud-console`,
+user `svc-cloud-console` (пароль из secret `argocd-prod/dada-cloud-console-backend` DB_USER/DATABASE_URL).
+Контекст kubectl: beget-prod (текущий), доступ без прокси (DIRECT-OK, `ensure-proxy.sh` сам это определил).
+Окно замера: now() = 2026-08-22 ~14:00 UTC. Все запросы READ-ONLY SELECT.
 
-## 0. Кто попал в окно
+## 1. Новые юзеры
 
-`select * from users where created_at >= '2026-08-15'` → **3 юзера**, все с
-`created_at >= 2026-08-17` (никого 08-15/08-16):
+Фильтр — канонический из `activation-funnel-v2.sql`/`signup-attribution.sql` (вычитает
+service-account-*, dada-e2e-test, a5-testuser-/sp2verify-, @dada-tuda.ru, @sp2-verify.dada-tuda.ru).
 
-| email | created_at | audit-строк за окно | последнее событие | тишина на 2026-08-22 12:xx |
-|---|---|---|---|---|
-| kkartov@yandex.ru | 2026-08-17 19:46:33Z | 513 | 2026-08-19 19:26:37Z | ~2д 18ч |
-| lifecoachrussia@yandex.ru | 2026-08-19 09:37:20Z | 26 | 2026-08-20 07:16:40Z | ~2д 6ч |
-| tarotreaderhimu@gmail.com | 2026-08-21 13:58:01Z | 19 | 2026-08-21 14:09:36Z | ~23ч (ещё может вернуться) |
+```sql
+SELECT count(*) FILTER (WHERE created_at >= now() - interval '7 days') AS d7,
+       count(*) FILTER (WHERE created_at >= now() - interval '30 days') AS d30
+FROM users
+WHERE username NOT LIKE 'service-account-%'
+  AND username NOT IN ('dada-e2e-test')
+  AND username !~ '^(a5-testuser-|sp2verify)'
+  AND email NOT LIKE '%@dada-tuda.ru'
+  AND email NOT LIKE '%@sp2-verify.dada-tuda.ru';
+```
 
-**Нулевых по audit_events за окно нет — 0 из 3.** Дополнительная сверка по
-`builds`/`git_repos`/`agent_chat_messages`/`feedback` не проводилась для этих
-троих, потому что она не нужна: у всех троих есть строки в audit_events
-(значит и в builds/git_repos они тоже есть — audit пишется на те же действия).
-Мёртвых сигнапов и провалов инструментирования в этом окне — **0 и 0** (честно:
-выборка n=3 слишком мала, чтобы говорить это про продукт в целом, только про
-эту неделю).
+**d7 = 3, d30 = 27** (скользящее окно от текущего момента).
 
-## 1. Первое действие после регистрации
+Список 27: 23 уникальных email-домена, из них **16 подряд за ~3 часа 08-08 19:49–22:56**
+(dmimuser@outlook.com … chenlikun.18@gmail.com) — та же сигнатура, что и известная
+`project_signup_farm_wave_pollutes_funnel` (волна фермеров 08-08). Остальные 11 —
+разнесены по датам, похожи на органику/тест (в т.ч. владелец artempro2021/artempro2022,
+kkartov, lifecoachrussia, tarotreaderhimu — свежие в 7д окне).
 
-Исключая `SignUp` (сама регистрация) и `SessionStart` (авто-событие входа):
+## Цепочка audit_events по каждому новому юзеру (created_at, action, resource_kind, resource_name)
 
-- **CreateProject — 3 из 3 (100%)**
+```sql
+WITH u AS (
+  SELECT id, username, created_at FROM users
+  WHERE created_at >= now() - interval '30 days'
+    AND username NOT LIKE 'service-account-%' AND username NOT IN ('dada-e2e-test')
+    AND username !~ '^(a5-testuser-|sp2verify)'
+    AND email NOT LIKE '%@dada-tuda.ru' AND email NOT LIKE '%@sp2-verify.dada-tuda.ru'
+)
+SELECT u.username, ae.created_at, ae.action, ae.resource_kind, ae.resource_name, ae.outcome
+FROM u JOIN audit_events ae ON ae.actor_id = u.id
+ORDER BY u.created_at, ae.created_at;
+```
 
-Воронка "зарегистрировался → создал проект" не течёт вообще — там нечему
-течь, это одно нажатие, происходящее у всех.
+Полный вывод — 174KB, сохранён локально
+(`/Users/alex/.claude/projects/-Users-alex-IdeaProjects-dada-cloud/0fd64f77-d604-4e43-97f3-1ddc14f198d3/tool-results/b9ls278ca.txt`).
+Ниже — свёртка (audit_n = non-SignUp события; build_n/repo_n/chat_n/feedback_n — активность в
+других таблицах для тех же id):
 
-## 2. Терминальное действие (последняя строка перед тишиной)
+```sql
+WITH u AS ( ... тот же фильтр ... ),
+audit_c AS (SELECT actor_id, count(*) FILTER (WHERE action<>'SignUp') n FROM audit_events GROUP BY actor_id),
+build_c AS (SELECT triggered_by uid, count(*) n FROM builds WHERE triggered_by IS NOT NULL GROUP BY triggered_by),
+repo_c AS (SELECT p.owner_id uid, count(*) n FROM git_repos gr JOIN projects p ON p.id=gr.project_id
+           WHERE p.owner_id IS NOT NULL GROUP BY p.owner_id),
+chat_c AS (SELECT user_sub::uuid uid, count(*) n FROM agent_chat_messages
+           WHERE user_sub ~ '^[0-9a-f-]{36}$' GROUP BY user_sub),
+fb_c AS (SELECT user_sub::uuid uid, count(*) n FROM feedback
+         WHERE user_sub ~ '^[0-9a-f-]{36}$' GROUP BY user_sub)
+SELECT u.username, u.created_at, coalesce(a.n,0) audit_n, coalesce(b.n,0) build_n,
+       coalesce(r.n,0) repo_n, coalesce(c.n,0) chat_n, coalesce(f.n,0) feedback_n
+FROM u LEFT JOIN audit_c a ON a.actor_id=u.id LEFT JOIN build_c b ON b.uid=u.id
+LEFT JOIN repo_c r ON r.uid=u.id LEFT JOIN chat_c c ON c.uid=u.id LEFT JOIN fb_c f ON f.uid=u.id
+ORDER BY u.created_at;
+```
 
-| email | terminal action | что было прямо перед этим |
-|---|---|---|
-| kkartov@yandex.ru | `ViewApps` (apps=0, empty=true) | 3× `InstallSolution` failure (`reason=env_failed`, HTTP 500) в ту же ночь, затем `DeleteApp`×неск., вернулся один раз посмотреть на пустой список и ушёл |
-| lifecoachrussia@yandex.ru | `DeployImageVersion` (outcome=success) | успешный билд/деплой — оборвался на позитивной ноте, не churn-сигнал |
-| tarotreaderhimu@gmail.com | `BuildFinished` (outcome=failure, `dockerfile_build_failed`) | 3 билда подряд за 9 минут, один и тот же `npm install`-фейл, между попытками юзер создавал новую БД, гоняясь не за той причиной |
+| username | created_at | audit_n | build_n | repo_n | chat_n | feedback_n |
+|---|---|---|---|---|---|---|
+| artempro2021@bk.ru | 07-23 | 649 | 33 | 2 | 100 | 2 |
+| cryocrm@gmail.com | 07-26 | 8 | 0 | 0 | 0 | 0 |
+| mytake@yandex.ru | 07-29 | 6 | 0 | 0 | 0 | 0 |
+| good.win2283@gmail.com | 07-29 | 92 | 1 | 0 | 4 | 0 |
+| macmam@atomicmail.io | 08-08 | 3 | 0 | 0 | 34 | 0 |
+| dmimuser@outlook.com | 08-08 19:49 | 1 | 0 | 0 | 0 | 0 |
+| jacksun950212@gmail.com | 08-08 | 4 | 0 | 0 | 0 | 0 |
+| langhakka9527@gmail.com | 08-08 19:54 | 1 | 0 | 0 | 0 | 0 |
+| game@016818.xyz | 08-08 19:55 | 1 | 0 | 0 | 0 | 0 |
+| pjx694168692@gmail.com | 08-08 | 12 | 0 | 0 | 0 | 0 |
+| grwang1201@outlook.com | 08-08 19:58 | 1 | 0 | 0 | 0 | 0 |
+| zengqcyxx@gmail.com | 08-08 19:59 | 1 | 0 | 0 | 0 | 0 |
+| clikuoo@gmail.com | 08-08 20:04 | 1 | 0 | 0 | 0 | 0 |
+| oddessc@outlook.com | 08-08 20:11 | 1 | 0 | 0 | 0 | 0 |
+| mail@ynotu.top | 08-08 20:11 | 1 | 0 | 0 | 0 | 0 |
+| zhisibi@163.com | 08-08 20:23 | 1 | 0 | 0 | 0 | 0 |
+| abc@zhkarc.us.ci | 08-08 | 2 | 0 | 0 | 0 | 0 |
+| bestmanskyline@gmail.com | 08-08 20:41 | 1 | 0 | 0 | 0 | 0 |
+| mmccok998@gmail.com | 08-08 | 4 | 0 | 0 | 0 | 0 |
+| a@atry.kdns.fr | 08-08 | 2 | 0 | 0 | 0 | 0 |
+| dsoftru@yandex.ru | 08-08 22:56 | 1 | 0 | 0 | 0 | 0 |
+| chenlikun.18@gmail.com | 08-09 05:37 | 1 | 0 | 0 | 0 | 0 |
+| michaelharlam@yandex.ru | 08-13 | 176 | 1 | 0 | 58 | 0 |
+| artempro2022@yandex.ru | 08-13 | 296 | 15 | 1 | 70 | 0 |
+| kkartov@yandex.ru | 08-17 (7д) | 512 | 11 | 0 | 0 | 0 |
+| lifecoachrussia@yandex.ru | 08-19 (7д) | 25 | 4 | 1 | 0 | 0 |
+| tarotreaderhimu@gmail.com | 08-21 (7д) | 18 | 3 | 1 | 0 | 0 |
 
-Распределение терминальных действий на n=3: 1× пассивный уход после
-провала фичи (`ViewApps` на пустом проекте), 1× уход в момент успеха
-(не тревожный), 1× уход посреди активного билд-фейл-цикла (ещё в пределах
-окна возврата, 23ч).
+## 2. Юзеры с нулём в audit_events среди новых
 
-## 3. Топ переходов action_A → action_B (count / distinct users)
+**Ни один из 27 не имеет 0 строк в audit_events.** Класс "мёртвый сигнап (0 везде)" и класс
+"провал инструментирования (0 в audit, есть в других таблицах)" — оба **пусты** для окна
+30 дней. Это само по себе находка: с момента фикса 08-09 (SignUp пишется той же командой, что
+и users-строка + SessionStart на каждый первый визит) audit-покрытие регистрации полное — дыра
+из `project_signup_could_be_born_without_a_trace.md` для этого окна не воспроизводится.
 
-| A → B | n | users |
-|---|---|---|
-| `ConnectGitRepo` → `TriggerBuild` | 9 | 3/3 |
-| `TriggerBuild` → `BuildFinished` | 8 | 3/3 |
-| `TriggerBuild` → `ViewBuildLogs` | 6 | 3/3 |
-| `ViewBuildLogs` → `BuildFinished` | 6 | 2/3 |
-| `BuildFinished` → `CreateApp` | 5 | 2/3 |
-| `ViewApps` → `StartGitAppInstall` | 4 | 3/3 |
-| `StartGitAppInstall` → `ConnectGitRepo` | 7 | 1/3 (kkartov повторял установку) |
-| `ViewProject` → `ViewApps` | 11 | 3/3 |
-| `SessionStart` → `ViewProject` | 5 | 1/3 |
+Но 16 из 27 (59%) имеют **ровно 1 audit-строку = `SessionStart`** и **0 везде во всех
+остальных таблицах** (builds/repo/chat/feedback). Это не "провал инструментирования" (audit
+не пустой) и не органический "молчащий пользователь" (только 1 действие за секунды после
+регистрации, кластер из 16 таких за 3 часа 08-08) — это **сигнал живой волны фермеров**,
+подтверждённый уже известной памятью проекта. Их метадата (`{"path": "/api/v1/agent/chat/history"
+| "/api/v1/billing/account/summary" | "/api/v1/admin/audit", "visit": "first", "reason": "cold"}`)
+— автоматический прогрев API сразу после логина, без человеческого клика.
 
-Самоповторы (`X → X`, один и тот же actor) — это не воронка, а retry/полинг
-одного юзера, но они настолько велики, что искажают сырой count, если его не
-отделять от distinct-users: `SeedDatabaseDSN → SeedDatabaseDSN` n=168
-(kkartov, 179 вызовов за 08-17 21:00→08-18 22:34, ~25.5ч, интервал ~8-9 мин —
-не ручной клик-спам, похоже на автоматический реконсил при каждом деплое/
-рестарте, не расследовано глубже в этом цикле); `VerifyDomainAuthorization →
-VerifyDomainAuthorization` n=31 (тот же kkartov, домен долго не верифицировался);
-`RevealEnvVar → RevealEnvVar` n=16, `UpdateAppStorage → UpdateAppStorage` n=11,
-`SetEnvVar → SetEnvVar` n=11, `DeleteApp → DeleteApp` n=10 — всё тот же один
-гиперактивный юзер (kkartov, 513 из 558 строк окна).
+Отдельно два **реальных** юзера с ненулевым audit, но нулём во всех продуктовых таблицах:
+`cryocrm@gmail.com` (8 событий, 2 сессии 5 дней с разрывом) и `mytake@yandex.ru` (6 событий, 2 сессии
+2 дня с разрывом). Оба: `SessionStart → RedeemPromo(если есть) → ViewProject → ViewApps → (тишина)`.
+Заходят, видят пустой проект/список аппов, уходят — **ни разу не дошли до CreateApp**. Это
+настоящий провал воронки, не бот и не дыра в логировании.
 
-## 4. Разбор двух content-инцидентов (оба уже закрыты кодом, не новые находки)
+## 3. Граф переходов action_A → action_B (27 юзеров, non-SignUp события)
 
-**kkartov — `InstallSolution` env_failed (2026-08-19 04:10-04:12Z).**
-Уже задокументировано и обработано: `backend/internal/api/platform_recovery.go:44-72` —
-причина (trailing newline в `GITOPS_ENCRYPTION_KEY` ломал `hex.DecodeString`),
-фикс `17db736d` (2026-08-19 11:57Z, ПОСЛЕ инцидента kkartov), плюс механизм
-`GetRecoveryPrompt` (`platform_recovery.go:96-179`), который обязан показать
-kkartov баннер «мы это чинили, попробуй снова» при его следующем визите —
-условие `userHasAnyApp==false` для него выполняется (apps=0). **Он не
-возвращался с 08-19 19:26 — механизм ещё не проверен на нём живьём**, это не
-дыра, а ожидание визита.
+```sql
+WITH u AS (...), ev AS (
+  SELECT u.id uid, ae.created_at, ae.action,
+         row_number() OVER (PARTITION BY u.id ORDER BY ae.created_at) rn
+  FROM u JOIN audit_events ae ON ae.actor_id=u.id AND ae.action<>'SignUp'
+), pairs AS (
+  SELECT uid, action a_from, lead(action) OVER (PARTITION BY uid ORDER BY rn) a_to FROM ev
+)
+SELECT a_from, a_to, count(*) n_transitions, count(DISTINCT uid) n_users
+FROM pairs WHERE a_to IS NOT NULL GROUP BY a_from, a_to ORDER BY n_transitions DESC LIMIT 15;
+```
 
-**tarotreaderhimu — `dockerfile_build_failed` ×3 за 9 минут (2026-08-21
-14:00-14:09Z).** Тоже уже в коде: `backend/internal/api/build_repeat.go` и
-`frontend/lib/build-repeat.ts` прямо цитируют этот инцидент по имени и
-реализуют `repeat_count`/`isStuckOnRepeat`/`repeatHintKey` — карточка билда
-должна подсветить «это уже третий раз, retry не поможет, смотри
-`Dockerfile`» вместо молчаливого повтора красной строки. Нужно перепроверить
-в следующем цикле, задеплоен ли `build_repeat.go`/фронт на прод и увидел ли
-уже tarotreaderhimu подсказку при следующем возврате (он ещё в окне 23ч,
-рано считать churn).
+| a_from | a_to | n_transitions | n_users |
+|---|---|---|---|
+| SeedDatabaseDSN | SeedDatabaseDSN | 168 | 1 (внутренний ре-сид одного power-юзера, не воронка) |
+| SessionStart | ViewProject | 149 | 7 |
+| ViewProject | ViewApps | 145 | 9 |
+| ViewProject | ViewProject | 89 | 4 |
+| ViewApps | ViewApp | 69 | 5 |
+| ViewApps | SessionStart | 68 | 6 |
+| SessionStart | SessionStart | 44 | 8 |
+| ViewProject | SessionStart | 43 | 5 |
+| ViewApps | ViewProject | 43 | 6 |
+| UploadSourceArchive | ViewBuildLogs | 36 | 4 |
+| ViewBuildLogs | BuildFinished | 33 | 5 |
+| BuildFinished | DeployImageVersion | 32 | 4 |
+| VerifyDomainAuthorization | VerifyDomainAuthorization | 31 | 1 |
+| ViewApp | ViewApps | 29 | 5 |
+| ViewApp | UploadSourceArchive | 28 | 2 |
 
-Оба случая — уже отработанные инциденты предыдущих циклов, а не новый
-необслуженный сигнал. Свежих недиагностированных провалов у новых юзеров
-в этом окне нет.
+### Первое действие после регистрации (среди тех, у кого есть non-SignUp событие)
 
-## 5. Вывод
+| first_action | n_users |
+|---|---|
+| SessionStart | 24 |
+| CreateApp | 2 |
+| RedeemPromo | 1 |
 
-n=3 за 7 дней — слишком мало, чтобы утверждать распределение по продукту
-(любая цифра "60% уходят после X" здесь была бы статистическим шумом, не
-пишу такую). Единственный воспроизводимый факт: **100% первых действий —
-`CreateProject`**, потому что это вынужденный первый шаг UI, не выбор.
-Оба содержательных сбоя (env_failed, dockerfile_build_failed) уже получили
-код-фиксы в прошлых циклах; открытый вопрос — сработают ли они на живых
-юзерах при возврате, а не новая правка.
+### Терминальное действие (последнее перед тишиной)
+
+| terminal_action | n_users |
+|---|---|
+| SessionStart | 18 |
+| ViewApps | 5 |
+| DeployImageVersion | 2 |
+| BuildFinished | 1 |
+| ViewProject | 1 |
+
+`SessionStart` как терминал у 18/27 — но 16 из этих 18 это фермеры с ровно 1 событием (SessionStart
+и есть и первое, и последнее — искусственный ноль-путь, не человеческий отвал). Реальный
+UX-обрыв виден в `ViewApps` как терминал (5 юзеров) — это люди, которые дошли до списка
+приложений (пустого) и не создали ни одного.
+
+## UX-вывод
+
+Граф однозначно показывает воронку **SessionStart → ViewProject → ViewApps → (обрыв)** для
+не-фермерских юзеров: 149 переходов SessionStart→ViewProject у 7 юзеров, 145 ViewProject→ViewApps
+у 9 юзеров, но переход ViewApps→CreateApp в топ-15 не попал вообще — CreateApp почти никогда
+не следует напрямую за просмотром пустого списка приложений. Двое подтверждённых кейсов
+(cryocrm@gmail.com, mytake@yandex.ru) буквально останавливаются на ViewApps дважды, с разрывом
+в несколько дней между сессиями, и ни разу не нажимают "создать".
+
+**Пункт беклога 1**
+Заголовок: `Пустой ViewApps не предлагает следующий шаг — юзер возвращается и уходит с того же экрана`
+Тело: Что сломано — юзер логинится второй раз спустя дни (SessionStart), сразу идёт
+ViewProject→ViewApps, видит пустой список приложений и уходит без единого CreateApp. Улика —
+cryocrm@gmail.com (2 сессии, 08-06 и 08-11, обе кончаются на ViewApps/ViewProject) и
+mytake@yandex.ru (2 сессии, 08-19 и 08-21, идентичный паттерн
+SessionStart→ViewProject→ViewApps→тишина). Что чинить — на пустом состоянии ViewApps (0 apps в
+проекте) показать явный CTA "Создать первое приложение" с одним кликом до формы CreateApp,
+вместо молчаливого пустого списка; замерить конверсию ViewApps(empty)→CreateApp до/после.
+
+**Пункт беклога 2**
+Заголовок: `16 из 27 новых регистраций за 30д — фермерская волна 08-08, 0 продуктовых действий`
+Тело: Что сломано — 16 аккаунтов созданы подряд за ~3 часа (08-08 19:49–22:56, домены
+outlook/gmail/163.com/разовые), каждый оставляет РОВНО одну audit-строку `SessionStart` с
+метадатой автоматического прогрева API (`path: /api/v1/agent/chat/history` или
+`/api/v1/billing/account/summary` или даже `/api/v1/admin/audit`) и 0 строк во всех остальных
+таблицах (builds/git_repos/agent_chat_messages/feedback). Это не органический отвал и не дыра в
+audit — сигнатура идентична уже известной `project_signup_farm_wave_pollutes_funnel`. Что
+чинить — не продуктовая правка UX, а гигиена метрики: воронку активации/новых-юзеров считать
+искажённой на 59% за это окно, добавить фильтр по временной кластеризации регистраций
+(>N сигапов за короткое окно с одинаковым паттерном SessionStart-only) в канонический запрос
+`activation-funnel-v2.sql`, чтобы будущие циклы не завышали знаменатель воронки этой волной.
+
+## Unmeasured / известные ограничения
+
+- Всё измерено живьём, `unmeasured` нет — сеть/прокси были доступны напрямую (DIRECT-OK),
+  все запросы прошли без ошибок.
+- Полный построчный дамп цепочки (174KB) не вставлен целиком в этот файл — сохранён по пути
+  выше; здесь дана агрегированная свёртка по требованию задачи (не просто count(*)).
+- `agent_chat_messages.user_sub` и `feedback.user_sub` — текстовые поля; джойн сделан через
+  regex-фильтр на UUID-формат (по памяти `project_agent_chat_user_sub_holds_users_id.md`), не
+  все строки этих таблиц обязаны содержать валидный UUID (сервисные акторы) — для 27 целевых
+  id это не создаёт риска (джойн точный по id, а не по типу).

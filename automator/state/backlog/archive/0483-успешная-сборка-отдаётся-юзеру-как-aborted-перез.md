@@ -1,11 +1,14 @@
 ---
 id: 0483
-status: open
+status: closed
 prio: P0
 stream: 2
 title: Успешная сборка отдаётся юзеру как aborted: перезапуск build-agent пишет вердикт мимо Jenkins
 created: 2026-08-22
 sess: sess-0822i
+closed_at: 2026-08-22
+closed_commit: a8d57431
+closed_note: Премиса пункта опровергнута живьём: fail_reason/error_message пусты у всех 4 строк, триггер — CancelBuild (юзер) и суперсессия, не рестарт агента. Корень: CancelBuild (backend/internal/api/builds.go:404) правит только строку БД, джоба Jenkins живёт дальше; MarkPushing в attach() возвращал !ok -> errBuildAborted -> общий путь провала слал юзеру письмо "BUILD FAILED: jenkins build aborted" ПОСЛЕ его же отмены. Фикс: сентинел errBuildNotInFlight, ранний выход из handleBuildError (метрика canceled, без postStatus/notifyResult), скан живости строки раз в 5с в bridge + jenkins.StopBuild/CancelQueueItem. Жертва — artempro2022-yandex-ru/megafactory.
 ---
 Разбор провалов за 24ч, sess-0822i [live psql `builds` + `builds_logs`, сверено с Jenkins].
 
