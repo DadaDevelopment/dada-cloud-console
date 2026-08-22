@@ -844,15 +844,22 @@ ${PUSH_WITH_RETRY_SH}
                         }
                     }
 
+                    // subList() returns a non-serializable ArrayList$SubList view --
+                    // CPS checkpoints pipeline state after every step and blew up on
+                    // it (build #1321: NotSerializableException, whole run FAILURE).
+                    // Copy each slice into a plain (serializable) list instead.
                     def BATCH_SIZE = 3
-                    def branchEntries = branches.collect { k, v -> [k, v] }
-                    for (int i = 0; i < branchEntries.size(); i += BATCH_SIZE) {
-                        def batch = branchEntries.subList(i, Math.min(i + BATCH_SIZE, branchEntries.size()))
+                    def branchNames = branches.keySet().toList()
+                    def i = 0
+                    while (i < branchNames.size()) {
                         def batchMap = [:]
-                        for (entry in batch) {
-                            batchMap[entry[0]] = entry[1]
+                        def end = Math.min(i + BATCH_SIZE, branchNames.size())
+                        for (int j = i; j < end; j++) {
+                            def name = branchNames[j]
+                            batchMap[name] = branches[name]
                         }
                         parallel batchMap
+                        i = end
                     }
                 }
 
