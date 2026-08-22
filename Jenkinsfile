@@ -712,15 +712,24 @@ spec:
                         env.BRANCH_NAME == 'develop'
                 )
 
-                // Per-image build-then-push, all images in parallel (user call:
-                // waiting for all 6-7 builds before pushing any is pure
-                // serialization when each image is independent). Traded away the
-                // earlier caution here on purpose — one shared dind daemon backs
-                // ALL of this (limits: cpu 1500m / memory 1536Mi, see the pod
-                // template above, and see incidents #138/#141/#143 in that
-                // comment). If builds start dying OOM/ENOSPC/channel-drop under
-                // this concurrency, that dind limit is the first thing to check,
-                // not the Jenkinsfile logic.
+                // Per-image build-then-push (user call: waiting for all 6-7
+                // builds before pushing any is pure serialization when each
+                // image is independent). Confirmed LIVE on build #1318
+                // (2026-08-22): running all 7 as one parallel() OOMKilled the
+                // shared dind container 4 TIMES in a single build (dind limit
+                // is 1536Mi, see pod template above) — each OOMKill took the
+                // whole agent pod offline and Jenkins rescheduled the pipeline
+                // onto a fresh pod, replaying Checkout from scratch. Same build
+                // number, not abortPrevious, not a different build — visible in
+                // Blue Ocean as one lane repeating checkout->build->die 4x.
+                // The node this pod lands on has ~4.6-5Gi free total (see the
+                // #1285 Pending note near node-builder above) so bumping dind's
+                // memory further makes the pod unschedulable instead — not an
+                // option. Fix is concurrency, not memory: batch the images
+                // BATCH_SIZE at a time below. Each image still builds+pushes
+                // independently within its batch (no waiting on a SPECIFIC
+                // other image), but dind never has to hold more than
+                // BATCH_SIZE builds' memory at once.
                 runStage('Docker build+push') {
                     if (shouldPush) {
                         withCredentials([usernamePassword(
@@ -835,7 +844,16 @@ ${PUSH_WITH_RETRY_SH}
                         }
                     }
 
-                    parallel branches
+                    def BATCH_SIZE = 3
+                    def branchEntries = branches.collect { k, v -> [k, v] }
+                    for (int i = 0; i < branchEntries.size(); i += BATCH_SIZE) {
+                        def batch = branchEntries.subList(i, Math.min(i + BATCH_SIZE, branchEntries.size()))
+                        def batchMap = [:]
+                        for (entry in batch) {
+                            batchMap[entry[0]] = entry[1]
+                        }
+                        parallel batchMap
+                    }
                 }
 
                 if (shouldPush) {
