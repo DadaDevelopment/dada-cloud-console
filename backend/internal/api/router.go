@@ -529,6 +529,10 @@ func SetupRouterWithHandler(pool *pgxpool.Pool, cfg *config.Config) (*gin.Engine
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/keep", h.KeepDemoApp)
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/values-token", h.GetValuesToken)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/delete-impact", h.DeleteAppImpact)
+
+		api.GET("/agents/tools", h.ListAgentTools)
+		api.POST("/agents/validate", h.ValidateAgent)
+		api.GET("/agents/:agentName/state", h.GetAgentState)
 		api.DELETE("/projects/:projectId/environments/:envId/apps/:appName", h.DeleteApp)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/move-impact", h.MoveAppImpact)
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/move", h.MoveApp)

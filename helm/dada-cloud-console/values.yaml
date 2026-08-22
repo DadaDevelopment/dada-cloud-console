@@ -519,6 +519,11 @@ rbac:
   # Namespace where the console creates Kanister ActionSets for per-database
   # backup/restore (the managed-Postgres namespace). Must match DB_BACKUP_NAMESPACE.
   dbBackupNamespace: databases
+  # Namespace the kagent agent runtime lives in: the Agent CRs, their prompt
+  # ConfigMaps and the shared RemoteMCPServers. A namespaced read-only Role is
+  # granted here so the console can show an agent's live state. Must match
+  # backend AGENT_RUNTIME_NAMESPACE.
+  agentRuntimeNamespace: kagent
 
 migrationJob:
   enabled: false

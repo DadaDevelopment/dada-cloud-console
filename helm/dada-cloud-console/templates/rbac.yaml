@@ -256,6 +256,48 @@ roleRef:
   kind: Role
   name: {{ include "dada-cloud-console.fullname" . }}-db-move
   apiGroup: rbac.authorization.k8s.io
+---
+# Agent runtime reader. The agent builder shows what an agent is actually doing:
+# whether kagent accepted the Agent CR, and which prompt version the running
+# pods loaded -- that last one lives in the "<agent>-prompt" ConfigMap and is
+# the only place the difference between the prompt in git and the prompt
+# answering users is visible while a rollout is stuck.
+#
+# Scoped to the one namespace the whole agent runtime lives in, and read-only:
+# agents are written through git by the gitops-agent, never patched from here.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "dada-cloud-console.fullname" . }}-agent-runtime-reader
+  namespace: {{ .Values.rbac.agentRuntimeNamespace | default "kagent" }}
+  labels:
+    {{- include "dada-cloud-console.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["kagent.dev"]
+    resources: ["agents", "remotemcpservers"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "dada-cloud-console.fullname" . }}-agent-runtime-reader
+  namespace: {{ .Values.rbac.agentRuntimeNamespace | default "kagent" }}
+  labels:
+    {{- include "dada-cloud-console.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "dada-cloud-console.fullname" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ include "dada-cloud-console.fullname" . }}-agent-runtime-reader
+  apiGroup: rbac.authorization.k8s.io
 {{- if .Values.rbac.dbCredsReader | default true }}
 ---
 # Reveal-on-demand of managed-database connection secrets

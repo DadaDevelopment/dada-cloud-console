@@ -22,6 +22,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/config"
 	"github.com/dada-tuda/console/backend/internal/dadagent"
 	"github.com/dada-tuda/console/backend/internal/grafana"
+	"github.com/dada-tuda/console/backend/internal/kagent"
 	"github.com/dada-tuda/console/backend/internal/llmchat"
 	"github.com/dada-tuda/console/backend/internal/logsearch"
 	"github.com/dada-tuda/console/backend/internal/mlflow"
@@ -147,6 +148,11 @@ type Handler struct {
 	platformHealthOnce sync.Once
 	platformHealthCS   kubernetes.Interface
 
+	// agents reads the kagent runtime for the agent builder: available MCP
+	// servers and the live state of one agent. Off-cluster it is disabled and
+	// every endpoint on it answers 503 instead of failing to start.
+	agents *kagent.Reader
+
 	auditNotifier         *notify.Notifier
 	auditNotifyEmail      string
 	auditRateLimiter      auditNotifyLimiter
@@ -221,6 +227,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	if cfg.AIStudioEnabled && cfg.MLflowBaseURL != "" {
 		h.mlflow = mlflow.New(cfg.MLflowBaseURL, cfg.MLflowAuthHeader)
 	}
+	h.agents = kagent.NewReader(cfg.AgentRuntimeNamespace, cfg.LangfuseHost, cfg.LangfuseProjectID)
 	h.portainer = portainer.New(cfg.PortainerURL, cfg.PortainerAPIToken)
 	h.prometheus = prometheus.New(cfg.PrometheusQueryURL, cfg.PrometheusQueryUser, cfg.PrometheusQueryPass)
 	h.opencost = opencost.New(cfg.OpenCostURL)

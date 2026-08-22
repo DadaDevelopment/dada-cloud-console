@@ -69,6 +69,21 @@ definitions:
       name:
         type: string
     type: object
+  api.ValidateAgentRequest:
+    properties:
+      allowed_headers:
+        items:
+          type: string
+        type: array
+      name:
+        type: string
+      prompt:
+        type: string
+      tools:
+        items:
+          type: string
+        type: array
+    type: object
   api.addDomainAuthorizationRequest:
     properties:
       apex_domain:
@@ -1574,6 +1589,44 @@ definitions:
       ran:
         type: boolean
     type: object
+  kagent.PodState:
+    properties:
+      name:
+        type: string
+      phase:
+        type: string
+      ready:
+        type: boolean
+      restarts:
+        type: integer
+    type: object
+  kagent.State:
+    properties:
+      accepted:
+        type: boolean
+      exists:
+        type: boolean
+      message:
+        type: string
+      name:
+        type: string
+      namespace:
+        type: string
+      pods:
+        items:
+          $ref: '#/definitions/kagent.PodState'
+        type: array
+      prompt_version:
+        type: string
+      ready:
+        type: boolean
+      reason:
+        type: string
+      traces_url:
+        type: string
+      url:
+        type: string
+    type: object
   models.AIModelAuthMode:
     enum:
     - apikey
@@ -2919,6 +2972,119 @@ paths:
       summary: '[service] List repos visible to a git installation'
       tags:
       - agent-git
+  /agents/{agentName}/state:
+    get:
+      description: Assembles the Agent CR conditions, the pods serving it, the prompt
+        version those pods loaded and the Langfuse traces link. A not-yet-synced agent
+        is reported as absent rather than as an error.
+      operationId: getAgentState
+      parameters:
+      - description: Agent name
+        in: path
+        name: agentName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/kagent.State'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Live state of one agent
+      tags:
+      - agents
+  /agents/tools:
+    get:
+      description: Reads the RemoteMCPServer objects of the agent runtime, including
+        whether each one is accepted and which tools it actually discovered. The cluster-internal
+        URL is returned to platform admins only. 503 when this console cannot see
+        the agent runtime.
+      operationId: listAgentTools
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the tools array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List the MCP servers an agent can use
+      tags:
+      - agents
+  /agents/validate:
+    post:
+      consumes:
+      - application/json
+      description: Checks name, prompt and requested MCP servers against everything
+        the cluster would refuse later. Returns 400 with a per-field error list, or
+        200 when the draft is safe to commit.
+      operationId: validateAgent
+      parameters:
+      - description: Draft agent
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.ValidateAgentRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: valid draft
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: object with the per-field errors array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Validate a draft agent before it is written to git
+      tags:
+      - agents
   /ai/catalog:
     get:
       description: Lists the model aliases callable through the AI Gateway and the

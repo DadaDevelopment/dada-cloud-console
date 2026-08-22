@@ -538,6 +538,18 @@ type Config struct {
 	LangfuseSecretKey string // LANGFUSE_SECRET_KEY
 	LangfuseEnabled   bool   // LANGFUSE_ENABLED (default true; keys still required)
 
+	// LangfuseProjectID is the project the agent runtime reports traces into.
+	// It exists only to build the "open traces" link next to an agent, and is
+	// empty by default: a link built from a guessed project id lands on a
+	// permission error, which reads as broken tracing rather than as a console
+	// that was never told where the traces are.
+	LangfuseProjectID string // LANGFUSE_PROJECT_ID
+
+	// AgentRuntimeNamespace is where the kagent Agents, their prompt ConfigMaps
+	// and the shared RemoteMCPServers live. One namespace for the whole
+	// platform: an agent is a declaration, not a workload a tenant owns.
+	AgentRuntimeNamespace string // AGENT_RUNTIME_NAMESPACE (default "kagent")
+
 	// DadaAgent cloud-task integration (ADR-cloud-task). The console fires
 	// autonomous agent tasks from an app chip: it mints a short-lived GitHub App
 	// install token + a Keycloak client-credentials token, submits + executes a
@@ -957,6 +969,8 @@ func Load() (*Config, error) {
 		LangfusePublicKey:           getEnv("LANGFUSE_PUBLIC_KEY", ""),
 		LangfuseSecretKey:           getEnv("LANGFUSE_SECRET_KEY", ""),
 		LangfuseEnabled:             getEnv("LANGFUSE_ENABLED", "true") == "true",
+		LangfuseProjectID:           getEnv("LANGFUSE_PROJECT_ID", ""),
+		AgentRuntimeNamespace:       getEnv("AGENT_RUNTIME_NAMESPACE", "kagent"),
 		DadaAgentBaseURL:            getEnv("DADA_AGENT_BASE_URL", ""),
 		KeycloakTokenURL:            getEnv("KEYCLOAK_TOKEN_URL", ""),
 		CloudAgentClientID:          getEnv("CLOUD_AGENT_CLIENT_ID", ""),
