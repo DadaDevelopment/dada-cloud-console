@@ -75,18 +75,20 @@ def NEXT_PUBLIC_CONSOLE_URL     = 'https://console.dada-tuda.ru'
 def podLabel  = 'dada-cloud-console-agent'
 def agentName = "kubeagent-${env.JOB_BASE_NAME}-${env.BUILD_NUMBER}-${UUID.randomUUID().toString().take(6)}"
 
-// abortPrevious was reverted once (builds #813-#818 — see git blame on this
-// line): it killed queued builds before their GitOps write-back ran, so 4 of 6
-// pushed commits never reached the tag pin and prod sat 3 commits behind main.
-// Re-enabled now that write-back moved right after "Docker build+push" — the
-// slow internal/api DB test suite runs AFTER write-back (see the standalone
-// "Backend tests" stage near the bottom), so a queued build is superseded
-// mostly BEFORE it starts, or AFTER it already wrote its tag — the window
-// where an abort throws away a completed write-back is now just Toolchain
-// through Docker build+push, not the whole pipeline. If starvation recurs, check
-// whether that ordering assumption still holds before reverting again.
+// abortPrevious tried TWICE now, reverted both times for the same reason:
+// starvation. First (#813-#818): killed queued builds before GitOps
+// write-back ran. Second (2026-08-22, this window, builds #1309-#1319): main
+// gets pushed by several parallel sessions every 3-8 min, and the pipeline
+// (7-way parallel Docker build+push, one shared dind) takes longer than that
+// to finish — every build got aborted by the next push before reaching
+// write-back, so literally NOTHING shipped for 90+ minutes. Moving write-back
+// earlier does not fix this: it only helps when pushes are rare enough for a
+// build to finish between them, and on a shared main with multiple agents
+// pushing they are not. Queueing (plain disableConcurrentBuilds, no
+// abortPrevious) trades a backlog for guaranteed forward progress — do not
+// re-enable abortPrevious without first checking actual push cadence on main.
 properties([
-        disableConcurrentBuilds(abortPrevious: true),
+        disableConcurrentBuilds(),
         parameters([
                 booleanParam(
                         name: 'RUN_E2E_AUTHED',
