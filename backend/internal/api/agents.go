@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +30,43 @@ type saveAgentRequest struct {
 	Env           []models.AgentEnvVar  `json:"env"`
 }
 
+// managedAgentKind is the Crossplane claim the console writes, and adoptedAgentKind
+// is the raw kagent CR that a hand-maintained resources.values.yaml carries.
+//
+// Both reach resource_snapshots through the same reader: the git-watcher upserts
+// every manifest entry of an app's resources.values.yaml by (kind, name), so an
+// agent written by hand into git is already a row here, exactly like a claim the
+// console ordered. The list shows both, because "what is in git" is the whole
+// point of that reader -- hiding the hand-written half would make the console
+// disagree with the repository it renders. Only the claim half is writable: a
+// claim named after an existing raw Agent would compose a SECOND CR with that
+// name into the runtime namespace and the two would fight over it.
+const (
+	managedAgentKind = "ManagedAgent"
+	adoptedAgentKind = "Agent"
+)
+
+// agentSnapshotKind reports which kind already holds this agent name in the
+// environment, or "" when the name is free. A claim wins over a raw CR when
+// both exist: the claim is the one the console can act on.
+func (h *Handler) agentSnapshotKind(ctx context.Context, projectID, envID uuid.UUID, name string) (string, error) {
+	var kind string
+	err := h.pool.QueryRow(ctx,
+		`SELECT kind FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind IN ('ManagedAgent', 'Agent') AND name = $3
+		 ORDER BY (kind = 'ManagedAgent') DESC
+		 LIMIT 1`,
+		projectID, envID, name,
+	).Scan(&kind)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return kind, nil
+}
+
 // ListAgents returns the agents of one environment as the console knows them.
 //
 // This is the git-side view: what has been ordered. Whether the agent is
@@ -39,7 +77,7 @@ type saveAgentRequest struct {
 //
 // @ID          listAgents
 // @Summary     List agents in an environment
-// @Description Returns the agents ordered through the console for this environment. Live readiness comes from the agent state endpoint.
+// @Description Returns the agents of this environment as git holds them: ManagedAgent claims ordered through the console and raw kagent Agent CRs maintained by hand. Live readiness comes from the agent state endpoint.
 // @Tags        agents
 // @Produce     json
 // @Security    BearerAuth
@@ -71,7 +109,7 @@ func (h *Handler) ListAgents(c *gin.Context) {
 	rows, err := h.pool.Query(c.Request.Context(),
 		`SELECT id, project_id, environment_id, kind, name, phase, summary_json, last_synced_at
 		 FROM resource_snapshots
-		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'ManagedAgent'
+		 WHERE project_id = $1 AND environment_id = $2 AND kind IN ('ManagedAgent', 'Agent')
 		 ORDER BY name`,
 		projectID, envID,
 	)
@@ -125,6 +163,7 @@ func (h *Handler) ListAgents(c *gin.Context) {
 // @Failure     400       {object} map[string]interface{}
 // @Failure     401       {object} map[string]string
 // @Failure     403       {object} map[string]string
+// @Failure     409       {object} map[string]string
 // @Router      /projects/{projectId}/environments/{envId}/agents [post]
 func (h *Handler) SaveAgent(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
@@ -171,16 +210,19 @@ func (h *Handler) SaveAgent(c *gin.Context) {
 		return
 	}
 
-	var existing int
-	if err := h.pool.QueryRow(c.Request.Context(),
-		`SELECT COUNT(*) FROM resource_snapshots
-		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'ManagedAgent' AND name = $3`,
-		projectID, envID, req.Name,
-	).Scan(&existing); err != nil {
+	existingKind, err := h.agentSnapshotKind(c.Request.Context(), projectID, envID, req.Name)
+	if err != nil {
 		reject(http.StatusInternalServerError, "lookup_failed", gin.H{"error": "failed to look up agent"})
 		return
 	}
-	if existing > 0 {
+	switch existingKind {
+	case adoptedAgentKind:
+		reject(http.StatusConflict, "agent_not_console_owned", gin.H{
+			"error":   "agent_not_console_owned",
+			"message": "this agent is a raw kagent CR maintained in git outside the console; editing it here would compose a second CR with the same name",
+		})
+		return
+	case managedAgentKind:
 		action = "UpdateAgent"
 	}
 
@@ -260,6 +302,7 @@ func (h *Handler) SaveAgent(c *gin.Context) {
 // @Failure     401       {object} map[string]string
 // @Failure     403       {object} map[string]string
 // @Failure     404       {object} map[string]string
+// @Failure     409       {object} map[string]string
 // @Router      /projects/{projectId}/environments/{envId}/agents/{name} [delete]
 func (h *Handler) DeleteAgent(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
@@ -291,19 +334,23 @@ func (h *Handler) DeleteAgent(c *gin.Context) {
 		return
 	}
 
-	var exists int
-	if err := h.pool.QueryRow(c.Request.Context(),
-		`SELECT COUNT(*) FROM resource_snapshots
-		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'ManagedAgent' AND name = $3`,
-		projectID, envID, name,
-	).Scan(&exists); err != nil {
+	existingKind, err := h.agentSnapshotKind(c.Request.Context(), projectID, envID, name)
+	if err != nil {
 		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "lookup_failed"})
 		respondError(c, http.StatusInternalServerError, "failed to look up agent")
 		return
 	}
-	if exists == 0 {
+	if existingKind == "" {
 		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "not_found", "status": http.StatusNotFound})
 		respondNotFound(c)
+		return
+	}
+	if existingKind == adoptedAgentKind {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "agent_not_console_owned", "status": http.StatusConflict})
+		c.JSON(http.StatusConflict, gin.H{
+			"error":   "agent_not_console_owned",
+			"message": "this agent is a raw kagent CR maintained in git outside the console; the console has no git path to remove it from",
+		})
 		return
 	}
 

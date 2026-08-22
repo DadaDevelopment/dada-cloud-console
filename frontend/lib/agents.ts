@@ -91,3 +91,26 @@ export function agentFormFromSnapshot(agent: ResourceSnapshot): AgentFormValues 
     env: envLines(summary),
   };
 }
+
+/**
+ * The kind the console writes for an agent it owns.
+ *
+ * The list is a view of git, and git holds two kinds under the same idea: the
+ * ManagedAgent claim the console renders, and the raw kagent Agent CR that a
+ * hand-maintained resources.values.yaml carries. Both arrive through the same
+ * git reader, so both belong on the page; only the claim has a console git path
+ * behind it.
+ */
+export const CONSOLE_AGENT_KIND = "ManagedAgent";
+
+/**
+ * Reports whether this agent can be edited or deleted here.
+ *
+ * A hand-written Agent is read-only in the console on purpose: a claim named
+ * after it would compose a SECOND CR with that name into the runtime namespace,
+ * and the two owners would fight over it. The backend refuses such a save with
+ * 409; hiding the buttons is what keeps the user from meeting that refusal.
+ */
+export function isConsoleOwnedAgent(kind: string): boolean {
+  return kind === CONSOLE_AGENT_KIND;
+}

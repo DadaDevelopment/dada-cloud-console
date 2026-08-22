@@ -26,6 +26,10 @@ export const agents: Messages = {
   "agents.state.pods": { ru: "Поды: {ready}/{total} готовы", en: "Pods: {ready}/{total} ready" },
   "agents.state.restarts": { ru: "рестартов: {count}", en: "restarts: {count}" },
   "agents.state.traces": { ru: "Трассы в Langfuse →", en: "Langfuse traces →" },
+  "agents.gitOwned": {
+    ru: "Агент описан в git вручную, вне консоли: правки только коммитом в инфраструктурный репозиторий",
+    en: "This agent is described in git by hand, outside the console: it changes by a commit to the infrastructure repo",
+  },
 
   "agents.action.edit": { ru: "Изменить", en: "Edit" },
   "agents.action.delete": { ru: "Удалить", en: "Delete" },

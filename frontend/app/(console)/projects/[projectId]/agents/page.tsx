@@ -23,6 +23,7 @@ import { useT } from "@/lib/i18n/console/context";
 import { trackUxEvent } from "@/lib/ux-telemetry";
 import {
   agentFormFromSnapshot,
+  isConsoleOwnedAgent,
   parseEnvLines,
   EMPTY_AGENT_FORM,
   type AgentFormValues,
@@ -249,6 +250,7 @@ export default function AgentsPage() {
           {agents.map((agent) => {
             const summary = (agent.summary_json ?? {}) as Record<string, unknown>;
             const state = states[agent.name];
+            const consoleOwned = isConsoleOwnedAgent(agent.kind);
             const readyPods = state?.pods?.filter((p) => p.ready).length ?? 0;
             const restarts = state?.pods?.reduce((sum, p) => sum + p.restarts, 0) ?? 0;
             return (
@@ -303,7 +305,13 @@ export default function AgentsPage() {
                   {t("common.status.synced", { ago: timeAgo(agent.last_synced_at) })}
                 </p>
 
-                {canWrite && (
+                {!consoleOwned && (
+                  <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                    {t("agents.gitOwned")}
+                  </p>
+                )}
+
+                {canWrite && consoleOwned && (
                   <div className="mt-3 flex gap-2">
                     <button
                       onClick={() => openEdit(agent)}

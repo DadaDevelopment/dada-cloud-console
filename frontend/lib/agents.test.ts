@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { agentFormFromSnapshot, envLines, parseEnvLines, toolNames } from "./agents.ts";
+import { agentFormFromSnapshot, envLines, isConsoleOwnedAgent, parseEnvLines, toolNames } from "./agents.ts";
 import type { ResourceSnapshot } from "./types.ts";
 
 test("an env value keeps every character after the first equals sign", () => {
@@ -66,4 +66,9 @@ test("stored env entries survive a round trip through the textarea", () => {
     { name: "B", value: "x=y" },
   ]);
   assert.deepEqual(toolNames(stored), []);
+});
+
+test("an agent written into git by hand is not editable here", () => {
+  assert.equal(isConsoleOwnedAgent("Agent"), false);
+  assert.equal(isConsoleOwnedAgent("ManagedAgent"), true);
 });
