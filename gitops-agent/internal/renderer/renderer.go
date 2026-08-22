@@ -486,13 +486,21 @@ type appValuesFile struct {
 // verbatim rather than being sized by anything. They exist because a render
 // that omits them deletes an ephemeral-storage limit an app was given by hand,
 // and a container that then writes past the node default is evicted.
+// ExtraRequests and ExtraLimits carry any further resource key verbatim, so a
+// render cannot delete a dimension the console has no field for: a hand-written
+// app may size one the console never models (internal/reels-tracker and
+// platform/ai-gateway both carry a camelCase ephemeralStorage next to the
+// canonical ephemeral-storage), and common.resources is a key the console
+// CLAIMS, so a render that knows only cpu/memory replaces the whole block.
 type AppResources struct {
-	CPURequest       string `json:"cpu_request"`
-	MemoryRequest    string `json:"memory_request"`
-	CPULimit         string `json:"cpu_limit"`
-	MemoryLimit      string `json:"memory_limit"`
-	EphemeralRequest string `json:"ephemeral_request,omitempty"`
-	EphemeralLimit   string `json:"ephemeral_limit,omitempty"`
+	CPURequest       string            `json:"cpu_request"`
+	MemoryRequest    string            `json:"memory_request"`
+	CPULimit         string            `json:"cpu_limit"`
+	MemoryLimit      string            `json:"memory_limit"`
+	EphemeralRequest string            `json:"ephemeral_request,omitempty"`
+	EphemeralLimit   string            `json:"ephemeral_limit,omitempty"`
+	ExtraRequests    map[string]string `json:"extra_requests,omitempty"`
+	ExtraLimits      map[string]string `json:"extra_limits,omitempty"`
 }
 
 // Complete reports whether every field is set. A partially filled envelope is
@@ -522,6 +530,12 @@ func resolveResources(r *AppResources, profile string) commonResources {
 		}
 		if r.EphemeralLimit != "" {
 			out.Limits["ephemeral-storage"] = r.EphemeralLimit
+		}
+		for k, v := range r.ExtraRequests {
+			out.Requests[k] = v
+		}
+		for k, v := range r.ExtraLimits {
+			out.Limits[k] = v
 		}
 	}
 	return out

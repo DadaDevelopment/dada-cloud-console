@@ -342,13 +342,48 @@ func (w *DBWatcher) adoptAppShape(ctx context.Context, op db.Operation, appName 
 	return changes, portAdopted, portWas, nil
 }
 
+// extraResourceKeys returns the resource keys of one requests/limits block that
+// renderer.AppResources has no field for. They travel verbatim so a render
+// cannot delete a dimension the console does not model.
+func extraResourceKeys(m map[string]string) map[string]string {
+	var out map[string]string
+	for k, v := range m {
+		switch k {
+		case "cpu", "memory", "ephemeral-storage":
+			continue
+		}
+		if out == nil {
+			out = map[string]string{}
+		}
+		out[k] = v
+	}
+	return out
+}
+
 // sameResources compares two resource envelopes, treating a missing one as
 // different from any present one.
 func sameResources(a, b *renderer.AppResources) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return *a == *b
+	return a.CPURequest == b.CPURequest && a.MemoryRequest == b.MemoryRequest &&
+		a.CPULimit == b.CPULimit && a.MemoryLimit == b.MemoryLimit &&
+		a.EphemeralRequest == b.EphemeralRequest && a.EphemeralLimit == b.EphemeralLimit &&
+		sameStringMap(a.ExtraRequests, b.ExtraRequests) &&
+		sameStringMap(a.ExtraLimits, b.ExtraLimits)
+}
+
+// sameStringMap compares two resource-key maps by content.
+func sameStringMap(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || w != v {
+			return false
+		}
+	}
+	return true
 }
 
 // describeWas names the console's previous value for the adoption report, or
@@ -423,10 +458,14 @@ func parseAdoptableValues(raw string) (adoptedValues, error) {
 		WorkloadType: doc.Common.WorkloadType,
 		StartCommand: doc.Common.StartCommand,
 	}
-	if img := doc.Common.Image; img != nil && img.Name != "" {
-		out.Image = img.Name
-		if img.Tag != "" {
+	if img := doc.Common.Image; img != nil {
+		switch {
+		case img.Name != "" && img.Tag != "":
 			out.Image = img.Name + ":" + img.Tag
+		case img.Name != "":
+			out.Image = img.Name
+		case img.Tag != "":
+			out.Image = ":" + img.Tag
 		}
 	}
 	if r := doc.Common.Resources; r != nil {
@@ -438,6 +477,8 @@ func parseAdoptableValues(raw string) (adoptedValues, error) {
 			EphemeralRequest: r.Requests["ephemeral-storage"],
 			EphemeralLimit:   r.Limits["ephemeral-storage"],
 		}
+		env.ExtraRequests = extraResourceKeys(r.Requests)
+		env.ExtraLimits = extraResourceKeys(r.Limits)
 		if env.Complete() {
 			out.Resources = &env
 		}
