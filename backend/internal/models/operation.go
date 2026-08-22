@@ -437,3 +437,46 @@ type Operation struct {
 	CreatedAt        time.Time       `json:"created_at"                  db:"created_at"`
 	UpdatedAt        time.Time       `json:"updated_at"                  db:"updated_at"`
 }
+
+// SaveAgentPayload is the typed payload for CreateAgent and UpdateAgent.
+//
+// An agent is saved whole: the console has one editor and a save re-states
+// every field, so the gitops-agent can upsert one ManagedAgent claim by name
+// instead of merging a patch into a CR it did not write.
+type SaveAgentPayload struct {
+	Name          string         `json:"name"`
+	DisplayName   string         `json:"display_name,omitempty"`
+	Description   string         `json:"description,omitempty"`
+	Prompt        string         `json:"prompt"`
+	PromptVersion string         `json:"prompt_version,omitempty"`
+	ModelConfig   string         `json:"model_config,omitempty"`
+	Runtime       string         `json:"runtime,omitempty"`
+	Namespace     string         `json:"namespace,omitempty"`
+	Tools         []AgentToolRef `json:"tools,omitempty"`
+	Env           []AgentEnvVar  `json:"env,omitempty"`
+}
+
+// AgentToolRef points an agent at one MCP server. URL is empty for a server
+// that already exists in the runtime: the claim then references it by name
+// rather than declaring a second RemoteMCPServer for the same endpoint.
+//
+// AllowedHeaders is what the agent is permitted to replay to that server, which
+// is the only channel a caller's identity travels on.
+type AgentToolRef struct {
+	Name           string   `json:"name"`
+	URL            string   `json:"url,omitempty"`
+	Description    string   `json:"description,omitempty"`
+	Timeout        string   `json:"timeout,omitempty"`
+	AllowedHeaders []string `json:"allowed_headers,omitempty"`
+}
+
+// AgentEnvVar is one plain environment variable of the agent runtime.
+type AgentEnvVar struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// DeleteAgentPayload is the typed payload for DeleteAgent operations.
+type DeleteAgentPayload struct {
+	Name string `json:"name"`
+}

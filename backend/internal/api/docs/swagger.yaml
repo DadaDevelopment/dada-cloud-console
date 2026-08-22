@@ -1400,6 +1400,31 @@ definitions:
           keep one alive across a sleep. Public half only.
         type: string
     type: object
+  api.saveAgentRequest:
+    properties:
+      description:
+        type: string
+      display_name:
+        type: string
+      env:
+        items:
+          $ref: '#/definitions/models.AgentEnvVar'
+        type: array
+      model_config:
+        type: string
+      name:
+        type: string
+      prompt:
+        type: string
+      prompt_version:
+        type: string
+      runtime:
+        type: string
+      tools:
+        items:
+          $ref: '#/definitions/models.AgentToolRef'
+        type: array
+    type: object
   api.saveDashboardRequest:
     type: object
   api.serviceChargeResponse:
@@ -1647,6 +1672,28 @@ definitions:
     - AIModelSourceMLflow
     - AIModelSourceS3
     - AIModelSourceCustom
+  models.AgentEnvVar:
+    properties:
+      name:
+        type: string
+      value:
+        type: string
+    type: object
+  models.AgentToolRef:
+    properties:
+      allowed_headers:
+        items:
+          type: string
+        type: array
+      description:
+        type: string
+      name:
+        type: string
+      timeout:
+        type: string
+      url:
+        type: string
+    type: object
   models.ImportServiceSpec:
     properties:
       container_name:
@@ -7791,6 +7838,153 @@ paths:
       summary: Create or replace a record in a delegated apex
       tags:
       - domain
+  /projects/{projectId}/environments/{envId}/agents:
+    get:
+      description: Returns the agents ordered through the console for this environment.
+        Live readiness comes from the agent state endpoint.
+      operationId: listAgents
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with an agents array of ResourceSnapshot
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List agents in an environment
+      tags:
+      - agents
+    post:
+      consumes:
+      - application/json
+      description: 'Queues the git write for one agent (prompt, tools, model). Async:
+        returns 202 with an operation; poll until terminal. Re-posting the same name
+        updates that agent.'
+      operationId: saveAgent
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Agent specification
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.saveAgentRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create or update an agent
+      tags:
+      - agents
+  /projects/{projectId}/environments/{envId}/agents/{name}:
+    delete:
+      description: 'Queues the git write that removes the agent claim. Argo then prunes
+        the agent, its prompt and its MCP servers. Async: returns 202 with an operation.'
+      operationId: deleteAgent
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Agent name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete an agent
+      tags:
+      - agents
   /projects/{projectId}/environments/{envId}/apps:
     get:
       description: |-

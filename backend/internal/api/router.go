@@ -456,6 +456,10 @@ func SetupRouterWithHandler(pool *pgxpool.Pool, cfg *config.Config) (*gin.Engine
 		api.GET("/projects/:projectId/environments/:envId/s3buckets/:name/credentials", h.GetS3BucketCredentials)
 		api.DELETE("/projects/:projectId/environments/:envId/s3buckets/:name", h.DeleteS3Bucket)
 
+		api.GET("/projects/:projectId/environments/:envId/agents", h.ListAgents)
+		api.POST("/projects/:projectId/environments/:envId/agents", h.SaveAgent)
+		api.DELETE("/projects/:projectId/environments/:envId/agents/:name", h.DeleteAgent)
+
 		// AppServers (VM track)
 		api.GET("/projects/:projectId/app-servers", h.ListAppServers)
 		api.POST("/projects/:projectId/app-servers", h.CreateAppServer)
