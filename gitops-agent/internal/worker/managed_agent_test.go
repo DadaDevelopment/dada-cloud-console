@@ -154,3 +154,58 @@ func TestDeleteAgent_UnknownAgentIsNotAChange(t *testing.T) {
 		t.Fatal("an agent absent from the carrier must not report a change")
 	}
 }
+
+// TestCarriedOverAgentMemory_SurvivesASaveThatDoesNotKnowAboutIt: the console
+// save re-states every field the console knows, and it knows nothing about
+// memory. An agent onboarded by hand keeps thirty days of notes; if a prompt fix
+// dropped spec.memory, the agent would go on answering while quietly forgetting
+// everything, and nobody would connect that to the edit.
+func TestCarriedOverAgentMemory_SurvivesASaveThatDoesNotKnowAboutIt(t *testing.T) {
+	mgr, valuesPath := agentCarrierFixture(t, "agents", "prod", "telemost-poc")
+
+	full := filepath.Join(mgr.LocalPath(), valuesPath)
+	content, err := os.ReadFile(full)
+	if err != nil {
+		t.Fatalf("read values: %v", err)
+	}
+	withMemory := strings.Replace(string(content),
+		"      prompt: |-",
+		"      memory:\n        modelConfig: embeddings-local\n        ttlDays: 30\n      prompt: |-", 1)
+	if withMemory == string(content) {
+		t.Fatalf("fixture shape changed, memory was not injected:\n%s", content)
+	}
+	if err := os.WriteFile(full, []byte(withMemory), 0o644); err != nil {
+		t.Fatalf("write values: %v", err)
+	}
+
+	memory, err := carriedOverAgentMemory(mgr, valuesPath, "telemost-poc")
+	if err != nil {
+		t.Fatalf("carriedOverAgentMemory: %v", err)
+	}
+	if memory == nil || memory.ModelConfig != "embeddings-local" || memory.TTLDays != 30 {
+		t.Fatalf("memory not carried over: %#v", memory)
+	}
+
+	saved, err := renderer.RenderManagedAgent(renderer.ManagedAgentSpec{
+		Name:        "telemost-poc",
+		Namespace:   "kagent",
+		ProjectSlug: "agents",
+		EnvSlug:     "prod",
+		Prompt:      "Отвечай коротко.",
+		Memory:      memory,
+	})
+	if err != nil {
+		t.Fatalf("RenderManagedAgent: %v", err)
+	}
+	if !strings.Contains(saved, "modelConfig: embeddings-local") || !strings.Contains(saved, "ttlDays: 30") {
+		t.Fatalf("re-rendered claim lost its memory:\n%s", saved)
+	}
+
+	none, err := carriedOverAgentMemory(mgr, valuesPath, "reels-poc")
+	if err != nil {
+		t.Fatalf("carriedOverAgentMemory(absent): %v", err)
+	}
+	if none != nil {
+		t.Fatalf("an agent without memory must stay without one, got %#v", none)
+	}
+}

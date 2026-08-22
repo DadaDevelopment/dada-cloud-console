@@ -22,6 +22,18 @@ type ManagedAgentToolRef struct {
 	AllowedHeaders []string
 }
 
+// ManagedAgentMemory is the long-term memory of an agent.
+//
+// The console cannot order it: an agent it creates remembers nothing between
+// conversations. It exists so a claim that already carries memory -- an agent
+// that was written into git by hand before the console could render one --
+// keeps it across a console save instead of losing thirty days of notes to an
+// edit of its prompt.
+type ManagedAgentMemory struct {
+	ModelConfig string
+	TTLDays     int
+}
+
 // ManagedAgentEnvVar is one plain environment variable of the agent runtime.
 type ManagedAgentEnvVar struct {
 	Name  string
@@ -46,6 +58,7 @@ type ManagedAgentSpec struct {
 	PromptVersion string
 	ModelConfig   string
 	Runtime       string
+	Memory        *ManagedAgentMemory
 	Tools         []ManagedAgentToolRef
 	Env           []ManagedAgentEnvVar
 }
@@ -68,7 +81,10 @@ spec:
   description: {{ quote .Description }}{{ end }}{{ if .PromptVersion }}
   promptVersion: {{ quote .PromptVersion }}{{ end }}{{ if .ModelConfig }}
   modelConfig: {{ .ModelConfig }}{{ end }}{{ if .Runtime }}
-  runtime: {{ .Runtime }}{{ end }}
+  runtime: {{ .Runtime }}{{ end }}{{ with .Memory }}
+  memory:
+    modelConfig: {{ .ModelConfig }}{{ if .TTLDays }}
+    ttlDays: {{ .TTLDays }}{{ end }}{{ end }}
   prompt: |-
 {{ indent .Prompt 4 }}{{ if .Tools }}
   tools:
