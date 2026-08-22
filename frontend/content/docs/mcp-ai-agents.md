@@ -9,7 +9,7 @@ your logs — on your behalf, using your own login. You ask in plain language
 ("deploy this image and give it a Postgres"); the agent calls the right platform
 tools and reports back.
 
-The server exposes **41 curated tools** drawn from the same API the web console
+The server exposes **42 curated tools** drawn from the same API the web console
 uses. It is not the whole API: the tool list is an allowlist, chosen so an agent
 carries a surface it can actually reason about. The agent only ever sees projects
 your account has a role on, and every action is authorized exactly as if you had

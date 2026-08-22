@@ -300,6 +300,29 @@ func MarkNoop(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, reason stri
 	return nil
 }
 
+// MarkValidated ends a dry run: it stores the plan on the operation and closes
+// it without a commit.
+//
+// A dry run is a no-op by construction -- nothing was written to git -- so it
+// shares MarkNoop's status and audit shape rather than inventing a state the
+// backend and console would not recognise. What it adds is the answer: the plan
+// goes into validation_result, which is the column the schema already reserves
+// for "what would have happened", and the caller reads it back through the
+// ordinary getOperation path.
+func MarkValidated(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, result []byte, reason string) error {
+	_, err := pool.Exec(ctx, `
+		UPDATE operations
+		SET    status = 'Committed', validation_result = $2, updated_at = NOW()
+		WHERE  id = $1
+	`, id, result)
+	if err != nil {
+		return err
+	}
+	releaseClaim(id)
+	recordNoopAudit(ctx, pool, id, reason)
+	return nil
+}
+
 // recordNoopAudit writes the outcome=success verdict for an operation that had
 // nothing to change, carrying the reason so path analysis can tell a no-op apart
 // from a commit. Guarded and best-effort for the same reasons as

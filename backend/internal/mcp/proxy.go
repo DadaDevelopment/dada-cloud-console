@@ -85,6 +85,11 @@ func MakeHandler(g GeneratedTool, backendURL, basePath string) ToolHandler {
 			}
 		}
 
+		applyToolDefaults(g.Name, args)
+		if msg := resolveAddressArgs(ctx, g, args, backendURL, basePath); msg != "" {
+			return errResult(msg), nil
+		}
+
 		filledPath := g.PathTemplate
 		for _, name := range g.PathParams {
 			val, ok := args[name]

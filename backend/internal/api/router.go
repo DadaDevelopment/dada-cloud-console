@@ -407,6 +407,13 @@ func SetupRouterWithHandler(pool *pgxpool.Pool, cfg *config.Config) (*gin.Engine
 		// Platform recovery
 		api.GET("/recovery-prompt", h.GetRecoveryPrompt)
 
+		// Cross-project search
+		api.GET("/search", h.Search)
+
+		// Name -> id addressing (project/env/app), so a caller does not have to
+		// walk the resource tree to write to an app it can already name.
+		api.GET("/resolve", h.ResolveRef)
+
 		// Projects
 		api.GET("/projects", h.ListProjects)
 		api.POST("/projects", h.CreateProject)

@@ -379,7 +379,7 @@ const ru: Dict = {
         { role: "assistant", text: "Готово, сэр. Приложение живёт по HTTPS, база и домен на месте." },
       ],
       bullets: [
-        "41 инструмент платформы прямо в чате",
+        "42 инструмента платформы прямо в чате",
         "Вход через браузер — ни токенов, ни ключей вручную",
         "Работает только с вашими проектами, по вашим правам",
       ],
@@ -1579,7 +1579,7 @@ const ru: Dict = {
   mcpAlt: {
     heroTitle: "MCP-сервер DADA Cloud: управляйте облаком из Claude",
     heroSubtitle:
-      "Подключите платформу к Claude Code, Claude Desktop, Cursor или любому MCP-клиенту — и просите словами: подними сервер, разверни репозиторий, покажи логи упавшего приложения. Агент получает 41 инструмент консоли, входит под вашим аккаунтом DADA ID через браузер и работает ровно с теми правами, что есть у вас. Адрес сервера — https://console.dada-tuda.ru/mcp.",
+      "Подключите платформу к Claude Code, Claude Desktop, Cursor или любому MCP-клиенту — и просите словами: подними сервер, разверни репозиторий, покажи логи упавшего приложения. Агент получает 42 инструмента консоли, входит под вашим аккаунтом DADA ID через браузер и работает ровно с теми правами, что есть у вас. Адрес сервера — https://console.dada-tuda.ru/mcp.",
     stepsTitle: "Как подключить за две минуты",
     stepsSubtitle: "Самый быстрый путь — плагин для Claude Code: ни токенов, ни ключей руками.",
     steps: [
@@ -1590,7 +1590,7 @@ const ru: Dict = {
     ],
     featuresTitle: "Что агент умеет через MCP",
     features: [
-      { title: "41 инструмент платформы", desc: "Проекты, приложения, сборки, базы, домены, переменные окружения, серверы, логи и одноразовые песочницы-боксы — тот же API, на котором работает веб-консоль, отобранный до набора, в котором агент не теряется." },
+      { title: "42 инструмента платформы", desc: "Проекты, приложения, сборки, базы, домены, переменные окружения, серверы, логи и одноразовые песочницы-боксы — тот же API, на котором работает веб-консоль, отобранный до набора, в котором агент не теряется." },
       { title: "Права ровно как у вас", desc: "Агент видит только проекты, где у вашего аккаунта есть роль. Запись требует того же разрешения, что и клик в консоли — MCP не даёт обходных путей." },
       { title: "Без токенов в конфиге", desc: "Вход идёт стандартным браузерным OAuth. Ключи не лежат в файлах настроек и не утекают в историю команд; короткоживущий токен клиент обновляет сам." },
       { title: "Логи для диагностики", desc: "Агент читает логи приложения и VM, статус сборки и состояние операций — этого хватает, чтобы он сам нашёл причину падения и предложил починку. Удалять приложения и базы он при этом не умеет: это осталось в консоли." },
@@ -2033,7 +2033,7 @@ const en: Dict = {
         { role: "assistant", text: "Done, sir. The app is live over HTTPS, database and domain in place." },
       ],
       bullets: [
-        "41 platform tools right in the chat",
+        "42 platform tools right in the chat",
         "Browser login — no tokens or keys to paste",
         "Scoped to your projects, under your permissions",
       ],
@@ -3181,7 +3181,7 @@ const en: Dict = {
   mcpAlt: {
     heroTitle: "DADA Cloud MCP server: run your cloud from Claude",
     heroSubtitle:
-      "Connect the platform to Claude Code, Claude Desktop, Cursor or any MCP client and ask in plain language: spin up a server, deploy this repo, show me why the app is down. The agent gets 41 console tools, signs in as you through the browser, and works with exactly the permissions your account has. Server URL: https://console.dada-tuda.ru/mcp.",
+      "Connect the platform to Claude Code, Claude Desktop, Cursor or any MCP client and ask in plain language: spin up a server, deploy this repo, show me why the app is down. The agent gets 42 console tools, signs in as you through the browser, and works with exactly the permissions your account has. Server URL: https://console.dada-tuda.ru/mcp.",
     stepsTitle: "Connect in two minutes",
     stepsSubtitle: "The fastest path is the Claude Code plugin — no tokens, no keys to paste.",
     steps: [
@@ -3192,7 +3192,7 @@ const en: Dict = {
     ],
     featuresTitle: "What the agent can do over MCP",
     features: [
-      { title: "41 platform tools", desc: "Projects, apps, builds, databases, domains, environment variables, servers, logs and throwaway sandbox boxes — the same API the web console runs on, cut down to a set an agent does not get lost in." },
+      { title: "42 platform tools", desc: "Projects, apps, builds, databases, domains, environment variables, servers, logs and throwaway sandbox boxes — the same API the web console runs on, cut down to a set an agent does not get lost in." },
       { title: "Exactly your permissions", desc: "The agent only sees projects your account has a role on, and every write goes through the same permission check as a click in the console. MCP is not a side door." },
       { title: "No tokens in config files", desc: "Sign-in is standard browser OAuth. Keys never sit in settings files or shell history, and the short-lived token is refreshed by the client." },
       { title: "Logs for diagnosis", desc: "The agent reads app and VM logs, build status and operation state — enough for it to find why an app is failing and propose the fix itself. It cannot delete apps or databases: that stayed in the console." },

@@ -1298,6 +1298,49 @@ definitions:
     required:
     - token
     type: object
+  api.refApp:
+    properties:
+      cluster_env_keys:
+        items:
+          type: string
+        type: array
+      cluster_env_observed:
+        type: boolean
+      env_var_keys:
+        items:
+          type: string
+        type: array
+      image:
+        type: string
+      name:
+        type: string
+      phase:
+        type: string
+      url:
+        type: string
+    type: object
+  api.refEnvironment:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      namespace:
+        type: string
+      runtime:
+        type: string
+    type: object
+  api.refProject:
+    properties:
+      display_name:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      org_id:
+        type: string
+    type: object
   api.reportOnboardingRequest:
     properties:
       status:
@@ -1308,6 +1351,25 @@ definitions:
   api.resolveFeedbackRequest:
     properties:
       resolution:
+        type: string
+    type: object
+  api.resolveResponse:
+    properties:
+      app:
+        $ref: '#/definitions/api.refApp'
+      apps:
+        items:
+          type: string
+        type: array
+      environment:
+        $ref: '#/definitions/api.refEnvironment'
+      environments:
+        items:
+          $ref: '#/definitions/api.refEnvironment'
+        type: array
+      project:
+        $ref: '#/definitions/api.refProject'
+      ref:
         type: string
     type: object
   api.restoreDatabaseRequest:
@@ -1355,6 +1417,12 @@ definitions:
     type: object
   api.setEnvVarRequest:
     properties:
+      dry_run:
+        description: |-
+          DryRun asks what this write would do and writes nothing: no env_vars row,
+          no commit. The queued operation carries the plan in validation_result,
+          readable with getOperation.
+        type: boolean
       is_secret:
         type: boolean
       scope:
@@ -7559,8 +7627,14 @@ paths:
       - domain
   /projects/{projectId}/environments/{envId}/apps:
     get:
-      description: Returns all App resources (Helm or compose) in a project environment,
-        with their live phase/status. Read-only.
+      description: |-
+        Returns App resources (Helm or compose) in a project environment, with their live phase/status. Read-only.
+
+        Pass view=summary. The default view returns the console's full snapshot of every app, which is the shape the web UI needs and is large enough to overflow a context window on a busy environment; the summary view returns only ref/name/project/env/ids/phase/image/url.
+
+        Pass name to narrow the listing to one app instead of reading the whole environment (exact match wins, otherwise substring).
+
+        Every response carries the project and environment NAMES next to their ids, and each summary row carries the "project/env/app" ref the resolve tool accepts, so no return trip is needed to turn an id back into an address.
       operationId: listApps
       parameters:
       - description: Project UUID
@@ -7573,11 +7647,21 @@ paths:
         name: envId
         required: true
         type: string
+      - description: Filter to apps matching this name
+        in: query
+        name: name
+        type: string
+      - description: summary for the thin listing; omit for the full snapshot
+        enum:
+        - summary
+        in: query
+        name: view
+        type: string
       produces:
       - application/json
       responses:
         "200":
-          description: object with an apps array of ResourceSnapshot
+          description: project, env, ids and an apps array
           schema:
             additionalProperties: true
             type: object
@@ -8648,8 +8732,16 @@ paths:
       - endpoint
   /projects/{projectId}/environments/{envId}/apps/{appName}/env:
     get:
-      description: Returns the environment variables for an app. Non-secret values
-        are returned in plaintext; secret values are masked (omitted). Read-only.
+      description: 'Returns the environment variables for an app from BOTH sources.
+        "env_vars" is what the console manages (non-secret values in plaintext, secret
+        values omitted). "cluster_env" is what the running workload actually carries:
+        every variable name in its pod spec with where the value comes from (literal,
+        secretKeyRef, configMapKeyRef), plus any bulk envFrom sources; values are
+        never included. An empty "env_vars" does NOT mean the app has no environment
+        — check cluster_env, and check cluster_env.observed before believing an empty
+        cluster list (false means the cluster could not be read, not that the app
+        is empty). Writing a variable to an app whose environment lives outside the
+        console can delete the rest; read both lists first. Read-only.'
       operationId: listEnvVars
       parameters:
       - description: Project UUID
@@ -8694,8 +8786,10 @@ paths:
       - env-var
   /projects/{projectId}/environments/{envId}/apps/{appName}/env/{key}:
     delete:
-      description: Removes a single environment variable from an app. Requires write
-        access.
+      description: 'Removes a single environment variable from an app. Requires write
+        access. Pass dry_run=true to ask what the delete would do without deleting
+        anything: the returned operation carries the values.yaml plan in validation_result,
+        readable with getOperation.'
       operationId: deleteEnvVar
       parameters:
       - description: Project UUID
@@ -8718,9 +8812,20 @@ paths:
         name: key
         required: true
         type: string
+      - description: Set to true to ask what the delete would do without deleting
+          anything; the returned operation carries the plan
+        in: query
+        name: dry_run
+        type: string
       produces:
       - application/json
       responses:
+        "202":
+          description: 'dry run: nothing was deleted; poll the returned operation
+            for the plan'
+          schema:
+            additionalProperties: true
+            type: object
         "204":
           description: No Content
         "403":
@@ -8805,8 +8910,13 @@ paths:
     put:
       consumes:
       - application/json
-      description: Creates or updates a single environment variable for an app. The
-        value is always stored AES-GCM encrypted. Requires write access.
+      description: 'Creates or updates a single environment variable for an app. The
+        value is always stored AES-GCM encrypted. Requires write access. Writes MERGE
+        into the app''s values.yaml and a write that would delete configuration living
+        only in git is refused. Send dry_run=true in the body to ask what the write
+        would do instead of doing it: nothing is saved, and the returned operation
+        carries the values.yaml plan (added/changed/removed/would_block) in validation_result,
+        readable with getOperation.'
       operationId: setEnvVar
       parameters:
       - description: Project UUID
@@ -8840,6 +8950,12 @@ paths:
       responses:
         "200":
           description: object with the saved env var
+          schema:
+            additionalProperties: true
+            type: object
+        "202":
+          description: 'dry run: nothing was written; poll the returned operation
+            for the plan'
           schema:
             additionalProperties: true
             type: object
@@ -16136,6 +16252,87 @@ paths:
       summary: Get the caller's platform-recovery prompt, if any
       tags:
       - recovery
+  /resolve:
+    get:
+      description: |-
+        Turns the address people and logs actually use — "internal/prod/telemost-bot" — into the ids every other tool takes, in ONE call.
+
+        Prefer this over the listProjects -> getProject -> listApps walk: those are three calls, two of which return whole records, and the app listing can be large enough to blow a context window. Pass `ref` as `project`, `project/env` or `project/env/app` (or pass `project`, `env` and `app` separately).
+
+        The answer also carries the next level down: resolving a project lists its environments, resolving an environment lists its app NAMES. Resolving an app additionally returns its current image, phase, the env-var keys the console manages and the env-var keys actually present in the cluster.
+
+        An ambiguous name (the same project name visible in two orgs) is a 409 that names the candidates rather than a guess.
+      operationId: resolveRef
+      parameters:
+      - description: 'Address: project, project/env or project/env/app'
+        in: query
+        name: ref
+        type: string
+      - description: Project name (alternative to ref)
+        in: query
+        name: project
+        type: string
+      - description: Environment name
+        in: query
+        name: env
+        type: string
+      - description: App name
+        in: query
+        name: app
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.resolveResponse'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Resolve a project/environment/app name to ids
+      tags:
+      - resolve
+  /search:
+    get:
+      description: Case-insensitive substring search over the projects the caller
+        can access and the apps inside them. Returns at most 20 hits per group. Queries
+        shorter than 2 characters return empty groups.
+      operationId: search
+      parameters:
+      - description: search term (min 2 characters)
+        in: query
+        name: q
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with projects and apps arrays
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Search projects and apps by name
+      tags:
+      - project
   /solutions:
     get:
       description: Returns the catalog of open-source projects the console can deploy

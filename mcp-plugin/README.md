@@ -1,7 +1,7 @@
 # Dada Cloud — Claude Code plugin
 
 Connect Claude Code to [Dada Cloud](https://console.dada-tuda.ru) with one command.
-Installs an MCP server exposing 41 curated platform tools — apps, databases,
+Installs an MCP server exposing 42 curated platform tools — apps, databases,
 domains, builds, logs, and Dada Box (an ephemeral root sandbox you get in one
 call) — plus guided prompts: `deploy-app`, `configure-env`, `diagnose-app`.
 

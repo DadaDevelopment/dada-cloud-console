@@ -15,6 +15,14 @@
 # To expose the full set, mount a file at MCP_OVERRIDES_PATH with an empty `keep`.
 
 keep:
+  # Addressing. resolveRef turns "internal/prod/telemost-bot" into ids in ONE
+  # call and is the intended first step: every other tool here also accepts
+  # project/env/app names directly (see internal/mcp/addressing.go), so the old
+  # listProjects -> getProject -> listApps walk is no longer on the path to a
+  # write. It stays exposed for the case an agent wants the map itself: the
+  # env-var keys the console manages, the keys actually live in the cluster,
+  # the current image, and the names one level down.
+  - resolveRef
   # Projects. getProject is not a nice-to-have: twelve tools below take an envId
   # path parameter and this is the ONLY operation in the whole surface that hands
   # one out for a project that already exists (listProjects returns the default

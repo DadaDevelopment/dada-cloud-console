@@ -372,13 +372,21 @@ func sourceForProvider(provider string) string {
 //
 // @ID          listApps
 // @Summary     List apps in an environment
-// @Description Returns all App resources (Helm or compose) in a project environment, with their live phase/status. Read-only.
+// @Description Returns App resources (Helm or compose) in a project environment, with their live phase/status. Read-only.
+// @Description
+// @Description Pass view=summary. The default view returns the console's full snapshot of every app, which is the shape the web UI needs and is large enough to overflow a context window on a busy environment; the summary view returns only ref/name/project/env/ids/phase/image/url.
+// @Description
+// @Description Pass name to narrow the listing to one app instead of reading the whole environment (exact match wins, otherwise substring).
+// @Description
+// @Description Every response carries the project and environment NAMES next to their ids, and each summary row carries the "project/env/app" ref the resolve tool accepts, so no return trip is needed to turn an id back into an address.
 // @Tags        app
 // @Produce     json
 // @Security    BearerAuth
-// @Param       projectId path     string true "Project UUID"
-// @Param       envId     path     string true "Environment UUID"
-// @Success     200       {object} map[string]interface{} "object with an apps array of ResourceSnapshot"
+// @Param       projectId path     string true  "Project UUID"
+// @Param       envId     path     string true  "Environment UUID"
+// @Param       name      query    string false "Filter to apps matching this name"
+// @Param       view      query    string false "summary for the thin listing; omit for the full snapshot" Enums(summary)
+// @Success     200       {object} map[string]interface{} "project, env, ids and an apps array"
 // @Failure     401       {object} map[string]string
 // @Failure     404       {object} map[string]string
 // @Router      /projects/{projectId}/environments/{envId}/apps [get]
@@ -508,7 +516,23 @@ func (h *Handler) ListApps(c *gin.Context) {
 		Metadata:      viewAppsAuditMetadata(apps, len(gitRows)),
 	})
 
-	c.JSON(http.StatusOK, gin.H{"apps": apps})
+	if filter := strings.TrimSpace(c.Query("name")); filter != "" {
+		apps = filterAppsByName(apps, filter)
+	}
+
+	projectName, envName := h.projectAndEnvNames(c.Request.Context(), projectID, envID)
+	body := gin.H{
+		"project":        projectName,
+		"project_id":     projectID,
+		"env":            envName,
+		"environment_id": envID,
+	}
+	if strings.EqualFold(c.Query("view"), "summary") {
+		body["apps"] = summarizeApps(apps, projectID, envID, projectName, envName)
+	} else {
+		body["apps"] = apps
+	}
+	c.JSON(http.StatusOK, body)
 }
 
 // appPortSourceUser and appPortSourceAuto are the two values of the
@@ -1182,10 +1206,11 @@ var validAppProfiles = map[string]bool{"small": true, "medium": true, "large": t
 // Postgres and Keycloak secret references, the 8000 service port and the
 // single-poller recreate strategy, and moving the chart from helm/python to
 // helm/app. ArgoCD applied it and the bot came back up with no environment at
-// all. guardUnattendedClobber did not stop it because the operation had a human
-// actor, and its premise -- that a person who clicks Deploy watches the result
-// and can put it back -- does not hold for an endpoint whose stated job is
-// changing two numbers.
+// all. The clobber guard did not stop it because it was scoped to operations
+// with the system actor, and its premise -- that a person who clicks Deploy
+// watches the result and can put it back -- does not hold for an endpoint whose
+// stated job is changing two numbers. That premise is gone: the guard now runs
+// on every app deploy, measured against the merged file.
 //
 // ResizeApp rewrites the six resource scalars inside the values.yaml already in
 // git and re-derives nothing, so there is nothing to drop, and it behaves the

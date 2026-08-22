@@ -134,3 +134,32 @@ func (e resolvedEnv) merged() map[string]string {
 	}
 	return m
 }
+
+// dryRunEnvPlaceholder stands in for the value of a variable a dry run is
+// asking about. A plan reports paths, never values, so the placeholder only has
+// to be present and different from whatever is in git.
+const dryRunEnvPlaceholder = "(pending value)"
+
+// overlayPendingEnv folds an unwritten env-var change into a resolved
+// environment so a dry run describes the write being considered rather than the
+// state before it.
+//
+// A dry run persists nothing -- that is the point of asking first -- so the key
+// the caller is about to set does not exist in env_vars while the plan is being
+// computed, and a plan computed without it would report every consequence of
+// the write except the write itself. Set keys land in Plain with a placeholder:
+// the plan names common.extraEnv.<KEY> as added or changed, and no value is ever
+// carried, stored or logged.
+func overlayPendingEnv(env resolvedEnv, setKeys, unsetKeys []string) {
+	for _, k := range unsetKeys {
+		delete(env.Plain, k)
+		delete(env.Secret, k)
+	}
+	for _, k := range setKeys {
+		if _, secret := env.Secret[k]; secret {
+			env.Secret[k] = dryRunEnvPlaceholder
+			continue
+		}
+		env.Plain[k] = dryRunEnvPlaceholder
+	}
+}

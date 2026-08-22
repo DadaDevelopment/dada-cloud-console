@@ -161,6 +161,30 @@ type DeployImageVersionPayload struct {
 	Image     string `json:"image"`
 	Framework string `json:"framework,omitempty"`
 	Port      int    `json:"port,omitempty"`
+
+	// ExpectedDrops are the values.yaml paths this operation MEANS to delete,
+	// declared by whoever queues it. gitops-agent refuses any deploy that would
+	// remove a path from an app's values.yaml, because for a hand-maintained app
+	// the console's silence about a key it claims ownership of is not a decision
+	// to delete it -- that is how internal/prod/telemost-bot lost eight
+	// environment variables, its service port and useDotEnv while one variable
+	// was being saved. Deleting a variable must still be able to remove it from
+	// git, so the delete path declares its own path here and nothing else.
+	ExpectedDrops []string `json:"expected_drops,omitempty"`
+
+	// DryRun turns the operation into a question: gitops-agent renders, merges
+	// and diffs the app's values.yaml, writes the resulting plan into
+	// operations.validation_result and commits nothing. It exists because the
+	// only way to learn that a write would delete hand-maintained configuration
+	// used to be to attempt the write.
+	DryRun bool `json:"dry_run,omitempty"`
+
+	// DryRunSetKeys and DryRunUnsetKeys are the env-var keys a dry run is
+	// asking about. The row is deliberately not persisted, so the render is
+	// told which keys the caller means to add or remove. Only KEYS are carried:
+	// operations.payload is plaintext and env values never enter it.
+	DryRunSetKeys   []string `json:"dry_run_set_keys,omitempty"`
+	DryRunUnsetKeys []string `json:"dry_run_unset_keys,omitempty"`
 }
 
 // AppResourceEnvelope is the CPU/memory sizing of a single app container.

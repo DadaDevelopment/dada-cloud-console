@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -61,24 +62,84 @@ type envVar struct {
 // exactly what delivering an env var needs. It also makes env delivery work for
 // a VM app with no deploy history at all, where resolving an image first would
 // have skipped the apply entirely.
-func (h *Handler) queueEnvApply(c *gin.Context, claims *auth.Claims, projectID, envID uuid.UUID, appName string) (*models.Operation, bool) {
-	ctx := c.Request.Context()
-	if rt, err := h.envRuntime(ctx, projectID, envID); err == nil && rt == models.EnvironmentRuntimeVM {
-		op, err := enqueueRedeployOp(ctx, h.pool, claims.UserID, projectID, envID, appName, "")
-		if err != nil {
-			return nil, false
-		}
-		return op, true
-	}
-	image, err := h.lastDeployedImage(ctx, h.pool, projectID, envID, appName)
-	if err != nil || image == "" {
+//
+// expectedDrops names the values.yaml paths this apply is allowed to delete.
+// Saving a variable declares nothing -- a save that removes anything from git is
+// a clobber. Deleting a variable declares its own extraEnv entry and nothing
+// else, so the delete lands while an unrelated loss in the same file still
+// stops the operation.
+func (h *Handler) queueEnvApply(c *gin.Context, claims *auth.Claims, projectID, envID uuid.UUID, appName string, expectedDrops ...string) (*models.Operation, bool) {
+	image, ok := h.envApplyImage(c.Request.Context(), projectID, envID, appName)
+	if !ok {
 		return nil, false
 	}
-	op, err := enqueueRedeployOp(ctx, h.pool, claims.UserID, projectID, envID, appName, image)
+	op, err := enqueueDeployOp(c.Request.Context(), h.pool, claims.UserID, projectID, envID,
+		models.DeployImageVersionPayload{AppName: appName, Image: image, ExpectedDrops: expectedDrops})
 	if err != nil {
 		return nil, false
 	}
 	return op, true
+}
+
+// envApplyImage resolves the image an env-triggered operation should carry, and
+// reports whether there is anything to deploy at all.
+func (h *Handler) envApplyImage(ctx context.Context, projectID, envID uuid.UUID, appName string) (string, bool) {
+	if rt, err := h.envRuntime(ctx, projectID, envID); err == nil && rt == models.EnvironmentRuntimeVM {
+		return "", true
+	}
+	image, err := h.lastDeployedImage(ctx, h.pool, projectID, envID, appName)
+	if err != nil || image == "" {
+		return "", false
+	}
+	return image, true
+}
+
+// queueEnvPlan asks what an env-var write WOULD do, and writes nothing.
+//
+// The caller has not saved anything at this point and will not: the operation
+// renders the app as it would look after the change, merges that render into
+// the values.yaml in git, diffs the two and stores the result on itself. This
+// is the answer to the question that used to cost a broken app to ask -- on
+// 2026-08-21 saving one variable on internal/prod/telemost-bot removed eight
+// others, the service port and useDotEnv, and the only way to find out was
+// afterwards, from the logs.
+//
+// setKeys/unsetKeys carry the keys the caller means to write or remove so the
+// plan describes the intended state rather than the current one. Values stay
+// out: the operation payload is plaintext.
+func (h *Handler) queueEnvPlan(c *gin.Context, claims *auth.Claims, projectID, envID uuid.UUID, appName string, setKeys, unsetKeys []string, expectedDrops ...string) (*models.Operation, error) {
+	ctx := c.Request.Context()
+	image, ok := h.envApplyImage(ctx, projectID, envID, appName)
+	if !ok {
+		return nil, errNothingToPlan
+	}
+	return enqueueDeployOp(ctx, h.pool, claims.UserID, projectID, envID,
+		envPlanPayload(appName, image, setKeys, unsetKeys, expectedDrops))
+}
+
+// envPlanPayload builds the payload of a dry run: the same deploy the caller
+// would have queued, marked as a question and told which keys the unwritten
+// change adds or removes.
+func envPlanPayload(appName, image string, setKeys, unsetKeys, expectedDrops []string) models.DeployImageVersionPayload {
+	return models.DeployImageVersionPayload{
+		AppName:         appName,
+		Image:           image,
+		ExpectedDrops:   expectedDrops,
+		DryRun:          true,
+		DryRunSetKeys:   setKeys,
+		DryRunUnsetKeys: unsetKeys,
+	}
+}
+
+// errNothingToPlan is returned when an app has no image yet: there is no deploy
+// to describe, and nothing in git for the change to endanger.
+var errNothingToPlan = errors.New("app has not been deployed yet, so there is nothing to plan against")
+
+// envVarValuesPath is the values.yaml path of one environment variable, as the
+// gitops-agent's clobber guard names it: extraEnv is a list of maps carrying a
+// "name", and the guard indexes such lists by that name rather than by position.
+func envVarValuesPath(key string) string {
+	return "common.extraEnv." + key
 }
 
 // enqueueRedeployOp inserts the DeployImageVersion operation that
@@ -88,8 +149,19 @@ func (h *Handler) queueEnvApply(c *gin.Context, claims *auth.Claims, projectID, 
 // running pods. Takes a pgxQuerier so callers can run it inside their own
 // transaction (start-command's opt-in redeploy commits atomically with the
 // config write) or directly against the pool (queueEnvApply).
-func enqueueRedeployOp(ctx context.Context, q pgxQuerier, actorID, projectID, envID uuid.UUID, appName, image string) (*models.Operation, error) {
-	payloadBytes, err := json.Marshal(models.DeployImageVersionPayload{AppName: appName, Image: image})
+func enqueueRedeployOp(ctx context.Context, q pgxQuerier, actorID, projectID, envID uuid.UUID, appName, image string, expectedDrops ...string) (*models.Operation, error) {
+	return enqueueDeployOp(ctx, q, actorID, projectID, envID, models.DeployImageVersionPayload{
+		AppName:       appName,
+		Image:         image,
+		ExpectedDrops: expectedDrops,
+	})
+}
+
+// enqueueDeployOp inserts one DeployImageVersion operation from an already-built
+// payload, so a real deploy and a dry run travel the same path and differ only
+// in what the payload says.
+func enqueueDeployOp(ctx context.Context, q pgxQuerier, actorID, projectID, envID uuid.UUID, payload models.DeployImageVersionPayload) (*models.Operation, error) {
+	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +173,7 @@ func enqueueRedeployOp(ctx context.Context, q pgxQuerier, actorID, projectID, en
 		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
 		           status, payload, validation_result, git_commit, git_path, argo_application,
 		           error_code, error_message, created_at, updated_at`,
-		actorID, projectID, envID, appName, payloadBytes,
+		actorID, projectID, envID, payload.AppName, payloadBytes,
 	)
 	if err := scanOperation(row, &op); err != nil {
 		return nil, err
@@ -162,9 +234,17 @@ func (h *Handler) lastDeployedImage(ctx context.Context, q pgxQuerier, projectID
 // ListEnvVars returns the env vars for an app. Secret values are never returned —
 // the frontend reveals a single secret on demand via the reveal endpoint.
 //
+// It answers from two sources, because answering from one was wrong. env_vars
+// holds what the console manages; cluster_env holds what the running workload
+// actually carries, including variables wired straight to a Secret and bulk
+// envFrom sources the console has no rows for. An app built by hand has an empty
+// env_vars and a full environment, and a caller shown only the first concludes
+// the app has no variables — which is how eleven of them were deleted on
+// 2026-08-21 by a caller that had just been told there were none.
+//
 // @ID          listEnvVars
 // @Summary     List environment variables for an app
-// @Description Returns the environment variables for an app. Non-secret values are returned in plaintext; secret values are masked (omitted). Read-only.
+// @Description Returns the environment variables for an app from BOTH sources. "env_vars" is what the console manages (non-secret values in plaintext, secret values omitted). "cluster_env" is what the running workload actually carries: every variable name in its pod spec with where the value comes from (literal, secretKeyRef, configMapKeyRef), plus any bulk envFrom sources; values are never included. An empty "env_vars" does NOT mean the app has no environment — check cluster_env, and check cluster_env.observed before believing an empty cluster list (false means the cluster could not be read, not that the app is empty). Writing a variable to an app whose environment lives outside the console can delete the rest; read both lists first. Read-only.
 // @Tags        env-var
 // @Produce     json
 // @Security    BearerAuth
@@ -249,20 +329,71 @@ func (h *Handler) ListEnvVars(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"env_vars": envVars})
+	consoleKeys := make(map[string]bool, len(envVars))
+	for _, ev := range envVars {
+		consoleKeys[ev.Key] = true
+	}
+	cluster := h.readClusterEnv(c.Request.Context(),
+		h.environmentNamespace(c.Request.Context(), envID), appName, consoleKeys)
+
+	c.JSON(http.StatusOK, gin.H{"env_vars": envVars, "cluster_env": cluster})
 }
 
 type setEnvVarRequest struct {
 	Value    string `json:"value"`
 	IsSecret bool   `json:"is_secret"`
 	Scope    string `json:"scope"`
+
+	// DryRun asks what this write would do and writes nothing: no env_vars row,
+	// no commit. The queued operation carries the plan in validation_result,
+	// readable with getOperation.
+	DryRun bool `json:"dry_run"`
+}
+
+// dryRunRequested reads the dry_run query parameter. Anything other than an
+// explicit affirmative is a real write, so a typo never silently turns a write
+// into a question.
+func dryRunRequested(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes":
+		return true
+	}
+	return false
+}
+
+// respondEnvPlan answers a dry run: nothing was written, and the operation the
+// caller must read to learn what a real write would do is named outright.
+func (h *Handler) respondEnvPlan(c *gin.Context, claims *auth.Claims, action string, projectID, envID uuid.UUID, appName, key string, op *models.Operation, err error) {
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		Action:        action,
+		ResourceKind:  "EnvVar",
+		ResourceName:  appName,
+		Metadata:      map[string]any{"key": key, "dry_run": true},
+	})
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"dry_run": true,
+			"written": false,
+			"verdict": err.Error(),
+		})
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{
+		"dry_run":      true,
+		"written":      false,
+		"operation":    op,
+		"operation_id": op.ID,
+		"next":         "poll getOperation with this operation_id: validation_result holds the values.yaml plan (added/changed/removed/would_block) this write would produce",
+	})
 }
 
 // SetEnvVar upserts a single environment variable (value stored encrypted).
 //
 // @ID          setEnvVar
 // @Summary     Set an environment variable
-// @Description Creates or updates a single environment variable for an app. The value is always stored AES-GCM encrypted. Requires write access.
+// @Description Creates or updates a single environment variable for an app. The value is always stored AES-GCM encrypted. Requires write access. Writes MERGE into the app's values.yaml and a write that would delete configuration living only in git is refused. Send dry_run=true in the body to ask what the write would do instead of doing it: nothing is saved, and the returned operation carries the values.yaml plan (added/changed/removed/would_block) in validation_result, readable with getOperation.
 // @Tags        env-var
 // @Accept      json
 // @Produce     json
@@ -273,6 +404,7 @@ type setEnvVarRequest struct {
 // @Param       key       path     string           true "Variable key"
 // @Param       body      body     setEnvVarRequest true "Variable value"
 // @Success     200       {object} map[string]interface{} "object with the saved env var"
+// @Success     202       {object} map[string]interface{} "dry run: nothing was written; poll the returned operation for the plan"
 // @Failure     400       {object} map[string]string
 // @Failure     403       {object} map[string]string
 // @Failure     404       {object} map[string]string
@@ -359,6 +491,12 @@ func (h *Handler) SetEnvVar(c *gin.Context) {
 	}
 	if scope != "build" && scope != "runtime" && scope != "both" {
 		rejectEnv(http.StatusBadRequest, "invalid_scope", "scope must be one of: build, runtime, both")
+		return
+	}
+
+	if req.DryRun {
+		op, err := h.queueEnvPlan(c, claims, projectID, envID, appName, []string{key}, nil)
+		h.respondEnvPlan(c, claims, "SetEnvVar", projectID, envID, appName, key, op, err)
 		return
 	}
 
@@ -779,7 +917,7 @@ func (h *Handler) RevealEnvVar(c *gin.Context) {
 //
 // @ID          deleteEnvVar
 // @Summary     Delete an environment variable
-// @Description Removes a single environment variable from an app. Requires write access.
+// @Description Removes a single environment variable from an app. Requires write access. Pass dry_run=true to ask what the delete would do without deleting anything: the returned operation carries the values.yaml plan in validation_result, readable with getOperation.
 // @Tags        env-var
 // @Produce     json
 // @Security    BearerAuth
@@ -787,7 +925,9 @@ func (h *Handler) RevealEnvVar(c *gin.Context) {
 // @Param       envId           path     string true  "Environment UUID"
 // @Param       appName         path     string true  "App name"
 // @Param       key             path     string true  "Variable key"
+// @Param       dry_run         query    string false "Set to true to ask what the delete would do without deleting anything; the returned operation carries the plan"
 // @Success     204       {object} nil
+// @Success     202       {object} map[string]interface{} "dry run: nothing was deleted; poll the returned operation for the plan"
 // @Failure     403       {object} map[string]string
 // @Failure     404       {object} map[string]string
 // @Router      /projects/{projectId}/environments/{envId}/apps/{appName}/env/{key} [delete]
@@ -851,6 +991,12 @@ func (h *Handler) DeleteEnvVar(c *gin.Context) {
 		return
 	}
 
+	if dryRunRequested(c.Query("dry_run")) {
+		op, err := h.queueEnvPlan(c, claims, projectID, envID, appName, nil, []string{key}, envVarValuesPath(key))
+		h.respondEnvPlan(c, claims, "DeleteEnvVar", projectID, envID, appName, key, op, err)
+		return
+	}
+
 	tag, err := h.pool.Exec(c.Request.Context(),
 		`DELETE FROM env_vars WHERE environment_id = $1 AND app_name = $2 AND key = $3`,
 		envID, appName, key,
@@ -873,7 +1019,7 @@ func (h *Handler) DeleteEnvVar(c *gin.Context) {
 		return
 	}
 
-	_, _ = h.queueEnvApply(c, claims, projectID, envID, appName)
+	_, _ = h.queueEnvApply(c, claims, projectID, envID, appName, envVarValuesPath(key))
 
 	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
 		ProjectID:     projectID,

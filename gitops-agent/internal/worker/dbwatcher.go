@@ -2227,6 +2227,23 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 		Image     string `json:"image"`
 		Framework string `json:"framework"`
 		Port      int    `json:"port"`
+		// ExpectedDrops are the values.yaml paths this operation means to
+		// remove, declared by whoever queued it. Everything else the render
+		// would delete is hand-maintained configuration and blocks the deploy.
+		ExpectedDrops []string `json:"expected_drops"`
+		// DryRun asks what this deploy would do instead of doing it: the
+		// operation renders, merges and diffs, stores the plan on itself and
+		// stops before the commit.
+		DryRun bool `json:"dry_run"`
+		// DryRunSetKeys and DryRunUnsetKeys are the env-var keys the caller is
+		// about to write or delete. A dry run answers a question about a write
+		// that has not happened, so the row it asks about is not in env_vars
+		// yet and the render would not show it; these keys are folded into the
+		// resolved environment so the plan describes the write the caller is
+		// actually considering. Only KEYS travel here -- operations.payload is
+		// plaintext and env values never enter it.
+		DryRunSetKeys   []string `json:"dry_run_set_keys"`
+		DryRunUnsetKeys []string `json:"dry_run_unset_keys"`
 	}
 	if err := json.Unmarshal(op.Payload, &p); err != nil {
 		return fmt.Errorf("parse payload: %w", err)
@@ -2289,6 +2306,9 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 	if err != nil {
 		return err
 	}
+	if p.DryRun {
+		overlayPendingEnv(env, p.DryRunSetKeys, p.DryRunUnsetKeys)
+	}
 
 	appSpec := renderer.AppSpec{
 		Name:               p.AppName,
@@ -2332,11 +2352,17 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 
 	gitPath := renderer.AppGitPath(projectName, envName, p.AppName)
 	valuesPath := renderer.AppHelmValuesGitPath(projectName, envName, p.AppName)
-	if err := w.guardUnattendedClobber(op, mgr, valuesPath, valuesYAML); err != nil {
-		return err
+	if _, err := mgr.Pull(); err != nil {
+		return fmt.Errorf("pull before rendering %s: %w", valuesPath, err)
 	}
 	mergedValues, err := w.mergeAppValues(mgr, valuesPath, valuesYAML)
 	if err != nil {
+		return err
+	}
+	if p.DryRun {
+		return w.recordValuesPlan(ctx, op, mgr, p.AppName, valuesPath, mergedValues, p.ExpectedDrops)
+	}
+	if err := w.guardValuesClobber(mgr, p.AppName, valuesPath, mergedValues, p.ExpectedDrops); err != nil {
 		return err
 	}
 	files := []git.FileChange{
@@ -2376,6 +2402,77 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 	return nil
 }
 
+// recordValuesPlan answers a dry run and commits nothing.
+//
+// The question a caller needs answered before writing is not "is my value
+// valid" -- it is "what else will this write take with it". The console renders
+// values.yaml from its database, so a key that lives only in git disappears the
+// moment anything re-renders; the guard refuses such a deploy, but a refusal
+// arrives after the caller already decided to write. This is the same
+// measurement, offered before the decision: the merged file diffed against the
+// file in git, with the removals separated from the rest and the ones the guard
+// would refuse named outright.
+func (w *DBWatcher) recordValuesPlan(ctx context.Context, op db.Operation, mgr *git.Manager, appName, valuesPath, mergedValues string, expectedDrops []string) error {
+	existing, readErr := mgr.ReadFile(valuesPath)
+	plan := buildValuesPlan(existing, readErr, mergedValues, valuesPath, expectedDrops)
+
+	encoded, err := json.Marshal(plan)
+	if err != nil {
+		return fmt.Errorf("encode dry-run plan for %s: %w", appName, err)
+	}
+	log.Info().Str("app", appName).Str("verdict", plan.Verdict).Msg("gitops: dry run, nothing written")
+	return db.MarkValidated(ctx, w.pool, op.ID, encoded, "dry run: nothing was written")
+}
+
+// valuesDryRunPlan is what a dry run stores on its operation.
+type valuesDryRunPlan struct {
+	DryRun     bool     `json:"dry_run"`
+	ValuesPath string   `json:"values_path"`
+	FirstWrite bool     `json:"first_write"`
+	Added      []string `json:"added"`
+	Changed    []string `json:"changed"`
+	Removed    []string `json:"removed"`
+	WouldBlock []string `json:"would_block"`
+	Verdict    string   `json:"verdict"`
+}
+
+// buildValuesPlan turns the file in git and the file a deploy would write into
+// the plan a caller reads. readErr non-nil means the app has no values.yaml
+// yet, which is a first write and endangers nothing.
+func buildValuesPlan(existing string, readErr error, mergedValues, valuesPath string, expectedDrops []string) valuesDryRunPlan {
+	plan := valuesDryRunPlan{
+		DryRun:     true,
+		ValuesPath: valuesPath,
+		FirstWrite: readErr != nil,
+		Added:      []string{},
+		Changed:    []string{},
+		Removed:    []string{},
+		WouldBlock: []string{},
+	}
+
+	if readErr == nil {
+		p := renderer.PlanValuesChange(existing, mergedValues)
+		plan.Added, plan.Changed, plan.Removed = p.Added, p.Changed, p.Removed
+		plan.WouldBlock = unexpectedDrops(renderer.DroppedPaths(existing, mergedValues), expectedDrops)
+	}
+
+	switch {
+	case plan.FirstWrite:
+		plan.Verdict = "this app has no values.yaml in git yet; the deploy would create it"
+	case len(plan.WouldBlock) > 0:
+		plan.Verdict = fmt.Sprintf(
+			"THE REAL DEPLOY WOULD BE REFUSED: it deletes configuration that exists only in git (%s). "+
+				"Import those keys into the console, or edit %s directly, before writing",
+			renderer.DescribeDropped(plan.WouldBlock), valuesPath)
+	case len(plan.Added) == 0 && len(plan.Changed) == 0 && len(plan.Removed) == 0:
+		plan.Verdict = "the deploy would leave " + valuesPath + " unchanged"
+	default:
+		plan.Verdict = fmt.Sprintf("the deploy would add %d, change %d and remove %d paths in %s, none of them hand-maintained",
+			len(plan.Added), len(plan.Changed), len(plan.Removed), valuesPath)
+	}
+	return plan
+}
+
 // mergeAppValues folds a rendered values.yaml into the one already in git so a
 // deploy rewrites only the keys the console owns.
 //
@@ -2385,11 +2482,10 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 // hand-added common.ingress block, and the app served nginx 404 on its custom
 // domain for sixteen hours while looking perfectly healthy on its default one.
 //
-// guardUnattendedClobber already refuses this for unattended operations, but a
-// console-initiated deploy is exempt from it by design -- someone is watching
-// and may legitimately be re-rendering. Watching is not the same as noticing:
-// the clobber is a side effect of a deploy the person asked for, several screens
-// away from what they were looking at. Merging removes the choice from them.
+// Merging is the first half of the protection and guardValuesClobber is the
+// second: merge keeps every key the console has no opinion about, and the guard
+// refuses the deploy when merging still deletes something -- which it does for
+// the keys the console DOES claim (ownedCommonKeys) but has no rows for.
 //
 // A missing file is a first deploy and takes the render as-is. A file that does
 // not parse fails the operation rather than being overwritten -- Argo would
@@ -2406,42 +2502,78 @@ func (w *DBWatcher) mergeAppValues(mgr *git.Manager, valuesPath, renderedValues 
 	return merged, nil
 }
 
-// guardUnattendedClobber refuses an unattended deploy that would delete parts
-// of an app's values.yaml which only exist in git.
+// guardValuesClobber refuses a deploy that would delete parts of an app's
+// values.yaml which only exist in git.
 //
 // values.yaml is regenerated from the database on every deploy, so an app whose
-// manifests are hand-maintained loses those edits on the next render. When a
-// person clicks Deploy they see that happen and can put it back. When the
-// platform deploys on its own -- the autoscaler raising a starved app's profile,
-// a deploy hook -- nobody is looking, and the loss lands on a live app: the
-// autoscaler's first production run stripped nine environment variables, two
-// volumes and a managed-database declaration from one, and ArgoCD then pruned
-// the database.
+// manifests are hand-maintained loses those edits on the next render. This used
+// to be scoped to unattended operations, on the reasoning that a person clicking
+// Deploy sees the loss happen and can put it back. That reasoning does not hold
+// for the two ways this actually bites:
 //
-// So the check is scoped to unattended operations and to deletions only. Its
-// failure leaves the operation Failed with the exact paths at stake, which is a
-// resize that did not happen -- strictly better than a resize that took the
+//   - The loss is a side effect of an action about something else. Saving one
+//     environment variable through the console or MCP queues a re-render, and on
+//     2026-08-21 that wiped eight extraEnv entries, servicePort (8000 -> chart
+//     default 8080) and useDotEnv (true -> absent) off a live telegram bot. The
+//     caller asked for one key; nobody was looking at values.yaml.
+//   - The actor is an agent. An MCP call runs under a service account, which is
+//     not SystemActorID, so it counted as attended while being the least watched
+//     caller the platform has.
+//
+// So the guard now runs for every app deploy. What makes that safe is that it
+// measures the MERGED file, not the raw render: MergeAppValues only rewrites
+// ownedCommonKeys and preserves everything else verbatim, so comparing against
+// the render reported losses that were never going to happen (common.ingress is
+// merged through untouched). Measuring the bytes actually about to be committed
+// is both stricter where it matters and quieter everywhere else.
+//
+// expectedDrops are the paths the operation MEANS to remove -- deleting an
+// environment variable has to be able to delete it from git, or the delete does
+// not happen. They come from the payload, written by whoever queued the
+// operation, so intent is declared by the caller rather than guessed here.
+//
+// Its failure leaves the operation Failed with the exact paths at stake, which
+// is a change that did not happen -- strictly better than a change that took the
 // app's configuration with it.
-func (w *DBWatcher) guardUnattendedClobber(op db.Operation, mgr *git.Manager, valuesPath, renderedValues string) error {
-	if !op.Unattended() {
-		return nil
-	}
-	if _, err := mgr.Pull(); err != nil {
-		return fmt.Errorf("pull before clobber check: %w", err)
-	}
+func (w *DBWatcher) guardValuesClobber(mgr *git.Manager, appName, valuesPath, mergedValues string, expectedDrops []string) error {
 	existing, err := mgr.ReadFile(valuesPath)
 	if err != nil {
 		return nil
 	}
-	dropped := renderer.DroppedPaths(existing, renderedValues)
+	dropped := unexpectedDrops(renderer.DroppedPaths(existing, mergedValues), expectedDrops)
 	if len(dropped) == 0 {
 		return nil
 	}
-	log.Printf("gitops: refusing unattended deploy of %s: rendering %s would drop %s",
-		op.ResourceName, valuesPath, renderer.DescribeDropped(dropped))
+	log.Printf("gitops: refusing deploy of %s: writing %s would drop %s",
+		appName, valuesPath, renderer.DescribeDropped(dropped))
 	return fmt.Errorf(
-		"unattended deploy would delete hand-maintained values from %s (%s); deploy this app from the console to re-render it deliberately",
-		valuesPath, renderer.DescribeDropped(dropped))
+		"this change would delete configuration that exists only in git: %s in %s. "+
+			"Those keys are not in the console's database, so re-rendering removes them. "+
+			"Import them into the console first (or edit values.yaml directly), then retry",
+		renderer.DescribeDropped(dropped), valuesPath)
+}
+
+// unexpectedDrops subtracts the paths an operation declared it means to remove
+// from the paths it would actually remove. A declared path also covers its
+// subtree: deleting common.extraEnv.FOO legitimately removes FOO's children.
+func unexpectedDrops(dropped, expected []string) []string {
+	if len(dropped) == 0 || len(expected) == 0 {
+		return dropped
+	}
+	out := dropped[:0:0]
+	for _, d := range dropped {
+		intended := false
+		for _, e := range expected {
+			if d == e || strings.HasPrefix(d, e+".") {
+				intended = true
+				break
+			}
+		}
+		if !intended {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // appProfileFallback resolves the resource profile for an environment whose App

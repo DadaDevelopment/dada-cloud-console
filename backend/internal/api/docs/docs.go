@@ -8647,7 +8647,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns all App resources (Helm or compose) in a project environment, with their live phase/status. Read-only.",
+                "description": "Returns App resources (Helm or compose) in a project environment, with their live phase/status. Read-only.\n\nPass view=summary. The default view returns the console's full snapshot of every app, which is the shape the web UI needs and is large enough to overflow a context window on a busy environment; the summary view returns only ref/name/project/env/ids/phase/image/url.\n\nPass name to narrow the listing to one app instead of reading the whole environment (exact match wins, otherwise substring).\n\nEvery response carries the project and environment NAMES next to their ids, and each summary row carries the \"project/env/app\" ref the resolve tool accepts, so no return trip is needed to turn an id back into an address.",
                 "produces": [
                     "application/json"
                 ],
@@ -8670,11 +8670,26 @@ const docTemplate = `{
                         "name": "envId",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter to apps matching this name",
+                        "name": "name",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "summary"
+                        ],
+                        "type": "string",
+                        "description": "summary for the thin listing; omit for the full snapshot",
+                        "name": "view",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "object with an apps array of ResourceSnapshot",
+                        "description": "project, env, ids and an apps array",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -10228,7 +10243,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns the environment variables for an app. Non-secret values are returned in plaintext; secret values are masked (omitted). Read-only.",
+                "description": "Returns the environment variables for an app from BOTH sources. \"env_vars\" is what the console manages (non-secret values in plaintext, secret values omitted). \"cluster_env\" is what the running workload actually carries: every variable name in its pod spec with where the value comes from (literal, secretKeyRef, configMapKeyRef), plus any bulk envFrom sources; values are never included. An empty \"env_vars\" does NOT mean the app has no environment — check cluster_env, and check cluster_env.observed before believing an empty cluster list (false means the cluster could not be read, not that the app is empty). Writing a variable to an app whose environment lives outside the console can delete the rest; read both lists first. Read-only.",
                 "produces": [
                     "application/json"
                 ],
@@ -10476,7 +10491,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Creates or updates a single environment variable for an app. The value is always stored AES-GCM encrypted. Requires write access.",
+                "description": "Creates or updates a single environment variable for an app. The value is always stored AES-GCM encrypted. Requires write access. Writes MERGE into the app's values.yaml and a write that would delete configuration living only in git is refused. Send dry_run=true in the body to ask what the write would do instead of doing it: nothing is saved, and the returned operation carries the values.yaml plan (added/changed/removed/would_block) in validation_result, readable with getOperation.",
                 "consumes": [
                     "application/json"
                 ],
@@ -10535,6 +10550,13 @@ const docTemplate = `{
                             "additionalProperties": true
                         }
                     },
+                    "202": {
+                        "description": "dry run: nothing was written; poll the returned operation for the plan",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
@@ -10570,7 +10592,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Removes a single environment variable from an app. Requires write access.",
+                "description": "Removes a single environment variable from an app. Requires write access. Pass dry_run=true to ask what the delete would do without deleting anything: the returned operation carries the values.yaml plan in validation_result, readable with getOperation.",
                 "produces": [
                     "application/json"
                 ],
@@ -10607,9 +10629,22 @@ const docTemplate = `{
                         "name": "key",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Set to true to ask what the delete would do without deleting anything; the returned operation carries the plan",
+                        "name": "dry_run",
+                        "in": "query"
                     }
                 ],
                 "responses": {
+                    "202": {
+                        "description": "dry run: nothing was deleted; poll the returned operation for the plan",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "204": {
                         "description": "No Content"
                     },
@@ -21012,6 +21047,116 @@ const docTemplate = `{
                 }
             }
         },
+        "/resolve": {
+            "get": {
+                "description": "Turns the address people and logs actually use — \"internal/prod/telemost-bot\" — into the ids every other tool takes, in ONE call.\n\nPrefer this over the listProjects -\u003e getProject -\u003e listApps walk: those are three calls, two of which return whole records, and the app listing can be large enough to blow a context window. Pass ` + "`" + `ref` + "`" + ` as ` + "`" + `project` + "`" + `, ` + "`" + `project/env` + "`" + ` or ` + "`" + `project/env/app` + "`" + ` (or pass ` + "`" + `project` + "`" + `, ` + "`" + `env` + "`" + ` and ` + "`" + `app` + "`" + ` separately).\n\nThe answer also carries the next level down: resolving a project lists its environments, resolving an environment lists its app NAMES. Resolving an app additionally returns its current image, phase, the env-var keys the console manages and the env-var keys actually present in the cluster.\n\nAn ambiguous name (the same project name visible in two orgs) is a 409 that names the candidates rather than a guess.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "resolve"
+                ],
+                "summary": "Resolve a project/environment/app name to ids",
+                "operationId": "resolveRef",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Address: project, project/env or project/env/app",
+                        "name": "ref",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project name (alternative to ref)",
+                        "name": "project",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment name",
+                        "name": "env",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "App name",
+                        "name": "app",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.resolveResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/search": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Case-insensitive substring search over the projects the caller can access and the apps inside them. Returns at most 20 hits per group. Queries shorter than 2 characters return empty groups.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "project"
+                ],
+                "summary": "Search projects and apps by name",
+                "operationId": "search",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "search term (min 2 characters)",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with projects and apps arrays",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/solutions": {
             "get": {
                 "security": [
@@ -23127,6 +23272,72 @@ const docTemplate = `{
                 }
             }
         },
+        "api.refApp": {
+            "type": "object",
+            "properties": {
+                "cluster_env_keys": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "cluster_env_observed": {
+                    "type": "boolean"
+                },
+                "env_var_keys": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "image": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "phase": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.refEnvironment": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "runtime": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.refProject": {
+            "type": "object",
+            "properties": {
+                "display_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "org_id": {
+                    "type": "string"
+                }
+            }
+        },
         "api.reportOnboardingRequest": {
             "type": "object",
             "properties": {
@@ -23142,6 +23353,35 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "resolution": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.resolveResponse": {
+            "type": "object",
+            "properties": {
+                "app": {
+                    "$ref": "#/definitions/api.refApp"
+                },
+                "apps": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "environment": {
+                    "$ref": "#/definitions/api.refEnvironment"
+                },
+                "environments": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.refEnvironment"
+                    }
+                },
+                "project": {
+                    "$ref": "#/definitions/api.refProject"
+                },
+                "ref": {
                     "type": "string"
                 }
             }
@@ -23212,6 +23452,10 @@ const docTemplate = `{
         "api.setEnvVarRequest": {
             "type": "object",
             "properties": {
+                "dry_run": {
+                    "description": "DryRun asks what this write would do and writes nothing: no env_vars row,\nno commit. The queued operation carries the plan in validation_result,\nreadable with getOperation.",
+                    "type": "boolean"
+                },
                 "is_secret": {
                     "type": "boolean"
                 },
