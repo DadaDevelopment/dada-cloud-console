@@ -247,6 +247,7 @@ var optimisticSnapshotKindByAction = map[string]string{
 	"CreatePublicApi":       "PublicApi",
 	"CreateS3Bucket":        "S3Bucket",
 	"CreateAIModel":         "AIModel",
+	"CreateAgent":           "ManagedAgent",
 }
 
 // cleanupFailedOptimisticSnapshot removes the Pending snapshot row the API seeds at
@@ -319,6 +320,10 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 		return w.doCreateS3Bucket(ctx, op)
 	case "DeleteS3Bucket":
 		return w.doDeleteS3Bucket(ctx, op)
+	case "CreateAgent", "UpdateAgent":
+		return w.doCreateAgent(ctx, op)
+	case "DeleteAgent":
+		return w.doDeleteAgent(ctx, op)
 	case "CreatePreviewEnv":
 		return fmt.Errorf("CreatePreviewEnv: превью-окружения убраны как фича, операция не выполняется")
 	case "DeletePreviewEnv":
