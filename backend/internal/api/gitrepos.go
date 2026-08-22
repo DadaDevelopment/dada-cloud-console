@@ -27,13 +27,27 @@ import (
 )
 
 // Values of the `flow` key carried by the StartGitAppInstall/FinishGitAppInstall
-// audit pair. The two GitHub connect mechanisms are measured separately, so every
-// row of the pair must name its mechanism: a row without `flow` is invisible to
-// the mortality queries in state/git-oauth-flight.sql, which group by it.
+// audit pair. The three GitHub connect mechanisms are measured separately, so
+// every row of the pair must name its mechanism: a row without `flow` is
+// invisible to the mortality queries in state/git-oauth-flight.sql, which
+// group by it.
 const (
 	installFlowAppInstall    = "app_install"
 	installFlowUserAuthorize = "user_authorize"
 )
+
+// installFlowPublicClone names the third connect mechanism: linkGitRepo
+// accepts an empty installation_id and an empty token, and builds an
+// anonymous "https://github.com/<repo>.git" clone URL straight from the repo
+// name. It never leaves our origin -- there is no GitHub redirect to
+// correlate through a nonce like the two flows above -- so its Start and
+// Finish rows are written back to back by the same request instead of by two
+// endpoints. Before this it wrote neither: a repo connected through this path
+// left zero rows in the git-oauth-flight queries, so the flight's measured
+// mortality was really the mortality of app_install and user_authorize alone,
+// silently standing in for the whole door (backlog 0410, kkartov@yandex.ru:
+// six public-repo connects, zero flight rows).
+const installFlowPublicClone = "public_clone"
 
 // isUniqueViolation reports whether err is a Postgres unique-constraint error (23505).
 func isUniqueViolation(err error) bool {
@@ -1501,9 +1515,40 @@ func (h *Handler) linkGitRepo(ctx context.Context, actorID, projectID, envID uui
 		}
 	}
 
+	publicCloneNonce := ""
 	if req.Provider == "github" && installationID == nil && req.Token == "" {
+		publicCloneNonce = randomHex(16)
+		h.recordAudit(ctx, actorID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        auditActionStartGitAppInstall,
+			ResourceKind:  "git_installation",
+			ResourceName:  "github",
+			Outcome:       auditOutcomePending,
+			Metadata: map[string]any{
+				"install_nonce":  publicCloneNonce,
+				"provider":       "github",
+				"flow":           installFlowPublicClone,
+				"repo_full_name": req.RepoFullName,
+			},
+		})
+
 		clonable, decisive := probeGithubCloneAccess(ctx, req.RepoFullName)
 		if decisive && !clonable {
+			h.recordAudit(ctx, actorID, auditEntry{
+				ProjectID:     projectID,
+				EnvironmentID: envID,
+				Action:        auditActionFinishGitAppInstall,
+				ResourceKind:  "git_installation",
+				ResourceName:  "github",
+				Outcome:       auditOutcomeFailure,
+				Metadata: map[string]any{
+					"install_nonce":  publicCloneNonce,
+					"flow":           installFlowPublicClone,
+					"reason":         "github_access_required",
+					"repo_full_name": req.RepoFullName,
+				},
+			})
 			return nil, &opFault{http.StatusBadRequest, "github_access_required", "This repository is private or unavailable. Connect GitHub access to this project before linking it."}
 		}
 		if !decisive {
@@ -1535,31 +1580,78 @@ func (h *Handler) linkGitRepo(ctx context.Context, actorID, projectID, envID uui
 
 	var r gitRepo
 	row := h.pool.QueryRow(ctx,
-		`INSERT INTO git_repos
-		   (project_id, environment_id, app_name, installation_id, provider,
-		    repo_full_name, clone_url, token_encrypted, webhook_secret,
-		    production_branch, root_dir, framework_override, auto_deploy,
-		    port, replicas, profile, worker, created_by, demo_expires_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
-		 RETURNING id, project_id, environment_id, app_name, installation_id, provider,
-		           repo_full_name, production_branch, root_dir, framework_override,
-		           auto_deploy, port, replicas, profile, worker, created_at, updated_at`,
+		`WITH ins AS (
+		   INSERT INTO git_repos
+		     (project_id, environment_id, app_name, installation_id, provider,
+		      repo_full_name, clone_url, token_encrypted, webhook_secret,
+		      production_branch, root_dir, framework_override, auto_deploy,
+		      port, replicas, profile, worker, created_by, demo_expires_at)
+		   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+		   RETURNING id, project_id, environment_id, app_name, installation_id, provider,
+		             repo_full_name, production_branch, root_dir, framework_override,
+		             auto_deploy, port, replicas, profile, worker, created_at, updated_at
+		 ),
+		 flight AS (
+		   INSERT INTO audit_events
+		     (actor_id, project_id, environment_id, action, resource_kind, resource_name, outcome, metadata, actor_type)
+		   SELECT $20, ins.project_id, ins.environment_id, $23, 'git_installation', 'github', 'success',
+		          jsonb_build_object('install_nonce', $21::text, 'flow', $22::text, 'repo_full_name', $6::text),
+		          'user'
+		     FROM ins
+		    WHERE $21::text IS NOT NULL
+		   RETURNING id
+		 )
+		 SELECT id, project_id, environment_id, app_name, installation_id, provider,
+		        repo_full_name, production_branch, root_dir, framework_override,
+		        auto_deploy, port, replicas, profile, worker, created_at, updated_at
+		   FROM ins`,
 		projectID, envID, req.AppName, installationID, req.Provider,
 		req.RepoFullName, cloneURL, tokenEncrypted, webhookSecret,
 		req.ProductionBranch, req.RootDir, frameworkOverride, req.AutoDeploy,
 		port, req.Replicas, req.Profile, req.Worker, actorID, demoExpiresAt,
+		actorID, nullableString(publicCloneNonce), installFlowPublicClone,
+		auditActionFinishGitAppInstall,
 	)
 	if err := row.Scan(&r.ID, &r.ProjectID, &r.EnvironmentID, &r.AppName,
 		&r.InstallationID, &r.Provider, &r.RepoFullName, &r.ProductionBranch,
 		&r.RootDir, &r.FrameworkOverride, &r.AutoDeploy,
 		&r.Port, &r.Replicas, &r.Profile, &r.Worker, &r.CreatedAt, &r.UpdatedAt); err != nil {
 		if isUniqueViolation(err) {
+			h.recordPublicCloneFinish(ctx, actorID, projectID, envID, publicCloneNonce, req.RepoFullName, auditOutcomeFailure, "app_name_conflict")
 			return nil, h.linkConflictFault(ctx, projectID, envID, req)
 		}
+		h.recordPublicCloneFinish(ctx, actorID, projectID, envID, publicCloneNonce, req.RepoFullName, auditOutcomeFailure, "insert_failed")
 		return nil, &opFault{http.StatusInternalServerError, "link_insert_failed", "failed to link repository"}
 	}
 	r.PlatformAccess = classifyPlatformAccess(r.Provider, r.InstallationID)
 	return &r, nil
+}
+
+// recordPublicCloneFinish writes the Finish half of the public_clone flight
+// for a failure that happens after Start was already written but the git_repos
+// row never committed (a unique-violation retry, or the generic insert
+// failure branch) -- the CTE in linkGitRepo's insert only fires Finish when
+// the insert itself succeeds, so these two failure exits need their own
+// best-effort write. No fact was created on these paths, so there is no
+// phantom-success risk in writing it as an ordinary, separate statement.
+func (h *Handler) recordPublicCloneFinish(ctx context.Context, actorID, projectID, envID uuid.UUID, nonce, repoFullName, outcome, reason string) {
+	if nonce == "" {
+		return
+	}
+	h.recordAudit(ctx, actorID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		Action:        auditActionFinishGitAppInstall,
+		ResourceKind:  "git_installation",
+		ResourceName:  "github",
+		Outcome:       outcome,
+		Metadata: map[string]any{
+			"install_nonce":  nonce,
+			"flow":           installFlowPublicClone,
+			"reason":         reason,
+			"repo_full_name": repoFullName,
+		},
+	})
 }
 
 // crossProjectRepoFault refuses binding a repository under an app name that
