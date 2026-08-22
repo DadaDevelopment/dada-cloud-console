@@ -1,14 +1,15 @@
 ---
 id: 0371
-status: open
+status: closed
 prio: P1
 stream: 3
 hypothesis: H08
 title: У platform_storage нет рычага: юзеру говорят «том полон» и не дают его увеличить
 created: 2026-08-19
 sess: sess-0819e
-locked_by: sess-0821f
-locked_until: 2026-08-21T10:38Z
+closed_at: 2026-08-22
+closed_commit: c1c7a7cf
+closed_note: Рычаг увеличения тома доведён до баннера platform_storage; онлайн-ресайз доказан живьём в agent-sandbox (PVC 1Gi→2Gi, capacity через ~102с, UID пода тот же, restarts=0). Текст исхода переписан: прежний врал про «том увеличен» на 202 и про перезапуск приложения.
 ---
 **Заземление [code].** `frontend/components/deploy/app-alerts-banner.tsx` даёт рычаг для
 `missing_env_var` (форма ввода), `bad_connection_string` и `ssl_not_supported` (кнопка «Исправить»),

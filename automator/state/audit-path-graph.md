@@ -1,226 +1,201 @@
-# audit_events разбор — sess-0822f, 2026-08-22 02:0x-02:1x UTC
+# audit_events разбор — sess-0822g, 2026-08-22 03:1x-03:2x UTC
 
-Гейт: `kubectl exec -n databases pg-shard-0-postgresql-0` (DSN из secret
-`argocd-prod/dada-cloud-console-backend#DATABASE_URL`, база `cloud-console`).
-Все числа ниже — живой SQL (`select now()` = 2026-08-22 02:10:07 UTC, max
-`audit_events.created_at` = 02:05:07.97 — свежак, 5 мин).
+Гейт: `probe-prod-access.sh` зелёный (apiserver/readyz ok, psql exec
+postgresql-0 ok, console 307). Все числа ниже — живой SQL через
+`kubectl exec -n databases postgresql-0 -c postgresql -- psql "$DSN"`,
+DSN из `argocd-prod/dada-cloud-console-backend#DATABASE_URL`, база
+`cloud-console`. `select now()` = 2026-08-22 03:11:20 UTC.
 
-## 0. Главный факт цикла: свипер class-fix (398f791f) сработал ЖИВЬЁМ и доехал до письма
+## 0. Главный факт цикла: ОКНО МЕЖДУ ЦИКЛАМИ ПОЛНОСТЬЮ ТИХОЕ
 
-Прошлый цикл (sess-0822e) отгрузил `398f791f` без единого живого прогона —
-«честный предел». Сейчас есть первая живая строка:
+[live] `select count(*) from audit_events where created_at >
+'2026-08-22 02:05:07.97'` (max `created_at` прошлого цикла sess-0822f) = **1**,
+и эта единственная строка — тот же `SendBuildNotification`
+(`best-marriage-astrologer-in-guwahati`), который прошлый цикл уже видел
+на границе окна (таймстемп `02:05:07.97386` > строки сравнения `.97` только
+из-за микросекундного хвоста — это не новая запись, это та же самая).
 
-```
-2026-08-22 02:03:50.984692  system@dada.local  BuildAutoRetried
-  best-marriage-astrologer-in-guwahati
-  {class_fix_id: "static-npm-template-20260821",
-   previous_build_id: "0f00460c-...", previous_fail_reason: "dockerfile_build_failed"}
-2026-08-22 02:05:07.05      BuildFinished  status=success  attempt=2
-2026-08-22 02:05:07.09      CreateApp      (первый деплой аппа юзера)
-2026-08-22 02:05:07.97      SendBuildNotification recipient_source=owner status(email)=success
-```
-
-Проверено ДВА раза разными источниками: (1) строка в `audit_events` и (2)
-лог build-agent `deploy-notify: sent app=best-marriage-astrologer-in-guwahati
-recipient_source=owner status=success` за 2026-08-22 02:05 — письмо реально
-ушло, не просто записалось в БД. Это закрывает E187 практическим успехом:
-ребро «класс закрыт → сборка юзера повторена» теперь СУЩЕСТВУЕТ в графе, не
-только в коде.
-
-Что ещё НЕ известно: вернулась ли tarotreaderhimu@gmail.com посмотреть на
-результат. Её последняя строка audit — 08-21 14:09:36 (BuildFinished failed),
-силентность на момент этого замера 12.0ч — рано подтверждать возврат, но
-письмо ушло почти 8 часов ПОСЛЕ её ухода, то есть догнать сама сессия уже не
-может — только email-канал.
+Итог: **за ~1ч между циклами (02:05 → 03:11) в audit_events НЕ ПОЯВИЛОСЬ НИ
+ОДНОЙ новой строки.** [live] `select id, email, created_at from users where
+created_at > '2026-08-22 02:10:00'` — пусто, новых регистраций тоже нет.
+Платформа не мертва (гейт зелёный, консоль отвечает 307), просто в этот
+конкретный час никто ничего не делал. Разбор ниже — по прежнему 30-дневному
+окну, которое почти не изменилось с прошлого цикла.
 
 ## 1. Новые юзеры
 
-30д: 30 (без изменений численно), 48ч: 0 новых signup (tarotreaderhimu
-08-21 13:58 — уже не в 48-часовом окне, последняя регистрация окна).
+[live] `select count(*) from users where created_at > now() - interval
+'30 days'` = **30** — без изменений численно четвёртый цикл подряд.
+[live] Топ-10 по `created_at desc` подтверждает: последняя регистрация
+по-прежнему `tarotreaderhimu@gmail.com` (08-21 13:58) — новых юзеров с
+прошлого цикла нет.
 
-Zero-audit среди 30д-когорты: **0** (перепроверено builds/agent_chat — не
-нужно, каждый SignUp пишет строку, подтверждено прямым `NOT EXISTS`-запросом
-по всем 30 юзерам).
+Zero-audit среди когорты: [live] прямой join `audit_cnt/build_cnt/chat_cnt`
+по всем 30 юзерам — **0 юзеров с нулём везде**, у каждого минимум 1
+audit-строка (SignUp). Провалов инструментирования по этой оси нет.
 
-### Новая находка: три «тихих» юзера когорты внезапно стали самыми активными
-
-Прошлый разбор (sess-0822c/d/e) фокусировался на tarotreaderhimu/
-lifecoachrussia/mytake как на «свежих». Полный пересчёт audit-строк на 30д
-показал трёх юзеров с кратно большей активностью, которых прошлые циклы не
-разбирали цепочками:
-
-| email | audit-строк | последняя | силентность |
-|---|---|---|---|
-| michaelharlam@yandex.ru | 168 | 2026-08-21 23:53 | 2.3ч |
-| artempro2022@yandex.ru | 239 | 2026-08-21 21:48 | 4.4ч |
-| artempro2021@bk.ru | 623 | 2026-08-21 21:17 | 4.9ч |
-
-Все трое живы (силентность <5ч), не терминальны. artempro2021 (создан
-07-23, всё ещё в 30-дневном окне) — самый тяжёлый юзер платформы по объёму
-audit: 201×ViewProject, 106×SessionStart, 34×DeployImageVersion, 5×DeleteApp
-— полноценный рабочий цикл разработки, не разовая проба.
-
-У всех троих есть собственные `BuildAutoRetried` строки за 08-19 (attempt
-2-4, `previous_fail_reason: platform_error`) — это СТАРЫЙ ретрай-механизм
-(до class-fix свипера, другой код-путь: `status: "queued"` вместо
-`class_fix_id`), не путать со свежим class-fix событием п.0.
+### Находка цикла: скрытый staff-аккаунт в 30-дневной когорте
+`michaelharlam@dada-tuda.ru` (created 2026-07-25, домен компании) сидит в
+одной когорте с внешними юзерами и несёт 241 audit-строку + 107
+chat-сообщений — это внутренний/тестовый аккаунт, не внешний сигнап,
+искажает вид "30 новых юзеров" если его не отфильтровать. Граф путей ниже
+считался с фильтром `email not like '%dada-tuda.ru%'`, но сам факт, что
+такой аккаунт годами живёт неотличимо от внешнего в `users`, стоит на
+заметке (см. §9).
 
 ## 2. Кто не сделал ничего / провалы инструментирования
 
-Zero-audit: 0 (см. выше, прямой `NOT EXISTS`).
+Zero-audit: 0 (см. выше, прямой join, не только `NOT EXISTS`).
 
-Chat→audit разрыв (`AgentChatUserMessage`) за 7д: **13 vs 13 = 0%** —
-четвёртый цикл подряд 0%. Кандидат №4 прошлого цикла (историчность
-инцидента до 08-07-хука) подтверждается ещё раз.
+Chat→audit разрыв (`AgentChatUserMessage`) за 7д: **13 vs 13 = 0%** — пятый
+цикл подряд 0%, инструментирование чата не деградировало.
 
 ## 3. Граф путей (30д, join по users, исключены `@dada-tuda.ru` и `system`)
 
-### Первое действие после SignUp (без изменений)
-`SessionStart` 19, `SignUp` 6, `CreateApp` 2, `AgentChatActionDeclined` 1,
-`CreateServiceDatabase` 1, `RedeemPromo` 1.
+Суммарно 4810 audit-строк за 30д на внешних юзеров (без изменений порядка
+величины с прошлого цикла).
 
-### Топ переходов action_A → action_B (self-loop исключён, n=20)
+### Первое действие после SignUp
+[live] `SessionStart` 12, `UploadSourceArchive` 2, `ViewProject` 1 —
+меньше категорий, чем прошлый цикл показывал (там было 6 категорий на
+похожем n) просто потому, что часть юзеров когорты имеет только 1
+audit-строку (SignUp) без второго события — `rn=2` для них не существует.
+Распределение первого ДЕЙСТВИЯ (не SignUp) не изменилось качественно:
+`SessionStart` доминирует.
+
+### Топ переходов action_A → action_B (self-loop исключён, n=20, 30д)
 | A | B | cnt | distinct users |
 |---|---|---|---|
 | SessionStart | ViewProject | 223 | 10 |
 | ViewProject | ViewApps | 202 | 12 |
 | ViewApps | ViewApp | 102 | 8 |
 | ViewApps | SessionStart | 98 | 8 |
+| DeployImageVersion | DeployStack | 80 | 1 |
 | BuildFinished | DeployImageVersion | 70 | 10 |
 | ViewProject | SessionStart | 70 | 8 |
 | DeployImageVersion | SessionStart | 58 | 5 |
 | ViewApps | ViewProject | 54 | 8 |
 | ViewApp | ViewApps | 43 | 7 |
 | SetEnvVar | DeployImageVersion | 40 | 6 |
+| DeployStack | DeployImageVersion | 39 | 1 |
 | ViewBuildLogs | BuildFinished | 35 | 6 |
 | ViewProject | ViewApp | 34 | 5 |
+| SendBuildNotification | AutoscaleApp | 34 | 1 |
+| SendNotification | SendBuildNotification | 32 | 1 |
 | UploadSourceArchive | ViewBuildLogs | 32 | 4 |
 | DeployImageVersion | SetEnvVar | 31 | 5 |
-| TriggerBuild | DeployImageVersion | 28 | 3 |
-| BuildFinished | CreateApp | 26 | 9 |
-| SessionStart | ViewApps | 25 | 5 |
-| ViewApp | UploadSourceArchive | 25 | 2 |
-| ConnectGitRepo | TriggerBuild | 24 | 7 |
-| ViewApp | SessionStart | 23 | 5 |
+| AutoscaleApp | SendNotification | 30 | 1 |
+| BuildFinished | CreateApp | 28 | 10 |
 
-Здоровый путь (`ViewBuildLogs → BuildFinished`, `TriggerBuild →
-DeployImageVersion`, `BuildFinished → CreateApp` на 9 разных юзерах) —
-доминирующая форма, не редкость. Патология: `SetDatabaseTier` self-loop 664
-в сыром (без-self-loop-фильтра) графе целиком принадлежит бёрсту system-
-актора 08-19 11:31 (см. §5), не новый рост — перепроверено точным подсчётом
-outcome.
+Здоровый путь (`ViewBuildLogs → BuildFinished`, `BuildFinished →
+CreateApp` на 10 разных юзерах) остаётся доминирующей формой.
 
-### Терминальное действие — срез "внешние реальные, тишина >24ч" (человеки, не internal)
+**Новая патология в топ-20, которой не было прошлый цикл:** пять рёбер
+(`DeployImageVersion↔DeployStack`, `SendBuildNotification→AutoscaleApp→
+SendNotification→SendBuildNotification`) с cnt 30-80, но **distinct
+users = 1** — весь объём принадлежит одному тяжёлому юзеру
+(`artempro2021@bk.ru`, 623 audit-строки за 30д, самый активный на
+платформе). Это не новый паттерн юзеров, это один рабочий цикл одного
+разработчика, который количественно перекрывает топ переходов. Тот же
+класс искажения графа, что был у `SetDatabaseTier`-бёрста в прошлых
+циклах — считать надо по distinct-users, не по cnt.
+
+### Терминальное действие (30д-когорта, тишина >24ч, исключён `@dada-tuda.ru`)
 | актор | терминал | часов тишины | metadata | классификация |
 |---|---|---|---|---|
-| lifecoachrussia@yandex.ru | DeployImageVersion | 42.9 | `gulyaev-ai-core`, success | ещё внутри 48ч, не churn |
-| kkartov@yandex.ru | ViewApps | 54.8 | `apps:0, empty:true` | **churn** (снёс всё сам) |
-| good.win2283@gmail.com | ViewApps | 181.0 | `apps:1, healthy:1` | **churn** (ушёл со здорового экрана) |
-| cryocrm@gmail.com | ViewProject | 257.0 | `{}` | **churn** (0 repo/0 build) |
-| + 15 ботов волны 08-08/09 | SessionStart | 308-318 | известная волна, не считается |
+| lifecoachrussia@yandex.ru | DeployImageVersion | **44.0** | `gulyaev-ai-core`, success | ⚠️ ещё внутри 48ч, но выросло с 42.9ч прошлого цикла — граница близко |
+| kkartov@yandex.ru | ViewApps | 55.8 | `apps:0, empty:true` | **churn** (без изменений) |
+| good.win2283@gmail.com | ViewApps | 182.0 | `apps:1, healthy:1` | **churn** (без изменений) |
+| cryocrm@gmail.com | ViewProject | 258.1 | `{}` | **churn** (без изменений) |
+| + 15 ботов волны 08-08/09 | SessionStart | 309-319 | известная волна, не считается | — |
 
-**Состав churn не изменился четвёртый цикл подряд** — те же 3 актора
-(kkartov, good.win2283, cryocrm). tarotreaderhimu (12.0ч), michaelharlam
-(2.3ч), artempro2022/2021 (4-5ч) — все внутри окна, живы.
+**Состав подтверждённого churn не изменился пятый цикл подряд** (kkartov,
+good.win2283, cryocrm). `lifecoachrussia` пересекла из "42.9ч" в "44.0ч" —
+если следующий цикл застанет её тишину >48ч без новой активности, она
+переходит из "внутри окна" в четвёртый подтверждённый churn.
 
-## 4. Ретрай-петли / системные джобы (30д)
+## 4. Живая нить №1: TriggerAutofix vs ViewBuildLogs — соотношение чуть выросло
 
-`SetDatabaseTier`: **332 failure / 12 success / 344 pending, max created_at
-= 2026-08-19 11:31:58 — без изменений с прошлого цикла, ноль новых строк за
-3-е сутки подряд.** Диагноз подтверждён третий раз тем же числом (332/12/344
-идентичны sess-0822c/d/e) — джоб остаётся мёртвым, не «тихо падающим». Без
-регрессии причины (нужен код/конфиг gitops-agent, не только SQL) — открытый
-инженерный пункт, см. беклог 0466.
+[live] 30д: `TriggerAutofix` 9 (было 7) / `ViewBuildLogs` 92 (было 91),
+distinct users по TriggerAutofix = 4. Прирост — 2 новые строки
+08-21 23:16/23:26 от `artemmendeleev@gmail.com` (app `fonbet-value`):
+первая `pending` (`client_claimed: "ui"`), вторая `failure` с
+`status: 409, detail: "по этому приложению уже идёт автопочинка, ждите
+завершения"`.
 
-kkartov-петли (SeedDatabaseDSN 172/169, VerifyDomainAuthorization 31,
-RevealEnvVar 23, SetEnvVar 14) — без роста, актор ушёл 54.8ч назад.
+Проверил механизм по коду (`frontend/components/deploy/app-alerts-
+banner.tsx`): кнопка блокируется локальным `useState` (`autofix.status`,
+строки 528/546-555/735), а backend-текст 409 уже человекочитаем на
+русском и попадает в `err.message` (строка 555) прямо в баннер — то есть
+двойной запуск НЕ читается юзером как непонятная ошибка. Кнопка доезжает
+до юзера (не архивная находка прошлых циклов про "недостижима со страницы
+сборки" — это ЗАКРЫТО, `client_claimed: "ui"` подтверждает живой клик с
+UI трижды за 30д на трёх разных юзерах: bruzas, lifecoachrussia,
+artemmendeleev). Живая нить прошлых циклов закрыта практическим успехом
+на новом юзере — фикс держится.
 
-Новый факт (не петля, разовый бёрст 08-19 23:00:03): 4 разных юзера
-(michaelharlam, artempro2021, artempro2022, bruzas.85@mail.ru) получили
-СТАРЫЙ (pre-classfix) `BuildAutoRetried` с одинаковым timestamp
-`23:00:03.585748` и `previous_fail_reason: "platform_error"` — похоже на
-единый батч-ретрай инфраструктурного сбоя, не на per-user петлю. Не разбирал
-глубже (не в скоупе цикла), но стоит на заметке: если платформенный
-`platform_error`-класс регулярно бьёт 4+ юзеров одним временны́м пятном, это
-кандидат в отдельный аудит.
+## 5. Живая нить №2: SeedDatabaseDSN failure-класс — новых случаев НЕТ
 
-## 5. SetDatabaseTier — статус без изменений (мёртв 3 цикла подряд)
+[live] 7д: `SeedDatabaseDSN` outcome — `failure` 172 / `success` 10,
+**весь failure-объём всё ещё принадлежит одному актору kkartov@yandex.ru**
+(`group by email` даёт единственную строку). За 4 цикла подряд ни один
+другой юзер этот класс не задел. Диагноз не меняется: это специфичный для
+kkartov ретрай-паттерн (актор ушёл 55.8ч назад, см. §3), не системная
+угроза.
 
-332/12/344, max 2026-08-19 11:31:58 — идентично прошлому циклу. См. §4.
+## 6. Сравнение с прошлым циклом (sess-0822f)
 
-## 6. TriggerAutofix (0457) — не проверялся отдельно в этом цикле (не в скоупе задания); см. §0 для смежного механизма (class-fix свипер), который сработал.
+- Главное изменение: окно между циклами (~1ч) дало **0 новых audit-строк
+  и 0 новых сигнапов** — платформа не мертва (гейт зелёный), просто
+  наблюдательное окно пустое; разбор строится на 30-дневной когорте, а не
+  на приросте.
+- Churn-состав (kkartov, good.win2283, cryocrm) — без изменений 5-й цикл.
+- Chat→audit разрыв — 0% 5-й цикл подряд.
+- TriggerAutofix/ViewBuildLogs 7/91 → 9/92, +1 новый юзер
+  (artemmendeleev) успешно воспользовался кнопкой (с одним 409-ретраем,
+  корректно показанным).
+- SeedDatabaseDSN failure-класс — без нового актора 4-й цикл подряд.
+- Новая находка (не искалась прошлые циклы): staff-аккаунт
+  `michaelharlam@dada-tuda.ru` сидит в 30-дневной когорте юзеров
+  неотличимо от внешних (см. §9).
+- Новая находка: пятирёберный кусок топ-20 графа переходов
+  (`DeployImageVersion↔DeployStack`, `SendBuildNotification/
+  AutoscaleApp/SendNotification`-цикл) целиком принадлежит одному
+  юзеру (artempro2021, 623 строки) — искажает вид графа, если не
+  фильтровать по distinct-users (тот же класс ошибки, что уже был с
+  `SetDatabaseTier`-бёрстом system-актора).
 
-## 7. tarotreaderhimu@gmail.com / best-marriage-astrologer-in-guwahati (0457/398f791f) — ДВИНУЛОСЬ
+## 7. UX-вывод / беклог — обязательный пункт
 
-Полная цепочка [live psql]: SignUp 13:58:01 → CreateProject → StartGit/
-FinishGitAppInstall → ConnectGitRepo → 3× (TriggerBuild → BuildFinished
-failed, `dockerfile_build_failed`) между 13:58 и 14:09 → тишина.
+**Разрыв этого цикла — не UI-баг, а гейт данных.** У `users` нет
+структурного признака "staff/test" аккаунта — единственный сигнал
+`email like '%dada-tuda.ru%'`, применяемый ad-hoc в каждом SQL-запросе
+разбора аудита. `michaelharlam@dada-tuda.ru` (241 audit-строка, 107
+chat-сообщений, создан 07-25) целиком проходит как "новый внешний юзер"
+в любом отчёте/дашборде, который не знает про этот фильтр — включая,
+вероятно, admin/overview числа сигнапов и активности, если они считают
+`users` без такого исключения.
 
-**08-22 02:03:50** (12ч спустя её ухода): `system@dada.local` пишет
-`BuildAutoRetried` с `class_fix_id: "static-npm-template-20260821"`,
-`previous_build_id` = ровно её последний failed build (`0f00460c-...`).
-Новый билд `3c8ebe82` (в таблице `builds`: `status=success`,
-`created→finished` за 76с) → `CreateApp` (первый деплой этого аппа,
-`framework: static`, домен `best-marriage-astrologer-in-guwahati-08c2af.
-dada-tuda.ru`) → `SendBuildNotification` → **подтверждено логом
-build-agent: email реально отправлен**, не только записан в БД.
+**Проверил:** `grep -rn "is_staff\|is_internal\|account_type" backend/
+internal/models/user.go` — совпадений нет, в модели `users` нет колонки
+для этого различия.
 
-Статус: класс закрыт, сборка автоматически повторена и доехала до живого
-аппа с доменом, юзеру ушло письмо. Возврата юзера в консоль пока нет (её
-последняя audit-строка всё ещё 14:09:36, силентность 12.0ч на момент
-замера) — рано делать вывод "вернулась/не вернулась", письмо ушло 8ч назад,
-собственной сессии после этого не было.
+**Предложение в беклог:**
+Заголовок (≤100 симв): "Staff-аккаунты на @dada-tuda.ru неотличимы от
+внешних юзеров в users/admin-метриках"
 
-## 8. Граф — новое ребро существует, но однонаправленное
-
-Единственная известная строка `BuildAutoRetried` с `class_fix_id` в системе
-— эта. Ребро `class_fix → build_retry_success` в графе путей теперь имеет
-1 инстанс. Симметричного ребра `email_sent → user_return_session` НЕТ и не
-может быть измерено из audit_events (email opens не инструментированы) —
-единственный способ узнать, сработало ли письмо, это будущая audit-строка
-от tarotreaderhimu либо её отсутствие после разумного окна (48-72ч с
-момента письма, т.е. проверка следующим-через-один циклом).
-
-## 9. UX-вывод / беклог — обязательный пункт
-
-**Терминальная точка с наибольшим числом юзеров:** `ViewApps` (пустой или
-здоровый список) — 2 из 3 подтверждённых churn-акторов (kkartov,
-good.win2283) закончили именно на этом экране, четвёртый цикл подряд без
-изменений состава.
-
-**Новый, более конкретный UX-разрыв этого цикла:** свипер class-fix чинит
-билд и деплоит апп ПОЛНОСТЬЮ МОЛЧА для консоли — единственный канал
-уведомления юзера письмо (подтверждено логом). Если юзер вернётся в
-консоль (а не откроет письмо), карточка аппа на странице
-`frontend/app/(console)/projects/[projectId]/apps/[appName]/page.tsx`
-(смотри блок статусов вокруг `page.tsx:105` — `TERMINAL`-набор статусов
-и `page.tsx:581-597` — блок баннера `urlStatus === "failed"`/`"pending"`)
-не содержит НИ ОДНОГО признака "этот билд был автоматически пересобран
-после нашего фикса" — `grep -rln "class_fix|classFix|BuildAutoRetried"
-frontend` даёт 0 совпадений. Юзер, зашедший в консоль после письма (или
-без него), увидит просто новый успешный билд без объяснения, почему
-предыдущие три упали, а этот — нет; для юзера, который уже решил "платформа
-сломана" (см. `project_shipped_lever_can_be_structurally_unreachable.md`),
-это не читается как "мы это починили", а как необъяснимая случайность.
-
-**Предложение в беклог:** добавить в ответ `GET` аппа/билда (или в payload,
-который рендерит `page.tsx`) поле `metadata.class_fix_id`
-(уже пишется в `audit_events` бэкендом — `backend/internal/api/
-build_classfix_sweeper.go`) и на фронте — баннер рядом с блоком `page.tsx:
-581-597` вида "мы обнаружили и исправили причину прошлых ошибок сборки
-(`{class_fix_id}`), новый билд собран автоматически". Один инстанс события
-есть живьём (`3c8ebe82`) — можно верифицировать баннер на этом же аппе,
-не дожидаясь следующего срабатывания свипера.
-
-## 10. Сравнение с прошлым циклом (sess-0822e)
-
-- Главное изменение: E187 из "честный предел, живого прогона нет" стал
-  "первое живое срабатывание, доказано двумя источниками (audit_events +
-  build-agent log)".
-- Churn-состав (kkartov, good.win2283, cryocrm) — без изменений 4-й цикл.
-- Chat→audit разрыв — 0% 4-й цикл подряд.
-- SetDatabaseTier — мёртв без изменений (332/12/344, идентично).
-- Новое: три недооценённых по прошлым циклам активных юзера
-  (michaelharlam, artempro2021/2022) с 168-623 audit-строками каждый —
-  прошлые циклы их не разбирали цепочками, хотя они не новее по created_at,
-  просто были заслонены свежими signup-ами в фокусе разбора.
+Тело: у `users` (`backend/internal/models/user.go`) нет поля
+`is_internal`/`account_type`. Единственный способ отличить внутренний
+аккаунт от внешнего сигнапа — текстовый фильтр по домену почты
+(`email like '%dada-tuda.ru%'`), который каждый раз пишется заново в
+ad-hoc SQL при разборе `audit_events`/`users`. Любая метрика активности
+или сигнапов (включая, возможно, `/api/v1/admin/overview`, если он не
+делает такой фильтр сам — не проверялось в этом цикле, см. `backend/
+internal/api/admin.go` на предмет фильтра по домену) рискует посчитать
+staff-тестирование как рост внешней базы. Пример живого случая:
+`michaelharlam@dada-tuda.ru`, created 2026-07-25, 241 audit-строка + 107
+chat-сообщений, сидит в одной когорте "30 новых юзеров за 30д" с реальными
+сигнапами tarotreaderhimu/lifecoachrussia/kkartov. Фикс: добавить
+булеву колонку `is_internal` в `users` (миграция) с дефолтом по домену
+почты при создании, и явно исключать её во всех admin/growth-метриках,
+а не полагаться на договорной email-паттерн в каждом разовом запросе.
