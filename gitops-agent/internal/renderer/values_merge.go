@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 
@@ -365,8 +366,13 @@ func deleteMapKey(m *yaml.Node, key string) {
 	}
 }
 
-// marshalDocument serialises a parsed document back to YAML with the indentation
-// the rest of the renderer emits.
+// marshalDocument serialises a parsed document back to YAML with the two-space
+// indentation every values.yaml in the gitops tree already uses.
+//
+// yaml.Marshal defaults to four, which is not a formatting preference but a
+// review problem: a write that added one variable to telemost-bot came back as
+// a 310-line rewrite where every line had moved, burying the one real change
+// and collapsing the file's git blame onto the console.
 func marshalDocument(doc *yaml.Node) (string, error) {
 	root := documentRoot(doc)
 	if root == nil {
@@ -380,9 +386,15 @@ func marshalDocument(doc *yaml.Node) (string, error) {
 			root.FootComment = doc.FootComment
 		}
 	}
-	b, err := yaml.Marshal(root)
-	if err != nil {
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(root); err != nil {
+		_ = enc.Close()
 		return "", err
 	}
-	return string(b), nil
+	if err := enc.Close(); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
 }
