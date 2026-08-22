@@ -1,8 +1,11 @@
 package worker
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/dada-tuda/console/gitops-agent/internal/renderer"
 )
@@ -13,10 +16,10 @@ import (
 // ingress block outside the console's ownership.
 const handMaintainedValues = `common:
   image:
-    repository: reg/telemost-bot
+    name: nexus.dada-tuda.ru/dada/telemost-bot
     tag: master-1.0.0-42
   servicePort: 8000
-  useDotEnv: true
+  useDotEnv: "true"
   extraEnv:
     - name: BOT_TOKEN
       valueFrom:
@@ -46,45 +49,114 @@ const handMaintainedValues = `common:
       - host: bot.example.ru
 `
 
-// consoleRenderKnowingOnlyTheImage is what RenderAppValues emits for an app the
-// console only knows the image of -- the shape every env-var save produces for a
-// hand-maintained app, because env_vars holds no rows for it.
-const consoleRenderKnowingOnlyTheImage = `common:
-  image:
-    repository: reg/telemost-bot
-    tag: master-1.0.0-42
-  replicas: 1
-`
-
-// TestGuardValuesClobber_RefusesTheEnvSaveThatStrippedTelemostBot is the
-// regression test for 2026-08-21: setEnvVar through MCP re-rendered
-// internal/prod/telemost-bot from a database that knew only its image, and the
-// merge deleted eight extraEnv entries, servicePort 8000 and useDotEnv, because
-// all three are ownedCommonKeys and the render was silent about them. The bot
-// came back up with no Postgres.
+// consoleRenderKnowingOnlyTheImage is the real render for an app the console
+// only knows the image, the framework-guessed port and one freshly saved
+// variable of -- the shape every env-var save produces for a hand-maintained
+// app, because env_vars holds no rows for the other eight.
 //
-// It is the same class as the 2026-08-02 loss on the same app, which was fixed
-// only for the resize endpoint. The guard existed but was scoped to
-// op.Unattended(), and an MCP call runs under a service account, so it was
-// exempt.
-func TestGuardValuesClobber_RefusesTheEnvSaveThatStrippedTelemostBot(t *testing.T) {
-	const valuesPath = "projects/internal/prod/telemost-bot/values.yaml"
-	mgr := locatorRepo(t, map[string]string{valuesPath: handMaintainedValues})
+// It comes out of RenderAppValues rather than being handwritten. The
+// handwritten version of this fixture was silent about servicePort and
+// useDotEnv, which made the loss look like two DELETIONS the clobber guard
+// could see; the real render EMITS both, so the production loss was two
+// in-place CHANGES that DroppedPaths can never report. That is why this test
+// passed while the bot was down.
+func consoleRenderKnowingOnlyTheImage(t *testing.T) string {
+	t.Helper()
+	rendered, err := renderer.RenderAppValues(renderer.AppSpec{
+		Name:     "telemost-bot",
+		Image:    "nexus.dada-tuda.ru/dada/telemost-bot:master-1.0.0-42",
+		Replicas: 1,
+		Port:     8080,
+		Env:      map[string]string{"AGENTSYNC_BASE_URL": "https://agentsync.dada-tuda.ru"},
+	})
+	if err != nil {
+		t.Fatalf("RenderAppValues: %v", err)
+	}
+	return rendered
+}
 
-	merged, err := renderer.MergeAppValues(handMaintainedValues, consoleRenderKnowingOnlyTheImage)
+// mergeAsProduction merges the way doDeployImageVersion does for an app whose
+// port nobody chose: servicePort and service are guesses, useDotEnv always is.
+func mergeAsProduction(t *testing.T, existing, rendered string, expectedDrops ...string) string {
+	t.Helper()
+	merged, err := renderer.MergeAppValuesWith(existing, rendered, renderer.MergeOptions{
+		Advisory:      advisoryValuesKeys(map[string]any{"port_source": "framework_default"}),
+		ExpectedDrops: expectedDrops,
+	})
 	if err != nil {
 		t.Fatalf("merge: %v", err)
 	}
+	return merged
+}
+
+// TestEnvSave_NoLongerStripsTelemostBot is the regression test for 2026-08-21:
+// setEnvVar through MCP re-rendered internal/prod/telemost-bot from a database
+// that knew only its image, and the merge deleted eight extraEnv entries and
+// moved servicePort 8000 -> 8080 and useDotEnv true -> false, because all three
+// are ownedCommonKeys. The bot came back up with no Postgres and a Service
+// pointing at a port nothing listened on.
+//
+// The fix is in the merge, not in the refusal: the save has to SUCCEED, and it
+// has to land the new variable and nothing else. A guard alone would only have
+// converted a broken bot into a lever that answers "no" to every env save on
+// every hand-maintained app.
+func TestEnvSave_NoLongerStripsTelemostBot(t *testing.T) {
+	const valuesPath = "projects/internal/prod/telemost-bot/values.yaml"
+	mgr := locatorRepo(t, map[string]string{valuesPath: handMaintainedValues})
+
+	merged := mergeAsProduction(t, handMaintainedValues, consoleRenderKnowingOnlyTheImage(t))
+
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(merged), &doc); err != nil {
+		t.Fatalf("merged values do not parse: %v\n%s", err, merged)
+	}
+	c, _ := doc["common"].(map[string]any)
+	if c == nil {
+		t.Fatalf("no common mapping: %s", merged)
+	}
+	if c["servicePort"] != 8000 {
+		t.Errorf("servicePort = %v, want the 8000 the bot listens on", c["servicePort"])
+	}
+	if c["useDotEnv"] != "true" {
+		t.Errorf("useDotEnv = %v, want the \"true\" that is in git", c["useDotEnv"])
+	}
+
+	env, _ := c["extraEnv"].([]any)
+	names := map[string]bool{}
+	for _, e := range env {
+		if entry, ok := e.(map[string]any); ok {
+			names[fmt.Sprint(entry["name"])] = true
+		}
+	}
+	for _, want := range []string{
+		"BOT_TOKEN", "POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB",
+		"POSTGRES_USER", "POSTGRES_PASSWORD", "KEYCLOAK_URL", "LOG_LEVEL",
+	} {
+		if !names[want] {
+			t.Errorf("%s lives only in git and must survive an env save: %#v", want, env)
+		}
+	}
+	if !names["AGENTSYNC_BASE_URL"] {
+		t.Errorf("the variable the user just saved must land: %#v", env)
+	}
 
 	w := &DBWatcher{}
-	err = w.guardValuesClobber(mgr, "telemost-bot", valuesPath, merged, nil)
-	if err == nil {
-		t.Fatal("an env save that deletes extraEnv, servicePort and useDotEnv must be refused, got nil")
+	if err := w.guardValuesClobber(mgr, "telemost-bot", valuesPath, merged, nil); err != nil {
+		t.Fatalf("the env save must go through, got: %v", err)
 	}
-	for _, want := range []string{"extraEnv", "servicePort", "useDotEnv"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("refusal must name %s, got: %v", want, err)
-		}
+}
+
+// TestEnvSave_StillRefusesAnUndeclaredDrop keeps the guard honest: it is the
+// backstop for whatever the merge does not preserve, so it must still refuse a
+// render that would delete a key only git knows.
+func TestEnvSave_StillRefusesAnUndeclaredDrop(t *testing.T) {
+	const valuesPath = "projects/internal/prod/telemost-bot/values.yaml"
+	mgr := locatorRepo(t, map[string]string{valuesPath: handMaintainedValues})
+
+	stripped := strings.Replace(handMaintainedValues, "  ingress:\n", "  gone:\n", 1)
+	w := &DBWatcher{}
+	if err := w.guardValuesClobber(mgr, "telemost-bot", valuesPath, stripped, nil); err == nil {
+		t.Fatal("a commit that deletes common.ingress must be refused")
 	}
 }
 
@@ -94,19 +166,17 @@ func TestGuardValuesClobber_RefusesTheEnvSaveThatStrippedTelemostBot(t *testing.
 // it would fail deploys over a loss that never happens, which is why the guard
 // could not be turned on for every deploy until it moved behind the merge.
 func TestGuardValuesClobber_IgnoresKeysTheMergePreserves(t *testing.T) {
-	merged, err := renderer.MergeAppValues(handMaintainedValues, consoleRenderKnowingOnlyTheImage)
-	if err != nil {
-		t.Fatalf("merge: %v", err)
-	}
-	if strings.Contains(mergedDropReport(t, handMaintainedValues, merged), "ingress") {
-		t.Fatalf("merge preserves common.ingress; the guard must not report it")
+	merged := mergeAsProduction(t, handMaintainedValues, consoleRenderKnowingOnlyTheImage(t))
+	if report := mergedDropReport(t, handMaintainedValues, merged); report != "" {
+		t.Fatalf("the merge preserves everything git owns; the guard must report nothing, got: %s", report)
 	}
 }
 
 // TestGuardValuesClobber_AllowsTheDropTheOperationDeclared covers deleteEnvVar:
 // removing a key has to be able to remove it from git, so an operation that
-// declares the path it means to drop passes, while an undeclared loss in the
-// same file still fails.
+// declares the path it means to drop carries that declaration through both the
+// merge and the guard, while a render that is merely silent about the same
+// entry no longer removes it at all.
 func TestGuardValuesClobber_AllowsTheDropTheOperationDeclared(t *testing.T) {
 	const valuesPath = "projects/acme/prod/web/values.yaml"
 	existing := `common:
@@ -128,18 +198,23 @@ func TestGuardValuesClobber_AllowsTheDropTheOperationDeclared(t *testing.T) {
       value: "1"
 `
 	mgr := locatorRepo(t, map[string]string{valuesPath: existing})
-	merged, err := renderer.MergeAppValues(existing, rendered)
-	if err != nil {
-		t.Fatalf("merge: %v", err)
-	}
 
+	declared := mergeAsProduction(t, existing, rendered, "common.extraEnv.DROP_ME")
+	if strings.Contains(declared, "DROP_ME") {
+		t.Fatalf("a declared drop must leave the file, got:\n%s", declared)
+	}
 	w := &DBWatcher{}
-	if err := w.guardValuesClobber(mgr, "web", valuesPath, merged,
+	if err := w.guardValuesClobber(mgr, "web", valuesPath, declared,
 		[]string{"common.extraEnv.DROP_ME"}); err != nil {
 		t.Fatalf("a declared drop must be allowed, got: %v", err)
 	}
-	if err := w.guardValuesClobber(mgr, "web", valuesPath, merged, nil); err == nil {
-		t.Fatal("the same drop with nothing declared must be refused")
+
+	silent := mergeAsProduction(t, existing, rendered)
+	if !strings.Contains(silent, "DROP_ME") {
+		t.Fatal("silence about an entry is not an instruction to delete it")
+	}
+	if err := w.guardValuesClobber(mgr, "web", valuesPath, silent, nil); err != nil {
+		t.Fatalf("nothing is dropped, so nothing may be refused, got: %v", err)
 	}
 }
 

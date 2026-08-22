@@ -1083,7 +1083,7 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 
 	gitPath := renderer.AppGitPath(projectName, envName, p.Name)
 	valuesPath := renderer.AppHelmValuesGitPath(projectName, envName, p.Name)
-	mergedValues, err := w.mergeAppValues(mgr, valuesPath, valuesYAML)
+	mergedValues, err := w.mergeAppValues(mgr, valuesPath, valuesYAML, renderer.MergeOptions{})
 	if err != nil {
 		return err
 	}
@@ -2355,7 +2355,10 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 	if _, err := mgr.Pull(); err != nil {
 		return fmt.Errorf("pull before rendering %s: %w", valuesPath, err)
 	}
-	mergedValues, err := w.mergeAppValues(mgr, valuesPath, valuesYAML)
+	mergedValues, err := w.mergeAppValues(mgr, valuesPath, valuesYAML, renderer.MergeOptions{
+		Advisory:      advisoryValuesKeys(cur),
+		ExpectedDrops: p.ExpectedDrops,
+	})
 	if err != nil {
 		return err
 	}
@@ -2490,16 +2493,36 @@ func buildValuesPlan(existing string, readErr error, mergedValues, valuesPath st
 // A missing file is a first deploy and takes the render as-is. A file that does
 // not parse fails the operation rather than being overwritten -- Argo would
 // otherwise apply chart defaults over the live release.
-func (w *DBWatcher) mergeAppValues(mgr *git.Manager, valuesPath, renderedValues string) (string, error) {
+func (w *DBWatcher) mergeAppValues(mgr *git.Manager, valuesPath, renderedValues string, opts renderer.MergeOptions) (string, error) {
 	existing, err := mgr.ReadFile(valuesPath)
 	if err != nil {
 		return renderedValues, nil
 	}
-	merged, err := renderer.MergeAppValues(existing, renderedValues)
+	merged, err := renderer.MergeAppValuesWith(existing, renderedValues, opts)
 	if err != nil {
 		return "", fmt.Errorf("merging into %s: %w", valuesPath, err)
 	}
 	return merged, nil
+}
+
+// advisoryValuesKeys names the values.yaml keys this render is GUESSING rather
+// than reporting, so the merge writes them only where git is silent.
+//
+// The public port is the one that bites. A console-created app has a port
+// somebody chose, recorded as port_source "user". An adopted or hand-maintained
+// app has whatever the platform inferred from its framework -- and for
+// internal/prod/telemost-bot that inference said 8080 while the uvicorn process
+// in the image had always listened on 8000, which is written in git and nowhere
+// else. Saving one environment variable rewrote servicePort to the guess, and
+// the Service pointed at a port nothing was listening on. That is invisible to
+// the clobber guard: nothing was deleted, a number changed.
+//
+// service.enabled travels with it: it is derived from the same guessed port.
+func advisoryValuesKeys(cur map[string]any) []string {
+	if source, _ := cur["port_source"].(string); source == appPortSourceUser {
+		return nil
+	}
+	return []string{"servicePort", "service"}
 }
 
 // guardValuesClobber refuses a deploy that would delete parts of an app's
@@ -2748,7 +2771,7 @@ func (w *DBWatcher) doUpdateAppStorage(ctx context.Context, op db.Operation) err
 
 	gitPath := renderer.AppGitPath(projectName, envName, p.AppName)
 	valuesPath := renderer.AppHelmValuesGitPath(projectName, envName, p.AppName)
-	mergedValues, err := w.mergeAppValues(mgr, valuesPath, valuesYAML)
+	mergedValues, err := w.mergeAppValues(mgr, valuesPath, valuesYAML, renderer.MergeOptions{Advisory: advisoryValuesKeys(cur)})
 	if err != nil {
 		return err
 	}

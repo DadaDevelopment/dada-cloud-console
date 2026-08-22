@@ -98,8 +98,128 @@ func TestMergeAppValuesRemovesOwnedKeyTheRenderOmits(t *testing.T) {
 	}
 }
 
-func TestMergeAppValuesReplacesOwnedListWholesale(t *testing.T) {
+// TestMergeAppValuesKeepsEnvOnlyGitKnows pins the half of the 2026-08-21
+// telemost-bot loss that the console could see coming and did anyway: the
+// render carries only the variables env_vars holds rows for, and it used to
+// replace the whole list. Eight secretKeyRef entries -- Postgres credentials
+// among them -- lived only in git, so saving one variable deleted them all.
+//
+// Silence about a variable is not an instruction to remove it. Entries are
+// matched by name: the render wins for names it mentions, git keeps the rest.
+func TestMergeAppValuesKeepsEnvOnlyGitKnows(t *testing.T) {
+	c := common(t, mergeOrFail(t, envMergeExisting, envMergeRendered))
+
+	env, ok := c["extraEnv"].([]any)
+	if !ok {
+		t.Fatalf("extraEnv missing: %#v", c)
+	}
+	got := map[string]any{}
+	for _, e := range env {
+		entry := e.(map[string]any)
+		got[entry["name"].(string)] = entry["value"]
+	}
+	if got["A"] != "9" {
+		t.Errorf("A = %v, want 9 from the render", got["A"])
+	}
+	if _, ok := got["B"]; !ok {
+		t.Errorf("B lives only in git and the render is silent about it, so it must survive: %#v", env)
+	}
+}
+
+// TestMergeAppValuesRemovesTheEnvEntryTheOperationDeclared is the other side of
+// the same contract: DeleteEnvVar has to be able to delete, and it says so by
+// declaring the path it means to drop -- the same notation the clobber guard
+// reports.
+func TestMergeAppValuesRemovesTheEnvEntryTheOperationDeclared(t *testing.T) {
+	out, err := MergeAppValuesWith(envMergeExisting, envMergeRendered, MergeOptions{
+		ExpectedDrops: []string{"common.extraEnv.B"},
+	})
+	if err != nil {
+		t.Fatalf("MergeAppValuesWith: %v", err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("merged output does not parse: %v\n%s", err, out)
+	}
+	env := common(t, doc)["extraEnv"].([]any)
+	for _, e := range env {
+		if e.(map[string]any)["name"] == "B" {
+			t.Fatalf("a declared drop must remove the entry, got %#v", env)
+		}
+	}
+	if len(env) != 1 {
+		t.Fatalf("only the declared entry may go, got %#v", env)
+	}
+}
+
+// TestMergeAppValuesAdvisoryKeysNeverOverwriteGit covers the quiet half of the
+// same incident. servicePort and useDotEnv are emitted by every render whether
+// or not anyone chose them, so writing them is a guess -- and on 2026-08-21 the
+// guess moved servicePort 8000 -> 8080 and useDotEnv true -> false as in-place
+// CHANGES, which DroppedPaths can never report. An advisory key is written only
+// where git is silent, and is never deleted by a render's silence either.
+func TestMergeAppValuesAdvisoryKeysNeverOverwriteGit(t *testing.T) {
 	existing := `common:
+    image:
+        name: img
+        tag: t
+    servicePort: 8000
+    useDotEnv: true
+`
+	rendered := `common:
+    image:
+        name: img
+        tag: t
+    servicePort: 8080
+    useDotEnv: "false"
+    replicas: 1
+`
+	out, err := MergeAppValuesWith(existing, rendered, MergeOptions{Advisory: []string{"servicePort", "service"}})
+	if err != nil {
+		t.Fatalf("MergeAppValuesWith: %v", err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("merged output does not parse: %v\n%s", err, out)
+	}
+	c := common(t, doc)
+	if c["servicePort"] != 8000 {
+		t.Errorf("servicePort = %v, want the 8000 a human put in git", c["servicePort"])
+	}
+	if c["useDotEnv"] != true {
+		t.Errorf("useDotEnv = %v, want the true a human put in git", c["useDotEnv"])
+	}
+
+	fresh := common(t, mergeOrFail(t, "common:\n    image:\n        name: img\n        tag: t\n", rendered))
+	if fresh["useDotEnv"] != "false" {
+		t.Errorf("an advisory key must still be written where git is silent, got %#v", fresh)
+	}
+}
+
+// TestMergeAppValuesKeepsAnAuthoritativePortAuthoritative proves advisory is a
+// per-render decision, not a property of the key: when the user chose the port
+// (port_source=user) the caller passes no advisory list and the console's value
+// wins, or changing the port in the UI would do nothing.
+func TestMergeAppValuesKeepsAnAuthoritativePortAuthoritative(t *testing.T) {
+	existing := `common:
+    image:
+        name: img
+        tag: t
+    servicePort: 8000
+`
+	rendered := `common:
+    image:
+        name: img
+        tag: t
+    servicePort: 8080
+`
+	c := common(t, mergeOrFail(t, existing, rendered))
+	if c["servicePort"] != 8080 {
+		t.Errorf("servicePort = %v, want the rendered 8080", c["servicePort"])
+	}
+}
+
+const envMergeExisting = `common:
     image:
         name: img
         tag: t
@@ -109,7 +229,8 @@ func TestMergeAppValuesReplacesOwnedListWholesale(t *testing.T) {
         - name: B
           value: "2"
 `
-	rendered := `common:
+
+const envMergeRendered = `common:
     image:
         name: img
         tag: t
@@ -117,19 +238,6 @@ func TestMergeAppValuesReplacesOwnedListWholesale(t *testing.T) {
         - name: A
           value: "9"
 `
-	c := common(t, mergeOrFail(t, existing, rendered))
-
-	env, ok := c["extraEnv"].([]any)
-	if !ok {
-		t.Fatalf("extraEnv missing: %#v", c)
-	}
-	if len(env) != 1 {
-		t.Fatalf("extraEnv should mirror the render exactly (deleting B), got %#v", env)
-	}
-	if first := env[0].(map[string]any); first["value"] != "9" {
-		t.Errorf("extraEnv[0].value = %v, want 9", first["value"])
-	}
-}
 
 func TestMergeAppValuesEmptyExistingIsTheRender(t *testing.T) {
 	rendered := "common:\n    replicas: 2\n"

@@ -2,6 +2,7 @@ package renderer
 
 import (
 	"fmt"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -53,7 +54,46 @@ var ownedCommonKeys = []string{
 // than being overwritten: an unreadable file is not permission to discard it,
 // and Argo would render chart defaults over the live release if a broken one
 // were committed.
+// MergeOptions narrows what a render is allowed to say about the file in git.
+//
+// Two of the keys the renderer emits are not console state at all -- they are
+// platform guesses that get emitted on every deploy whether or not anyone chose
+// them. Writing a guess over a value a human put in git is the same data loss as
+// deleting it, and the clobber guard cannot see it, because the guard only
+// reports keys that DISAPPEAR: on 2026-08-21 an env-var save on
+// internal/prod/telemost-bot moved servicePort 8000 -> 8080 and useDotEnv
+// true -> false, both as in-place CHANGES, and the bot came up with a Service
+// pointing at a port nothing listened on.
+//
+// Advisory names those keys. An advisory key is written when git does not have
+// it -- a console-created app still gets its defaults -- and left exactly as it
+// is when git does, in either direction: a render that omits an advisory key
+// does not delete it either.
+//
+// ExpectedDrops are the values.yaml paths the operation MEANS to remove, in the
+// same notation the clobber guard reports (common.extraEnv.FOO). They are what
+// makes removing an environment variable possible now that a render's silence
+// about an entry no longer removes it.
+type MergeOptions struct {
+	Advisory      []string
+	ExpectedDrops []string
+}
+
+// alwaysAdvisory are the owned keys no caller can make authoritative, because
+// nothing in the console's database backs them. useDotEnv is a hardcoded
+// constant in RenderAppValues: the console has never had a field for it, so
+// every render asserts "false" about an app that may well have been mounting a
+// .env for a year.
+var alwaysAdvisory = []string{"useDotEnv"}
+
+// MergeAppValues merges with the console treated as authoritative for every key
+// it owns except the intrinsically advisory ones. Production goes through
+// MergeAppValuesWith so a deploy can declare which of its values are guesses.
 func MergeAppValues(existingYAML, renderedYAML string) (string, error) {
+	return MergeAppValuesWith(existingYAML, renderedYAML, MergeOptions{})
+}
+
+func MergeAppValuesWith(existingYAML, renderedYAML string, opts MergeOptions) (string, error) {
 	var rendered yaml.Node
 	if err := yaml.Unmarshal([]byte(renderedYAML), &rendered); err != nil {
 		return "", fmt.Errorf("parsing rendered values: %w", err)
@@ -87,9 +127,17 @@ func MergeAppValues(existingYAML, renderedYAML string) (string, error) {
 			continue
 		}
 		for _, owned := range ownedCommonKeys {
-			if v := mapValue(renderedCommon, owned); v != nil {
+			v := mapValue(renderedCommon, owned)
+			switch {
+			case owned == extraEnvKey:
+				mergeExtraEnv(existingCommon, v, opts.ExpectedDrops)
+			case isAdvisory(owned, opts.Advisory):
+				if mapValue(existingCommon, owned) == nil && v != nil {
+					setMapValue(existingCommon, owned, v)
+				}
+			case v != nil:
 				setMapValue(existingCommon, owned, v)
-			} else {
+			default:
 				deleteMapKey(existingCommon, owned)
 			}
 		}
@@ -100,6 +148,100 @@ func MergeAppValues(existingYAML, renderedYAML string) (string, error) {
 		return "", fmt.Errorf("re-marshalling merged values: %w", err)
 	}
 	return out, nil
+}
+
+// extraEnvKey is the one owned key whose entries are merged by name instead of
+// being replaced as a block. See mergeExtraEnv.
+const extraEnvKey = "extraEnv"
+
+// isAdvisory reports whether an owned key carries a platform guess rather than
+// console state on this render.
+func isAdvisory(key string, advisory []string) bool {
+	for _, a := range alwaysAdvisory {
+		if a == key {
+			return true
+		}
+	}
+	for _, a := range advisory {
+		if a == key {
+			return true
+		}
+	}
+	return false
+}
+
+// mergeExtraEnv folds the rendered environment into the one already in git,
+// matched by variable name, and removes only the entries the operation declared.
+//
+// Replacing the list wholesale was the loudest half of the 2026-08-21 loss:
+// internal/prod/telemost-bot carried eight extraEnv entries -- its Postgres
+// credentials among them -- that live only in git, the console had rows for
+// none of them, and saving one new variable rendered a one-entry list that
+// replaced all eight. The console cannot delete what it has never been told
+// about; silence about an entry is not an instruction to remove it.
+//
+// A caller that means to remove one says so through MergeOptions.ExpectedDrops,
+// which is exactly what DeleteEnvVar declares, so removing a variable in the UI
+// still removes it from git.
+func mergeExtraEnv(existingCommon *yaml.Node, rendered *yaml.Node, expectedDrops []string) {
+	existing := mapValue(existingCommon, extraEnvKey)
+	if existing == nil || existing.Kind != yaml.SequenceNode {
+		if rendered != nil {
+			setMapValue(existingCommon, extraEnvKey, rendered)
+		}
+		return
+	}
+
+	if rendered != nil && rendered.Kind == yaml.SequenceNode {
+		for _, item := range rendered.Content {
+			name := envEntryName(item)
+			if name == "" {
+				continue
+			}
+			if at := envEntryIndex(existing, name); at >= 0 {
+				existing.Content[at] = item
+				continue
+			}
+			existing.Content = append(existing.Content, item)
+		}
+	}
+
+	for _, drop := range expectedDrops {
+		name := strings.TrimPrefix(drop, "common."+extraEnvKey+".")
+		if name == drop || name == "" {
+			continue
+		}
+		if at := envEntryIndex(existing, name); at >= 0 {
+			existing.Content = append(existing.Content[:at], existing.Content[at+1:]...)
+		}
+	}
+
+	if len(existing.Content) == 0 {
+		deleteMapKey(existingCommon, extraEnvKey)
+	}
+}
+
+// envEntryName returns the "name" of one extraEnv entry, or "" when the entry
+// is not a named mapping -- a raw scalar or a Helm template the console must
+// leave alone.
+func envEntryName(item *yaml.Node) string {
+	if item.Kind != yaml.MappingNode {
+		return ""
+	}
+	if n := mapValue(item, "name"); n != nil {
+		return n.Value
+	}
+	return ""
+}
+
+// envEntryIndex finds an extraEnv entry by variable name.
+func envEntryIndex(list *yaml.Node, name string) int {
+	for i, item := range list.Content {
+		if envEntryName(item) == name {
+			return i
+		}
+	}
+	return -1
 }
 
 // documentRoot unwraps the document node yaml.Unmarshal produces for a whole
