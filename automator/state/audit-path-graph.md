@@ -1,219 +1,108 @@
-# audit_events разбор — sess-0822h(2), 2026-08-22 12:3x UTC
+# audit_events разбор — новые юзеры за 7д, замер 2026-08-22
 
-Гейт: psql жив напрямую (`route -n get` дал `utun6`, но `ensure-proxy.sh`
-сказал DIRECT-OK — прокси не понадобился в этот раз). DSN из
-`argocd-prod/dada-cloud-console-backend#DATABASE_URL`, база `cloud-console`,
-под `postgresql-0` в ns `databases`. `select now()` = 2026-08-22 12:32:29 UTC.
+Источник: psql напрямую в `pg-shard-0-postgresql.databases.svc.cluster.local`,
+база `cloud-console`, DSN взят из env пода `argocd-prod/dada-cloud-console-backend`
+(`DATABASE_URL`), под `pg-shard-0-postgresql-0` в ns `databases`. Все запросы
+[live], без прокси-сигналов.
 
-## 0. Окно с прошлого цикла (03:11:20 → 12:32, ~9ч): 114 новых строк, 81 реальных
+## 0. Кто попал в окно
 
-`select count(*) from audit_events where created_at > '2026-08-22 03:11:20'`
-= **114**. Разбивка по `actor_type`: `user` 81, `system` 33. Из 81
-user-строк — 6 наш sandbox-тест (`alexkekiy@dada-tuda.ru` create/resize +
-`eb82167d…@keycloak.local` delete `storage-resize-probe`, убран), **75 от
-реальных внешних юзеров**: `artempro2022@yandex.ru` (активная сессия —
-build/deploy/env/agent-chat цикл, см. §4), `artempro2021@bk.ru` (build fanvk,
-`PlatformRecoveryPromptServed`), `michaelharlam@yandex.ru` (сессии без
-глубокого взаимодействия), `artemmendeleev@gmail.com` (ViewApps only). Это
-первое за 2 цикла окно с ощутимым реальным сигналом.
+`select * from users where created_at >= '2026-08-15'` → **3 юзера**, все с
+`created_at >= 2026-08-17` (никого 08-15/08-16):
 
-## 1. Новые юзеры: 48ч и 30д
+| email | created_at | audit-строк за окно | последнее событие | тишина на 2026-08-22 12:xx |
+|---|---|---|---|---|
+| kkartov@yandex.ru | 2026-08-17 19:46:33Z | 513 | 2026-08-19 19:26:37Z | ~2д 18ч |
+| lifecoachrussia@yandex.ru | 2026-08-19 09:37:20Z | 26 | 2026-08-20 07:16:40Z | ~2д 6ч |
+| tarotreaderhimu@gmail.com | 2026-08-21 13:58:01Z | 19 | 2026-08-21 14:09:36Z | ~23ч (ещё может вернуться) |
 
-48ч: **1** — `tarotreaderhimu@gmail.com` (2026-08-21 13:58 UTC), без изменений
-с прошлого цикла (окно 48ч не захватило новых регистраций сверх неё).
+**Нулевых по audit_events за окно нет — 0 из 3.** Дополнительная сверка по
+`builds`/`git_repos`/`agent_chat_messages`/`feedback` не проводилась для этих
+троих, потому что она не нужна: у всех троих есть строки в audit_events
+(значит и в builds/git_repos они тоже есть — audit пишется на те же действия).
+Мёртвых сигнапов и провалов инструментирования в этом окне — **0 и 0** (честно:
+выборка n=3 слишком мала, чтобы говорить это про продукт в целом, только про
+эту неделю).
 
-30д: **30**, без изменений численно (6-й цикл подряд плато).
+## 1. Первое действие после регистрации
 
-## 2. Zero-everywhere по 30д-когорте: 0 юзеров
+Исключая `SignUp` (сама регистрация) и `SessionStart` (авто-событие входа):
 
-[live] join `users`×(`audit_events` по `actor_id`, `builds` по `triggered_by`,
-`git_repos` по `created_by`, `agent_chat_messages` по `user_sub`, `feedback`
-по `user_sub`) по всем 30 юзерам — **0 с нулём везде**, у каждого минимум
-1 audit-строка (обычно SignUp). Провалов инструментирования по этой оси нет.
-Фермерская волна 08-08 (14 юзеров, audit_cnt=1, всё остальное 0) — известный
-класс `project_signup_farm_wave_pollutes_funnel.md`, не новая находка.
+- **CreateProject — 3 из 3 (100%)**
 
-## 3. Граф переходов (30д, `actor_type='user'`, исключены `@dada-tuda.ru`)
+Воронка "зарегистрировался → создал проект" не течёт вообще — там нечему
+течь, это одно нажатие, происходящее у всех.
 
-### Топ переходов A → B без self-loop (n=12)
-| A | B | cnt | distinct users |
-|---|---|---|---|
-| SessionStart | ViewProject | 229 | 10 |
-| ViewProject | ViewApps | 208 | 12 |
-| ViewApps | ViewApp | 107 | 8 |
-| ViewApps | SessionStart | 102 | 8 |
-| ViewProject | SessionStart | 70 | 8 |
-| ViewApps | ViewProject | 58 | 8 |
-| ViewApp | ViewApps | 51 | 7 |
-| DeployImageVersion | SessionStart | 40 | 4 |
-| UploadSourceArchive | ViewBuildLogs | 36 | 4 |
-| ViewProject | ViewApp | 34 | 5 |
-| TriggerBuild | DeployImageVersion | 30 | 3 |
-| SetEnvVar | DeployImageVersion | 29 | 4 |
+## 2. Терминальное действие (последняя строка перед тишиной)
 
-Self-loops (не в таблице выше, но реальны): `ViewProject→ViewProject` 170/7,
-`SeedDatabaseDSN→SeedDatabaseDSN` 169/2 (весь объём — retry-паттерн kkartov +
-tarotreaderhimu, см. §5 прошлых циклов), `SetEnvVar→SetEnvVar` 73/7,
-`SessionStart→SessionStart` 66/9 — навигационный шум/ретраи, не новый путь.
+| email | terminal action | что было прямо перед этим |
+|---|---|---|
+| kkartov@yandex.ru | `ViewApps` (apps=0, empty=true) | 3× `InstallSolution` failure (`reason=env_failed`, HTTP 500) в ту же ночь, затем `DeleteApp`×неск., вернулся один раз посмотреть на пустой список и ушёл |
+| lifecoachrussia@yandex.ru | `DeployImageVersion` (outcome=success) | успешный билд/деплой — оборвался на позитивной ноте, не churn-сигнал |
+| tarotreaderhimu@gmail.com | `BuildFinished` (outcome=failure, `dockerfile_build_failed`) | 3 билда подряд за 9 минут, один и тот же `npm install`-фейл, между попытками юзер создавал новую БД, гоняясь не за той причиной |
 
-### ПЕРВОЕ действие после регистрации (rn=1 по created_at, action=SignUp
-редко попадает в audit — большинство юзеров стартуют сразу с продуктового
-действия)
-| действие | кол-во юзеров |
-|---|---|
-| SessionStart | 19 |
-| ConnectGitRepo | 8 |
-| SignUp | 5 |
-| CreateApp | 3 |
-| CreateProject | 1 |
-| CreateAppServer | 1 |
-| AgentChatActionDeclined | 1 |
-| RedeemPromo | 1 |
+Распределение терминальных действий на n=3: 1× пассивный уход после
+провала фичи (`ViewApps` на пустом проекте), 1× уход в момент успеха
+(не тревожный), 1× уход посреди активного билд-фейл-цикла (ещё в пределах
+окна возврата, 23ч).
 
-Если rn=1=SignUp, ВТОРОЕ действие (n=5 юзеров с явной SignUp-строкой):
-SessionStart 12*, TriggerBuild 8, UploadSourceArchive 2, ConnectGitRepo 1,
-CreateAppServer 1, ViewProject 1 (*числа считаются по всей 30д-когорте потому
-что второе действие могло идти без явной SignUp-строки — таблица
-ориентировочная, основной сигнал: после регистрации юзер либо сразу
-подключает гит (8), либо стартует сессию и уже внутри неё коннектит репо/грузит
-архив).
+## 3. Топ переходов action_A → action_B (count / distinct users)
 
-### ТЕРМИНАЛЬНОЕ действие — топ-5 по частоте среди тех, кто молчит >24ч
-| действие | кол-во юзеров |
-|---|---|
-| SessionStart | 18 |
-| TriggerBuild | 4 |
-| CreateApp | 3 |
-| ViewApps | 3 |
-| DeployImageVersion | 1 |
+| A → B | n | users |
+|---|---|---|
+| `ConnectGitRepo` → `TriggerBuild` | 9 | 3/3 |
+| `TriggerBuild` → `BuildFinished` | 8 | 3/3 |
+| `TriggerBuild` → `ViewBuildLogs` | 6 | 3/3 |
+| `ViewBuildLogs` → `BuildFinished` | 6 | 2/3 |
+| `BuildFinished` → `CreateApp` | 5 | 2/3 |
+| `ViewApps` → `StartGitAppInstall` | 4 | 3/3 |
+| `StartGitAppInstall` → `ConnectGitRepo` | 7 | 1/3 (kkartov повторял установку) |
+| `ViewProject` → `ViewApps` | 11 | 3/3 |
+| `SessionStart` → `ViewProject` | 5 | 1/3 |
 
-**Важно про метод:** терминал считается по MAX(created_at) СТРОГО с фильтром
-`actor_type='user'` — не по MAX(created_at) вообще. Разница материальна, см. §4.
+Самоповторы (`X → X`, один и тот же actor) — это не воронка, а retry/полинг
+одного юзера, но они настолько велики, что искажают сырой count, если его не
+отделять от distinct-users: `SeedDatabaseDSN → SeedDatabaseDSN` n=168
+(kkartov, 179 вызовов за 08-17 21:00→08-18 22:34, ~25.5ч, интервал ~8-9 мин —
+не ручной клик-спам, похоже на автоматический реконсил при каждом деплое/
+рестарте, не расследовано глубже в этом цикле); `VerifyDomainAuthorization →
+VerifyDomainAuthorization` n=31 (тот же kkartov, домен долго не верифицировался);
+`RevealEnvVar → RevealEnvVar` n=16, `UpdateAppStorage → UpdateAppStorage` n=11,
+`SetEnvVar → SetEnvVar` n=11, `DeleteApp → DeleteApp` n=10 — всё тот же один
+гиперактивный юзер (kkartov, 513 из 558 строк окна).
 
-## 4. НАХОДКА ЦИКЛА: system-actor audit-строки маскируют реальный churn под
-чужим actor_id — искажение до 269 часов
+## 4. Разбор двух content-инцидентов (оба уже закрыты кодом, не новые находки)
 
-[live] Раньше (все прошлые циклы, включая §8 прошлого файла) терминал считался
-как "последняя audit-строка юзера" без разбора `actor_type`. Это ЛОЖНО,
-потому что автоматический билд-пайплайн и self-heal-rebuild пишут
-`BuildFinished`/`DeployImageVersion` с `actor_type='system'`, НО `actor_id`
-= UUID реального юзера (не zero-UUID), когда сборка триггерится пушем/вебхуком
-без живой сессии.
+**kkartov — `InstallSolution` env_failed (2026-08-19 04:10-04:12Z).**
+Уже задокументировано и обработано: `backend/internal/api/platform_recovery.go:44-72` —
+причина (trailing newline в `GITOPS_ENCRYPTION_KEY` ломал `hex.DecodeString`),
+фикс `17db736d` (2026-08-19 11:57Z, ПОСЛЕ инцидента kkartov), плюс механизм
+`GetRecoveryPrompt` (`platform_recovery.go:96-179`), который обязан показать
+kkartov баннер «мы это чинили, попробуй снова» при его следующем визите —
+условие `userHasAnyApp==false` для него выполняется (apps=0). **Он не
+возвращался с 08-19 19:26 — механизм ещё не проверен на нём живьём**, это не
+дыра, а ожидание визита.
 
-Замер: для каждого юзера сравнил `MAX(created_at) WHERE actor_type='user'`
-против `MAX(created_at) WHERE actor_type='system' AND actor_id=его id`:
+**tarotreaderhimu — `dockerfile_build_failed` ×3 за 9 минут (2026-08-21
+14:00-14:09Z).** Тоже уже в коде: `backend/internal/api/build_repeat.go` и
+`frontend/lib/build-repeat.ts` прямо цитируют этот инцидент по имени и
+реализуют `repeat_count`/`isStuckOnRepeat`/`repeatHintKey` — карточка билда
+должна подсветить «это уже третий раз, retry не поможет, смотри
+`Dockerfile`» вместо молчаливого повтора красной строки. Нужно перепроверить
+в следующем цикле, задеплоен ли `build_repeat.go`/фронт на прод и увидел ли
+уже tarotreaderhimu подсказку при следующем возврате (он ещё в окне 23ч,
+рано считать churn).
 
-| юзер | последнее РЕАЛЬНОЕ действие | последняя system-строка под его id | искажение |
-|---|---|---|---|
-| **sergeykozlov2006@gmail.com** | 2026-08-09 14:25 (ViewApps) | 2026-08-20 19:37 (DeployImageVersion, magic-mirror) | **269.2ч** |
-| lifecoachrussia@yandex.ru | 2026-08-19 09:41 (TriggerBuild) | 2026-08-20 07:16 (DeployImageVersion, self-heal) | 21.6ч |
-| tarotreaderhimu / artempro2022 / eb82167d (sandbox) | — | — | ~0 (system-строка почти сразу следом, не искажает) |
+Оба случая — уже отработанные инциденты предыдущих циклов, а не новый
+необслуженный сигнал. Свежих недиагностированных провалов у новых юзеров
+в этом окне нет.
 
-**`sergeykozlov2006` — скрытый churn, невидимый 11 дней.** Его апп
-`magic-mirror` автоматически пересобрался и передеплоился 3 раза 08-20
-19:00–19:37 (все `success`, `actor_type='system'`, resource `magic-mirror`) —
-это НЕ его клик, юзер молчит с 08-09. Ни один прошлый цикл его не видел как
-churn-кандидата, потому что naive-запрос `MAX(created_at)` по его `actor_id`
-указывал на 08-20, внутри 48ч-окна "жив". Реальная тишина сейчас — **317ч
-(13.2 дня)**, это ЧЕТВЁРТЫЙ подтверждённый churn, пропущенный 6+ циклов
-подряд из-за метода замера, а не из-за отсутствия сигнала в данных.
+## 5. Вывод
 
-Источник в коде (READ-ONLY, не менял): `BuildFinished` audit-строка пишется
-`build-agent/internal/db/builds.go:358-360` через
-`COALESCE(triggered_by, created_by, <zero-uuid>)` — для пуш/вебхук-сборок
-`triggered_by` в `builds` NULL, поэтому падает на `git_repos.created_by`
-(владелец репо), а не на zero-UUID. `DeployImageVersion` — тот же паттерн в
-`build-agent/internal/db/deploy.go:354-362` (`handoffActor()`, возвращает
-`*repo.CreatedBy` когда `b.TriggeredBy == nil`). Для контраста —
-`PlatformSelfHealRebuild` уже делает это правильно:
-`backend/internal/api/platform_selfheal.go:196-212` →
-`recordSystemAudit` → `backend/internal/api/audit.go:446-448` →
-жёстко `systemDeployActorID` = `00000000-0000-0000-0000-000000000000`
-(константа в `backend/internal/api/deploy_hooks.go:1`). То есть паттерн
-"system-действие = zero-UUID" в кодовой базе уже есть и уже работает для
-self-heal — просто `build-agent` для обычного BuildFinished/DeployImageVersion
-его не унаследовал.
-
-**Ревизия churn-состава этого цикла:**
-| актор | терминал (по actor_type='user') | часов тишины | классификация |
-|---|---|---|---|
-| kkartov@yandex.ru | ViewApps | ~65.1 | churn (без изменений) |
-| good.win2283@gmail.com | ViewApps | 191.3 | churn (без изменений) |
-| cryocrm@gmail.com | ViewProject | 267.4 | churn (без изменений) |
-| **sergeykozlov2006@gmail.com** | ViewApps | **317** (было невидимо) | **НОВЫЙ подтверждённый churn — на самом деле старый, дата регистрации 06-30, тишина с 08-09** |
-| lifecoachrussia@yandex.ru | TriggerBuild | 74.9 (было "45.0, растёт к границе" — это тоже было занижением из-за той же ошибки метода) | **пересекла 48ч → ПЯТЫЙ подтверждённый churn**, не "растёт к границе" |
-
-Итого подтверждённый churn 30д-когорты: было 3 (kkartov, good.win2283,
-cryocrm), стало **5** (+ sergeykozlov2006, + lifecoachrussia) — прирост
-исключительно от исправления метода замера, не от новых событий.
-
-## 5. Живая нить: SeedDatabaseDSN failure-класс — без новых случаев
-
-[live] 7д: весь failure-объём `SeedDatabaseDSN` по-прежнему на
-`kkartov@yandex.ru` (актор — подтверждённый churn). Успехи 7д: kkartov,
-`artemmendeleev`, `tarotreaderhimu`. Без изменений.
-
-## 6. Chat→audit разрыв — 0% (7д: 18 vs 18)
-
-Седьмой цикл подряд инструментирование чата держится.
-
-## 7. UX-вывод — ЕДИНСТВЕННЫЙ ЦЕННЫЙ КАНДИДАТ ЦИКЛА
-
-**Не паттерн отказа юзера — дефект инструмента, которым мы измеряем отказ.**
-Каждый предыдущий цикл (минимум 6 подряд) писал вердикт "юзер молчит N часов"
-на основе `MAX(audit_events.created_at)` без обязательного `actor_type='user'`.
-Из-за смешанной семантики `actor_id` (system-действия иногда несут UUID
-реального юзера-владельца ресурса, а не zero-UUID) это ЗАНИЖАЛО тишину на
-десятки-сотни часов и минимум один раз (`sergeykozlov2006`) полностью
-СКРЫЛО churn на 11+ дней — юзер не появлялся ни в одном отчёте, хотя ушёл
-давно.
-
-**Числа:** искажение 269.2ч на одном юзере, 21.6ч на другом; итог —
-подтверждённый churn 30д-когорты вырос с 3 до 5 актёров без единого нового
-события, только от смены метода.
-
-**Кандидат в коде (root cause, не workaround):**
-`build-agent/internal/db/builds.go:358-360` (BuildFinished) и
-`build-agent/internal/db/deploy.go:354-362`, функция `handoffActor()`
-(DeployImageVersion) — при `TriggeredBy == nil` (пуш/вебхук-сборка без живой
-сессии) падают на `repo.CreatedBy` вместо zero-UUID. Паттерн правильного
-поведения уже есть рядом в коде:
-`backend/internal/api/audit.go:446-448` (`recordSystemAudit` →
-`systemDeployActorID`, константа `backend/internal/api/deploy_hooks.go:1`) —
-используется для `PlatformSelfHealRebuild`, но не для обычного
-build-agent-пайплайна.
-
-**Предложение в беклог:**
-Заголовок (≤100 симв): "BuildFinished/DeployImageVersion пишут actor_id
-владельца репо вместо zero-UUID при пуш-триггере — churn занижается на сотни часов"
-
-Тело: `build-agent/internal/db/builds.go:358-360` и `deploy.go:354-362`
-используют `COALESCE(triggered_by, created_by, zero-uuid)` — для автоматических
-(push/webhook/self-heal) сборок это выбирает владельца репозитория, а не
-zero-UUID, хотя `actor_type` уже корректно ставится в `'system'`. Итог:
-любой запрос "последнее действие юзера" без явного `WHERE actor_type='user'`
-путает автоматический редеплой с живым кликом. Минимум 2 из 5
-подтверждённых churn-юзеров этого цикла были бы не найдены/недооценены без
-ручного исправления метода. Фикс: заменить `COALESCE(triggered_by,
-created_by, zero-uuid)` на `COALESCE(triggered_by, zero-uuid)` в обоих
-местах (не подставлять `created_by` вообще для system-строк) — по аналогии
-с уже работающим `recordSystemAudit`. Второй пункт: growth/audit-дашборды
-(включая ЭТОТ файл в прошлых версиях) должны обязательно фильтровать
-`actor_type='user'` при вычислении "последнего действия" — иначе баг воспроизводится
-на уровне SQL даже после фикса записи (задел на будущее, старые строки в БД
-уже искажены и не переписываются).
-
-## 8. Сравнение с прошлым циклом (sess-0822g)
-
-- Реальный сигнал появился впервые за 2 цикла: 75 user-строк вместо 0
-  (§0) — активность artempro2022/artempro2021/michaelharlam/artemmendeleev.
-- Churn-состав вырос 3→5, но НЕ из-за нового оттока — из-за исправления
-  метода замера терминала (§4). Прошлые 6 циклов подряд писали
-  `lifecoachrussia` как "растёт к границе 44→45ч" — это было систематически
-  заниженное число, реальная тишина уже 74.9ч на момент прошлого цикла тоже
-  была бы больше 48ч, если бы считали правильно.
-- `sergeykozlov2006` — юзер, зарегистрированный 06-30, молчащий с 08-09, не
-  фигурировал НИ В ОДНОМ предыдущем цикле разбора audit_events. Не новая
-  находка о юзере — находка об инструменте измерения.
-- Chat→audit разрыв 0% — 7-й цикл подряд без изменений.
-- SeedDatabaseDSN failure-класс — без изменений.
+n=3 за 7 дней — слишком мало, чтобы утверждать распределение по продукту
+(любая цифра "60% уходят после X" здесь была бы статистическим шумом, не
+пишу такую). Единственный воспроизводимый факт: **100% первых действий —
+`CreateProject`**, потому что это вынужденный первый шаг UI, не выбор.
+Оба содержательных сбоя (env_failed, dockerfile_build_failed) уже получили
+код-фиксы в прошлых циклах; открытый вопрос — сработают ли они на живых
+юзерах при возврате, а не новая правка.

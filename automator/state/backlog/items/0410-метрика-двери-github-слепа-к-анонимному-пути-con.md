@@ -7,8 +7,8 @@ hypothesis: H02
 title: Метрика двери GitHub слепа к анонимному пути connect: успех считается отвалом
 created: 2026-08-20
 sess: sess-0820f
-locked_by: sess-0821f
-locked_until: 2026-08-21T10:38Z
+locked_by: sess-0822i
+locked_until: 2026-08-22T15:10Z
 ---
 Вскрыто при закрытии 0388 (sess-0820f). `git-oauth-flight.sql` меряет пару
 `StartGitAppInstall`/`FinishGitAppInstall`, то есть ТОЛЬКО перелёт установки GitHub App. Но
