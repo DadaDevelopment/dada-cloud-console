@@ -48,41 +48,52 @@ type managedAgentPayload struct {
 // per-project runtime does not need a new operation action.
 const defaultAgentRuntimeNamespace = "kagent"
 
-// carriedOverAgentMemory returns the long-term memory the claim in git already
-// declares, or nil when it declares none.
+// carriedOverAgentFields are the parts of a claim the console does not know
+// about and therefore cannot re-state on a save.
+type carriedOverAgentFields struct {
+	Memory            *renderer.ManagedAgentMemory
+	LangfuseProjectID string
+}
+
+// carriedOverAgent returns the fields the claim in git already declares that a
+// console save would otherwise erase.
 //
-// The console has no memory field: a save re-states every field it knows, and
-// what it does not know would leave the file on that save. Memory is the one
-// such field today -- an agent onboarded by hand can keep thirty days of notes,
-// and dropping them because somebody fixed a typo in the prompt is a data loss
-// nobody would connect to the edit that caused it.
-func carriedOverAgentMemory(mgr *git.Manager, valuesPath, name string) (*renderer.ManagedAgentMemory, error) {
+// A save re-states every field the console knows, and what it does not know
+// would leave the file on that save. Long-term memory is one such field -- an
+// agent onboarded by hand can keep thirty days of notes, and dropping them
+// because somebody fixed a typo in the prompt is a data loss nobody would
+// connect to the edit that caused it. The Langfuse project is the other: lose
+// it and the agent keeps running while its "traces" link goes silent.
+func carriedOverAgent(mgr *git.Manager, valuesPath, name string) (carriedOverAgentFields, error) {
+	var out carriedOverAgentFields
 	rv, err := loadResourcesValues(mgr, valuesPath)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
 	existing, found, err := rv.ManifestOfKindNamed("ManagedAgent", name)
 	if err != nil || !found {
-		return nil, err
+		return out, err
 	}
 	var claim struct {
 		Spec struct {
-			Memory *struct {
+			LangfuseProjectID string `yaml:"langfuseProjectId"`
+			Memory            *struct {
 				ModelConfig string `yaml:"modelConfig"`
 				TTLDays     int    `yaml:"ttlDays"`
 			} `yaml:"memory"`
 		} `yaml:"spec"`
 	}
 	if err := yaml.Unmarshal([]byte(existing), &claim); err != nil {
-		return nil, fmt.Errorf("parse existing agent %q: %w", name, err)
+		return out, fmt.Errorf("parse existing agent %q: %w", name, err)
 	}
-	if claim.Spec.Memory == nil || claim.Spec.Memory.ModelConfig == "" {
-		return nil, nil
+	out.LangfuseProjectID = claim.Spec.LangfuseProjectID
+	if claim.Spec.Memory != nil && claim.Spec.Memory.ModelConfig != "" {
+		out.Memory = &renderer.ManagedAgentMemory{
+			ModelConfig: claim.Spec.Memory.ModelConfig,
+			TTLDays:     claim.Spec.Memory.TTLDays,
+		}
 	}
-	return &renderer.ManagedAgentMemory{
-		ModelConfig: claim.Spec.Memory.ModelConfig,
-		TTLDays:     claim.Spec.Memory.TTLDays,
-	}, nil
+	return out, nil
 }
 
 // doCreateAgent writes one ManagedAgent claim into the project's agent carrier
@@ -136,11 +147,12 @@ func (w *DBWatcher) doCreateAgent(ctx context.Context, op db.Operation) error {
 	if err := mgr.EnsureCloned(); err != nil {
 		return err
 	}
-	memory, err := carriedOverAgentMemory(mgr, renderer.ManagedAgentResourcesValuesGitPath(projectName, envName), p.Name)
+	carried, err := carriedOverAgent(mgr, renderer.ManagedAgentResourcesValuesGitPath(projectName, envName), p.Name)
 	if err != nil {
 		return err
 	}
-	spec.Memory = memory
+	spec.Memory = carried.Memory
+	spec.LangfuseProjectID = carried.LangfuseProjectID
 
 	yaml, err := renderer.RenderManagedAgent(spec)
 	if err != nil {

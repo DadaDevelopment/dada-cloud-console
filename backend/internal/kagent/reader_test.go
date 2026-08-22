@@ -57,8 +57,12 @@ func agentCR(name string, ready bool) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "kagent.dev/v1alpha2",
 		"kind":       "Agent",
-		"metadata":   map[string]any{"name": name, "namespace": DefaultNamespace},
-		"spec":       map[string]any{},
+		"metadata": map[string]any{
+			"name":        name,
+			"namespace":   DefaultNamespace,
+			"annotations": map[string]any{LangfuseProjectAnnotation: "proj-1"},
+		},
+		"spec": map[string]any{},
 		"status": map[string]any{"conditions": []any{
 			map[string]any{"type": "Accepted", "status": "True", "reason": "Reconciled"},
 			map[string]any{"type": "Ready", "status": status, "reason": reason, "message": message},
@@ -70,7 +74,7 @@ func readerFor(t *testing.T, objs []runtime.Object, k8s ...runtime.Object) *Read
 	t.Helper()
 	dyn := dynamicfake.NewSimpleDynamicClient(scheme(), objs...)
 	return NewReaderWith(dyn, fake.NewSimpleClientset(k8s...), DefaultNamespace,
-		"https://langfuse.dada-tuda.ru/", "proj-1")
+		"https://langfuse.dada-tuda.ru/")
 }
 
 // TestListTools_ReportsWhatEachServerActuallyDiscovered is the reason this
@@ -185,7 +189,7 @@ func TestAgentState_RejectsANameTheClusterWouldReject(t *testing.T) {
 // service-account mount, and a console that will not start there costs more
 // than a panel that says it cannot see the cluster.
 func TestReader_OffClusterIsDisabledNotBroken(t *testing.T) {
-	r := NewReaderWith(nil, nil, "", "", "")
+	r := NewReaderWith(nil, nil, "", "")
 	if r.Enabled() {
 		t.Fatal("a reader with no clients must not claim to be enabled")
 	}
@@ -201,11 +205,43 @@ func TestReader_OffClusterIsDisabledNotBroken(t *testing.T) {
 }
 
 // TestTracesURL_EmptyWhenTheProjectIsUnknown: a link built from a guessed
-// project id lands on a Langfuse permission error, which reads as "traces are
-// broken" rather than "this console was never told where they are".
+// project id opens somebody else's traces, which reads as "this agent never
+// ran" rather than "the link is pointed at the wrong project".
 func TestTracesURL_EmptyWhenTheProjectIsUnknown(t *testing.T) {
-	r := NewReaderWith(nil, nil, "", "https://langfuse.dada-tuda.ru", "")
-	if got := r.tracesURL(); got != "" {
+	r := NewReaderWith(nil, nil, "", "https://langfuse.dada-tuda.ru")
+	if got := r.tracesURL(""); got != "" {
 		t.Fatalf("tracesURL() = %q, want empty", got)
+	}
+}
+
+// TestAgentState_TracesLinkFollowsTheAgentNotThePlatform is the defect this
+// annotation exists for: agents carry their own Langfuse credentials, so two
+// agents of one cluster write into two different projects, and a link built
+// from the platform's own project id sent every agent to the console's traces.
+func TestAgentState_TracesLinkFollowsTheAgentNotThePlatform(t *testing.T) {
+	own := agentCR("telemost-poc", true)
+	own.SetAnnotations(map[string]string{LangfuseProjectAnnotation: "proj-telemost"})
+
+	st, err := readerFor(t, []runtime.Object{own}).AgentState(context.Background(), "telemost-poc")
+	if err != nil {
+		t.Fatalf("AgentState: %v", err)
+	}
+	if st.TracesURL != "https://langfuse.dada-tuda.ru/project/proj-telemost/traces" {
+		t.Fatalf("TracesURL = %q, want the agent's own project", st.TracesURL)
+	}
+}
+
+// TestAgentState_NoTracesLinkWhenTheAgentDoesNotSayWhere: silence beats a link
+// into a project this agent never wrote to.
+func TestAgentState_NoTracesLinkWhenTheAgentDoesNotSayWhere(t *testing.T) {
+	bare := agentCR("reels-poc", true)
+	bare.SetAnnotations(nil)
+
+	st, err := readerFor(t, []runtime.Object{bare}).AgentState(context.Background(), "reels-poc")
+	if err != nil {
+		t.Fatalf("AgentState: %v", err)
+	}
+	if st.TracesURL != "" {
+		t.Fatalf("TracesURL = %q, want empty for an agent that names no project", st.TracesURL)
 	}
 }

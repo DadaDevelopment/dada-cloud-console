@@ -89,17 +89,15 @@ type Reader struct {
 	dyn dynamic.Interface
 	cs  kubernetes.Interface
 
-	namespace     string
-	langfuseHost  string
-	langfuseProj  string
-	tracesEnabled bool
+	namespace    string
+	langfuseHost string
 }
 
 // NewReader builds a Reader from the pod's mounted service-account credentials,
 // the same in-cluster pattern as newDeleteImpactScanner.
-func NewReader(namespace, langfuseHost, langfuseProject string) *Reader {
+func NewReader(namespace, langfuseHost string) *Reader {
 	r := &Reader{namespace: namespaceOrDefault(namespace)}
-	r.setTraces(langfuseHost, langfuseProject)
+	r.setTraces(langfuseHost)
 
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
@@ -118,16 +116,14 @@ func NewReader(namespace, langfuseHost, langfuseProject string) *Reader {
 }
 
 // NewReaderWith builds a Reader over injected clients, for tests.
-func NewReaderWith(dyn dynamic.Interface, cs kubernetes.Interface, namespace, langfuseHost, langfuseProject string) *Reader {
+func NewReaderWith(dyn dynamic.Interface, cs kubernetes.Interface, namespace, langfuseHost string) *Reader {
 	r := &Reader{dyn: dyn, cs: cs, namespace: namespaceOrDefault(namespace)}
-	r.setTraces(langfuseHost, langfuseProject)
+	r.setTraces(langfuseHost)
 	return r
 }
 
-func (r *Reader) setTraces(host, project string) {
+func (r *Reader) setTraces(host string) {
 	r.langfuseHost = strings.TrimRight(host, "/")
-	r.langfuseProj = project
-	r.tracesEnabled = r.langfuseHost != "" && project != ""
 }
 
 func namespaceOrDefault(ns string) string {
@@ -200,7 +196,6 @@ func (r *Reader) AgentState(ctx context.Context, name string) (State, error) {
 	}
 
 	st := State{Name: name, Namespace: r.namespace, Pods: []PodState{}}
-	st.TracesURL = r.tracesURL()
 
 	obj, err := r.dyn.Resource(agentGVR).Namespace(r.namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
@@ -210,6 +205,7 @@ func (r *Reader) AgentState(ctx context.Context, name string) (State, error) {
 		return State{}, fmt.Errorf("reading agent: %w", err)
 	}
 	st.Exists = true
+	st.TracesURL = r.tracesURL(obj.GetAnnotations()[LangfuseProjectAnnotation])
 	st.Accepted, _, _ = conditionState(obj, "Accepted")
 	st.Ready, st.Reason, st.Message = conditionState(obj, "Ready")
 	st.URL = fmt.Sprintf("http://%s.%s.svc.cluster.local:8080/", name, r.namespace)
@@ -261,15 +257,23 @@ func (r *Reader) promptVersion(ctx context.Context, name string) string {
 	return cm.Data["version"]
 }
 
-// tracesURL points at the Langfuse project the agents report into, or "" when
-// the console has not been told which project that is. An empty string is the
-// honest answer: a link built from a guessed project id lands on a permission
-// error, which reads as "traces are broken" rather than "traces are elsewhere".
-func (r *Reader) tracesURL() string {
-	if !r.tracesEnabled {
+// LangfuseProjectAnnotation names the Langfuse project one agent reports into.
+//
+// Per agent rather than per platform: agents carry their own Langfuse
+// credentials, so two agents of the same cluster legitimately write into two
+// different projects, and the console cannot know which from its own config.
+const LangfuseProjectAnnotation = "platform.dada-tuda.ru/langfuse-project"
+
+// tracesURL points at the Langfuse project this one agent reports into, or ""
+// when the agent does not say which project that is. An empty string is the
+// honest answer: a link built from the platform's own project id opens somebody
+// else's traces, which reads as "this agent never ran" rather than "the link is
+// pointed at the wrong project".
+func (r *Reader) tracesURL(project string) string {
+	if r.langfuseHost == "" || project == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s/project/%s/traces", r.langfuseHost, r.langfuseProj)
+	return fmt.Sprintf("%s/project/%s/traces", r.langfuseHost, project)
 }
 
 // conditionState reads one status condition, returning whether it is True plus

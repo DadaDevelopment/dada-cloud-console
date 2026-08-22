@@ -155,12 +155,12 @@ func TestDeleteAgent_UnknownAgentIsNotAChange(t *testing.T) {
 	}
 }
 
-// TestCarriedOverAgentMemory_SurvivesASaveThatDoesNotKnowAboutIt: the console
+// TestCarriedOverAgent_FieldsSurviveASaveThatDoesNotKnowAboutThem: the console
 // save re-states every field the console knows, and it knows nothing about
 // memory. An agent onboarded by hand keeps thirty days of notes; if a prompt fix
 // dropped spec.memory, the agent would go on answering while quietly forgetting
 // everything, and nobody would connect that to the edit.
-func TestCarriedOverAgentMemory_SurvivesASaveThatDoesNotKnowAboutIt(t *testing.T) {
+func TestCarriedOverAgent_FieldsSurviveASaveThatDoesNotKnowAboutThem(t *testing.T) {
 	mgr, valuesPath := agentCarrierFixture(t, "agents", "prod", "telemost-poc")
 
 	full := filepath.Join(mgr.LocalPath(), valuesPath)
@@ -170,7 +170,7 @@ func TestCarriedOverAgentMemory_SurvivesASaveThatDoesNotKnowAboutIt(t *testing.T
 	}
 	withMemory := strings.Replace(string(content),
 		"      prompt: |-",
-		"      memory:\n        modelConfig: embeddings-local\n        ttlDays: 30\n      prompt: |-", 1)
+		"      langfuseProjectId: \"cmt4v2gg60eajad0dyizlor3b\"\n      memory:\n        modelConfig: embeddings-local\n        ttlDays: 30\n      prompt: |-", 1)
 	if withMemory == string(content) {
 		t.Fatalf("fixture shape changed, memory was not injected:\n%s", content)
 	}
@@ -178,12 +178,16 @@ func TestCarriedOverAgentMemory_SurvivesASaveThatDoesNotKnowAboutIt(t *testing.T
 		t.Fatalf("write values: %v", err)
 	}
 
-	memory, err := carriedOverAgentMemory(mgr, valuesPath, "telemost-poc")
+	carried, err := carriedOverAgent(mgr, valuesPath, "telemost-poc")
 	if err != nil {
-		t.Fatalf("carriedOverAgentMemory: %v", err)
+		t.Fatalf("carriedOverAgent: %v", err)
 	}
+	memory := carried.Memory
 	if memory == nil || memory.ModelConfig != "embeddings-local" || memory.TTLDays != 30 {
 		t.Fatalf("memory not carried over: %#v", memory)
+	}
+	if carried.LangfuseProjectID != "cmt4v2gg60eajad0dyizlor3b" {
+		t.Fatalf("langfuse project not carried over: %q", carried.LangfuseProjectID)
 	}
 
 	saved, err := renderer.RenderManagedAgent(renderer.ManagedAgentSpec{
@@ -193,6 +197,8 @@ func TestCarriedOverAgentMemory_SurvivesASaveThatDoesNotKnowAboutIt(t *testing.T
 		EnvSlug:     "prod",
 		Prompt:      "Отвечай коротко.",
 		Memory:      memory,
+
+		LangfuseProjectID: carried.LangfuseProjectID,
 	})
 	if err != nil {
 		t.Fatalf("RenderManagedAgent: %v", err)
@@ -200,12 +206,18 @@ func TestCarriedOverAgentMemory_SurvivesASaveThatDoesNotKnowAboutIt(t *testing.T
 	if !strings.Contains(saved, "modelConfig: embeddings-local") || !strings.Contains(saved, "ttlDays: 30") {
 		t.Fatalf("re-rendered claim lost its memory:\n%s", saved)
 	}
-
-	none, err := carriedOverAgentMemory(mgr, valuesPath, "reels-poc")
-	if err != nil {
-		t.Fatalf("carriedOverAgentMemory(absent): %v", err)
+	if !strings.Contains(saved, `langfuseProjectId: "cmt4v2gg60eajad0dyizlor3b"`) {
+		t.Fatalf("re-rendered claim lost the Langfuse project, its traces link goes silent:\n%s", saved)
 	}
-	if none != nil {
-		t.Fatalf("an agent without memory must stay without one, got %#v", none)
+
+	none, err := carriedOverAgent(mgr, valuesPath, "reels-poc")
+	if err != nil {
+		t.Fatalf("carriedOverAgent(absent): %v", err)
+	}
+	if none.Memory != nil {
+		t.Fatalf("an agent without memory must stay without one, got %#v", none.Memory)
+	}
+	if none.LangfuseProjectID != "" {
+		t.Fatalf("an agent that names no Langfuse project must stay without one, got %q", none.LangfuseProjectID)
 	}
 }

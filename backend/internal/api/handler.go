@@ -227,7 +227,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	if cfg.AIStudioEnabled && cfg.MLflowBaseURL != "" {
 		h.mlflow = mlflow.New(cfg.MLflowBaseURL, cfg.MLflowAuthHeader)
 	}
-	h.agents = kagent.NewReader(cfg.AgentRuntimeNamespace, cfg.LangfuseHost, cfg.LangfuseProjectID)
+	h.agents = kagent.NewReader(cfg.AgentRuntimeNamespace, cfg.LangfuseHost)
 	h.portainer = portainer.New(cfg.PortainerURL, cfg.PortainerAPIToken)
 	h.prometheus = prometheus.New(cfg.PrometheusQueryURL, cfg.PrometheusQueryUser, cfg.PrometheusQueryPass)
 	h.opencost = opencost.New(cfg.OpenCostURL)

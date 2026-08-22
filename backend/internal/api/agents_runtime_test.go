@@ -50,7 +50,7 @@ func testMCPServer(name, url string) *unstructured.Unstructured {
 func agentTestHandler(objs []runtime.Object, k8s ...runtime.Object) *Handler {
 	dyn := dynamicfake.NewSimpleDynamicClient(agentTestScheme(), objs...)
 	return &Handler{agents: kagent.NewReaderWith(dyn, k8sfake.NewSimpleClientset(k8s...),
-		kagent.DefaultNamespace, "https://langfuse.dada-tuda.ru", "proj-1")}
+		kagent.DefaultNamespace, "https://langfuse.dada-tuda.ru")}
 }
 
 // testAgentClaims is any logged-in tenant.
@@ -149,7 +149,11 @@ func TestGetAgentState_ReportsAPodServingAnOlderPrompt(t *testing.T) {
 	agent := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "kagent.dev/v1alpha2",
 		"kind":       "Agent",
-		"metadata":   map[string]any{"name": "reels-poc", "namespace": kagent.DefaultNamespace},
+		"metadata": map[string]any{
+			"name":        "reels-poc",
+			"namespace":   kagent.DefaultNamespace,
+			"annotations": map[string]any{kagent.LangfuseProjectAnnotation: "proj-reels"},
+		},
 		"status": map[string]any{"conditions": []any{
 			map[string]any{"type": "Accepted", "status": "True"},
 			map[string]any{"type": "Ready", "status": "True", "reason": "DeploymentReady"},

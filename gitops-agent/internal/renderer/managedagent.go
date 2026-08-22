@@ -58,9 +58,15 @@ type ManagedAgentSpec struct {
 	PromptVersion string
 	ModelConfig   string
 	Runtime       string
-	Memory        *ManagedAgentMemory
-	Tools         []ManagedAgentToolRef
-	Env           []ManagedAgentEnvVar
+	// LangfuseProjectID is the Langfuse project this agent's traces land in.
+	// Per agent rather than per platform: agents carry their own Langfuse
+	// credentials, so two agents of one cluster legitimately write into two
+	// different projects, and neither the console nor the runtime can infer
+	// which from its own config.
+	LangfuseProjectID string
+	Memory            *ManagedAgentMemory
+	Tools             []ManagedAgentToolRef
+	Env               []ManagedAgentEnvVar
 }
 
 var managedAgentTmpl = template.Must(template.New("managedagent").Funcs(template.FuncMap{
@@ -81,7 +87,8 @@ spec:
   description: {{ quote .Description }}{{ end }}{{ if .PromptVersion }}
   promptVersion: {{ quote .PromptVersion }}{{ end }}{{ if .ModelConfig }}
   modelConfig: {{ .ModelConfig }}{{ end }}{{ if .Runtime }}
-  runtime: {{ .Runtime }}{{ end }}{{ with .Memory }}
+  runtime: {{ .Runtime }}{{ end }}{{ if .LangfuseProjectID }}
+  langfuseProjectId: {{ quote .LangfuseProjectID }}{{ end }}{{ with .Memory }}
   memory:
     modelConfig: {{ .ModelConfig }}{{ if .TTLDays }}
     ttlDays: {{ .TTLDays }}{{ end }}{{ end }}

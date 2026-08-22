@@ -11,12 +11,12 @@ export const agents: Messages = {
 
   "agents.empty.title": { ru: "Пока нет агентов", en: "No agents yet" },
   "agents.empty.description": {
-    ru: "Агент — это промпт плюс набор MCP-инструментов. Консоль пишет его в git, кластер поднимает рантайм, трассы уходят в Langfuse.",
+    ru: "Агент — это промпт плюс набор MCP-инструментов. Консоль пишет его в git, кластер поднимает рантайм, а каждый его разговор с моделью виден в Langfuse.",
     en: "An agent is a prompt plus a set of MCP tools. The console writes it to git, the cluster brings the runtime up, traces go to Langfuse.",
   },
   "agents.empty.step1": { ru: "Опишите роль агента в промпте", en: "Describe the agent's role in the prompt" },
   "agents.empty.step2": { ru: "Выберите MCP-серверы, которыми он пользуется", en: "Pick the MCP servers it may use" },
-  "agents.empty.step3": { ru: "Следите за готовностью и трассами прямо здесь", en: "Watch readiness and traces right here" },
+  "agents.empty.step3": { ru: "Следите за готовностью и разговорами прямо здесь", en: "Watch readiness and traces right here" },
 
   "agents.state.pending": { ru: "Ещё не синхронизирован", en: "Not synced yet" },
   "agents.state.ready": { ru: "Отвечает", en: "Serving" },
@@ -25,7 +25,7 @@ export const agents: Messages = {
   "agents.state.promptVersion": { ru: "Версия промпта: {version}", en: "Prompt version: {version}" },
   "agents.state.pods": { ru: "Поды: {ready}/{total} готовы", en: "Pods: {ready}/{total} ready" },
   "agents.state.restarts": { ru: "рестартов: {count}", en: "restarts: {count}" },
-  "agents.state.traces": { ru: "Трассы в Langfuse →", en: "Langfuse traces →" },
+  "agents.state.traces": { ru: "Разговоры в Langfuse →", en: "Langfuse traces →" },
   "agents.gitOwned": {
     ru: "Агент описан в git вручную, вне консоли: правки только коммитом в инфраструктурный репозиторий",
     en: "This agent is described in git by hand, outside the console: it changes by a commit to the infrastructure repo",

@@ -14,7 +14,7 @@ import (
 // assembled by hand in a test.
 func (h *Handler) agentRuntime() *kagent.Reader {
 	if h.agents == nil {
-		return kagent.NewReaderWith(nil, nil, "", "", "")
+		return kagent.NewReaderWith(nil, nil, "", "")
 	}
 	return h.agents
 }
