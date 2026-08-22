@@ -484,6 +484,7 @@ export default function AppDetailPage() {
         projectId={projectId}
         envId={envId}
         appName={appName}
+        volume={summary.volume}
       />
 
       {!isResource && (

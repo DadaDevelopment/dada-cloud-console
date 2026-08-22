@@ -179,6 +179,71 @@ export function alertChipAction(alert: AppAlert): AlertChipAction {
 }
 
 /**
+ * Matches the backend's volumeSizeRe (backend/internal/api/apps.go): a
+ * positive integer followed by Mi, Gi, or Ti, nothing else.
+ */
+const VOLUME_SIZE_RE = /^[1-9][0-9]*(Mi|Gi|Ti)$/;
+
+/**
+ * Mirrors the backend's absoluteMaxVolumeSize (100Gi): a hard safety ceiling
+ * on a per-app volume independent of billing plan. The console never
+ * proposes a size above it, so the one-click storage repair can never
+ * generate a request the backend is guaranteed to reject on this ground
+ * alone (the plan's own storage quota can still reject it lower down).
+ */
+const MAX_VOLUME_GI = 100;
+
+/**
+ * Parses a Kubernetes-style quantity string (as stored in AppVolume.size)
+ * into bytes, or null if it does not match the shape the backend itself
+ * accepts (see volumeSizeRe above). Mirrors the backend's quantityBytes.
+ */
+function parseVolumeSizeBytes(size?: string): number | null {
+  if (!size || !VOLUME_SIZE_RE.test(size)) return null;
+  const unit = size.slice(-2);
+  const num = Number(size.slice(0, -2));
+  const mult = unit === "Mi" ? 1024 ** 2 : unit === "Gi" ? 1024 ** 3 : 1024 ** 4;
+  return num * mult;
+}
+
+/** Formats a whole-gigabyte count back into the quantity string the backend expects. */
+export function formatVolumeSize(gi: number): string {
+  return `${gi}Gi`;
+}
+
+/**
+ * Proposes a bigger size for the `platform_storage` alert's one-click
+ * repair: doubles the current size, rounded up to a whole gigabyte (a
+ * volume smaller than 1Gi still gets a real step, not a 0Gi no-op), and
+ * clamps the result to the platform's absolute ceiling. Returns null when
+ * `currentSize` is missing or unparseable (no lever without a known
+ * current size), or when the volume is already at the ceiling (proposing
+ * the same size back would be a no-op, not a fix).
+ */
+export function proposeVolumeSizeGi(currentSize?: string): { currentGi: number; proposedGi: number } | null {
+  const bytes = parseVolumeSizeBytes(currentSize);
+  if (bytes == null) return null;
+  const currentGi = Math.max(1, Math.ceil(bytes / 1024 ** 3));
+  if (currentGi >= MAX_VOLUME_GI) return null;
+  const proposedGi = Math.min(Math.max(currentGi * 2, currentGi + 1), MAX_VOLUME_GI);
+  return { currentGi, proposedGi };
+}
+
+/**
+ * True when `err` is the backend's 403 quota-exceeded shape (see
+ * respondQuotaExceeded in backend/internal/api/billing.go): status 403 and
+ * code "quota_exceeded". Branches only on the typed status/code the API
+ * client already parses onto the thrown Error (see apiFetch in lib/api.ts),
+ * never on error prose — regex-matching an error message already burned
+ * this codebase once (see project_frontend_mapped_errors_by_regex_on_prose).
+ */
+export function isQuotaExceededError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { status?: number; code?: string };
+  return e.status === 403 && e.code === "quota_exceeded";
+}
+
+/**
  * True when the crash cause is one the app's owner fixes by giving the app an
  * explicit start command. Both kinds here say the same thing about the same
  * lever: `"app_needs_args"` means the program refused the empty command line

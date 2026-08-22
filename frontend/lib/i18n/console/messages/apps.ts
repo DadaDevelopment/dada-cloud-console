@@ -907,6 +907,26 @@ export const apps: Messages = {
     ru: "На постоянном томе приложения закончились inode — лимит на количество файлов, отдельный от места в гигабайтах. Это не ошибка в вашем коде. Увеличение тома это НЕ исправит — нужно удалить или упаковать лишние мелкие файлы.",
     en: "The app's persistent volume ran out of inodes — the file-count limit, separate from gigabyte capacity. This is not a bug in your code. Enlarging the volume will NOT fix this — delete or pack the excess small files.",
   },
+  "apps.alerts.crash.cause.platformStorage.repair.cta": {
+    ru: "Увеличить том с {from} до {to}",
+    en: "Enlarge the volume from {from} to {to}",
+  },
+  "apps.alerts.crash.cause.platformStorage.repair.pending": {
+    ru: "Увеличиваем том…",
+    en: "Enlarging the volume…",
+  },
+  "apps.alerts.crash.cause.platformStorage.repair.done": {
+    ru: "Расширение тома запущено. Новый размер применяется примерно за две минуты, приложение при этом не перезапускается.",
+    en: "The volume expansion has started. The new size takes about two minutes to apply, and the app keeps running.",
+  },
+  "apps.alerts.crash.cause.platformStorage.repair.error": {
+    ru: "Не получилось увеличить том",
+    en: "Could not enlarge the volume",
+  },
+  "apps.alerts.crash.cause.platformStorage.repair.quotaExceeded": {
+    ru: "Тариф не даёт увеличить том до нужного размера. Это не поломка — перейдите на тариф с большим лимитом места.",
+    en: "The plan does not allow enlarging the volume to that size. Nothing is broken - move to a plan with more storage room.",
+  },
   "apps.alerts.crash.cause.resourceLimit": {
     ru: "Контейнер был остановлен: приложение превысило лимит памяти, выделенный по тарифу. Это не ошибка в коде — нужен профиль с большим лимитом или меньше потребление памяти.",
     en: "The container was stopped: the app exceeded the memory limit included in its plan. This is not a bug in your code — it needs a bigger profile or lower memory usage.",
