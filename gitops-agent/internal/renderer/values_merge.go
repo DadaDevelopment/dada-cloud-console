@@ -199,6 +199,7 @@ func mergeExtraEnv(existingCommon *yaml.Node, rendered *yaml.Node, expectedDrops
 				continue
 			}
 			if at := envEntryIndex(existing, name); at >= 0 {
+				carryComments(existing.Content[at], item)
 				existing.Content[at] = item
 				continue
 			}
@@ -271,6 +272,7 @@ func mapValue(m *yaml.Node, key string) *yaml.Node {
 func setMapValue(m *yaml.Node, key string, value *yaml.Node) {
 	for i := 0; i+1 < len(m.Content); i += 2 {
 		if m.Content[i].Value == key {
+			carryComments(m.Content[i+1], value)
 			m.Content[i+1] = value
 			return
 		}
@@ -279,6 +281,78 @@ func setMapValue(m *yaml.Node, key string, value *yaml.Node) {
 		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key},
 		value,
 	)
+}
+
+// carryComments moves the prose a human left in git onto the node that replaces
+// it. A rendered node never carries comments, so replacing an owned key would
+// otherwise silently delete the warning someone wrote next to it. Comments are
+// matched by key so a note on a nested field survives the subtree swap; the
+// rendered node wins whenever it already carries text of its own.
+func carryComments(old, fresh *yaml.Node) {
+	if old == nil || fresh == nil {
+		return
+	}
+	if fresh.HeadComment == "" {
+		fresh.HeadComment = old.HeadComment
+	}
+	if fresh.LineComment == "" {
+		fresh.LineComment = old.LineComment
+	}
+	if fresh.FootComment == "" {
+		fresh.FootComment = old.FootComment
+	}
+	if old.Kind == yaml.SequenceNode && fresh.Kind == yaml.SequenceNode {
+		for i, item := range fresh.Content {
+			if match := matchingSeqItem(old, item, i); match != nil {
+				carryComments(match, item)
+			}
+		}
+		return
+	}
+	if old.Kind != yaml.MappingNode || fresh.Kind != yaml.MappingNode {
+		return
+	}
+	for i := 0; i+1 < len(old.Content); i += 2 {
+		for j := 0; j+1 < len(fresh.Content); j += 2 {
+			if old.Content[i].Value != fresh.Content[j].Value {
+				continue
+			}
+			carryComments(old.Content[i], fresh.Content[j])
+			carryComments(old.Content[i+1], fresh.Content[j+1])
+		}
+	}
+}
+
+// matchingSeqItem finds the list entry the fresh one replaces. List entries the
+// renderer emits (extraEnv, hostAliases) are identified by their name field, so
+// a note next to one variable follows that variable even when the list is
+// reordered; position is the fallback for entries without a name.
+func matchingSeqItem(old, fresh *yaml.Node, idx int) *yaml.Node {
+	if name := scalarField(fresh, "name"); name != "" {
+		for _, cand := range old.Content {
+			if scalarField(cand, "name") == name {
+				return cand
+			}
+		}
+		return nil
+	}
+	if idx < len(old.Content) {
+		return old.Content[idx]
+	}
+	return nil
+}
+
+// scalarField reads a scalar value out of a mapping node, or "" when absent.
+func scalarField(n *yaml.Node, key string) string {
+	if n == nil || n.Kind != yaml.MappingNode {
+		return ""
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == key && n.Content[i+1].Kind == yaml.ScalarNode {
+			return n.Content[i+1].Value
+		}
+	}
+	return ""
 }
 
 // deleteMapKey removes key and its value from a mapping node.
@@ -297,6 +371,14 @@ func marshalDocument(doc *yaml.Node) (string, error) {
 	root := documentRoot(doc)
 	if root == nil {
 		return "", fmt.Errorf("empty document")
+	}
+	if doc.Kind == yaml.DocumentNode {
+		if root.HeadComment == "" {
+			root.HeadComment = doc.HeadComment
+		}
+		if root.FootComment == "" {
+			root.FootComment = doc.FootComment
+		}
 	}
 	b, err := yaml.Marshal(root)
 	if err != nil {

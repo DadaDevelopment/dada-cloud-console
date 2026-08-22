@@ -106,6 +106,12 @@ func adoptRenderMerge(t *testing.T, appName, existing string) string {
 	if adopted.Replicas != nil {
 		spec.Replicas = *adopted.Replicas
 	}
+	if v := adopted.Volume; v != nil {
+		spec.VolumePath = v.Path
+		spec.VolumeSize = v.Size
+		spec.VolumeStorageClass = v.StorageClass
+		spec.VolumeFSGroup = v.FSGroup
+	}
 	env := resolvedEnv{Plain: adopted.Plain, Secret: map[string]string{}, Refs: adopted.Refs}
 	env.applyTo(&spec, appName)
 
