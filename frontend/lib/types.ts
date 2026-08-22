@@ -653,6 +653,15 @@ export interface AppSummary {
     app_name: string;
     repo_full_name: string;
   };
+  /**
+   * Last-mile HTTP probe result (gitops-agent/internal/worker/livenessprobe.go),
+   * passed through summary_json unchanged on both the single-app and the
+   * app-list endpoints -- see frontend/lib/last-mile-status.ts.
+   */
+  http_status?: number;
+  http_reason?: string;
+  http_checked_at?: string;
+  worker?: boolean;
 }
 
 export interface AppsResponse {
