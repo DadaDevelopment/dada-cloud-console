@@ -621,6 +621,8 @@ func (w *GitWatcher) syncResourcesValuesFile(ctx context.Context, mgr *git.Manag
 		synced++
 	}
 
+	pruned := w.pruneVanishedSnapshots(ctx, projectID, envUUID, appName, doc.Manifests, c)
+
 	if err := db.InsertCommit(ctx, w.pool,
 		c.SHA, mgr.RepoURL(), mgr.Branch(), filePath, c.Message,
 		c.Author, c.Email, nil, "manual",
@@ -628,7 +630,40 @@ func (w *GitWatcher) syncResourcesValuesFile(ctx context.Context, mgr *git.Manag
 		log.Warn().Err(err).Str("sha", c.SHA).Msg("git-watcher: record resource commit")
 	}
 
-	log.Info().Int("count", synced).Str("path", filePath).Msg("git-watcher: synced resources from git")
+	log.Info().Int("count", synced).Int("pruned", pruned).Str("path", filePath).Msg("git-watcher: synced resources from git")
+}
+
+// pruneVanishedSnapshots drops the snapshots of resources this file used to
+// carry and no longer does.
+//
+// The reverse sync only ever upserted, so a CR removed from a hand-edited
+// resources.values.yaml stayed in the console forever: a row nothing in git or
+// in the cluster answers for, shown next to the live ones and indistinguishable
+// from them. Rows are matched by the app_name the sync itself stamps, so only
+// what this file wrote is ever removed, and only when the file is at least as
+// new as the row -- a snapshot the API has just written at request time is
+// fresher than the commit and survives, exactly like the LWW upsert above.
+func (w *GitWatcher) pruneVanishedSnapshots(ctx context.Context, projectID uuid.UUID, envID *uuid.UUID, appName string, manifests []resourceManifest, c git.Commit) int {
+	present := make([]string, 0, len(manifests))
+	for _, m := range manifests {
+		if m.Kind == "" || m.Metadata.Name == "" {
+			continue
+		}
+		present = append(present, m.Kind+"/"+m.Metadata.Name)
+	}
+	tag, err := w.pool.Exec(ctx,
+		`DELETE FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2
+		   AND summary_json->>'app_name' = $3
+		   AND last_synced_at <= $4
+		   AND (kind || '/' || name) <> ALL($5::text[])`,
+		projectID, envID, appName, c.When, present,
+	)
+	if err != nil {
+		log.Warn().Err(err).Str("app", appName).Msg("git-watcher: prune vanished resource snapshots")
+		return 0
+	}
+	return int(tag.RowsAffected())
 }
 
 // chartCRKinds are the platform CR kinds the console indexes from a helm chart's
