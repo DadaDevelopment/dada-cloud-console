@@ -934,6 +934,16 @@ surviving top-level path. Put unit or identity boundaries inside the diagram
 and never bridge them with an invented ribbon; do not substitute cards for a
 graph merely to make the page more compact.
 
+## 2026-08-24 — SVG geometry must be visually checked
+
+Mistake: node labels in the multi-lane Sankey were anchored left of intermediate
+nodes. On the deployed chart they collided with the lane labels and made the
+main paths unreadable, despite the arithmetic and build checks passing.
+
+Rule: a chart change is not complete until labels, nodes and ribbons are
+checked together at the intended viewport. Reserve gutters as part of the
+geometry, and never position node labels inside another lane's text area.
+
 ## Инструмент для агента адресуется именем, а не обходом (2026-08-22)
 
 MCP-поверхность генерировалась из собственного Swagger, поэтому повторяла адресацию

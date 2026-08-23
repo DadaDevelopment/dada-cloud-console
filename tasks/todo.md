@@ -27,6 +27,11 @@
 - [ ] Draw the new path as the continuation of the second Sankey.
 - [ ] Run CI and verify the deployed API response.
 
+## Sankey label collision correction (2026-08-24)
+
+- [ ] Reserve a left lane-label gutter and place every node label to the right of its node.
+- [ ] Verify the rendered Sankey at desktop width before delivery.
+
 - [x] Inventory and validate every persisted signal for landing, registration, account creation, and first authenticated entry.
 - [x] Build one detailed acquisition funnel: landing -> registration intent -> account created -> first console entry.
 - [x] Inventory user lifecycle signals for resource creation, readiness, quotas, payment intent, and succeeded payment.

@@ -28,6 +28,7 @@ const WIDTH = 1160;
 const NODE_WIDTH = 13;
 const TOP = 34;
 const LANE_HEIGHT = 94;
+const LANE_LABEL_WIDTH = 180;
 
 function curve(x0: number, y0: number, x1: number, y1: number): string {
   const middle = (x0 + x1) / 2;
@@ -54,7 +55,7 @@ export function DetailedFunnelSankey({
     [streams],
   );
   const height = TOP + Math.max(1, streams.length) * LANE_HEIGHT + 18;
-  const xFor = (column: number) => (column * (WIDTH - NODE_WIDTH - 220)) / (maxColumns - 1) + 150;
+  const xFor = (column: number) => (column * (WIDTH - NODE_WIDTH - 260)) / (maxColumns - 1) + LANE_LABEL_WIDTH;
 
   if (streams.length === 0) return null;
 
@@ -93,15 +94,13 @@ export function DetailedFunnelSankey({
                 );
               })}
               {nodes.map((node, index) => {
-                const last = index === nodes.length - 1;
-                const labelX = last ? node.x + NODE_WIDTH + 8 : node.x - 7;
-                const anchor = last ? "start" : "end";
+                const labelX = node.x + NODE_WIDTH + 8;
                 return (
                   <g key={`${stream.id}:node:${node.label}`}>
                     <rect x={node.x} y={node.y} width={NODE_WIDTH} height={node.height} rx={2} fill={color}><title>{`${node.label}: ${node.value}${node.detail ? ` (${node.detail})` : ""}`}</title></rect>
-                    <text x={labelX} y={node.y + 10} textAnchor={anchor} className="fill-gray-700 dark:fill-gray-300" style={{ fontSize: 11, fontWeight: 600 }}>{node.label}</text>
-                    <text x={labelX} y={node.y + 23} textAnchor={anchor} className="fill-blue-700 dark:fill-blue-300" style={{ fontSize: 12, fontWeight: 800 }}>{node.value}</text>
-                    {node.detail && <text x={labelX} y={node.y + 35} textAnchor={anchor} className="fill-gray-400 dark:fill-gray-500" style={{ fontSize: 10 }}>{node.detail}</text>}
+                    <text x={labelX} y={node.y + 10} className="fill-gray-700 dark:fill-gray-300" style={{ fontSize: 11, fontWeight: 600 }}>{node.label}</text>
+                    <text x={labelX} y={node.y + 23} className="fill-blue-700 dark:fill-blue-300" style={{ fontSize: 12, fontWeight: 800 }}>{node.value}</text>
+                    {node.detail && <text x={labelX} y={node.y + 35} className="fill-gray-400 dark:fill-gray-500" style={{ fontSize: 10 }}>{node.detail}</text>}
                   </g>
                 );
               })}
