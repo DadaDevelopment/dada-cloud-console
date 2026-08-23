@@ -168,7 +168,7 @@ definitions:
     type: object
   api.adminFunnelLifecycle:
     properties:
-      app_creators:
+      app_created_users:
         type: integer
       build_started_users:
         type: integer

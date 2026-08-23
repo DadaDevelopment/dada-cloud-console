@@ -53,8 +53,8 @@ func TestAdminFunnelQueriesMatchCurrentSchema(t *testing.T) {
 func TestAdminFunnelFirstDeployPathUsesOrderedAppEvidence(t *testing.T) {
 	query := adminFunnelFirstDeployQuery()
 	for _, want := range []string{
-		"a.action = 'CreateApp'", "g.action = 'ConnectGitRepo'", "b.started_at IS NOT NULL",
-		"d.build_id = b.build_id", "o.status IN ('Committed', 'Ready')", "g.created_at >= a.app_created_at",
+		"g.action = 'ConnectGitRepo'", "b.started_at IS NOT NULL", "o.action = 'CreateApp'",
+		"d.build_id = a.build_id", "o.status IN ('Committed', 'Ready')", "b.started_at >= r.connected_at",
 	} {
 		if !strings.Contains(query, want) {
 			t.Fatalf("first deploy query missing %q", want)

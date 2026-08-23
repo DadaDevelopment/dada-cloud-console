@@ -1638,9 +1638,9 @@ export interface AdminFunnelLifecycle {
   quota_blocked_users: number;
   quota_blocked_attempts: number;
   quota_grace_organizations: number;
-  app_creators: number;
   git_connected_users: number;
   build_started_users: number;
+  app_created_users: number;
   first_deployed_users: number;
   resources: AdminFunnelResource[];
 }

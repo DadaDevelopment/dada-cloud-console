@@ -22070,7 +22070,7 @@ const docTemplate = `{
         "api.adminFunnelLifecycle": {
             "type": "object",
             "properties": {
-                "app_creators": {
+                "app_created_users": {
                     "type": "integer"
                 },
                 "build_started_users": {

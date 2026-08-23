@@ -75,9 +75,9 @@ type adminFunnelLifecycle struct {
 	QuotaBlockedUsers       int                   `json:"quota_blocked_users"`
 	QuotaBlockedAttempts    int                   `json:"quota_blocked_attempts"`
 	QuotaGraceOrganizations int                   `json:"quota_grace_organizations"`
-	AppCreators             int                   `json:"app_creators"`
 	GitConnectedUsers       int                   `json:"git_connected_users"`
 	BuildStartedUsers       int                   `json:"build_started_users"`
+	AppCreatedUsers         int                   `json:"app_created_users"`
 	FirstDeployedUsers      int                   `json:"first_deployed_users"`
 	Resources               []adminFunnelResource `json:"resources"`
 }
@@ -249,24 +249,11 @@ func adminFunnelFirstDeployQuery() string {
 			WHERE u.account_kind = 'customer'
 			  AND ($1::text[] IS NULL OR u.account_kind <> ALL($1))
 		),
-		apps AS (
-			SELECT a.actor_id, a.project_id, a.environment_id, a.resource_name AS app_name, a.created_at AS app_created_at
-			FROM audit_events a
-			JOIN scope s ON s.id = a.actor_id
-			WHERE a.action = 'CreateApp' AND a.outcome = 'success' AND a.resource_kind = 'App'
-		),
 		repos AS (
-			SELECT DISTINCT ON (a.actor_id, a.project_id, a.environment_id, a.app_name)
-				a.actor_id, a.project_id, a.environment_id, a.app_name, g.created_at AS connected_at
-			FROM apps a
-			JOIN audit_events g ON g.actor_id = a.actor_id
-				AND g.project_id = a.project_id
-				AND g.environment_id = a.environment_id
-				AND g.resource_name = a.app_name
-				AND g.action = 'ConnectGitRepo'
-				AND g.outcome = 'success'
-				AND g.created_at >= a.app_created_at
-			ORDER BY a.actor_id, a.project_id, a.environment_id, a.app_name, g.created_at
+			SELECT g.actor_id, g.project_id, g.environment_id, g.resource_name AS app_name, g.created_at AS connected_at
+			FROM audit_events g
+			JOIN scope s ON s.id = g.actor_id
+			WHERE g.action = 'ConnectGitRepo' AND g.outcome = 'success' AND g.resource_kind = 'GitRepo'
 		),
 		started_builds AS (
 			SELECT DISTINCT ON (r.actor_id, r.project_id, r.environment_id, r.app_name)
@@ -277,17 +264,29 @@ func adminFunnelFirstDeployQuery() string {
 			WHERE b.started_at IS NOT NULL AND b.started_at >= r.connected_at
 			ORDER BY r.actor_id, r.project_id, r.environment_id, r.app_name, b.started_at
 		),
-		deployed AS (
-			SELECT DISTINCT b.actor_id
+		apps AS (
+			SELECT DISTINCT ON (b.actor_id, b.project_id, b.environment_id, b.app_name)
+				b.actor_id, b.project_id, b.environment_id, b.app_name, b.build_id, o.created_at AS app_created_at
 			FROM started_builds b
-			JOIN deployments d ON d.build_id = b.build_id AND d.created_at >= b.started_at
+			JOIN operations o ON o.project_id = b.project_id
+				AND o.environment_id = b.environment_id
+				AND o.resource_name = b.app_name
+				AND o.action = 'CreateApp'
+				AND o.status IN ('Committed', 'Ready')
+				AND o.created_at >= b.started_at
+			ORDER BY b.actor_id, b.project_id, b.environment_id, b.app_name, o.created_at
+		),
+		deployed AS (
+			SELECT DISTINCT a.actor_id
+			FROM apps a
+			JOIN deployments d ON d.build_id = a.build_id AND d.created_at >= a.app_created_at
 			LEFT JOIN operations o ON o.id = d.operation_id
 			WHERE d.operation_id IS NULL OR (o.action = 'DeployImageVersion' AND o.status IN ('Committed', 'Ready'))
 		)
 		SELECT
-			(SELECT count(DISTINCT actor_id) FROM apps),
 			(SELECT count(DISTINCT actor_id) FROM repos),
 			(SELECT count(DISTINCT actor_id) FROM started_builds),
+			(SELECT count(DISTINCT actor_id) FROM apps),
 			(SELECT count(*) FROM deployed)
 	`
 }
@@ -385,8 +384,8 @@ func (h *Handler) GetAdminFunnel(c *gin.Context) {
 		return
 	}
 	if err := h.pool.QueryRow(c.Request.Context(), adminFunnelFirstDeployQuery(), excludeArg).Scan(
-		&resp.Lifecycle.AppCreators, &resp.Lifecycle.GitConnectedUsers,
-		&resp.Lifecycle.BuildStartedUsers, &resp.Lifecycle.FirstDeployedUsers,
+		&resp.Lifecycle.GitConnectedUsers, &resp.Lifecycle.BuildStartedUsers,
+		&resp.Lifecycle.AppCreatedUsers, &resp.Lifecycle.FirstDeployedUsers,
 	); err != nil {
 		log.Printf("admin funnel: read first deploy path: %v", err)
 		respondError(c, http.StatusInternalServerError, "failed to read funnel")
