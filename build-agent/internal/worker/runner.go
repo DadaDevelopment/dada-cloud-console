@@ -1183,11 +1183,14 @@ func advisoryKey(id uuid.UUID) int64 {
 	return int64(binary.BigEndian.Uint64(id[:8]))
 }
 
-// Reconcile re-attaches to Jenkins builds the previous agent instance was
-// tracking. Called once at startup: a fresh pod has no in-process builds, so
-// every non-terminal row with a Jenkins reference is an orphan whose job may
-// still be running. Rows without any Jenkins reference (never triggered) are
-// left to the time-gated ReapStuck backstop.
+// Reconcile re-attaches to Jenkins builds this or a previous agent instance
+// isn't actively tracking in-process. Called at startup and on every poll
+// tick: a build another goroutine is already handling is skipped via
+// Scheduler.Tracked, so repeat calls only pick up rows an earlier reattach
+// attempt failed to claim (e.g. a transient Jenkins error) or that arrived
+// orphaned since the last tick (a rolling restart mid-build). Rows without
+// any Jenkins reference (never triggered) are left to the time-gated
+// ReapStuck backstop.
 func (r *Runner) Reconcile(ctx context.Context) {
 	builds, err := db.InFlightBuilds(ctx, r.pool)
 	if err != nil {
@@ -1197,6 +1200,9 @@ func (r *Runner) Reconcile(ctx context.Context) {
 	for i := range builds {
 		rb := builds[i]
 		if !reconcilable(rb) {
+			continue
+		}
+		if r.scheduler.Tracked(rb.ID) {
 			continue
 		}
 		buildCtx, release, ok := r.scheduler.Acquire(ctx, rb.ID)
@@ -1802,6 +1808,20 @@ var jenkinsNoisePrefixes = []string{
 	"End of Pipeline",
 }
 
+var jenkinsInternalFramePrefixes = []string{
+	"at PluginClassLoader for ",
+	"at java.base/",
+	"at org.jenkinsci.",
+	"at hudson.",
+	"at jenkins.",
+	"at org.codehaus.groovy.",
+	"at groovy.lang.",
+	"at com.cloudbees.",
+	"Caused by: org.jenkinsci.",
+	"Caused by: hudson.",
+	"Caused by: jenkins.",
+}
+
 func sanitizeLogLine(raw string) (string, bool) {
 	s := consoleNoteRe.ReplaceAllString(raw, "")
 	s = ansiRe.ReplaceAllString(s, "")
@@ -1818,6 +1838,11 @@ func sanitizeLogLine(raw string) (string, bool) {
 		return "", false
 	}
 	for _, p := range jenkinsNoisePrefixes {
+		if strings.HasPrefix(body, p) {
+			return "", false
+		}
+	}
+	for _, p := range jenkinsInternalFramePrefixes {
 		if strings.HasPrefix(body, p) {
 			return "", false
 		}

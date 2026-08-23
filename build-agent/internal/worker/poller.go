@@ -35,6 +35,7 @@ func (p *Poller) Start(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			p.runner.Reconcile(ctx)
 			p.runner.ReapStuck(ctx)
 			p.runner.RetryPlatformFailures(ctx)
 			p.runner.DrainQueue(ctx)

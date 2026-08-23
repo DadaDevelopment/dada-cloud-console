@@ -66,6 +66,17 @@ func (s *Scheduler) Cancel(buildID uuid.UUID) bool {
 	return ok
 }
 
+// Tracked reports whether buildID already holds a slot in this process. Callers
+// that scan for orphaned/in-flight DB rows (Reconcile) must check this before
+// Acquire, or a build already running in another goroutine gets a second
+// concurrent attach/finalize racing the first.
+func (s *Scheduler) Tracked(buildID uuid.UUID) bool {
+	s.mu.Lock()
+	_, ok := s.cancels[buildID]
+	s.mu.Unlock()
+	return ok
+}
+
 // Inflight returns the number of builds currently holding a slot.
 func (s *Scheduler) Inflight() int {
 	return len(s.sem)

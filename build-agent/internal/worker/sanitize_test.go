@@ -17,10 +17,26 @@ func TestSanitizeDropsJenkinsNoise(t *testing.T) {
 		"[2026-07-11T20:14:29.539Z] \x1b[8mha:////4M7blob==\x1b[0m[Pipeline] // container",
 		"[2026-07-11T20:14:29.613Z] \x1b[8mha:////blob==\x1b[0m[Pipeline] End of Pipeline",
 		"[2026-07-11T20:14:29.637Z] [Checks API] No suitable checks publisher found.",
+		"[2026-08-23T22:55:31.446Z]   at PluginClassLoader for workflow-durable-task-step//org.jenkinsci.plugins.workflow.support.steps.ExecutorStepDynamicContext$FilePathTranslator.get(ExecutorStepDynamicContext.java:160)",
+		"[2026-08-23T22:55:31.446Z]   at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Unknown Source)",
+		"[2026-08-23T22:55:31.446Z]   at hudson.model.ResourceController$1.run(ResourceController.java:100)",
+		"Caused by: org.jenkinsci.plugins.workflow.steps.MissingContextVariableException: Required context class",
 	}
 	for _, in := range drop {
 		if _, ok := sanitizeLogLine(in); ok {
 			t.Errorf("expected drop, kept: %q", in)
+		}
+	}
+}
+
+func TestSanitizeKeepsUserApplicationStackTrace(t *testing.T) {
+	keep := []string{
+		"    at Object.<anonymous> (/app/src/index.js:12:7)",
+		"\tat com.example.leadgen.Main.main(Main.java:42)",
+	}
+	for _, in := range keep {
+		if _, ok := sanitizeLogLine(in); !ok {
+			t.Errorf("expected user stack trace line kept, dropped: %q", in)
 		}
 	}
 }
