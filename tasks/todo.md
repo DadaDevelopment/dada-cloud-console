@@ -1,5 +1,12 @@
 # Detailed funnel reconstruction (2026-08-23)
 
+## Sankey-first correction (2026-08-23)
+
+- [x] Keep the report to two top-level paths without reducing its evidence to panels.
+- [ ] Render acquisition as one multi-lane Sankey with source, UX, DB-account and first-entry evidence.
+- [ ] Render lifecycle as one multi-lane Sankey with user journey, resource-type branches and billing path.
+- [ ] Verify the frontend build and deployed visualization.
+
 - [x] Inventory and validate every persisted signal for landing, registration, account creation, and first authenticated entry.
 - [x] Build one detailed acquisition funnel: landing -> registration intent -> account created -> first console entry.
 - [x] Inventory user lifecycle signals for resource creation, readiness, quotas, payment intent, and succeeded payment.

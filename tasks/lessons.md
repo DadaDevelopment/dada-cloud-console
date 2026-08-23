@@ -922,6 +922,18 @@ each surviving funnel. Reduce the number of top-level paths, not the evidence
 inside them. Before changing a reporting page, name the exact two questions it
 must answer and prove each source can support its corresponding stage.
 
+## 2026-08-23 — A requested Sankey is not a card layout
+
+Mistake: after the owner asked to consolidate into two funnels, I kept the
+numbers but replaced the detailed paths with stage rails and statistic cells.
+That erased the visual language explicitly requested: ribbons must show where
+each comparable cohort continues or drops.
+
+Rule: when the requested reporting form is Sankey, retain a Sankey for every
+surviving top-level path. Put unit or identity boundaries inside the diagram
+and never bridge them with an invented ribbon; do not substitute cards for a
+graph merely to make the page more compact.
+
 ## Инструмент для агента адресуется именем, а не обходом (2026-08-22)
 
 MCP-поверхность генерировалась из собственного Swagger, поэтому повторяла адресацию
