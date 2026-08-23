@@ -909,6 +909,19 @@ wrong, not the chart. Pin the exact metric string in a test so the next edit
 cannot quietly revert the unit, and surface any clamp to the reader instead of
 smoothing it away.
 
+## 2026-08-23 — Compact is not informative
+
+Mistake: after being asked to reduce the number of funnels, I collapsed the
+resource stages into a two-step readiness summary. That made the page neater
+but removed the answer the owner needs: who created what, where they stopped,
+and how activity reaches a purchase. I optimized the layout rather than the
+decision the report supports.
+
+Rule: when consolidating analytics, preserve the detailed stage accounting in
+each surviving funnel. Reduce the number of top-level paths, not the evidence
+inside them. Before changing a reporting page, name the exact two questions it
+must answer and prove each source can support its corresponding stage.
+
 ## Инструмент для агента адресуется именем, а не обходом (2026-08-22)
 
 MCP-поверхность генерировалась из собственного Swagger, поэтому повторяла адресацию

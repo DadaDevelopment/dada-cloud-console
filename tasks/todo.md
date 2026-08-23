@@ -1,3 +1,33 @@
+# Detailed funnel reconstruction (2026-08-23)
+
+- [x] Inventory and validate every persisted signal for landing, registration, account creation, and first authenticated entry.
+- [x] Build one detailed acquisition funnel: landing -> registration intent -> account created -> first console entry.
+- [x] Inventory user lifecycle signals for resource creation, readiness, quotas, payment intent, and succeeded payment.
+- [x] Build one detailed monetization funnel: all users -> resource choices -> quota/billing events -> payment outcome.
+- [x] Preserve exact per-stage counts and show gaps as unavailable rather than invented transitions.
+- [ ] Run CI and inspect the deployed page.
+
+## Review — Detailed funnel reconstruction
+
+- First path retains the per-source Metrika Sankey and adds exact UX, DB-account
+  and server `SessionStart` counts. The anonymous-to-account boundary is named,
+  so no percentage is manufactured across incompatible identifiers.
+- Second path is a lifetime customer-account funnel: account -> project owner ->
+  resource requester -> current Ready -> resource organization -> checkout ->
+  paid. It visibly changes from users to organizations at billing.
+- Resource types are parallel detail cells with distinct creators, request count,
+  and current Ready users. Quota refusals and allowed grace breaches are separate
+  evidence, not fabricated sequential stages.
+- Live read-only DB validation: 41 customer accounts, 22 project owners, 15
+  resource requesters, 11 currently Ready, 1 resource organization with a
+  checkout, 0 paid; 1 user has 10 recorded quota refusals and 0 grace breaches.
+- Local verification: `go test ./internal/api -count=1`, `go vet ./internal/api`,
+  the channel-funnel unit suite (7/7), and docs translation validation pass.
+- Full frontend typecheck and suite cannot run locally because the workspace has
+  no installed React/Next/private dependencies; Jenkins remains the full gate.
+
+---
+
 # Funnel consolidation (2026-08-23)
 
 - [x] Establish that App/DB/VM/Box/S3/Model are parallel resource choices, not sequential funnel stages.

@@ -116,6 +116,17 @@ definitions:
       updated_at:
         type: string
     type: object
+  api.adminFunnelAcquisition:
+    properties:
+      accounts_created:
+        type: integer
+      first_authenticated:
+        type: integer
+      ux_landing_users:
+        type: integer
+      ux_signup_started_users:
+        type: integer
+    type: object
   api.adminFunnelChannel:
     properties:
       deploy_success:
@@ -155,40 +166,60 @@ definitions:
       count:
         type: integer
     type: object
+  api.adminFunnelLifecycle:
+    properties:
+      checkout_organizations:
+        type: integer
+      customer_accounts:
+        type: integer
+      paid_organizations:
+        type: integer
+      project_owners:
+        type: integer
+      quota_blocked_attempts:
+        type: integer
+      quota_blocked_users:
+        type: integer
+      quota_grace_organizations:
+        type: integer
+      ready_resource_users:
+        type: integer
+      resource_organizations:
+        type: integer
+      resource_requesters:
+        type: integer
+      resources:
+        items:
+          $ref: '#/definitions/api.adminFunnelResource'
+        type: array
+    type: object
+  api.adminFunnelResource:
+    properties:
+      key:
+        type: string
+      ready_users:
+        type: integer
+      requested_users:
+        type: integer
+      requests:
+        type: integer
+    type: object
   api.adminFunnelResponse:
     properties:
-      app_up:
-        type: integer
-      box_up:
-        type: integer
+      acquisition:
+        $ref: '#/definitions/api.adminFunnelAcquisition'
       channel_funnel:
         $ref: '#/definitions/api.adminFunnelChannelReport'
       cohort_counts:
         items:
           $ref: '#/definitions/api.adminFunnelCohortCount'
         type: array
-      db_up:
-        type: integer
       excluded_kinds:
         items:
           type: string
         type: array
-      model_up:
-        type: integer
-      paid:
-        type: integer
-      paid_note:
-        type: string
-      ready_resource_users:
-        type: integer
-      registration_funnel:
-        $ref: '#/definitions/api.overviewRegistrationFunnel'
-      s3_up:
-        type: integer
-      signups:
-        type: integer
-      vm_up:
-        type: integer
+      lifecycle:
+        $ref: '#/definitions/api.adminFunnelLifecycle'
       window:
         type: string
     type: object
@@ -1192,41 +1223,6 @@ definitions:
         type: string
       target:
         type: string
-    type: object
-  api.overviewChannelCount:
-    properties:
-      channel:
-        type: string
-      count:
-        type: integer
-    type: object
-  api.overviewFunnelStage:
-    properties:
-      count:
-        type: integer
-      key:
-        type: string
-      label:
-        type: string
-    type: object
-  api.overviewRegistrationFunnel:
-    properties:
-      available:
-        type: boolean
-      channels:
-        items:
-          $ref: '#/definitions/api.overviewChannelCount'
-        type: array
-      days:
-        type: integer
-      note:
-        type: string
-      registered:
-        type: integer
-      stages:
-        items:
-          $ref: '#/definitions/api.overviewFunnelStage'
-        type: array
     type: object
   api.platformStatusComponent:
     properties:
@@ -2298,9 +2294,9 @@ paths:
       - admin
   /admin/funnel:
     get:
-      description: Metrika traffic sources, Keycloak registration steps, current ready-resource
-        cohort, and a separate payment fact for that cohort. account_kind filters
-        apply to the DB-backed product leg only.
+      description: Detailed acquisition and lifecycle funnels. The window applies
+        to acquisition; lifecycle is historical for all customer accounts in the selected
+        cohort.
       operationId: getAdminFunnel
       parameters:
       - default: 30d

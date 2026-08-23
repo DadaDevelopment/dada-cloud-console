@@ -810,7 +810,7 @@ const docTemplate = `{
         },
         "/admin/funnel": {
             "get": {
-                "description": "Metrika traffic sources, Keycloak registration steps, current ready-resource cohort, and a separate payment fact for that cohort. account_kind filters apply to the DB-backed product leg only.",
+                "description": "Detailed acquisition and lifecycle funnels. The window applies to acquisition; lifecycle is historical for all customer accounts in the selected cohort.",
                 "tags": [
                     "admin"
                 ],
@@ -21990,6 +21990,23 @@ const docTemplate = `{
                 }
             }
         },
+        "api.adminFunnelAcquisition": {
+            "type": "object",
+            "properties": {
+                "accounts_created": {
+                    "type": "integer"
+                },
+                "first_authenticated": {
+                    "type": "integer"
+                },
+                "ux_landing_users": {
+                    "type": "integer"
+                },
+                "ux_signup_started_users": {
+                    "type": "integer"
+                }
+            }
+        },
         "api.adminFunnelChannel": {
             "type": "object",
             "properties": {
@@ -22050,14 +22067,69 @@ const docTemplate = `{
                 }
             }
         },
+        "api.adminFunnelLifecycle": {
+            "type": "object",
+            "properties": {
+                "checkout_organizations": {
+                    "type": "integer"
+                },
+                "customer_accounts": {
+                    "type": "integer"
+                },
+                "paid_organizations": {
+                    "type": "integer"
+                },
+                "project_owners": {
+                    "type": "integer"
+                },
+                "quota_blocked_attempts": {
+                    "type": "integer"
+                },
+                "quota_blocked_users": {
+                    "type": "integer"
+                },
+                "quota_grace_organizations": {
+                    "type": "integer"
+                },
+                "ready_resource_users": {
+                    "type": "integer"
+                },
+                "resource_organizations": {
+                    "type": "integer"
+                },
+                "resource_requesters": {
+                    "type": "integer"
+                },
+                "resources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.adminFunnelResource"
+                    }
+                }
+            }
+        },
+        "api.adminFunnelResource": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string"
+                },
+                "ready_users": {
+                    "type": "integer"
+                },
+                "requested_users": {
+                    "type": "integer"
+                },
+                "requests": {
+                    "type": "integer"
+                }
+            }
+        },
         "api.adminFunnelResponse": {
             "type": "object",
             "properties": {
-                "app_up": {
-                    "type": "integer"
-                },
-                "box_up": {
-                    "type": "integer"
+                "acquisition": {
+                    "$ref": "#/definitions/api.adminFunnelAcquisition"
                 },
                 "channel_funnel": {
                     "$ref": "#/definitions/api.adminFunnelChannelReport"
@@ -22068,38 +22140,14 @@ const docTemplate = `{
                         "$ref": "#/definitions/api.adminFunnelCohortCount"
                     }
                 },
-                "db_up": {
-                    "type": "integer"
-                },
                 "excluded_kinds": {
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
                 },
-                "model_up": {
-                    "type": "integer"
-                },
-                "paid": {
-                    "type": "integer"
-                },
-                "paid_note": {
-                    "type": "string"
-                },
-                "ready_resource_users": {
-                    "type": "integer"
-                },
-                "registration_funnel": {
-                    "$ref": "#/definitions/api.overviewRegistrationFunnel"
-                },
-                "s3_up": {
-                    "type": "integer"
-                },
-                "signups": {
-                    "type": "integer"
-                },
-                "vm_up": {
-                    "type": "integer"
+                "lifecycle": {
+                    "$ref": "#/definitions/api.adminFunnelLifecycle"
                 },
                 "window": {
                     "type": "string"
@@ -23573,60 +23621,6 @@ const docTemplate = `{
                 },
                 "target": {
                     "type": "string"
-                }
-            }
-        },
-        "api.overviewChannelCount": {
-            "type": "object",
-            "properties": {
-                "channel": {
-                    "type": "string"
-                },
-                "count": {
-                    "type": "integer"
-                }
-            }
-        },
-        "api.overviewFunnelStage": {
-            "type": "object",
-            "properties": {
-                "count": {
-                    "type": "integer"
-                },
-                "key": {
-                    "type": "string"
-                },
-                "label": {
-                    "type": "string"
-                }
-            }
-        },
-        "api.overviewRegistrationFunnel": {
-            "type": "object",
-            "properties": {
-                "available": {
-                    "type": "boolean"
-                },
-                "channels": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/api.overviewChannelCount"
-                    }
-                },
-                "days": {
-                    "type": "integer"
-                },
-                "note": {
-                    "type": "string"
-                },
-                "registered": {
-                    "type": "integer"
-                },
-                "stages": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/api.overviewFunnelStage"
-                    }
                 }
             }
         },

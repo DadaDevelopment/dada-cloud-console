@@ -12,14 +12,28 @@ func TestAdminFunnelQueriesMatchCurrentSchema(t *testing.T) {
 	pool := overviewBrokenTestPool(t)
 	ctx := context.Background()
 
-	var counts [9]int
-	err := pool.QueryRow(ctx, adminFunnelCountsQuery("TRUE"), nil).Scan(
-		&counts[0], &counts[1], &counts[2], &counts[3],
-		&counts[4], &counts[5], &counts[6], &counts[7], &counts[8],
+	var acquisition [4]int
+	err := pool.QueryRow(ctx, adminFunnelAcquisitionQuery("TRUE", "TRUE"), nil).Scan(
+		&acquisition[0], &acquisition[1], &acquisition[2], &acquisition[3],
 	)
 	if err != nil {
-		t.Fatalf("admin funnel counts query must compile against current schema: %v", err)
+		t.Fatalf("admin funnel acquisition query must compile against current schema: %v", err)
 	}
+
+	var lifecycle [10]int
+	err = pool.QueryRow(ctx, adminFunnelLifecycleQuery(), nil).Scan(
+		&lifecycle[0], &lifecycle[1], &lifecycle[2], &lifecycle[3], &lifecycle[4],
+		&lifecycle[5], &lifecycle[6], &lifecycle[7], &lifecycle[8], &lifecycle[9],
+	)
+	if err != nil {
+		t.Fatalf("admin funnel lifecycle query must compile against current schema: %v", err)
+	}
+
+	resources, err := pool.Query(ctx, adminFunnelResourcesQuery(), nil)
+	if err != nil {
+		t.Fatalf("admin funnel resources query must compile against current schema: %v", err)
+	}
+	resources.Close()
 
 	rows, err := pool.Query(ctx, adminFunnelCohortsQuery("TRUE"))
 	if err != nil {
@@ -28,26 +42,24 @@ func TestAdminFunnelQueriesMatchCurrentSchema(t *testing.T) {
 	rows.Close()
 }
 
-func TestAdminFunnelReadyResourceCohortUsesCurrentState(t *testing.T) {
-	query := adminFunnelCountsQuery("TRUE")
-	start := strings.Index(query, "ready_resource AS")
-	end := strings.Index(query, "SELECT\n")
-	if start < 0 || end <= start {
-		t.Fatal("ready-resource CTE missing")
-	}
-	cohort := query[start:end]
+func TestAdminFunnelLifecycleUsesCurrentReadinessAndLinkedPayment(t *testing.T) {
+	query := adminFunnelLifecycleQuery()
 	for _, want := range []string{
+		"u.account_kind = 'customer'",
 		"rs.phase = 'Ready'",
 		"a.status = 'Ready'",
 		"b.status IN ('Ready', 'Idle')",
+		"resource_orgs r JOIN checkout_orgs c",
+		"status = 'succeeded' AND paid_at IS NOT NULL",
+		"quota_exceeded",
 	} {
-		if !strings.Contains(cohort, want) {
-			t.Fatalf("ready-resource cohort missing %q", want)
+		if !strings.Contains(query, want) {
+			t.Fatalf("lifecycle query missing %q", want)
 		}
 	}
-	for _, forbidden := range []string{"a.vm_ip", "b.ssh_host", "AIModel"} {
-		if strings.Contains(cohort, forbidden) {
-			t.Fatalf("ready-resource cohort must not use historical or phase-less signal %q", forbidden)
+	for _, forbidden := range []string{"a.vm_ip", "b.ssh_host", "customer_email"} {
+		if strings.Contains(query, forbidden) {
+			t.Fatalf("lifecycle query must not use unlinked or historical signal %q", forbidden)
 		}
 	}
 }

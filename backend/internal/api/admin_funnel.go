@@ -50,22 +50,41 @@ type adminFunnelChannelReport struct {
 	Note      string               `json:"note,omitempty"`
 }
 
+type adminFunnelAcquisition struct {
+	UXLandingUsers       int `json:"ux_landing_users"`
+	UXSignupStartedUsers int `json:"ux_signup_started_users"`
+	AccountsCreated      int `json:"accounts_created"`
+	FirstAuthenticated   int `json:"first_authenticated"`
+}
+
+type adminFunnelResource struct {
+	Key            string `json:"key"`
+	RequestedUsers int    `json:"requested_users"`
+	Requests       int    `json:"requests"`
+	ReadyUsers     int    `json:"ready_users"`
+}
+
+type adminFunnelLifecycle struct {
+	CustomerAccounts        int                   `json:"customer_accounts"`
+	ProjectOwners           int                   `json:"project_owners"`
+	ResourceRequesters      int                   `json:"resource_requesters"`
+	ReadyResourceUsers      int                   `json:"ready_resource_users"`
+	ResourceOrganizations   int                   `json:"resource_organizations"`
+	CheckoutOrganizations   int                   `json:"checkout_organizations"`
+	PaidOrganizations       int                   `json:"paid_organizations"`
+	QuotaBlockedUsers       int                   `json:"quota_blocked_users"`
+	QuotaBlockedAttempts    int                   `json:"quota_blocked_attempts"`
+	QuotaGraceOrganizations int                   `json:"quota_grace_organizations"`
+	Resources               []adminFunnelResource `json:"resources"`
+}
+
 type adminFunnelResponse struct {
-	Window             string                     `json:"window"`
-	ExcludedKinds      []string                   `json:"excluded_kinds"`
-	Signups            int                        `json:"signups"`
-	AppUp              int                        `json:"app_up"`
-	DBUp               int                        `json:"db_up"`
-	VMUp               int                        `json:"vm_up"`
-	BoxUp              int                        `json:"box_up"`
-	S3Up               int                        `json:"s3_up"`
-	ModelUp            int                        `json:"model_up"`
-	ReadyResourceUsers int                        `json:"ready_resource_users"`
-	Paid               int                        `json:"paid"`
-	PaidNote           string                     `json:"paid_note,omitempty"`
-	CohortCounts       []adminFunnelCohortCount   `json:"cohort_counts"`
-	ChannelFunnel      adminFunnelChannelReport   `json:"channel_funnel"`
-	RegistrationFunnel overviewRegistrationFunnel `json:"registration_funnel"`
+	Window        string                   `json:"window"`
+	ExcludedKinds []string                 `json:"excluded_kinds"`
+	CohortCounts  []adminFunnelCohortCount `json:"cohort_counts"`
+	ChannelFunnel adminFunnelChannelReport `json:"channel_funnel"`
+	Acquisition   adminFunnelAcquisition   `json:"acquisition"`
+	Lifecycle     adminFunnelLifecycle     `json:"lifecycle"`
 }
 
 const cloudFunnelCounterID = 110158915
@@ -79,49 +98,143 @@ const (
 
 var metrikaStatAPIURL = "https://api-metrika.yandex.net/stat/v1/data"
 
-func adminFunnelCountsQuery(sinceClause string) string {
+func adminFunnelAcquisitionQuery(sinceClause, uxSinceClause string) string {
+	return `
+		WITH account_scope AS (
+			SELECT u.id, u.created_at
+			FROM user_accounts u
+			WHERE u.account_kind = 'customer'
+			  AND ` + sinceClause + `
+			  AND ($1::text[] IS NULL OR u.account_kind <> ALL($1))
+		),
+		first_authenticated AS (
+			SELECT DISTINCT s.id
+			FROM account_scope s
+			JOIN audit_events a ON a.actor_id = s.id
+				AND a.action = 'SessionStart'
+				AND a.metadata->>'visit' = 'first'
+				AND a.created_at >= s.created_at
+		),
+		resolved_ux AS (
+			SELECT COALESCE(x.user_id::text, i.user_id::text, x.anon_id::text) AS identity, x.event_type, x.target
+			FROM ux_events x
+			LEFT JOIN ux_identity i ON i.anon_id = x.anon_id
+			WHERE ` + uxSinceClause + `
+		)
+		SELECT
+			(SELECT count(DISTINCT identity) FROM resolved_ux WHERE event_type = 'pageview' AND target IN ('/', '/en')),
+			(SELECT count(DISTINCT identity) FROM resolved_ux WHERE event_type = 'goal' AND target = 'signup_started'),
+			(SELECT count(*) FROM account_scope),
+			(SELECT count(*) FROM first_authenticated)
+	`
+}
+
+func adminFunnelLifecycleQuery() string {
 	return `
 		WITH scope AS (
-			SELECT u.id, u.email
+			SELECT u.id
 			FROM user_accounts u
-			WHERE ` + sinceClause + `
+			WHERE u.account_kind = 'customer'
 			  AND ($1::text[] IS NULL OR u.account_kind <> ALL($1))
+		),
+		proj AS (
+			SELECT p.id, p.owner_id, p.org_id
+			FROM projects p
+			JOIN scope s ON s.id = p.owner_id
+		),
+		requested AS (
+			SELECT DISTINCT p.owner_id, p.org_id
+			FROM operations o
+			JOIN proj p ON p.id = o.project_id
+			WHERE o.action IN ('CreateApp', 'CreateServiceDatabase', 'CreateS3Bucket', 'CreateAppServer', 'BoxUp')
+			  AND o.status NOT IN ('Failed', 'Cancelled')
+		),
+		ready AS (
+			SELECT DISTINCT p.owner_id FROM proj p JOIN resource_snapshots rs ON rs.project_id = p.id
+				WHERE rs.phase = 'Ready' AND rs.kind IN ('App', 'ServiceDatabase', 'ServiceDatabaseV2', 'S3Bucket')
+			UNION
+			SELECT DISTINCT p.owner_id FROM proj p JOIN app_servers a ON a.project_id = p.id WHERE a.status = 'Ready'
+			UNION
+			SELECT DISTINCT p.owner_id FROM proj p JOIN boxes b ON b.project_id = p.id WHERE b.status IN ('Ready', 'Idle')
+		),
+		resource_orgs AS (
+			SELECT DISTINCT org_id FROM requested
+		),
+		checkout_orgs AS (
+			SELECT DISTINCT org_id FROM payments WHERE status IN ('pending', 'succeeded', 'canceled')
+		),
+		paid_orgs AS (
+			SELECT DISTINCT org_id FROM payments WHERE status = 'succeeded' AND paid_at IS NOT NULL
+		),
+		quota_blocked AS (
+			SELECT a.actor_id, count(*) AS attempts
+			FROM audit_events a
+			JOIN scope s ON s.id = a.actor_id
+			WHERE a.outcome = 'failure'
+			  AND a.metadata->>'reason' IN ('quota_exceeded', 'consumption_exceeded', 'storage_quota_exceeded')
+			GROUP BY a.actor_id
+		),
+		grace_orgs AS (
+			SELECT DISTINCT b.org_id FROM billing_accounts b JOIN resource_orgs r ON r.org_id = b.org_id
+			WHERE b.quota_breach_count > 0
+		)
+		SELECT
+			(SELECT count(*) FROM scope),
+			(SELECT count(DISTINCT owner_id) FROM proj),
+			(SELECT count(DISTINCT owner_id) FROM requested),
+			(SELECT count(*) FROM ready),
+			(SELECT count(*) FROM resource_orgs),
+			(SELECT count(*) FROM resource_orgs r JOIN checkout_orgs c USING (org_id)),
+			(SELECT count(*) FROM resource_orgs r JOIN paid_orgs p USING (org_id)),
+			(SELECT count(*) FROM quota_blocked),
+			(SELECT COALESCE(sum(attempts), 0) FROM quota_blocked),
+			(SELECT count(*) FROM grace_orgs)
+	`
+}
+
+func adminFunnelResourcesQuery() string {
+	return `
+		WITH scope AS (
+			SELECT u.id FROM user_accounts u WHERE u.account_kind = 'customer' AND ($1::text[] IS NULL OR u.account_kind <> ALL($1))
 		),
 		proj AS (
 			SELECT p.id, p.owner_id FROM projects p JOIN scope s ON s.id = p.owner_id
 		),
-		ready_resource AS (
-			SELECT DISTINCT owner_id FROM (
-				SELECT p.owner_id FROM resource_snapshots rs JOIN proj p ON p.id = rs.project_id
-					WHERE (rs.kind = 'App' AND rs.phase = 'Ready')
-					   OR (rs.kind IN ('ServiceDatabase','ServiceDatabaseV2') AND rs.phase = 'Ready')
-					   OR (rs.kind = 'S3Bucket' AND rs.phase = 'Ready')
-				UNION
-				SELECT p.owner_id FROM app_servers a JOIN proj p ON p.id = a.project_id
-					WHERE a.status = 'Ready'
-				UNION
-				SELECT p.owner_id FROM boxes b JOIN proj p ON p.id = b.project_id
-					WHERE b.status IN ('Ready', 'Idle')
-			) resources
+		kinds AS (
+			SELECT 'app'::text AS key, 'CreateApp'::text AS action
+			UNION ALL SELECT 'db', 'CreateServiceDatabase'
+			UNION ALL SELECT 'vm', 'CreateAppServer'
+			UNION ALL SELECT 'box', 'BoxUp'
+			UNION ALL SELECT 's3', 'CreateS3Bucket'
+		),
+		request_counts AS (
+			SELECT k.key, count(DISTINCT p.owner_id) AS users, count(*) AS requests
+			FROM kinds k JOIN operations o ON o.action = k.action
+			JOIN proj p ON p.id = o.project_id
+			WHERE o.status NOT IN ('Failed', 'Cancelled')
+			GROUP BY k.key
+		),
+		ready AS (
+			SELECT 'app'::text AS key, rs.project_id FROM resource_snapshots rs WHERE rs.kind = 'App' AND rs.phase = 'Ready'
+			UNION ALL SELECT 'db', rs.project_id FROM resource_snapshots rs WHERE rs.kind IN ('ServiceDatabase', 'ServiceDatabaseV2') AND rs.phase = 'Ready'
+			UNION ALL SELECT 'vm', a.project_id FROM app_servers a WHERE a.status = 'Ready'
+			UNION ALL SELECT 'box', b.project_id FROM boxes b WHERE b.status IN ('Ready', 'Idle')
+			UNION ALL SELECT 's3', rs.project_id FROM resource_snapshots rs WHERE rs.kind = 'S3Bucket' AND rs.phase = 'Ready'
+		),
+		ready_counts AS (
+			SELECT rd.key, count(DISTINCT p.owner_id) AS users
+			FROM ready rd JOIN proj p ON p.id = rd.project_id
+			GROUP BY rd.key
 		)
 		SELECT
-			(SELECT count(*) FROM scope),
-			(SELECT count(DISTINCT p.owner_id) FROM resource_snapshots rs JOIN proj p ON p.id = rs.project_id
-				WHERE rs.kind = 'App' AND rs.phase = 'Ready'),
-			(SELECT count(DISTINCT p.owner_id) FROM resource_snapshots rs JOIN proj p ON p.id = rs.project_id
-				WHERE rs.kind IN ('ServiceDatabase','ServiceDatabaseV2') AND rs.phase = 'Ready'),
-			(SELECT count(DISTINCT p.owner_id) FROM app_servers a JOIN proj p ON p.id = a.project_id
-				WHERE a.status = 'Ready' OR a.vm_ip <> ''),
-			(SELECT count(DISTINCT p.owner_id) FROM boxes b JOIN proj p ON p.id = b.project_id
-				WHERE b.ssh_host <> ''),
-			(SELECT count(DISTINCT p.owner_id) FROM resource_snapshots rs JOIN proj p ON p.id = rs.project_id
-				WHERE rs.kind = 'S3Bucket' AND rs.phase = 'Ready'),
-			(SELECT count(DISTINCT p.owner_id) FROM resource_snapshots rs JOIN proj p ON p.id = rs.project_id
-				WHERE rs.kind = 'AIModel'),
-			(SELECT count(*) FROM ready_resource),
-			(SELECT count(DISTINCT s.id) FROM scope s JOIN ready_resource r ON r.owner_id = s.id
-				JOIN payments pay ON lower(pay.customer_email) = lower(s.email)
-				WHERE pay.status = 'succeeded')
+			k.key,
+			COALESCE(r.users, 0),
+			COALESCE(r.requests, 0),
+			COALESCE(rd.users, 0)
+		FROM kinds k
+		LEFT JOIN request_counts r ON r.key = k.key
+		LEFT JOIN ready_counts rd ON rd.key = k.key
+		ORDER BY k.key
 	`
 }
 
@@ -137,34 +250,20 @@ var funnelWindowDays = map[string]int{
 	"7d": 7, "30d": 30, "90d": 90, "all": 3650,
 }
 
-// GetAdminFunnel returns the live Metrika channel leg, Keycloak registration
-// leg, and a current resource-readiness cohort for one window and account_kind
-// cohort. Payment is returned as a separate fact about that cohort rather than
-// an implied time-ordered funnel transition.
+// GetAdminFunnel returns two countable product paths. Acquisition keeps the
+// anonymous Metrika and browser-identity stages visibly separate from account
+// rows and first authenticated entries. Lifecycle follows customer accounts to
+// projects and resource requests, then switches deliberately to organizations
+// for checkout and payment because billing belongs to the organization.
 //
-// Ready-resource users are computed from current usable state: App/DB/S3 need
-// resource_snapshots.phase = Ready, AppServer needs status = Ready, and Box
-// needs status Ready or Idle. AIModel is excluded from the ready-resource
-// cohort because the worker never stamps a usable phase for it; it remains a
-// separate presence-only resource mix count.
-//
-// Resource-kind mix is computed per kind, not per row, because the
-// ground-truth signal differs by kind: App/DB/S3 use resource_snapshots.phase
-// = 'Ready' (the gitops reconciler's verdict); AIModel has no working phase
-// signal (the worker never stamps Ready for it), so presence is the only
-// available proxy; AppServer (VM) and Box are not in resource_snapshots at
-// all and use their own tables' "ever became reachable" columns (vm_ip / ssh_host)
-// instead of current status, because status cycles back through
-// Deleted/Failed after use and a status filter reads as a false zero.
-//
-// Paid joins payments to ready-resource users via customer_email, not created_by_sub:
-// created_by_sub is empty on every existing production row (P0, undiagnosed
-// prior to this endpoint), while customer_email is a required, always-populated
-// field at checkout (yookassa.Checkout enforces it via requireReceiptEmail).
+// Resource readiness is a current-state snapshot: App/DB/S3 use the reconciler
+// phase, VM uses its status, and Box uses Ready or Idle. It is not presented as
+// a historical first-ready event because that timestamp is not stored for each
+// resource kind.
 //
 // @ID          getAdminFunnel
 // @Summary     Full acquisition and product funnel
-// @Description Metrika traffic sources, Keycloak registration steps, current ready-resource cohort, and a separate payment fact for that cohort. account_kind filters apply to the DB-backed product leg only.
+// @Description Detailed acquisition and lifecycle funnels. The window applies to acquisition; lifecycle is historical for all customer accounts.
 // @Tags        admin
 // @Param       window query string false "7d|30d|90d|all" default(30d)
 // @Param       exclude_kind query string false "comma-separated account_kind values to hide"
@@ -199,8 +298,10 @@ func (h *Handler) GetAdminFunnel(c *gin.Context) {
 	}
 
 	sinceClause := "TRUE"
+	uxSinceClause := "TRUE"
 	if interval != "" {
 		sinceClause = "u.created_at >= now() - interval '" + interval + "'"
+		uxSinceClause = "x.occurred_at >= now() - interval '" + interval + "'"
 	}
 
 	var excludeArg interface{}
@@ -209,15 +310,47 @@ func (h *Handler) GetAdminFunnel(c *gin.Context) {
 	}
 
 	resp := adminFunnelResponse{Window: window, ExcludedKinds: excludeKinds}
-	err := h.pool.QueryRow(c.Request.Context(), adminFunnelCountsQuery(sinceClause), excludeArg).Scan(
-		&resp.Signups, &resp.AppUp, &resp.DBUp, &resp.VMUp, &resp.BoxUp, &resp.S3Up, &resp.ModelUp, &resp.ReadyResourceUsers, &resp.Paid,
+	err := h.pool.QueryRow(c.Request.Context(), adminFunnelAcquisitionQuery(sinceClause, uxSinceClause), excludeArg).Scan(
+		&resp.Acquisition.UXLandingUsers, &resp.Acquisition.UXSignupStartedUsers,
+		&resp.Acquisition.AccountsCreated, &resp.Acquisition.FirstAuthenticated,
 	)
 	if err != nil {
-		log.Printf("admin funnel: read counts: %v", err)
+		log.Printf("admin funnel: read acquisition: %v", err)
 		respondError(c, http.StatusInternalServerError, "failed to read funnel")
 		return
 	}
-	resp.PaidNote = "AIModel counts row presence only; ready-resource users include only App/DB/S3 Ready, VM Ready, or Box Ready/Idle."
+	if err := h.pool.QueryRow(c.Request.Context(), adminFunnelLifecycleQuery(), excludeArg).Scan(
+		&resp.Lifecycle.CustomerAccounts, &resp.Lifecycle.ProjectOwners, &resp.Lifecycle.ResourceRequesters,
+		&resp.Lifecycle.ReadyResourceUsers, &resp.Lifecycle.ResourceOrganizations,
+		&resp.Lifecycle.CheckoutOrganizations, &resp.Lifecycle.PaidOrganizations,
+		&resp.Lifecycle.QuotaBlockedUsers, &resp.Lifecycle.QuotaBlockedAttempts,
+		&resp.Lifecycle.QuotaGraceOrganizations,
+	); err != nil {
+		log.Printf("admin funnel: read lifecycle: %v", err)
+		respondError(c, http.StatusInternalServerError, "failed to read funnel")
+		return
+	}
+
+	resourceRows, err := h.pool.Query(c.Request.Context(), adminFunnelResourcesQuery(), excludeArg)
+	if err != nil {
+		log.Printf("admin funnel: read resource mix: %v", err)
+		respondError(c, http.StatusInternalServerError, "failed to read funnel")
+		return
+	}
+	defer resourceRows.Close()
+	resp.Lifecycle.Resources = make([]adminFunnelResource, 0, 5)
+	for resourceRows.Next() {
+		var resource adminFunnelResource
+		if err := resourceRows.Scan(&resource.Key, &resource.RequestedUsers, &resource.Requests, &resource.ReadyUsers); err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to scan funnel resources")
+			return
+		}
+		resp.Lifecycle.Resources = append(resp.Lifecycle.Resources, resource)
+	}
+	if err := resourceRows.Err(); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to read funnel resources")
+		return
+	}
 
 	cohortRows, err := h.pool.Query(c.Request.Context(), adminFunnelCohortsQuery(sinceClause))
 	if err != nil {
@@ -236,7 +369,6 @@ func (h *Handler) GetAdminFunnel(c *gin.Context) {
 		resp.CohortCounts = append(resp.CohortCounts, cc)
 	}
 
-	resp.RegistrationFunnel = h.overviewRegistrationFunnel(c.Request.Context(), funnelWindowDays[window])
 	resp.ChannelFunnel = h.adminFunnelChannelReport(c.Request.Context(), funnelWindowDays[window])
 
 	c.JSON(http.StatusOK, resp)

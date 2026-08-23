@@ -1613,22 +1613,41 @@ export interface AdminFunnelChannelReport {
   note?: string;
 }
 
+export interface AdminFunnelAcquisition {
+  ux_landing_users: number;
+  ux_signup_started_users: number;
+  accounts_created: number;
+  first_authenticated: number;
+}
+
+export interface AdminFunnelResource {
+  key: string;
+  requested_users: number;
+  requests: number;
+  ready_users: number;
+}
+
+export interface AdminFunnelLifecycle {
+  customer_accounts: number;
+  project_owners: number;
+  resource_requesters: number;
+  ready_resource_users: number;
+  resource_organizations: number;
+  checkout_organizations: number;
+  paid_organizations: number;
+  quota_blocked_users: number;
+  quota_blocked_attempts: number;
+  quota_grace_organizations: number;
+  resources: AdminFunnelResource[];
+}
+
 export interface AdminFunnelResponse {
   window: string;
   excluded_kinds: string[] | null;
-  signups: number;
-  app_up: number;
-  db_up: number;
-  vm_up: number;
-  box_up: number;
-  s3_up: number;
-  model_up: number;
-  ready_resource_users: number;
-  paid: number;
-  paid_note?: string;
   cohort_counts: AdminFunnelCohortCount[];
   channel_funnel: AdminFunnelChannelReport;
-  registration_funnel: AdminOverviewRegistrationFunnel;
+  acquisition: AdminFunnelAcquisition;
+  lifecycle: AdminFunnelLifecycle;
 }
 
 export interface AdminCostsResponse {
