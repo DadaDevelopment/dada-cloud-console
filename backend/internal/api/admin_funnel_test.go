@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -11,10 +12,10 @@ func TestAdminFunnelQueriesMatchCurrentSchema(t *testing.T) {
 	pool := overviewBrokenTestPool(t)
 	ctx := context.Background()
 
-	var counts [8]int
+	var counts [9]int
 	err := pool.QueryRow(ctx, adminFunnelCountsQuery("TRUE"), nil).Scan(
 		&counts[0], &counts[1], &counts[2], &counts[3],
-		&counts[4], &counts[5], &counts[6], &counts[7],
+		&counts[4], &counts[5], &counts[6], &counts[7], &counts[8],
 	)
 	if err != nil {
 		t.Fatalf("admin funnel counts query must compile against current schema: %v", err)
@@ -25,6 +26,30 @@ func TestAdminFunnelQueriesMatchCurrentSchema(t *testing.T) {
 		t.Fatalf("admin funnel cohorts query must compile against current schema: %v", err)
 	}
 	rows.Close()
+}
+
+func TestAdminFunnelReadyResourceCohortUsesCurrentState(t *testing.T) {
+	query := adminFunnelCountsQuery("TRUE")
+	start := strings.Index(query, "ready_resource AS")
+	end := strings.Index(query, "SELECT\n")
+	if start < 0 || end <= start {
+		t.Fatal("ready-resource CTE missing")
+	}
+	cohort := query[start:end]
+	for _, want := range []string{
+		"rs.phase = 'Ready'",
+		"a.status = 'Ready'",
+		"b.status IN ('Ready', 'Idle')",
+	} {
+		if !strings.Contains(cohort, want) {
+			t.Fatalf("ready-resource cohort missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"a.vm_ip", "b.ssh_host", "AIModel"} {
+		if strings.Contains(cohort, forbidden) {
+			t.Fatalf("ready-resource cohort must not use historical or phase-less signal %q", forbidden)
+		}
+	}
 }
 
 func TestFetchMetrikaTrafficSourceFunnel(t *testing.T) {

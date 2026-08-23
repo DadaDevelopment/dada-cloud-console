@@ -14,16 +14,14 @@ const WINDOWS = ["7d", "30d", "90d", "all"] as const;
 
 type Row = { key: string; label: string; count: number; tone?: "error" };
 
-function stages(data: AdminFunnelResponse): Row[] {
+function resourceMix(data: AdminFunnelResponse): Row[] {
   return [
-    { key: "signups", label: "adminFunnel.stage.signups", count: data.signups },
     { key: "app", label: "adminFunnel.stage.app", count: data.app_up },
     { key: "db", label: "adminFunnel.stage.db", count: data.db_up },
     { key: "vm", label: "adminFunnel.stage.vm", count: data.vm_up },
     { key: "box", label: "adminFunnel.stage.box", count: data.box_up },
     { key: "s3", label: "adminFunnel.stage.s3", count: data.s3_up },
     { key: "model", label: "adminFunnel.stage.model", count: data.model_up },
-    { key: "paid", label: "adminFunnel.stage.paid", count: data.paid },
   ];
 }
 
@@ -100,7 +98,7 @@ export default function AdminFunnelPage() {
     );
   }
 
-  const rows = data ? stages(data).map((r) => ({ ...r, label: t(r.label) })) : [];
+  const resources = data ? resourceMix(data).map((r) => ({ ...r, label: t(r.label) })) : [];
   const reg = data?.registration_funnel;
   const regRows: Row[] = (reg?.stages ?? []).map((s) => ({
     key: s.key,
@@ -120,9 +118,13 @@ export default function AdminFunnelPage() {
     source: c.source,
     values: [c.users, c.register_opened, c.signup_started, c.registration_complete],
   }));
-  const regFunnelRows: Row[] = regRows.filter((r) => r.tone !== "error");
   const regErrors = regRows.filter((r) => r.tone === "error").reduce((sum, r) => sum + r.count, 0);
   const regStagesAllZero = (reg?.stages ?? []).every((stage) => stage.count === 0);
+  const regFormEvidence = !reg?.available
+    ? reg?.note || t("adminFunnel.reg.unavailable")
+    : regStagesAllZero
+      ? t("adminFunnel.acquisition.formZero")
+      : t("adminFunnel.acquisition.formOpened", { count: regRows[0]?.count ?? 0 });
 
   return (
     <div>
@@ -214,60 +216,30 @@ export default function AdminFunnelPage() {
             <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">{t("adminFunnel.channel.note")}</p>
           </>
         )}
-      </div>
-
-      <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
-        <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t("adminFunnel.reg.title")}</h2>
-        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("adminFunnel.reg.body")}</p>
-        {!loading && reg && !reg.available ? (
-          <p className="mt-3 text-sm text-amber-600 dark:text-amber-400">{reg.note || t("adminFunnel.reg.unavailable")}</p>
-        ) : loading ? (
-          <div className="flex h-24 items-center justify-center"><Spinner size="md" /></div>
-        ) : (
-          <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-3">
-            <div className="md:col-span-2">
-              {regStagesAllZero ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400">{t("adminFunnel.reg.allZero")}</p>
-              ) : (
-                <ChannelFunnelSankey
-                  channels={[{ source: "reg", values: regFunnelRows.map((r) => r.count) }]}
-                  sourceLabel={() => regFunnelRows[0]?.label ?? ""}
-                  stageLabels={regFunnelRows.map((r) => r.label)}
-                  dropLabels={regFunnelRows.slice(1).map((r) => t("adminFunnel.sankey.dropAt", { stage: r.label }))}
-                  clampNote={(sources) => t("adminFunnel.channel.clamped", { sources })}
-                />
-              )}
-            </div>
-            <div className="flex flex-col justify-center gap-3 border-t border-gray-100 dark:border-gray-800/60 pt-3 md:border-t-0 md:border-l md:pl-4 md:pt-0">
-              <div>
-                <p className="text-xs text-gray-500 dark:text-gray-400">{t("adminFunnel.reg.registered")}</p>
-                <p className="text-2xl font-semibold text-gray-900 dark:text-gray-100">{reg?.registered ?? "—"}</p>
-                {regErrors > 0 && (
-                  <p className="mt-2 text-xs text-red-600 dark:text-red-400">{t("adminFunnel.reg.errorAside", { count: regErrors })}</p>
-                )}
+        {!loading && (
+          <section className="mt-5 border-t border-gray-100 pt-4 dark:border-gray-800" aria-labelledby="registration-evidence">
+            <h3 id="registration-evidence" className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t("adminFunnel.acquisition.evidence.title")}</h3>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("adminFunnel.acquisition.evidence.body")}</p>
+            <dl className="mt-3 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800/50">
+                <dt className="text-xs text-gray-500 dark:text-gray-400">{t("adminFunnel.acquisition.dbRegistered")}</dt>
+                <dd className="mt-1 text-xl font-semibold tabular-nums text-gray-900 dark:text-gray-100">{reg?.registered ?? "—"}</dd>
               </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
-        <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t("adminFunnel.door.title")}</h2>
-        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("adminFunnel.door.body")}</p>
-        {loading ? (
-          <div className="flex h-24 items-center justify-center"><Spinner size="md" /></div>
-        ) : channelRows.length === 0 ? (
-          <p className="mt-3 text-sm text-gray-400 dark:text-gray-500">{t("adminFunnel.door.empty")}</p>
-        ) : (
-          <div className="mt-5">
-            <ChannelFunnelSankey
-              channels={channelRows.map((r) => ({ source: r.key, values: [r.count, r.count] }))}
-              sourceLabel={(source) => channelLabel(source)}
-              stageLabels={[t("adminFunnel.door.stageDoor"), t("adminFunnel.door.stageRegistered")]}
-              dropLabels={[t("adminFunnel.channel.dropped")]}
-              clampNote={(sources) => t("adminFunnel.channel.clamped", { sources })}
-            />
-          </div>
+              <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800/50">
+                <dt className="text-xs text-gray-500 dark:text-gray-400">{t("adminFunnel.acquisition.doors")}</dt>
+                <dd className="mt-1 text-sm font-medium text-gray-900 dark:text-gray-100">
+                  {channelRows.length > 0 ? channelRows.map((row) => `${row.label}: ${row.count}`).join(", ") : t("adminFunnel.door.empty")}
+                </dd>
+              </div>
+              <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800/50">
+                <dt className="text-xs text-gray-500 dark:text-gray-400">{t("adminFunnel.acquisition.form")}</dt>
+                <dd className="mt-1 text-sm font-medium text-gray-900 dark:text-gray-100">
+                  {regFormEvidence}
+                </dd>
+                {regErrors > 0 && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{t("adminFunnel.acquisition.formErrors", { count: regErrors })}</p>}
+              </div>
+            </dl>
+          </section>
         )}
       </div>
 
@@ -297,21 +269,47 @@ export default function AdminFunnelPage() {
       </div>
 
       <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
+        <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t("adminFunnel.product.title")}</h2>
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("adminFunnel.product.body")}</p>
         {loading ? (
           <div className="flex h-40 items-center justify-center">
             <Spinner size="md" />
           </div>
         ) : (
-          rows.every((r) => r.count === 0) ? (
+          !data || data.signups === 0 ? (
           <p className="text-sm text-gray-400 dark:text-gray-500">{t("adminFunnel.cohort.empty")}</p>
         ) : (
-          <ChannelFunnelSankey
-            channels={[{ source: "cohort", values: rows.map((r) => r.count) }]}
-            sourceLabel={() => rows[0]?.label ?? ""}
-            stageLabels={rows.map((r) => r.label)}
-            dropLabels={rows.slice(1).map((r) => t("adminFunnel.sankey.dropAt", { stage: r.label }))}
-            clampNote={(sources) => t("adminFunnel.channel.clamped", { sources })}
-          />
+          <>
+            <div className="mt-5">
+              <ChannelFunnelSankey
+                channels={[{ source: "product", values: [data.signups, data.ready_resource_users] }]}
+                sourceLabel={() => t("adminFunnel.stage.signups")}
+                stageLabels={[
+                  t("adminFunnel.stage.signups"),
+                  t("adminFunnel.stage.activated"),
+                ]}
+                dropLabels={[
+                  t("adminFunnel.product.notActivated"),
+                ]}
+                clampNote={(sources) => t("adminFunnel.channel.clamped", { sources })}
+              />
+            </div>
+            <p className="mt-4 rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500 dark:border-gray-700 dark:bg-gray-800/40 dark:text-gray-400">
+              {t("adminFunnel.product.paidAside", { count: data.paid })}
+            </p>
+            <section className="mt-5 border-t border-gray-100 pt-4 dark:border-gray-800" aria-labelledby="resource-mix">
+              <h3 id="resource-mix" className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t("adminFunnel.product.mix.title")}</h3>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("adminFunnel.product.mix.body")}</p>
+              <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                {resources.map((resource) => (
+                  <div key={resource.key} className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800/50">
+                    <dt className="text-xs text-gray-500 dark:text-gray-400">{resource.label}</dt>
+                    <dd className="mt-1 text-lg font-semibold tabular-nums text-gray-900 dark:text-gray-100">{resource.count}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          </>
           )
         )}
         {data?.paid_note && (

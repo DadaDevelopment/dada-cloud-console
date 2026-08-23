@@ -1,3 +1,17 @@
+# Funnel consolidation (2026-08-23)
+
+- [x] Establish that App/DB/VM/Box/S3/Model are parallel resource choices, not sequential funnel stages.
+- [x] Return a deduplicated "activated any resource" cohort so the product funnel has nested stages.
+- [x] Render exactly two primary funnels: acquisition to registration, and registration to activation to payment.
+- [x] Fold Keycloak form telemetry and signup-door attribution into compact evidence below acquisition rather than standalone charts.
+- [ ] Typecheck, run API/frontend tests, visually inspect the responsive page and document the result.
+
+## Review — Funnel consolidation
+
+(in progress)
+
+---
+
 # Public-route health (2026-08-04, reopened)
 
 **Decision:** do not infer or surface a separate app type. A configured port is

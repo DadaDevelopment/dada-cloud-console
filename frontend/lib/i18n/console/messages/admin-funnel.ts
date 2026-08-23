@@ -5,10 +5,10 @@ import type { Messages } from "./common";
  */
 export const adminFunnel: Messages = {
   "adminFunnel.crumb.funnel": { ru: "Воронка", en: "Funnel" },
-  "adminFunnel.title": { ru: "Воронка продукта", en: "Product funnel" },
+  "adminFunnel.title": { ru: "Воронки продукта", en: "Product funnels" },
   "adminFunnel.subtitle": {
-    ru: "Регистрация → какой ресурс завёл → оплата. Реальные данные из БД, окно и когорта фильтруются.",
-    en: "Signup → which resource they set up → paid. Real DB data, filterable by window and cohort.",
+    ru: "Два пути: от визита до регистрации и от регистрации до активации с оплатой.",
+    en: "Two paths: visit to signup, and signup to activation and payment.",
   },
   "adminFunnel.accessDenied": {
     ru: "Нет доступа. Воронка доступна администраторам и аналитикам платформы.",
@@ -28,11 +28,12 @@ export const adminFunnel: Messages = {
   "adminFunnel.stage.box": { ru: "Box", en: "Box" },
   "adminFunnel.stage.s3": { ru: "S3", en: "S3" },
   "adminFunnel.stage.model": { ru: "Model", en: "Model" },
+  "adminFunnel.stage.activated": { ru: "Есть готовый ресурс", en: "Have a ready resource" },
   "adminFunnel.stage.paid": { ru: "Оплата", en: "Paid" },
 
   "adminFunnel.note.paid": {
-    ru: "Модель считается по факту наличия строки (фаза не доходит до Ready). VM/Box считаются по признаку «когда-либо был доступен», а не по текущему статусу.",
-    en: "Model counts row presence only (its phase never reaches Ready). VM/Box count \"ever became reachable\", not current status.",
+    ru: "Model считается по факту наличия строки: у него нет готовой фазы. В готовый ресурс попадают только App/БД/S3 Ready, VM Ready и Box Ready/Idle.",
+    en: "Model counts row presence only: it has no ready phase. Ready resources include only App/DB/S3 Ready, VM Ready, and Box Ready/Idle.",
   },
   "adminFunnel.channel.title": { ru: "Канальная воронка: лендинг → регистрация", en: "Channel funnel: landing → signup" },
   "adminFunnel.channel.body": {
@@ -69,6 +70,36 @@ export const adminFunnel: Messages = {
   "adminFunnel.channel.visitsAside": {
     ru: "{visits} визитов за окно. Ступени воронки — уникальные пользователи Метрики, а не события: один человек с пятью деплоями — это один.",
     en: "{visits} visits in the window. Funnel stages are unique Metrika users, not events: one person with five deploys counts once.",
+  },
+  "adminFunnel.acquisition.evidence.title": { ru: "Проверка регистрации", en: "Registration evidence" },
+  "adminFunnel.acquisition.evidence.body": {
+    ru: "Санкей показывает веб-события Метрики. Ниже — независимая сверка с реальными аккаунтами в БД и способом регистрации.",
+    en: "The Sankey shows Metrika web events. Below is an independent check against real DB accounts and the signup door.",
+  },
+  "adminFunnel.acquisition.dbRegistered": { ru: "Создано аккаунтов в БД", en: "Accounts created in DB" },
+  "adminFunnel.acquisition.doors": { ru: "Известные двери регистрации", en: "Known signup doors" },
+  "adminFunnel.acquisition.form": { ru: "Форма email/пароль", en: "Email/password form" },
+  "adminFunnel.acquisition.formZero": {
+    ru: "не использовалась: открыта только Яндекс ID",
+    en: "not used: only Yandex ID is open",
+  },
+  "adminFunnel.acquisition.formOpened": { ru: "открыли: {count}", en: "opened: {count}" },
+  "adminFunnel.acquisition.formErrors": { ru: "ошибок формы: {count}", en: "form errors: {count}" },
+
+  "adminFunnel.product.title": { ru: "Активация: регистрация → готовый ресурс", en: "Activation: signup → ready resource" },
+  "adminFunnel.product.body": {
+    ru: "Вторая ступень — пользователи с доступным сейчас App, БД, VM, Box или S3. Это единственный доказуемый переход: данные не хранят время первой готовности для всех типов ресурсов.",
+    en: "The second stage is users with a currently available App, DB, VM, Box, or S3. This is the only provable transition: the data does not store a first-ready timestamp for every resource type.",
+  },
+  "adminFunnel.product.notActivated": { ru: "Нет готового ресурса", en: "No ready resource" },
+  "adminFunnel.product.paidAside": {
+    ru: "Среди этой когорты успешную оплату имеют: {count}. Платёж сопоставлен по email и показан отдельно: порядок оплаты и готовности ресурса не известен.",
+    en: "{count} people in this cohort have a successful payment. It is matched by email and shown separately: the order of payment and resource readiness is unknown.",
+  },
+  "adminFunnel.product.mix.title": { ru: "Что активировали", en: "What they activated" },
+  "adminFunnel.product.mix.body": {
+    ru: "Разрез ресурсов в когорте, не ступени: один пользователь может быть сразу в нескольких типах. Model показан по факту создания, потому что у него нет готовой фазы.",
+    en: "Resource breakdown within the cohort, not stages: one user may have several types. Model is shown by row presence because it has no ready phase.",
   },
 
   "adminFunnel.cohort.empty": {

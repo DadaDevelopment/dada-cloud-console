@@ -810,7 +810,7 @@ const docTemplate = `{
         },
         "/admin/funnel": {
             "get": {
-                "description": "Metrika traffic sources, Keycloak registration steps, and resource-kind adoption -\u003e paid counts for a window. account_kind filters apply to the DB-backed product leg only.",
+                "description": "Metrika traffic sources, Keycloak registration steps, current ready-resource cohort, and a separate payment fact for that cohort. account_kind filters apply to the DB-backed product leg only.",
                 "tags": [
                     "admin"
                 ],
@@ -8811,7 +8811,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns the agents ordered through the console for this environment. Live readiness comes from the agent state endpoint.",
+                "description": "Returns the agents of this environment as git holds them: ManagedAgent claims ordered through the console and raw kagent Agent CRs maintained by hand. Live readiness comes from the agent state endpoint.",
                 "produces": [
                     "application/json"
                 ],
@@ -8939,6 +8939,15 @@ const docTemplate = `{
                                 "type": "string"
                             }
                         }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
                     }
                 }
             }
@@ -9010,6 +9019,15 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -22067,6 +22085,9 @@ const docTemplate = `{
                 },
                 "paid_note": {
                     "type": "string"
+                },
+                "ready_resource_users": {
+                    "type": "integer"
                 },
                 "registration_funnel": {
                     "$ref": "#/definitions/api.overviewRegistrationFunnel"

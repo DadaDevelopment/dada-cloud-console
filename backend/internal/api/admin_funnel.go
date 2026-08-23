@@ -60,6 +60,7 @@ type adminFunnelResponse struct {
 	BoxUp              int                        `json:"box_up"`
 	S3Up               int                        `json:"s3_up"`
 	ModelUp            int                        `json:"model_up"`
+	ReadyResourceUsers int                        `json:"ready_resource_users"`
 	Paid               int                        `json:"paid"`
 	PaidNote           string                     `json:"paid_note,omitempty"`
 	CohortCounts       []adminFunnelCohortCount   `json:"cohort_counts"`
@@ -88,6 +89,20 @@ func adminFunnelCountsQuery(sinceClause string) string {
 		),
 		proj AS (
 			SELECT p.id, p.owner_id FROM projects p JOIN scope s ON s.id = p.owner_id
+		),
+		ready_resource AS (
+			SELECT DISTINCT owner_id FROM (
+				SELECT p.owner_id FROM resource_snapshots rs JOIN proj p ON p.id = rs.project_id
+					WHERE (rs.kind = 'App' AND rs.phase = 'Ready')
+					   OR (rs.kind IN ('ServiceDatabase','ServiceDatabaseV2') AND rs.phase = 'Ready')
+					   OR (rs.kind = 'S3Bucket' AND rs.phase = 'Ready')
+				UNION
+				SELECT p.owner_id FROM app_servers a JOIN proj p ON p.id = a.project_id
+					WHERE a.status = 'Ready'
+				UNION
+				SELECT p.owner_id FROM boxes b JOIN proj p ON p.id = b.project_id
+					WHERE b.status IN ('Ready', 'Idle')
+			) resources
 		)
 		SELECT
 			(SELECT count(*) FROM scope),
@@ -103,7 +118,9 @@ func adminFunnelCountsQuery(sinceClause string) string {
 				WHERE rs.kind = 'S3Bucket' AND rs.phase = 'Ready'),
 			(SELECT count(DISTINCT p.owner_id) FROM resource_snapshots rs JOIN proj p ON p.id = rs.project_id
 				WHERE rs.kind = 'AIModel'),
-			(SELECT count(DISTINCT s.id) FROM scope s JOIN payments pay ON lower(pay.customer_email) = lower(s.email)
+			(SELECT count(*) FROM ready_resource),
+			(SELECT count(DISTINCT s.id) FROM scope s JOIN ready_resource r ON r.owner_id = s.id
+				JOIN payments pay ON lower(pay.customer_email) = lower(s.email)
 				WHERE pay.status = 'succeeded')
 	`
 }
@@ -121,10 +138,17 @@ var funnelWindowDays = map[string]int{
 }
 
 // GetAdminFunnel returns the live Metrika channel leg, Keycloak registration
-// leg, and product-adoption counts (signup -> App/DB/VM/Box/S3/Model -> paid)
-// for one window and account_kind cohort.
+// leg, and a current resource-readiness cohort for one window and account_kind
+// cohort. Payment is returned as a separate fact about that cohort rather than
+// an implied time-ordered funnel transition.
 //
-// Resource "up" is computed per resource kind, not per row, because the
+// Ready-resource users are computed from current usable state: App/DB/S3 need
+// resource_snapshots.phase = Ready, AppServer needs status = Ready, and Box
+// needs status Ready or Idle. AIModel is excluded from the ready-resource
+// cohort because the worker never stamps a usable phase for it; it remains a
+// separate presence-only resource mix count.
+//
+// Resource-kind mix is computed per kind, not per row, because the
 // ground-truth signal differs by kind: App/DB/S3 use resource_snapshots.phase
 // = 'Ready' (the gitops reconciler's verdict); AIModel has no working phase
 // signal (the worker never stamps Ready for it), so presence is the only
@@ -133,14 +157,14 @@ var funnelWindowDays = map[string]int{
 // instead of current status, because status cycles back through
 // Deleted/Failed after use and a status filter reads as a false zero.
 //
-// Paid joins payments to users via customer_email, not created_by_sub:
+// Paid joins payments to ready-resource users via customer_email, not created_by_sub:
 // created_by_sub is empty on every existing production row (P0, undiagnosed
 // prior to this endpoint), while customer_email is a required, always-populated
 // field at checkout (yookassa.Checkout enforces it via requireReceiptEmail).
 //
 // @ID          getAdminFunnel
 // @Summary     Full acquisition and product funnel
-// @Description Metrika traffic sources, Keycloak registration steps, and resource-kind adoption -> paid counts for a window. account_kind filters apply to the DB-backed product leg only.
+// @Description Metrika traffic sources, Keycloak registration steps, current ready-resource cohort, and a separate payment fact for that cohort. account_kind filters apply to the DB-backed product leg only.
 // @Tags        admin
 // @Param       window query string false "7d|30d|90d|all" default(30d)
 // @Param       exclude_kind query string false "comma-separated account_kind values to hide"
@@ -186,14 +210,14 @@ func (h *Handler) GetAdminFunnel(c *gin.Context) {
 
 	resp := adminFunnelResponse{Window: window, ExcludedKinds: excludeKinds}
 	err := h.pool.QueryRow(c.Request.Context(), adminFunnelCountsQuery(sinceClause), excludeArg).Scan(
-		&resp.Signups, &resp.AppUp, &resp.DBUp, &resp.VMUp, &resp.BoxUp, &resp.S3Up, &resp.ModelUp, &resp.Paid,
+		&resp.Signups, &resp.AppUp, &resp.DBUp, &resp.VMUp, &resp.BoxUp, &resp.S3Up, &resp.ModelUp, &resp.ReadyResourceUsers, &resp.Paid,
 	)
 	if err != nil {
 		log.Printf("admin funnel: read counts: %v", err)
 		respondError(c, http.StatusInternalServerError, "failed to read funnel")
 		return
 	}
-	resp.PaidNote = "AIModel counts row presence only, its phase never reaches Ready; VM/Box count ever-reachable, not current status."
+	resp.PaidNote = "AIModel counts row presence only; ready-resource users include only App/DB/S3 Ready, VM Ready, or Box Ready/Idle."
 
 	cohortRows, err := h.pool.Query(c.Request.Context(), adminFunnelCohortsQuery(sinceClause))
 	if err != nil {

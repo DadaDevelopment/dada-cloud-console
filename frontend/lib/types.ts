@@ -1623,6 +1623,7 @@ export interface AdminFunnelResponse {
   box_up: number;
   s3_up: number;
   model_up: number;
+  ready_resource_users: number;
   paid: number;
   paid_note?: string;
   cohort_counts: AdminFunnelCohortCount[];
