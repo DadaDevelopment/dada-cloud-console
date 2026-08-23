@@ -44,7 +44,7 @@ export function LandingGuide({
   related?: { label: string; href: string }[];
 }) {
   const g = copy;
-  const cta = `/register?${utm}`;
+  const cta = `/login?${utm}`;
 
   return (
     <>

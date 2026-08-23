@@ -42,7 +42,7 @@ export default function HomePage() {
             <p className="mt-6 max-w-2xl text-lg text-white/70 sm:text-xl">{t.home.heroSubtitle}</p>
             <div className="mt-9 flex flex-wrap gap-3">
               <Link
-                href={consoleHref("/register")}
+                href={consoleHref("/login")}
                 onClick={() => reachGoal(GOAL_LANDING_CTA, { source: "direct", placement: "hero" })}
                 className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-7 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
               >
@@ -190,7 +190,7 @@ export default function HomePage() {
           </div>
           <div className="mt-8 flex flex-wrap items-center gap-4">
             <Link
-              href={consoleHref("/register")}
+              href={consoleHref("/login")}
               onClick={() =>
                 reachGoal(GOAL_LANDING_CTA, { source: "direct", placement: "pricing_teaser" })
               }

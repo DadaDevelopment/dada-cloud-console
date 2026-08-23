@@ -90,7 +90,7 @@ export default function MigrateVercelPage() {
           <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">{g.ctaTitle}</h2>
           <p className="mx-auto mt-4 max-w-xl text-lg text-white/70">{g.ctaSubtitle}</p>
           <Link
-            href={`${consoleHref("/register")}?${UTM}`}
+            href={`${consoleHref("/login")}?${UTM}`}
             className="mt-8 inline-block rounded-md bg-blue-600 px-8 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
           >
             {g.ctaButton}

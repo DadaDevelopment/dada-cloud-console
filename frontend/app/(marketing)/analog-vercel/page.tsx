@@ -106,7 +106,7 @@ export default function VercelAlternativePage() {
       )}
 
       <FaqList title={g.faqTitle} items={g.faq} />
-      <CtaBand ctaHref={`/register?${UTM}`} />
+      <CtaBand ctaHref={`/login?${UTM}`} />
     </>
   );
 }

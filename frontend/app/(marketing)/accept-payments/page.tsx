@@ -20,7 +20,7 @@ export default function AcceptPaymentsPage() {
         description={g.heroSubtitle}
         steps={g.steps.map((s) => ({ name: s.title, text: s.desc }))}
       />
-      <ProductHero title={g.heroTitle} subtitle={g.heroSubtitle} ctaHref={`/register?${UTM}`} />
+      <ProductHero title={g.heroTitle} subtitle={g.heroSubtitle} ctaHref={`/login?${UTM}`} />
 
       <section className="bg-white py-20">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -42,7 +42,7 @@ export default function AcceptPaymentsPage() {
 
       <FeatureGrid title={g.featuresTitle} features={g.features} />
       <FaqList title={g.faqTitle} items={g.faq} />
-      <CtaBand ctaHref={`/register?${UTM}`} />
+      <CtaBand ctaHref={`/login?${UTM}`} />
     </>
   );
 }

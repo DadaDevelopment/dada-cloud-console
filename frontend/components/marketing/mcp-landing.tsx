@@ -42,7 +42,7 @@ export function McpLanding() {
         description={g.heroSubtitle}
         steps={g.steps.map((s) => ({ name: s.title, text: s.desc }))}
       />
-      <ProductHero title={g.heroTitle} subtitle={g.heroSubtitle} ctaHref={`/register?${UTM}`} />
+      <ProductHero title={g.heroTitle} subtitle={g.heroSubtitle} ctaHref={`/login?${UTM}`} />
 
       <section className="bg-white py-16">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -82,7 +82,7 @@ export function McpLanding() {
         ]}
       />
 
-      <CtaBand ctaHref={`/register?${UTM}`} />
+      <CtaBand ctaHref={`/login?${UTM}`} />
     </>
   );
 }

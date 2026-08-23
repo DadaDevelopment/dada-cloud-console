@@ -4,8 +4,16 @@ import { useRouter } from "next/navigation";
 import { authApi } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { AuthErrorScreen } from "@/components/shell/auth-error-screen";
+import { startLogin } from "@/lib/register-redirect";
+import { rememberSource } from "@/lib/metrika";
 
 const AUTH_MODE = process.env.NEXT_PUBLIC_AUTH_MODE;
+const LOGIN_SEARCH = typeof window === "undefined" ? new URLSearchParams() : new URLSearchParams(window.location.search);
+
+function sanitizeReturnTo(value: string | null): string {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return "/projects";
+  return value;
+}
 
 /**
  * OIDC entry point. Instead of an intermediate "Sign in with Keycloak" card,
@@ -17,8 +25,10 @@ const AUTH_MODE = process.env.NEXT_PUBLIC_AUTH_MODE;
  */
 function OidcLoginPage() {
   const router = useRouter();
-  const { login, isLoading, token, authError, logout } = useAuth();
+  const { isLoading, token, authError, logout } = useAuth();
   const startedRef = useRef(false);
+  const returnTo = sanitizeReturnTo(LOGIN_SEARCH.get("returnTo") ?? LOGIN_SEARCH.get("next"));
+  const source = LOGIN_SEARCH.get("utm_source") ?? "direct";
 
   useEffect(() => {
     if (isLoading || authError) return;
@@ -28,8 +38,9 @@ function OidcLoginPage() {
     }
     if (startedRef.current) return;
     startedRef.current = true;
-    login();
-  }, [isLoading, token, authError, login, router]);
+    rememberSource(source);
+    void startLogin(returnTo);
+  }, [isLoading, token, authError, returnTo, router, source]);
 
   /**
    * Auth gave up before it could tell us who this is. Starting the Keycloak
@@ -39,7 +50,7 @@ function OidcLoginPage() {
    * plain page reload, which loops outright.
    */
   if (authError) {
-    return <AuthErrorScreen onRetry={() => window.location.reload()} onLogout={logout} />;
+    return <AuthErrorScreen onRetry={() => void startLogin(returnTo)} onLogout={logout} />;
   }
 
   return (

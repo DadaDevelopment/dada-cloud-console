@@ -80,7 +80,7 @@ export function reachGoal(goal: string, params?: Record<string, string>) {
 /** Goal fired when a visitor clicks the register CTA on a marketing landing. */
 export const GOAL_LANDING_CTA = "landing_cta_click";
 
-/** Goal fired on `/register`, just before the visitor is handed to Keycloak. */
+/** Legacy goal for the former console-owned `/register` choice screen. */
 export const GOAL_SIGNUP_STARTED = "signup_started";
 
 /** Goal fired once a returning OIDC callback completes a fresh registration. */
@@ -102,7 +102,7 @@ export const SOURCE_COOKIE = "dada_src";
 
 /**
  * Persists the acquisition source in a first-party cookie scoped to the whole
- * `dada-tuda.ru` zone. The utm only lives in the `/register` query string and is
+ * `dada-tuda.ru` zone. The utm only lives in the `/login` query string and is
  * lost the moment Keycloak takes over the redirect, so it has to be written down
  * before that happens if signups are ever to be attributed to a landing page.
  *
@@ -217,9 +217,9 @@ function setAttributionCookie(name: string, value: string, hostname: string): vo
  * `dada_med`, `dada_cmp`, `dada_ref`) that the backend reads at signup time to
  * attribute a registration to the page that actually brought the visitor in.
  *
- * Must run on every page load, as early as possible, NOT just on `/register`:
+ * Must run on every page load, as early as possible, NOT just on `/login`:
  * an organic visitor who lands on a marketing page and only reaches
- * `/register` several clicks later would otherwise carry no `utm_source` at
+ * `/login` several clicks later would otherwise carry no `utm_source` at
  * all by the time `rememberSource` used to run, and stayed unattributed
  * forever.
  *

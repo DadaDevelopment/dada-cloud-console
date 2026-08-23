@@ -219,7 +219,7 @@ export default function PricingPage() {
                 </ul>
 
                 <Link
-                  href={p.key === "enterprise" ? "mailto:hello@dada-tuda.ru" : consoleHref(localeHref("/register", locale))}
+                  href={p.key === "enterprise" ? "mailto:hello@dada-tuda.ru" : consoleHref("/login")}
                   className={clsx(
                     "mt-6 rounded-lg px-5 py-2.5 text-center text-sm font-semibold transition-colors",
                     p.highlight

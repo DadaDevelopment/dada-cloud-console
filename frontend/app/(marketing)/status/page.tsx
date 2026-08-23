@@ -203,7 +203,7 @@ export default function StatusRadarPage() {
               {g.ctaPrimaryLabel}
             </Link>
             <Link
-              href={`${consoleHref("/register")}?${UTM}`}
+              href={`${consoleHref("/login")}?${UTM}`}
               className="rounded-md border border-white/20 px-8 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/5"
             >
               {g.ctaSecondaryLabel}

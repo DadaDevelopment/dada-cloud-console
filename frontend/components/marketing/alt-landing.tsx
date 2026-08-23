@@ -103,7 +103,7 @@ export function PricingAndCaveats(g: PricingAndCaveatsProps) {
  * FAQPage and HowTo structured data that mirrors the visible copy.
  */
 export function AltLandingPage({ path, g, utm }: { path: string; g: AltLanding; utm: string }) {
-  const ctaHref = `/register?utm_source=${utm}`;
+  const ctaHref = `/login?utm_source=${utm}`;
   const hasSteps = Boolean(g.howtoSteps && g.howtoSteps.length > 0);
 
   return (

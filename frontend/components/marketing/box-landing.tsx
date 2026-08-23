@@ -32,10 +32,10 @@ const STEP_ICONS = [Zap, Plug, Database, Gem];
 /**
  * In-page CTA targets, carrying `utm_source=door_box`.
  *
- * Same pattern as the other landings (`/register?utm_source=door_b`), so the tag
+ * Same pattern as the other landings (`/login?utm_source=door_b`), so the tag
  * is in the URL from the first click onward and the funnel's `utm_source` lines up
  * with the existing `door_*` tests. The difference is that this landing's
- * conversion IS the form on the page — there is no /register hop to carry the tag
+ * conversion IS the form on the page — there is no /login hop to carry the tag
  * for us — so the CTAs stay in-page anchors and the tag rides the query string of
  * the landing's own URL. Written out in full rather than as a bare `?...#...`
  * relative href so the target is unambiguous on both /box and /en/box.
