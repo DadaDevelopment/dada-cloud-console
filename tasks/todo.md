@@ -3,9 +3,22 @@
 ## Sankey-first correction (2026-08-23)
 
 - [x] Keep the report to two top-level paths without reducing its evidence to panels.
-- [ ] Render acquisition as one multi-lane Sankey with source, UX, DB-account and first-entry evidence.
-- [ ] Render lifecycle as one multi-lane Sankey with user journey, resource-type branches and billing path.
-- [ ] Verify the frontend build and deployed visualization.
+- [x] Render acquisition as one multi-lane Sankey with source, UX, DB-account and first-entry evidence.
+- [x] Render lifecycle as one multi-lane Sankey with user journey, resource-type branches and billing path.
+- [x] Verify the frontend build and deployed visualization.
+
+### Review
+
+- `7cfedb3f` removes the stage rail and resource/quota cards from the report.
+  It renders exactly two Sankey canvases: acquisition has Metrika, UX and the
+  server-confirmed account-to-first-entry lane; lifecycle has the customer
+  path, each parallel resource type, and the billing path to payment.
+- Ribbons are only drawn inside comparable cohorts. The anonymous-to-account
+  and user-to-organization boundaries remain separate named lanes, so the
+  graphic does not assert a conversion the data cannot prove.
+- `npm run check:docs` passed. Full frontend lint/build is Jenkins #1333
+  SUCCESS; the production frontend and backend deployments both use
+  `7cfedb3f`.
 
 - [x] Inventory and validate every persisted signal for landing, registration, account creation, and first authenticated entry.
 - [x] Build one detailed acquisition funnel: landing -> registration intent -> account created -> first console entry.
