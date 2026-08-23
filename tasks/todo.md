@@ -4,11 +4,28 @@
 - [x] Return a deduplicated "activated any resource" cohort so the product funnel has nested stages.
 - [x] Render exactly two primary funnels: acquisition to registration, and registration to activation to payment.
 - [x] Fold Keycloak form telemetry and signup-door attribution into compact evidence below acquisition rather than standalone charts.
-- [ ] Typecheck, run API/frontend tests, visually inspect the responsive page and document the result.
+- [x] Run API/frontend tests and verify the deployed API contract. Local visual preview was unavailable because the private frontend dependency cannot be installed in this environment.
 
 ## Review — Funnel consolidation
 
-(in progress)
+- The page now has exactly two primary Sankeys: traffic source -> registration,
+  and registration -> currently ready resource. Keycloak form telemetry and
+  signup-door attribution are compact evidence below the first; resource kinds
+  are an overlapping breakdown below the second.
+- `ready_resource_users` is a deduplicated owner cohort with current App/DB/S3
+  Ready, VM Ready, or Box Ready/Idle. AIModel is deliberately excluded from the
+  funnel because it has no usable readiness phase; it remains a presence-only
+  mix count. The API regression test pins those predicates.
+- Payment is not drawn as a funnel stage. It is a separate email-matched fact
+  for the ready-resource cohort because the data does not preserve an ordered
+  account -> first-ready -> paid relation.
+- Verification: `go test ./internal/api -count=1`, `go vet ./internal/api`,
+  and the pure Sankey tests (7/7) pass. Jenkins #1328 is SUCCESS for
+  `32ada87d`; its log shows frontend lint passed and the complete pipeline
+  completed. Live read-only `/api/v1/admin/funnel?window=30d` returned
+  `signups=29`, `ready_resource_users=4`, `paid=0`, and no legacy `activated`
+  field. Browser visual inspection could not run locally because the private
+  frontend package registry required unavailable credentials.
 
 ---
 
