@@ -5,7 +5,7 @@
 - [x] Inventory user lifecycle signals for resource creation, readiness, quotas, payment intent, and succeeded payment.
 - [x] Build one detailed monetization funnel: all users -> resource choices -> quota/billing events -> payment outcome.
 - [x] Preserve exact per-stage counts and show gaps as unavailable rather than invented transitions.
-- [ ] Run CI and inspect the deployed page.
+- [x] Run CI and inspect the deployed page.
 
 ## Review — Detailed funnel reconstruction
 
@@ -23,8 +23,13 @@
   checkout, 0 paid; 1 user has 10 recorded quota refusals and 0 grace breaches.
 - Local verification: `go test ./internal/api -count=1`, `go vet ./internal/api`,
   the channel-funnel unit suite (7/7), and docs translation validation pass.
-- Full frontend typecheck and suite cannot run locally because the workspace has
-  no installed React/Next/private dependencies; Jenkins remains the full gate.
+- Local frontend dependencies remain unavailable, but Jenkins #1331 is SUCCESS
+  for `c8ca71ec`: lint, frontend build, full Go tests and image publication all
+  passed. The live backend and frontend deployments both run `c8ca71ec`.
+- Live read-only `/api/v1/admin/funnel?window=30d` returns the new
+  `acquisition` and `lifecycle` objects, including 133 UX landing identities,
+  63 registration starts, 26 created accounts, 25 first authenticated entries,
+  and the validated lifecycle/resource breakdown above.
 
 ---
 
