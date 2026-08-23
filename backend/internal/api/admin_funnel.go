@@ -75,6 +75,10 @@ type adminFunnelLifecycle struct {
 	QuotaBlockedUsers       int                   `json:"quota_blocked_users"`
 	QuotaBlockedAttempts    int                   `json:"quota_blocked_attempts"`
 	QuotaGraceOrganizations int                   `json:"quota_grace_organizations"`
+	AppCreators             int                   `json:"app_creators"`
+	GitConnectedUsers       int                   `json:"git_connected_users"`
+	BuildStartedUsers       int                   `json:"build_started_users"`
+	FirstDeployedUsers      int                   `json:"first_deployed_users"`
 	Resources               []adminFunnelResource `json:"resources"`
 }
 
@@ -238,6 +242,56 @@ func adminFunnelResourcesQuery() string {
 	`
 }
 
+func adminFunnelFirstDeployQuery() string {
+	return `
+		WITH scope AS (
+			SELECT u.id FROM user_accounts u
+			WHERE u.account_kind = 'customer'
+			  AND ($1::text[] IS NULL OR u.account_kind <> ALL($1))
+		),
+		apps AS (
+			SELECT a.actor_id, a.project_id, a.environment_id, a.resource_name AS app_name, a.created_at AS app_created_at
+			FROM audit_events a
+			JOIN scope s ON s.id = a.actor_id
+			WHERE a.action = 'CreateApp' AND a.outcome = 'success' AND a.resource_kind = 'App'
+		),
+		repos AS (
+			SELECT DISTINCT ON (a.actor_id, a.project_id, a.environment_id, a.app_name)
+				a.actor_id, a.project_id, a.environment_id, a.app_name, g.created_at AS connected_at
+			FROM apps a
+			JOIN audit_events g ON g.actor_id = a.actor_id
+				AND g.project_id = a.project_id
+				AND g.environment_id = a.environment_id
+				AND g.resource_name = a.app_name
+				AND g.action = 'ConnectGitRepo'
+				AND g.outcome = 'success'
+				AND g.created_at >= a.app_created_at
+			ORDER BY a.actor_id, a.project_id, a.environment_id, a.app_name, g.created_at
+		),
+		started_builds AS (
+			SELECT DISTINCT ON (r.actor_id, r.project_id, r.environment_id, r.app_name)
+				r.actor_id, r.project_id, r.environment_id, r.app_name, b.id AS build_id, b.started_at
+			FROM repos r
+			JOIN git_repos gr ON gr.project_id = r.project_id AND gr.environment_id = r.environment_id AND gr.app_name = r.app_name
+			JOIN builds b ON b.git_repo_id = gr.id AND b.environment_id = r.environment_id AND b.app_name = r.app_name
+			WHERE b.started_at IS NOT NULL AND b.started_at >= r.connected_at
+			ORDER BY r.actor_id, r.project_id, r.environment_id, r.app_name, b.started_at
+		),
+		deployed AS (
+			SELECT DISTINCT b.actor_id
+			FROM started_builds b
+			JOIN deployments d ON d.build_id = b.build_id AND d.created_at >= b.started_at
+			LEFT JOIN operations o ON o.id = d.operation_id
+			WHERE d.operation_id IS NULL OR (o.action = 'DeployImageVersion' AND o.status IN ('Committed', 'Ready'))
+		)
+		SELECT
+			(SELECT count(DISTINCT actor_id) FROM apps),
+			(SELECT count(DISTINCT actor_id) FROM repos),
+			(SELECT count(DISTINCT actor_id) FROM started_builds),
+			(SELECT count(*) FROM deployed)
+	`
+}
+
 func adminFunnelCohortsQuery(sinceClause string) string {
 	return `SELECT u.account_kind, count(*) FROM user_accounts u WHERE ` + sinceClause + ` GROUP BY u.account_kind ORDER BY u.account_kind`
 }
@@ -327,6 +381,14 @@ func (h *Handler) GetAdminFunnel(c *gin.Context) {
 		&resp.Lifecycle.QuotaGraceOrganizations,
 	); err != nil {
 		log.Printf("admin funnel: read lifecycle: %v", err)
+		respondError(c, http.StatusInternalServerError, "failed to read funnel")
+		return
+	}
+	if err := h.pool.QueryRow(c.Request.Context(), adminFunnelFirstDeployQuery(), excludeArg).Scan(
+		&resp.Lifecycle.AppCreators, &resp.Lifecycle.GitConnectedUsers,
+		&resp.Lifecycle.BuildStartedUsers, &resp.Lifecycle.FirstDeployedUsers,
+	); err != nil {
+		log.Printf("admin funnel: read first deploy path: %v", err)
 		respondError(c, http.StatusInternalServerError, "failed to read funnel")
 		return
 	}

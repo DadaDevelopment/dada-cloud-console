@@ -20,6 +20,13 @@
   SUCCESS; the production frontend and backend deployments both use
   `7cfedb3f`.
 
+## First deployment path (2026-08-24)
+
+- [ ] Trace durable account-level evidence for first created App, connected Git repository, started build and successful deploy.
+- [ ] Add the nested cohort counts to the admin funnel API with regression coverage.
+- [ ] Draw the new path as the continuation of the second Sankey.
+- [ ] Run CI and verify the deployed API response.
+
 - [x] Inventory and validate every persisted signal for landing, registration, account creation, and first authenticated entry.
 - [x] Build one detailed acquisition funnel: landing -> registration intent -> account created -> first console entry.
 - [x] Inventory user lifecycle signals for resource creation, readiness, quotas, payment intent, and succeeded payment.

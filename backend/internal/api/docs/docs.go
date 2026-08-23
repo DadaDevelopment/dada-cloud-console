@@ -810,7 +810,7 @@ const docTemplate = `{
         },
         "/admin/funnel": {
             "get": {
-                "description": "Detailed acquisition and lifecycle funnels. The window applies to acquisition; lifecycle is historical for all customer accounts in the selected cohort.",
+                "description": "Detailed acquisition and lifecycle funnels. The window applies to acquisition; lifecycle is historical for all customer accounts.",
                 "tags": [
                     "admin"
                 ],
@@ -22070,10 +22070,22 @@ const docTemplate = `{
         "api.adminFunnelLifecycle": {
             "type": "object",
             "properties": {
+                "app_creators": {
+                    "type": "integer"
+                },
+                "build_started_users": {
+                    "type": "integer"
+                },
                 "checkout_organizations": {
                     "type": "integer"
                 },
                 "customer_accounts": {
+                    "type": "integer"
+                },
+                "first_deployed_users": {
+                    "type": "integer"
+                },
+                "git_connected_users": {
                     "type": "integer"
                 },
                 "paid_organizations": {

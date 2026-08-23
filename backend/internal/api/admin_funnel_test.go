@@ -29,6 +29,14 @@ func TestAdminFunnelQueriesMatchCurrentSchema(t *testing.T) {
 		t.Fatalf("admin funnel lifecycle query must compile against current schema: %v", err)
 	}
 
+	var firstDeploy [4]int
+	err = pool.QueryRow(ctx, adminFunnelFirstDeployQuery(), nil).Scan(
+		&firstDeploy[0], &firstDeploy[1], &firstDeploy[2], &firstDeploy[3],
+	)
+	if err != nil {
+		t.Fatalf("admin funnel first deploy query must compile against current schema: %v", err)
+	}
+
 	resources, err := pool.Query(ctx, adminFunnelResourcesQuery(), nil)
 	if err != nil {
 		t.Fatalf("admin funnel resources query must compile against current schema: %v", err)
@@ -40,6 +48,18 @@ func TestAdminFunnelQueriesMatchCurrentSchema(t *testing.T) {
 		t.Fatalf("admin funnel cohorts query must compile against current schema: %v", err)
 	}
 	rows.Close()
+}
+
+func TestAdminFunnelFirstDeployPathUsesOrderedAppEvidence(t *testing.T) {
+	query := adminFunnelFirstDeployQuery()
+	for _, want := range []string{
+		"a.action = 'CreateApp'", "g.action = 'ConnectGitRepo'", "b.started_at IS NOT NULL",
+		"d.build_id = b.build_id", "o.status IN ('Committed', 'Ready')", "g.created_at >= a.app_created_at",
+	} {
+		if !strings.Contains(query, want) {
+			t.Fatalf("first deploy query missing %q", want)
+		}
+	}
 }
 
 func TestAdminFunnelLifecycleUsesCurrentReadinessAndLinkedPayment(t *testing.T) {

@@ -168,9 +168,17 @@ definitions:
     type: object
   api.adminFunnelLifecycle:
     properties:
+      app_creators:
+        type: integer
+      build_started_users:
+        type: integer
       checkout_organizations:
         type: integer
       customer_accounts:
+        type: integer
+      first_deployed_users:
+        type: integer
+      git_connected_users:
         type: integer
       paid_organizations:
         type: integer
@@ -2295,8 +2303,7 @@ paths:
   /admin/funnel:
     get:
       description: Detailed acquisition and lifecycle funnels. The window applies
-        to acquisition; lifecycle is historical for all customer accounts in the selected
-        cohort.
+        to acquisition; lifecycle is historical for all customer accounts.
       operationId: getAdminFunnel
       parameters:
       - default: 30d
