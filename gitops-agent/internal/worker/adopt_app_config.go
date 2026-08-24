@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"time"
@@ -87,36 +88,54 @@ func (w *DBWatcher) doAdoptAppConfig(ctx context.Context, op db.Operation) error
 	if err := json.Unmarshal(op.Payload, &p); err != nil {
 		return fmt.Errorf("parse payload: %w", err)
 	}
+	report, err := w.adoptAppConfigFor(ctx, op, p.AppName)
+	if err != nil {
+		return err
+	}
+	result, err := json.Marshal(report)
+	if err != nil {
+		return err
+	}
+	return db.MarkValidated(ctx, w.pool, op.ID, result, report.Summary)
+}
+
+// adoptAppConfigFor is adoption itself, separated from the operation that
+// records it. The deploy path calls this directly: a deploy that is about to be
+// refused because git holds configuration the console never learned does not
+// need a human to go run the adopt verb and come back, it needs the console to
+// learn. See adoptRetryAfterClobber.
+func (w *DBWatcher) adoptAppConfigFor(ctx context.Context, op db.Operation, appName string) (adoptReport, error) {
+	p := adoptAppConfigPayload{AppName: appName}
 	if strings.TrimSpace(p.AppName) == "" {
-		return fmt.Errorf("adopt app config: app_name is required")
+		return adoptReport{}, fmt.Errorf("adopt app config: app_name is required")
 	}
 	if op.EnvironmentID == nil {
-		return fmt.Errorf("adopt app config: environment is required")
+		return adoptReport{}, fmt.Errorf("adopt app config: environment is required")
 	}
 
 	projectName, envName, _, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
 	if err != nil {
-		return fmt.Errorf("project/env lookup: %w", err)
+		return adoptReport{}, fmt.Errorf("project/env lookup: %w", err)
 	}
 	mgr, err := w.managerFor(ctx, op.ProjectID)
 	if err != nil {
-		return err
+		return adoptReport{}, err
 	}
 	if err := mgr.EnsureCloned(); err != nil {
-		return err
+		return adoptReport{}, err
 	}
 	if _, err := mgr.Pull(); err != nil {
-		return err
+		return adoptReport{}, err
 	}
 
 	valuesPath := renderer.AppHelmValuesGitPath(projectName, envName, p.AppName)
 	raw, err := mgr.ReadFile(valuesPath)
 	if err != nil {
-		return fmt.Errorf("adopt app config: %s has no %s in git, so there is nothing to adopt", p.AppName, valuesPath)
+		return adoptReport{}, fmt.Errorf("adopt app config: %s has no %s in git, so there is nothing to adopt", p.AppName, valuesPath)
 	}
 	adopted, err := parseAdoptableValues(raw)
 	if err != nil {
-		return fmt.Errorf("adopt app config: %w", err)
+		return adoptReport{}, fmt.Errorf("adopt app config: %w", err)
 	}
 
 	report := adoptReport{
@@ -130,7 +149,7 @@ func (w *DBWatcher) doAdoptAppConfig(ctx context.Context, op db.Operation) error
 
 	known, err := w.consoleEnvKeys(ctx, *op.EnvironmentID, p.AppName)
 	if err != nil {
-		return err
+		return adoptReport{}, err
 	}
 
 	for _, k := range sortedEnvKeys(adopted.Plain) {
@@ -139,7 +158,7 @@ func (w *DBWatcher) doAdoptAppConfig(ctx context.Context, op db.Operation) error
 			continue
 		}
 		if err := w.insertAdoptedValue(ctx, *op.EnvironmentID, p.AppName, k, adopted.Plain[k], op.ActorID); err != nil {
-			return err
+			return adoptReport{}, err
 		}
 		report.AdoptedPlain = append(report.AdoptedPlain, k)
 	}
@@ -149,7 +168,7 @@ func (w *DBWatcher) doAdoptAppConfig(ctx context.Context, op db.Operation) error
 			continue
 		}
 		if err := w.insertAdoptedSecretRef(ctx, *op.EnvironmentID, p.AppName, r, op.ActorID); err != nil {
-			return err
+			return adoptReport{}, err
 		}
 		report.AdoptedSecretRef = append(report.AdoptedSecretRef, fmt.Sprintf("%s -> secret/%s:%s", r.Name, r.SecretName, r.SecretKey))
 	}
@@ -157,7 +176,7 @@ func (w *DBWatcher) doAdoptAppConfig(ctx context.Context, op db.Operation) error
 
 	shapeChanges, portAdopted, portWas, err := w.adoptAppShape(ctx, op, p.AppName, adopted)
 	if err != nil {
-		return err
+		return adoptReport{}, err
 	}
 	report.AdoptedShape = shapeChanges
 	if report.AdoptedShape == nil {
@@ -171,11 +190,7 @@ func (w *DBWatcher) doAdoptAppConfig(ctx context.Context, op db.Operation) error
 		len(report.AdoptedPlain), len(report.AdoptedSecretRef), len(report.AdoptedShape),
 		describeShape(report.AdoptedShape), valuesPath, len(report.AlreadyInConsole),
 	)
-	result, err := json.Marshal(report)
-	if err != nil {
-		return err
-	}
-	return db.MarkValidated(ctx, w.pool, op.ID, result, report.Summary)
+	return report, nil
 }
 
 // consoleEnvKeys reports which variables the console already carries for an
@@ -527,4 +542,52 @@ func describeShape(changes []string) string {
 		return "the console already agreed with git"
 	}
 	return strings.Join(changes, "; ")
+}
+
+// adoptRetryAfterClobber decides what happens to a deploy the clobber guard is
+// about to refuse: adopt the app's git-held configuration and run the render
+// again, or hand the refusal back.
+//
+// The guard exists because rendering an app the console only half knows deletes
+// the half it does not: on 2026-08-21 one env-var save stripped eight secret
+// references, a service port and a .env mount off internal/prod/telemost-bot.
+// Refusing protects the app. It does not, on its own, give anybody a way
+// forward -- and the way forward it named was a second verb the caller had to
+// know about, call by hand, and then retry the first one with. That is a repair
+// the platform can do for itself: adoption reads git, writes nothing to git,
+// changes nothing about the running app, and only teaches the console keys it
+// was missing. Every ingredient of "safe to do automatically" is already true
+// of it.
+//
+// retriedAfterAdopt is what bounds the recursion: on the retry the answer is
+// always the refusal, so a deploy can trigger at most one adoption. If adoption
+// adds nothing, the drops were never explainable by unlearned configuration and
+// the caller gets the guard's refusal unchanged -- a deploy that would still
+// delete real configuration must still be refused, and looping on it would only
+// refuse more slowly.
+func (w *DBWatcher) adoptRetryAfterClobber(ctx context.Context, op db.Operation, appName string, guardErr error, retriedAfterAdopt bool) (bool, error) {
+	if retriedAfterAdopt {
+		return false, guardErr
+	}
+	report, err := w.adoptForDeploy(ctx, op, appName)
+	if err != nil {
+		log.Printf("gitops: %s would be refused (%v) and adoption could not run: %v", appName, guardErr, err)
+		return false, guardErr
+	}
+	learned := len(report.AdoptedPlain) + len(report.AdoptedSecretRef) + len(report.AdoptedShape)
+	if learned == 0 {
+		return false, guardErr
+	}
+	log.Printf("gitops: %s: adopted %d keys from git before deploying (%s); retrying the render",
+		appName, learned, report.Summary)
+	return true, nil
+}
+
+// adoptForDeploy is the adoption the deploy path runs, behind a field so a test
+// can supply one that cannot touch a database or a git remote.
+func (w *DBWatcher) adoptForDeploy(ctx context.Context, op db.Operation, appName string) (adoptReport, error) {
+	if w.adoptForDeployFn != nil {
+		return w.adoptForDeployFn(ctx, op, appName)
+	}
+	return w.adoptAppConfigFor(ctx, op, appName)
 }

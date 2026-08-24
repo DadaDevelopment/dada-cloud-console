@@ -34,6 +34,10 @@ type DBWatcher struct {
 	mlflow   *mlflow.Client          // nil when MLFLOW_BASE_URL is unset
 	clients  *dadak8s.Clients        // nil when there is no in-cluster config (local dev)
 	onDeploy func(context.Context, db.Operation)
+
+	// adoptForDeployFn overrides the adoption the deploy path runs when the
+	// clobber guard would refuse. Only tests set it.
+	adoptForDeployFn func(context.Context, db.Operation, string) (adoptReport, error)
 }
 
 func NewDBWatcher(pool *pgxpool.Pool, cfg *config.Config, clients *dadak8s.Clients) *DBWatcher {
@@ -2223,7 +2227,14 @@ func adoptBuildDetectedPort(cur map[string]any, worker bool, detected int) (floa
 	return float64(detected), true
 }
 
+// doDeployImageVersion renders an app and commits it. retriedAfterAdopt is
+// false on the operation's own attempt and true on the single re-run that
+// follows an automatic adoption, which is what bounds the recursion.
 func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) error {
+	return w.deployImageVersion(ctx, op, false)
+}
+
+func (w *DBWatcher) deployImageVersion(ctx context.Context, op db.Operation, retriedAfterAdopt bool) error {
 	var p struct {
 		AppName   string `json:"app_name"`
 		Image     string `json:"image"`
@@ -2363,7 +2374,11 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 		return w.recordValuesPlan(ctx, op, mgr, p.AppName, valuesPath, mergedValues, p.ExpectedDrops)
 	}
 	if err := w.guardValuesClobber(mgr, p.AppName, valuesPath, mergedValues, p.ExpectedDrops); err != nil {
-		return err
+		retry, rerr := w.adoptRetryAfterClobber(ctx, op, p.AppName, err, retriedAfterAdopt)
+		if !retry {
+			return rerr
+		}
+		return w.deployImageVersion(ctx, op, true)
 	}
 	files := []git.FileChange{
 		{Path: gitPath, Content: yaml},
@@ -2467,9 +2482,10 @@ func buildValuesPlan(existing string, readErr error, mergedValues, valuesPath st
 			"THE REAL DEPLOY WOULD BE REFUSED: it deletes configuration that exists only in git (%s)",
 			renderer.DescribeDropped(plan.WouldBlock))
 		plan.Remedy = fmt.Sprintf(
-			"adopt the app first (POST /api/v1/projects/{project}/environments/{env}/apps/%s/adopt-config, MCP adoptAppConfig): "+
-				"it records what %s already holds as the console's own state, after which this write edits the app instead of stripping it",
-			plan.appNameHint(), valuesPath)
+			"the real deploy adopts %s first -- it records what git already holds as the console's own state and renders again, "+
+				"so this plan describes the worst case, not the outcome. Paths still listed after that adoption exist in git and in "+
+				"no form the console can express; declare them in expected_drops if removing them is the intent",
+			valuesPath)
 	case len(plan.Added) == 0 && len(plan.Changed) == 0 && len(plan.Removed) == 0:
 		plan.Verdict = "the deploy would leave " + valuesPath + " unchanged"
 	default:
@@ -2584,9 +2600,9 @@ func (w *DBWatcher) guardValuesClobber(mgr *git.Manager, appName, valuesPath, me
 		appName, valuesPath, renderer.DescribeDropped(dropped))
 	return fmt.Errorf(
 		"this change would delete configuration that exists only in git: %s in %s. "+
-			"Those keys are not in the console's database, so re-rendering removes them. "+
-			"Adopt the app first (POST /api/v1/projects/{project}/environments/{env}/apps/%s/adopt-config, MCP adoptAppConfig) "+
-			"to record what git already holds as the console's own state, then retry",
+			"Those keys are not in the console's database, so re-rendering removes them. Adoption already ran against %s and did "+
+			"not account for them, so they are configuration the console cannot express rather than configuration it had not learned. "+
+			"Declare them in expected_drops if removing them is the intent",
 		renderer.DescribeDropped(dropped), valuesPath, appName)
 }
 
