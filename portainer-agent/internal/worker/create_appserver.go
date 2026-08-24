@@ -99,7 +99,7 @@ func (w *VMWatcher) doCreateAppServer(ctx context.Context, op db.Operation) erro
 	bootstrapCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
 
-	params := w.bootstrapParams(p.Name, ep.EdgeKey, ep.EdgeID)
+	params := w.bootstrapParams(p.Name, ep.EdgeKey, ep.EdgeID, op.ProjectID.String())
 	if err := dadash.RunBootstrap(bootstrapCtx, vmIP, "root", w.cfg.AgentSSHPrivateKey, params); err != nil {
 		_ = db.SetAppServerFailed(ctx, w.pool, serverID, friendlyVMError(err))
 		return fmt.Errorf("ssh bootstrap: %w", err)
@@ -183,7 +183,7 @@ func (w *VMWatcher) doCreateManualAppServer(ctx context.Context, op db.Operation
 	bootstrapCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
 
-	params := w.bootstrapParams(p.Name, ep.EdgeKey, ep.EdgeID)
+	params := w.bootstrapParams(p.Name, ep.EdgeKey, ep.EdgeID, op.ProjectID.String())
 	if err := dadash.RunBootstrap(bootstrapCtx, host, sshUser, p.SSHPrivateKey, params); err != nil {
 		_ = db.SetAppServerFailed(ctx, w.pool, serverID, friendlyVMError(err))
 		return fmt.Errorf("ssh bootstrap: %w", err)

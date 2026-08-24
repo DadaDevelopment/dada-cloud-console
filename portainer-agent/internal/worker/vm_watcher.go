@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/dada-tuda/console/portainer-agent/internal/beget"
@@ -12,6 +13,7 @@ import (
 	"github.com/dada-tuda/console/portainer-agent/internal/portainer"
 	dadash "github.com/dada-tuda/console/portainer-agent/internal/ssh"
 	tfexecutor "github.com/dada-tuda/console/portainer-agent/internal/terraform"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
@@ -23,16 +25,23 @@ type VMWatcher struct {
 	portainer *portainer.Client
 	tf        *tfexecutor.Executor
 	beget     vpsRemover
+
+	applyTenant   tenantApplier
+	tenantMu      sync.Mutex
+	tenantApplied map[uuid.UUID]bool
+	tenantTried   map[uuid.UUID]time.Time
+	clock         func() time.Time
 }
 
 // NewVMWatcher constructs a VMWatcher with its dependencies.
 func NewVMWatcher(pool *pgxpool.Pool, cfg *config.Config) *VMWatcher {
 	return &VMWatcher{
-		pool:      pool,
-		cfg:       cfg,
-		portainer: portainer.New(cfg.PortainerURL, cfg.PortainerAPIToken),
-		tf:        tfexecutor.NewExecutor(cfg.TFBinPath, cfg.TFStateConnStr, cfg.TFWorkspaceBase),
-		beget:     beget.New(cfg.BegetAPIBaseURL, cfg.BegetToken),
+		applyTenant: dadash.EnsureTenant,
+		pool:        pool,
+		cfg:         cfg,
+		portainer:   portainer.New(cfg.PortainerURL, cfg.PortainerAPIToken),
+		tf:          tfexecutor.NewExecutor(cfg.TFBinPath, cfg.TFStateConnStr, cfg.TFWorkspaceBase),
+		beget:       beget.New(cfg.BegetAPIBaseURL, cfg.BegetToken),
 	}
 }
 
@@ -56,6 +65,7 @@ func (w *VMWatcher) Start(ctx context.Context) {
 			return
 		case <-ticker.C:
 			w.poll(ctx)
+			w.reconcileFleetTenants(ctx)
 		}
 	}
 }
@@ -96,7 +106,12 @@ func (w *VMWatcher) dispatch(ctx context.Context, op db.Operation) error {
 }
 
 // bootstrapParams assembles SSH bootstrap template params from config.
-func (w *VMWatcher) bootstrapParams(serverName, edgeKey, edgeID string) dadash.BootstrapParams {
+//
+// promTenant is the owning project ID: the fleet edge stack sends it as
+// X-Scope-OrgID on remote_write, and multitenant Mimir drops the whole scrape
+// with 401 when the header is empty. It is per-VM data, so it can only come
+// from here — see reconcileFleetTenants for already-enrolled VMs.
+func (w *VMWatcher) bootstrapParams(serverName, edgeKey, edgeID, promTenant string) dadash.BootstrapParams {
 	return dadash.BootstrapParams{
 		ServerName:               serverName,
 		EdgeKey:                  edgeKey,
@@ -104,6 +119,7 @@ func (w *VMWatcher) bootstrapParams(serverName, edgeKey, edgeID string) dadash.B
 		PrometheusRemoteWriteURL: w.cfg.PrometheusRemoteWriteURL,
 		PrometheusUser:           w.cfg.PrometheusRemoteWriteUser,
 		PrometheusPass:           w.cfg.PrometheusRemoteWritePass,
+		PromTenant:               promTenant,
 		ElasticsearchURL:         w.cfg.ElasticsearchURL,
 		ElasticsearchAPIKey:      w.cfg.ElasticsearchAPIKey,
 	}

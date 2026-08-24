@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Rendered by portainer-agent Go text/template, piped via SSH stdin.
-# Template vars: .ServerName .EdgeKey .EdgeID
+# Template vars: .ServerName .EdgeKey .EdgeID .PromTenant
 #                .PrometheusRemoteWriteURL .PrometheusUser .PrometheusPass
 #                .ElasticsearchURL .ElasticsearchAPIKey
 # Observability sidecars (prometheus-agent, filebeat) render only when their
@@ -43,6 +43,7 @@ VM_NAME={{.ServerName}}
 {{if .PrometheusRemoteWriteURL}}PROM_REMOTE_WRITE_URL={{.PrometheusRemoteWriteURL}}
 PROM_USER={{.PrometheusUser}}
 PROM_PASS={{.PrometheusPass}}
+PROM_TENANT={{.PromTenant}}
 {{end}}VMENV
 chmod 600 /etc/dada/vm.env
 echo "[bootstrap] wrote /etc/dada/vm.env (VM_NAME={{.ServerName}}, fleet edge-stack identity)"

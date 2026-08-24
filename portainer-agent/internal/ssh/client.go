@@ -24,6 +24,7 @@ type BootstrapParams struct {
 	PrometheusRemoteWriteURL string
 	PrometheusUser           string
 	PrometheusPass           string
+	PromTenant               string
 	ElasticsearchURL         string
 	ElasticsearchAPIKey      string
 }

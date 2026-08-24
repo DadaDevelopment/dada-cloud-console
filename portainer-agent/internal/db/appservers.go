@@ -18,6 +18,7 @@ type AppServerRow struct {
 	VMProviderID        *string
 	TerraformWorkspace  *string
 	PortainerEndpointID *int
+	Source              string
 	Status              string
 	ErrorMessage        *string
 }
@@ -248,7 +249,7 @@ func GetComposeDeployTarget(ctx context.Context, pool *pgxpool.Pool, projectID u
 func ListReadyAppServers(ctx context.Context, pool *pgxpool.Pool) ([]AppServerRow, error) {
 	rows, err := pool.Query(ctx,
 		`SELECT id, project_id, name, vm_ip, vm_provider_id, terraform_workspace,
-		        portainer_endpoint_id, status, error_message
+		        portainer_endpoint_id, COALESCE(source, ''), status, error_message
 		 FROM app_servers WHERE status = 'Ready'`)
 	if err != nil {
 		return nil, fmt.Errorf("query: %w", err)
@@ -258,7 +259,7 @@ func ListReadyAppServers(ctx context.Context, pool *pgxpool.Pool) ([]AppServerRo
 	for rows.Next() {
 		var s AppServerRow
 		if err := rows.Scan(&s.ID, &s.ProjectID, &s.Name, &s.VMIP, &s.VMProviderID,
-			&s.TerraformWorkspace, &s.PortainerEndpointID, &s.Status, &s.ErrorMessage); err != nil {
+			&s.TerraformWorkspace, &s.PortainerEndpointID, &s.Source, &s.Status, &s.ErrorMessage); err != nil {
 			return nil, err
 		}
 		result = append(result, s)
