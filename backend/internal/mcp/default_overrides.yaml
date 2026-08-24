@@ -38,9 +38,10 @@ keep:
   - createApp
   - updateAppImage
   - updateAppStorage
-  # adoptAppConfig teaches the console what an app created outside it already
-  # is, so a later setEnvVar edits that app instead of overwriting it.
-  - adoptAppConfig
+  # adoptAppConfig is deliberately NOT here. Adoption is the platform repairing
+  # its own blind spot, not a verb a caller should have to know: the deploy path
+  # runs it by itself when the clobber guard would otherwise refuse. The REST
+  # endpoint stays for the console UI.
   # Environment variables (get-all / put / delete — delete is safe, scoped to a key)
   - listEnvVars
   - setEnvVar
