@@ -372,6 +372,10 @@ buildAgent:
     BUILD_MAX_CONCURRENT: "4"
     BUILD_LOG_DB_RETENTION: "168h"
     JENKINS_JOB: "dada-build"
+    # Build-result mail is high-volume (one per deploy) and is intentionally
+    # not the operator audit channel. This explicit env value overrides a
+    # legacy DEPLOY_NOTIFY_ENABLED=true in the build-agent Secret.
+    DEPLOY_NOTIFY_ENABLED: "false"
   # Raw env entries, appended after `env` above. Unlike `env` (a plain map) these
   # may carry valueFrom, so a credential can be pulled from a Secret the platform
   # delivers instead of being written into values. Explicit env wins over envFrom,
