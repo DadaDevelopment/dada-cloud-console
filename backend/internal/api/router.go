@@ -469,6 +469,7 @@ func SetupRouterWithHandler(pool *pgxpool.Pool, cfg *config.Config) (*gin.Engine
 		api.DELETE("/projects/:projectId/app-servers/:serverName", h.DeleteAppServer)
 		api.POST("/projects/:projectId/app-servers/:serverName/discover", h.DiscoverWorkload)
 		api.POST("/projects/:projectId/app-servers/:serverName/import", h.ImportComposeStack)
+		api.POST("/projects/:projectId/app-servers/:serverName/hostname", h.AttachAppServerHostname)
 
 		// Ready-made projects. The catalog is global and read-only; installing
 		// one runs the ordinary connect-repo + build path server-side, plus the

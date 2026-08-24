@@ -819,14 +819,15 @@ func (h *Handler) createAppOp(c *gin.Context, claims *auth.Claims, projectID, en
 	// For VM environments, the app deploys as a Docker Compose stack onto the
 	// environment's AppServer. That server must exist and be Ready.
 	var appServerName string
+	var appServerVMIP *string
 	if isCompose {
 		var status string
 		err := h.pool.QueryRow(c.Request.Context(),
-			`SELECT s.name, s.status
+			`SELECT s.name, s.status, s.vm_ip
 			 FROM environments e JOIN app_servers s ON s.id = e.app_server_id
 			 WHERE e.id = $1 AND e.project_id = $2`,
 			envID, projectID,
-		).Scan(&appServerName, &status)
+		).Scan(&appServerName, &status, &appServerVMIP)
 		if err == pgx.ErrNoRows {
 			return nil, "", rejectCreate(http.StatusConflict, "no_appserver", "this VM environment has no AppServer attached; create or attach one first")
 		}
@@ -963,7 +964,12 @@ func (h *Handler) createAppOp(c *gin.Context, claims *auth.Claims, projectID, en
 	}
 
 	var defaultHostname string
-	if !isCompose && !req.Worker && servesHTTP(req.Port) && h.cfg.DefaultDomainEnabled && h.cfg.DefaultDomainBase != "" {
+	defaultRecordType := "CNAME"
+	if isCompose {
+		defaultRecordType = "A"
+	}
+	if !req.Worker && servesHTTP(req.Port) && h.cfg.DefaultDomainEnabled && h.cfg.DefaultDomainBase != "" &&
+		(!isCompose || (appServerVMIP != nil && *appServerVMIP != "")) {
 		if suffix, sErr := randomHostSuffix(); sErr == nil {
 			defaultHostname = buildDefaultHostname(h.cfg.DefaultDomainBase, req.Name, suffix)
 		}
@@ -1026,9 +1032,9 @@ func (h *Handler) createAppOp(c *gin.Context, claims *auth.Claims, projectID, en
 	if defaultHostname != "" {
 		if _, err = tx.Exec(c.Request.Context(),
 			`INSERT INTO domain_hostnames (authorization_id, environment_id, app_name, hostname, record_type, status, cert_status, operation_id, managed)
-			 VALUES (NULL, $1, $2, $3, 'CNAME', 'pending', 'pending', $4, true)
+			 VALUES (NULL, $1, $2, $3, $5, 'pending', 'pending', $4, true)
 			 ON CONFLICT (hostname) DO NOTHING`,
-			envID, req.Name, defaultHostname, op.ID,
+			envID, req.Name, defaultHostname, op.ID, defaultRecordType,
 		); err != nil {
 			return nil, "", fail("failed to record default hostname")
 		}

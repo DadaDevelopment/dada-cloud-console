@@ -3,9 +3,12 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -55,6 +58,55 @@ func UpdateLiveStatus(
 		return 0, err
 	}
 	return tag.RowsAffected(), nil
+}
+
+// PrimaryHostnameInfo is the address the console shows for an app, plus why it
+// is not serving yet when it is not.
+type PrimaryHostnameInfo struct {
+	Hostname string
+	Status   string
+	Reason   string
+}
+
+// PrimaryHostname returns the address an app answers on, picking the same way
+// the k8s status reconciler does: an active hostname beats a pending one, a
+// tenant's own domain beats the platform surrogate, ties break oldest-first.
+// Without this a published VM app carries no url in its snapshot, so the console
+// shows a live site as an app with no address — the k8s side has had it since
+// the beginning, and parity is the whole point of the VM publish path.
+func PrimaryHostname(ctx context.Context, pool *pgxpool.Pool, environmentID uuid.UUID, appName string) (PrimaryHostnameInfo, error) {
+	var hostname, status string
+	var reason *string
+	err := pool.QueryRow(ctx, `
+		SELECT hostname, status, status_reason
+		FROM domain_hostnames
+		WHERE environment_id = $1 AND app_name = $2
+		ORDER BY (status = 'active') DESC, managed ASC, created_at ASC
+		LIMIT 1
+	`, environmentID, appName).Scan(&hostname, &status, &reason)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return PrimaryHostnameInfo{}, nil
+	}
+	if err != nil {
+		return PrimaryHostnameInfo{}, fmt.Errorf("primary hostname: %w", err)
+	}
+	info := PrimaryHostnameInfo{Hostname: hostname, Status: normalizeHostnameStatus(status)}
+	if reason != nil {
+		info.Reason = *reason
+	}
+	return info, nil
+}
+
+// normalizeHostnameStatus maps domain_hostnames.status onto the console's
+// url_status contract, folding anything unrecognized into "unknown" instead of
+// letting it leak through unmapped.
+func normalizeHostnameStatus(status string) string {
+	switch status {
+	case "active", "pending", "failed":
+		return status
+	default:
+		return "unknown"
+	}
 }
 
 // GetSnapshotSummary returns summary_json for a snapshot.

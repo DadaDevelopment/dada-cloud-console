@@ -4828,6 +4828,112 @@ const docTemplate = `{
                 }
             }
         },
+        "/projects/{projectId}/app-servers/{serverName}/hostname": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mints a managed \u003cname\u003e.\u003cplatform-domain\u003e hostname whose A record points at this app server's public IP, and installs/extends the platform-managed nginx + Let's Encrypt stack on the VM to serve it. Works on a bare VM with no imported workload. Set host_loopback=true with target_port to proxy a service bound to 127.0.0.1 on the host; otherwise target_port names the port of the managed compose app given by app_name. Asynchronous: returns 202 with an operation; poll it until terminal.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "appserver"
+                ],
+                "summary": "Publish an app server on a platform subdomain",
+                "operationId": "attachAppServerHostname",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "App server name",
+                        "name": "serverName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Hostname specification",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/api.attachAppServerHostnameRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "hostname already attached; nothing enqueued",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "202": {
+                        "description": "object with the accepted operation and the minted hostname",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "VM not enrolled/Ready, no public IP, or hostname taken elsewhere",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/app-servers/{serverName}/import": {
             "post": {
                 "security": [
@@ -22509,6 +22615,23 @@ const docTemplate = `{
                 },
                 "table": {
                     "type": "string"
+                }
+            }
+        },
+        "api.attachAppServerHostnameRequest": {
+            "type": "object",
+            "properties": {
+                "app_name": {
+                    "type": "string"
+                },
+                "host_loopback": {
+                    "type": "boolean"
+                },
+                "hostname": {
+                    "type": "string"
+                },
+                "target_port": {
+                    "type": "integer"
                 }
             }
         },

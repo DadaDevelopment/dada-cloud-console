@@ -461,6 +461,17 @@ definitions:
       table:
         type: string
     type: object
+  api.attachAppServerHostnameRequest:
+    properties:
+      app_name:
+        type: string
+      host_loopback:
+        type: boolean
+      hostname:
+        type: string
+      target_port:
+        type: integer
+    type: object
   api.attachBoxDatabaseRequest:
     properties:
       env_prefix:
@@ -1155,6 +1166,7 @@ definitions:
     properties:
       metrics:
         additionalProperties:
+          format: float64
           type: number
         type: object
       source:
@@ -5064,6 +5076,82 @@ paths:
       security:
       - BearerAuth: []
       summary: Discover an app server's running workload (read-only)
+      tags:
+      - appserver
+  /projects/{projectId}/app-servers/{serverName}/hostname:
+    post:
+      consumes:
+      - application/json
+      description: 'Mints a managed <name>.<platform-domain> hostname whose A record
+        points at this app server''s public IP, and installs/extends the platform-managed
+        nginx + Let''s Encrypt stack on the VM to serve it. Works on a bare VM with
+        no imported workload. Set host_loopback=true with target_port to proxy a service
+        bound to 127.0.0.1 on the host; otherwise target_port names the port of the
+        managed compose app given by app_name. Asynchronous: returns 202 with an operation;
+        poll it until terminal.'
+      operationId: attachAppServerHostname
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: App server name
+        in: path
+        name: serverName
+        required: true
+        type: string
+      - description: Hostname specification
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/api.attachAppServerHostnameRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: hostname already attached; nothing enqueued
+          schema:
+            additionalProperties: true
+            type: object
+        "202":
+          description: object with the accepted operation and the minted hostname
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: VM not enrolled/Ready, no public IP, or hostname taken elsewhere
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Publish an app server on a platform subdomain
       tags:
       - appserver
   /projects/{projectId}/app-servers/{serverName}/import:

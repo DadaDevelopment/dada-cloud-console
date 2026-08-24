@@ -15,11 +15,51 @@ import (
 
 // ── Network / Ingress ───────────────────────────────────────────────────────
 
-// VMIngressRule routes a path to one Application service:port on the same stack.
+// VMIngressRule routes a path to one Application service:port on the same stack,
+// or — with HostLoopback — to a port the VM's own host is listening on.
 type VMIngressRule struct {
 	Path string // e.g. "/api/" or "/"
 	App  string // target compose service name, e.g. "backend"
 	Port int    // target container port, e.g. 8001
+	// HostLoopback routes to the VM host itself (VMHostGatewayAlias) instead of a
+	// compose service. It is what publishes a workload the platform does not own
+	// — anything bound to 127.0.0.1 on the VM, outside the managed stack. App is
+	// ignored (and must not become a compose depends_on) when this is set.
+	HostLoopback bool
+}
+
+// VMHostGatewayAlias is the name the ingress container resolves to the VM host.
+// Docker only defines it when the service declares VMHostGatewayMapping, which is
+// why every loopback upstream forces that mapping onto the compose block.
+const VMHostGatewayAlias = "host.docker.internal"
+
+// VMHostGatewayMapping is the compose extra_hosts entry that makes
+// VMHostGatewayAlias resolve to the VM's gateway address.
+const VMHostGatewayMapping = VMHostGatewayAlias + ":host-gateway"
+
+// upstreamHost is the authority proxy_pass targets: the VM host for a loopback
+// upstream, otherwise the compose service name.
+func upstreamHost(app string, hostLoopback bool) string {
+	if hostLoopback {
+		return VMHostGatewayAlias
+	}
+	return app
+}
+
+// NeedsHostGateway reports whether any upstream in the spec resolves through the
+// VM host, i.e. whether the ingress service must declare VMHostGatewayMapping.
+func (spec VMIngressSpec) NeedsHostGateway() bool {
+	for _, r := range spec.Rules {
+		if r.HostLoopback {
+			return true
+		}
+	}
+	for _, h := range spec.ExtraHosts {
+		if h.HostLoopback {
+			return true
+		}
+	}
+	return false
 }
 
 // VMIngressTLS is the TLS config for an Ingress. CertPath/KeyPath are the in-container
@@ -68,6 +108,9 @@ type VMExtraHost struct {
 	KeyPath  string // in-container key path for this host
 	App      string // target compose service name
 	Port     int    // target container port
+	// HostLoopback routes this vhost to the VM host itself instead of a compose
+	// service — see VMIngressRule.HostLoopback.
+	HostLoopback bool
 	// TLSReady reports that CertPath/KeyPath exist on the VM. When false the host
 	// is served over plain http only: nginx refuses to start against a missing
 	// ssl_certificate, so rendering a 443 block ahead of issuance would take the
@@ -163,14 +206,14 @@ func RenderNginxConf(spec VMIngressSpec) string {
 		fmt.Fprintf(&b, "    auth_basic \"Private area\";\n    auth_basic_user_file %s;\n\n", spec.BasicAuth)
 	}
 	for _, r := range spec.Rules {
-		fmt.Fprintf(&b, "    location %s {\n        proxy_pass http://%s:%d;\n%s\n    }\n\n", r.Path, r.App, r.Port, nginxProxyHeaders)
+		fmt.Fprintf(&b, "    location %s {\n        proxy_pass http://%s:%d;\n%s\n    }\n\n", r.Path, upstreamHost(r.App, r.HostLoopback), r.Port, nginxProxyHeaders)
 	}
 	b.WriteString("}\n")
 
 	for _, h := range spec.ExtraHosts {
 		if !h.TLSReady {
 			fmt.Fprintf(&b, "\nserver {\n    listen 80;\n    server_name %s;\n%s", h.Host, acme)
-			fmt.Fprintf(&b, "    location / {\n        proxy_pass http://%s:%d;\n%s\n    }\n}\n", h.App, h.Port, nginxProxyHeaders)
+			fmt.Fprintf(&b, "    location / {\n        proxy_pass http://%s:%d;\n%s\n    }\n}\n", upstreamHost(h.App, h.HostLoopback), h.Port, nginxProxyHeaders)
 			continue
 		}
 		b.WriteString("\n")
@@ -188,7 +231,7 @@ func RenderExtraHostTLS(h VMExtraHost, minVersion string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "server {\n    listen 443 ssl http2;\n    server_name %s;\n\n", h.Host)
 	fmt.Fprintf(&b, "    ssl_certificate %s;\n    ssl_certificate_key %s;\n    ssl_protocols %s;\n    ssl_ciphers HIGH:!aNULL:!MD5;\n\n", h.CertPath, h.KeyPath, sslProtocols(minVersion))
-	fmt.Fprintf(&b, "    location / {\n        proxy_pass http://%s:%d;\n%s\n    }\n}\n", h.App, h.Port, nginxProxyHeaders)
+	fmt.Fprintf(&b, "    location / {\n        proxy_pass http://%s:%d;\n%s\n    }\n}\n", upstreamHost(h.App, h.HostLoopback), h.Port, nginxProxyHeaders)
 	return b.String()
 }
 

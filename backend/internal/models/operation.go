@@ -403,9 +403,18 @@ type DomainHostname struct {
 // AttachCustomHostnamePayload is the typed payload for AttachCustomHostname
 // operations. JSON tags are a hard contract with gitops-agent's
 // doAttachCustomHostname worker — do NOT rename them.
+// Port and HostLoopback are only meaningful on vm-runtime environments, where
+// the hostname becomes an nginx vhost on the app server itself and the platform
+// must know what to proxy to. Port empty means "read the target port off the
+// managed app's own compose spec"; HostLoopback switches the upstream from a
+// compose service to the VM's host gateway, which is how a workload the platform
+// did not deploy (bound to 127.0.0.1) gets published. Both are ignored on k8s,
+// where the Service name and port come from the app's own manifest.
 type AttachCustomHostnamePayload struct {
-	AppName  string `json:"app_name"`
-	Hostname string `json:"hostname"`
+	AppName      string `json:"app_name"`
+	Hostname     string `json:"hostname"`
+	Port         int    `json:"port,omitempty"`
+	HostLoopback bool   `json:"host_loopback,omitempty"`
 }
 
 // DetachCustomHostnamePayload is the typed payload for DetachCustomHostname

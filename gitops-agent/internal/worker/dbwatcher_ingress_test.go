@@ -297,11 +297,7 @@ func TestIngressRebuildSpec_KeepsBasicAuth(t *testing.T) {
 	}
 	meta.TLS.Enabled = true
 	meta.TLS.CertPath = "/etc/nginx/certs/live/fin-data.pro/fullchain.pem"
-	meta.Rules = append(meta.Rules, struct {
-		Path string `json:"path"`
-		App  string `json:"app"`
-		Port int    `json:"port"`
-	}{Path: "/", App: "frontend", Port: 5173})
+	meta.Rules = append(meta.Rules, ingressMetaRule{Path: "/", App: "frontend", Port: 5173})
 
 	spec, deps, keyPath := ingressRebuildSpec(meta, []ingressCustomHost{{Host: "www.fin-data.pro", App: "frontend", Port: 5173}})
 

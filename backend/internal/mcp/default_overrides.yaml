@@ -76,9 +76,16 @@ keep:
   # by app (cloud/k8s) OR vm (VM/compose), so it covers both runtimes. getAppLogs
   # (Portainer container tail, VM-only) is intentionally NOT exposed to the agent.
   - searchLogs
-  # App servers (VMs)
+  # App servers (VMs). The four together are the whole VM story an agent needs:
+  # provision one, see what is already running on it, adopt that into managed
+  # apps, and publish it on a real https hostname. attachAppServerHostname is the
+  # one that closes the loop -- before it, a freshly provisioned VM could only be
+  # given a public name by hand-committing DNS into the gitops repo.
   - listAppServers
   - createAppServer
+  - discoverAppServerWorkload
+  - importComposeStack
+  - attachAppServerHostname
   # Boxes (ephemeral root sandboxes). This is the front door of the product for
   # an agent: one call gets a body, later calls get it back or let it go.
   #

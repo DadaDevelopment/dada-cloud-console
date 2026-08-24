@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -688,35 +689,9 @@ func (h *Handler) ImportComposeStack(c *gin.Context) {
 		return
 	}
 
-	var envID uuid.UUID
-	err = h.pool.QueryRow(c.Request.Context(),
-		`SELECT e.id FROM environments e
-		 JOIN app_servers s ON s.id = e.app_server_id
-		 WHERE s.project_id = $1 AND s.name = $2
-		 ORDER BY e.created_at LIMIT 1`,
-		projectID, serverName,
-	).Scan(&envID)
-	if err == pgx.ErrNoRows {
-		var projectSlug string
-		if err := h.pool.QueryRow(c.Request.Context(),
-			`SELECT name FROM projects WHERE id = $1`, projectID,
-		).Scan(&projectSlug); err != nil {
-			rejectImportErr(http.StatusInternalServerError, "project_lookup_failed", "failed to resolve project for environment")
-			return
-		}
-		if err := h.pool.QueryRow(c.Request.Context(),
-			`INSERT INTO environments (project_id, name, namespace, type, runtime, app_server_id)
-			 VALUES ($1, $2, $3, 'prod', 'vm', $4)
-			 ON CONFLICT (project_id, name)
-			 DO UPDATE SET runtime = 'vm', app_server_id = EXCLUDED.app_server_id, updated_at = NOW()
-			 RETURNING id`,
-			projectID, serverName, projectSlug+"-"+serverName, serverID,
-		).Scan(&envID); err != nil {
-			rejectImportErr(http.StatusInternalServerError, "environment_create_failed", "failed to create app server environment")
-			return
-		}
-	} else if err != nil {
-		rejectImportErr(http.StatusInternalServerError, "environment_lookup_failed", "failed to resolve app server environment")
+	envID, err := h.ensureVMEnvironment(c.Request.Context(), projectID, serverName, serverID)
+	if err != nil {
+		rejectImportErr(http.StatusInternalServerError, "environment_create_failed", "failed to resolve app server environment")
 		return
 	}
 	auditEnvID = envID
@@ -812,4 +787,294 @@ func (h *Handler) ImportComposeStack(c *gin.Context) {
 	})
 
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "compose stack import queued"})
+}
+
+// ensureVMEnvironment resolves the single vm-runtime environment bound to an app
+// server, creating it on first use. A VM gets no environments row at provisioning
+// time (doCreateAppServer never inserts one), yet every environment-scoped lever
+// the console has — ingress, hostnames, env vars, app snapshots — is keyed by
+// environment id, so without this the VM is reachable by none of them until an
+// import happens to run. Name/namespace are derived deterministically from the
+// server name so import and hostname attachment converge on the same row.
+func (h *Handler) ensureVMEnvironment(ctx context.Context, projectID uuid.UUID, serverName string, serverID uuid.UUID) (uuid.UUID, error) {
+	var envID uuid.UUID
+	err := h.pool.QueryRow(ctx,
+		`SELECT e.id FROM environments e
+		 JOIN app_servers s ON s.id = e.app_server_id
+		 WHERE s.project_id = $1 AND s.name = $2
+		 ORDER BY e.created_at LIMIT 1`,
+		projectID, serverName,
+	).Scan(&envID)
+	if err == nil {
+		return envID, nil
+	}
+	if err != pgx.ErrNoRows {
+		return uuid.Nil, err
+	}
+
+	var projectSlug string
+	if err := h.pool.QueryRow(ctx,
+		`SELECT name FROM projects WHERE id = $1`, projectID,
+	).Scan(&projectSlug); err != nil {
+		return uuid.Nil, err
+	}
+	if err := h.pool.QueryRow(ctx,
+		`INSERT INTO environments (project_id, name, namespace, type, runtime, app_server_id)
+		 VALUES ($1, $2, $3, 'prod', 'vm', $4)
+		 ON CONFLICT (project_id, name)
+		 DO UPDATE SET runtime = 'vm', app_server_id = EXCLUDED.app_server_id, updated_at = NOW()
+		 RETURNING id`,
+		projectID, serverName, projectSlug+"-"+serverName, serverID,
+	).Scan(&envID); err != nil {
+		return uuid.Nil, err
+	}
+	return envID, nil
+}
+
+type attachAppServerHostnameRequest struct {
+	AppName      string `json:"app_name"`
+	Hostname     string `json:"hostname"`
+	TargetPort   int    `json:"target_port"`
+	HostLoopback bool   `json:"host_loopback"`
+}
+
+// AttachAppServerHostname publishes a VM on a platform subdomain in one call.
+//
+// This is the VM counterpart of the default domain a k8s app gets at CreateApp:
+// it mints a managed hostname under the platform's own base domain with an A
+// record pointing at the app server's public IP, and enqueues the same
+// AttachDefaultDomain operation gitops-agent renders — which on a vm-runtime
+// environment installs/extends the platform-managed nginx + ACME stack on the VM
+// and writes the DNS carrier in the same commit.
+//
+// It deliberately does NOT require a compose import first: ensureVMEnvironment
+// gives the server an environment on the spot, so a freshly provisioned VM is one
+// call away from a working https URL. host_loopback covers the common case of a
+// workload the platform did not deploy, listening on 127.0.0.1 — nginx then
+// proxies to the host gateway instead of a compose service.
+//
+// @ID          attachAppServerHostname
+// @Summary     Publish an app server on a platform subdomain
+// @Description Mints a managed <name>.<platform-domain> hostname whose A record points at this app server's public IP, and installs/extends the platform-managed nginx + Let's Encrypt stack on the VM to serve it. Works on a bare VM with no imported workload. Set host_loopback=true with target_port to proxy a service bound to 127.0.0.1 on the host; otherwise target_port names the port of the managed compose app given by app_name. Asynchronous: returns 202 with an operation; poll it until terminal.
+// @Tags        appserver
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId  path     string                          true "Project UUID"
+// @Param       serverName path     string                          true "App server name"
+// @Param       body       body     attachAppServerHostnameRequest  false "Hostname specification"
+// @Success     202        {object} map[string]interface{} "object with the accepted operation and the minted hostname"
+// @Success     200        {object} map[string]interface{} "hostname already attached; nothing enqueued"
+// @Failure     400        {object} map[string]string
+// @Failure     401        {object} map[string]string
+// @Failure     403        {object} map[string]string
+// @Failure     404        {object} map[string]string
+// @Failure     409        {object} map[string]string "VM not enrolled/Ready, no public IP, or hostname taken elsewhere"
+// @Router      /projects/{projectId}/app-servers/{serverName}/hostname [post]
+func (h *Handler) AttachAppServerHostname(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	serverName := c.Param("serverName")
+
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		return
+	}
+	if !canWrite(role) {
+		respondForbidden(c)
+		return
+	}
+
+	var req attachAppServerHostnameRequest
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			respondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
+	reject := func(status int, reason, msg string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:    projectID,
+			Action:       "AttachAppServerHostname",
+			ResourceKind: "App",
+			ResourceName: req.AppName,
+			Outcome:      auditOutcomeFailure,
+			Metadata:     map[string]any{"reason": reason, "status": status, "server": serverName},
+		})
+		respondError(c, status, msg)
+	}
+
+	if !h.cfg.DefaultDomainEnabled || h.cfg.DefaultDomainBase == "" {
+		reject(http.StatusConflict, "default_domain_disabled", "platform domains are not enabled on this installation")
+		return
+	}
+
+	appName := req.AppName
+	if appName == "" {
+		appName = serverName
+	}
+	if err := validateKubeName(appName); err != nil {
+		reject(http.StatusBadRequest, "invalid_app_name", err.Error())
+		return
+	}
+	if req.HostLoopback && req.TargetPort <= 0 {
+		reject(http.StatusBadRequest, "missing_target_port", "host_loopback requires target_port: the platform cannot guess which loopback port to proxy to")
+		return
+	}
+	if req.TargetPort < 0 || req.TargetPort > 65535 {
+		reject(http.StatusBadRequest, "invalid_target_port", "target_port must be between 1 and 65535")
+		return
+	}
+
+	var endpointID *int
+	var serverStatus string
+	var serverID uuid.UUID
+	var vmIP *string
+	err = h.pool.QueryRow(c.Request.Context(),
+		`SELECT id, portainer_endpoint_id, status, vm_ip FROM app_servers
+		 WHERE project_id = $1 AND name = $2 AND status != 'Deleted'`,
+		projectID, serverName,
+	).Scan(&serverID, &endpointID, &serverStatus, &vmIP)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		reject(http.StatusInternalServerError, "server_lookup_failed", "failed to find app server")
+		return
+	}
+	if endpointID == nil {
+		reject(http.StatusConflict, "server_not_enrolled", "app server is not enrolled yet (no Portainer endpoint); enroll it before publishing a hostname")
+		return
+	}
+	if serverStatus != string(models.AppServerStatusReady) {
+		reject(http.StatusConflict, "server_not_ready", "app server is not Ready yet")
+		return
+	}
+	if vmIP == nil || *vmIP == "" {
+		reject(http.StatusConflict, "server_has_no_ip", "app server has no public IP recorded yet; a hostname would have nothing to point at")
+		return
+	}
+
+	hostname := normalizeDomain(req.Hostname)
+	if hostname == "" {
+		suffix, sErr := randomHostSuffix()
+		if sErr != nil {
+			reject(http.StatusInternalServerError, "hostname_mint_failed", "failed to mint a hostname")
+			return
+		}
+		hostname = buildDefaultHostname(h.cfg.DefaultDomainBase, appName, suffix)
+	} else if !strings.HasSuffix(hostname, "."+h.cfg.DefaultDomainBase) {
+		reject(http.StatusBadRequest, "hostname_not_platform_domain",
+			"this endpoint only mints hostnames under "+h.cfg.DefaultDomainBase+"; for your own domain verify its apex and use the custom hostname endpoint")
+		return
+	} else if !isValidDomain(hostname) {
+		reject(http.StatusBadRequest, "invalid_hostname", "hostname is not a valid domain name")
+		return
+	}
+
+	envID, err := h.ensureVMEnvironment(c.Request.Context(), projectID, serverName, serverID)
+	if err != nil {
+		reject(http.StatusInternalServerError, "environment_create_failed", "failed to resolve app server environment")
+		return
+	}
+
+	var existingEnv uuid.UUID
+	var existingApp string
+	err = h.pool.QueryRow(c.Request.Context(),
+		`SELECT environment_id, app_name FROM domain_hostnames WHERE hostname = $1`, hostname,
+	).Scan(&existingEnv, &existingApp)
+	if err == nil {
+		if existingEnv != envID {
+			reject(http.StatusConflict, "hostname_taken", "that hostname is already attached elsewhere")
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"hostname": hostname, "app_name": existingApp, "message": "hostname already attached"})
+		return
+	}
+	if err != pgx.ErrNoRows {
+		reject(http.StatusInternalServerError, "hostname_lookup_failed", "failed to check hostname")
+		return
+	}
+
+	payloadBytes, err := json.Marshal(models.AttachCustomHostnamePayload{
+		AppName:      appName,
+		Hostname:     hostname,
+		Port:         req.TargetPort,
+		HostLoopback: req.HostLoopback,
+	})
+	if err != nil {
+		reject(http.StatusInternalServerError, "payload_marshal_failed", "failed to marshal payload")
+		return
+	}
+
+	tx, err := h.pool.Begin(c.Request.Context())
+	if err != nil {
+		reject(http.StatusInternalServerError, "operation_insert_failed", "failed to create operation")
+		return
+	}
+	defer func() { _ = tx.Rollback(c.Request.Context()) }()
+
+	var op models.Operation
+	row := tx.QueryRow(c.Request.Context(),
+		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
+		 VALUES ($1, $2, $3, 'AttachDefaultDomain', 'App', $4, 'Created', $5)
+		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
+		           status, payload, validation_result, git_commit, git_path, argo_application,
+		           error_code, error_message, created_at, updated_at`,
+		claims.UserID, projectID, envID, appName, payloadBytes,
+	)
+	if err := scanOperation(row, &op); err != nil {
+		reject(http.StatusInternalServerError, "operation_insert_failed", "failed to create operation")
+		return
+	}
+	if _, err := tx.Exec(c.Request.Context(),
+		`INSERT INTO domain_hostnames (authorization_id, environment_id, app_name, hostname, record_type, status, cert_status, operation_id, managed)
+		 VALUES (NULL, $1, $2, $3, 'A', 'pending', 'pending', $4, true)`,
+		envID, appName, hostname, op.ID,
+	); err != nil {
+		reject(http.StatusInternalServerError, "hostname_insert_failed", "failed to record hostname")
+		return
+	}
+	if err := tx.Commit(c.Request.Context()); err != nil {
+		reject(http.StatusInternalServerError, "operation_insert_failed", "failed to create operation")
+		return
+	}
+
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		OperationID:   op.ID,
+		Action:        "AttachAppServerHostname",
+		ResourceKind:  "App",
+		ResourceName:  appName,
+		Outcome:       auditOutcomeSuccess,
+		Metadata: map[string]any{
+			"server":        serverName,
+			"hostname":      hostname,
+			"target_port":   req.TargetPort,
+			"host_loopback": req.HostLoopback,
+		},
+	})
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"operation": op,
+		"hostname":  hostname,
+		"app_name":  appName,
+		"message":   "hostname attachment queued",
+	})
 }

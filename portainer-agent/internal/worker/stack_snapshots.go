@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/dada-tuda/console/portainer-agent/internal/db"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
 
@@ -66,6 +68,37 @@ func classifyService(image string) (kind, subtype, name string) {
 	return "App", "", base
 }
 
+// applyPrimaryHostname writes the app's public address onto its live-status
+// patch, mirroring what the k8s status reconciler puts on a cluster app so the
+// console renders both runtimes the same way. The keys are always written, with
+// url nil when there is no hostname: the patch is merged into summary_json, so
+// leaving them out would keep showing the address of a domain that was detached.
+// A lookup failure is non-fatal — live status is worth more than an address.
+func applyPrimaryHostname(ctx context.Context, pool *pgxpool.Pool, envID uuid.UUID, appName string, patch map[string]any) {
+	info, err := db.PrimaryHostname(ctx, pool, envID, appName)
+	if err != nil {
+		log.Warn().Err(err).Str("app", appName).Msg("primary hostname lookup failed (non-fatal)")
+		return
+	}
+	for k, v := range hostnamePatchFields(info) {
+		patch[k] = v
+	}
+}
+
+// hostnamePatchFields renders one hostname lookup into the summary keys the
+// console reads. Split out from applyPrimaryHostname so the shape is testable
+// without a database.
+func hostnamePatchFields(info db.PrimaryHostnameInfo) map[string]any {
+	if info.Hostname == "" {
+		return map[string]any{"url": nil, "url_status": nil, "url_reason": nil}
+	}
+	return map[string]any{
+		"url":        "https://" + info.Hostname,
+		"url_status": info.Status,
+		"url_reason": info.Reason,
+	}
+}
+
 // syncStackSnapshots mirrors the just-deployed per-environment stack's live
 // container state onto the first-class Application snapshots. Each Application is
 // one compose SERVICE (service label == app name), so live status is matched to
@@ -100,6 +133,7 @@ func (w *VMWatcher) syncStackSnapshots(ctx context.Context, op db.Operation, end
 			"stack":       stackName,
 			"endpoint_id": endpointID,
 		}
+		applyPrimaryHostname(ctx, w.pool, *op.EnvironmentID, service, patch)
 		patchJSON, _ := json.Marshal(patch)
 		n, err := db.UpdateLiveStatus(ctx, w.pool, *op.EnvironmentID, "App", service, "Ready", patchJSON)
 		if err != nil {

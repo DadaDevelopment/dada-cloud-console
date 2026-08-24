@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1282,7 +1283,13 @@ func ReconcilePendingHostnames(ctx context.Context, pool *pgxpool.Pool, cfg *con
 				`UPDATE domain_hostnames SET status_reason=$2, updated_at=now()
 				  WHERE id=$1 AND status='pending'`, p.id, reason)
 		}
-		if !p.managed || cfg == nil || cfg.ClusterLBIP == "" {
+		reissueTarget := ""
+		if p.runtime == models.EnvironmentRuntimeVM {
+			reissueTarget = dnsTarget
+		} else if cfg != nil {
+			reissueTarget = cfg.ClusterLBIP
+		}
+		if !p.managed || reissueTarget == "" {
 			continue
 		}
 		if now.Sub(p.attachStartedAt) <= hostnameDNSStuckAfter {
@@ -1291,7 +1298,7 @@ func ReconcilePendingHostnames(ctx context.Context, pool *pgxpool.Pool, cfg *con
 		if p.lastReissue != nil && now.Sub(*p.lastReissue) <= hostnameReissueCooldown {
 			continue
 		}
-		if hostnameDNSResolved(ctx, p.hostname, cfg.ClusterLBIP) {
+		if hostnameDNSResolved(ctx, p.hostname, reissueTarget) {
 			continue
 		}
 		if err := reissueDefaultDomainDNS(ctx, pool, p.projectID, p.environmentID, p.appName, p.hostname); err != nil {
@@ -1703,11 +1710,53 @@ func appNeedsDefaultDomain(summary map[string]any) bool {
 	if worker, _ := summary["worker"].(bool); worker {
 		return false
 	}
-	port, _ := summary["port"].(float64)
+	port := summaryServicePort(summary)
 	if port <= 0 {
 		return false
 	}
-	return servesHTTP(int(port))
+	return servesHTTP(port)
+}
+
+// summaryServicePort reads the port an App snapshot serves on, across both
+// snapshot shapes. Kubernetes snapshots carry a top-level "port"; compose
+// snapshots (composeAppSummary in gitops-agent) carry none at all -- their port
+// lives inside desired.ports as docker port strings. Reading only the top-level
+// key made every VM app look portless, so every domain pass keyed on it was a
+// silent no-op on the VM runtime rather than a decision.
+func summaryServicePort(summary map[string]any) int {
+	if port, ok := summary["port"].(float64); ok && port > 0 {
+		return int(port)
+	}
+	desired, _ := summary["desired"].(map[string]any)
+	if desired == nil {
+		return 0
+	}
+	ports, _ := desired["ports"].([]any)
+	for _, raw := range ports {
+		s, _ := raw.(string)
+		if port := containerPortFromPortString(s); port > 0 {
+			return port
+		}
+	}
+	return 0
+}
+
+// containerPortFromPortString extracts the container-side port of a docker
+// compose port mapping ("8080:80", "127.0.0.1:8080:80/tcp", "80"), which is the
+// port an nginx upstream must target -- the host-side port is irrelevant when
+// the proxy reaches the service over the compose network.
+func containerPortFromPortString(s string) int {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	s = strings.SplitN(s, "/", 2)[0]
+	parts := strings.Split(s, ":")
+	port, err := strconv.Atoi(parts[len(parts)-1])
+	if err != nil || port <= 0 || port > 65535 {
+		return 0
+	}
+	return port
 }
 
 // BackfillMissingDefaultDomains finds HTTP-serving Kubernetes apps that have no
@@ -1724,6 +1773,19 @@ func appNeedsDefaultDomain(summary map[string]any) bool {
 // going through the API -- nothing else ever notices, since
 // ReconcilePendingHostnames only walks EXISTING domain_hostnames rows. A
 // missing row therefore stayed domain-less forever until this ran.
+//
+// It stays Kubernetes-only on purpose, even though VM apps now get a default
+// domain at CreateApp exactly like k8s apps do. On a VM the App snapshots are
+// not all console-authored: ImportComposeStack turns every container already
+// running on an adopted server into an App, and a pass that mints a public
+// hostname for anything HTTP-shaped would publish internal admin panels and
+// dashboards nobody asked to expose -- the same one-way door
+// appMayGetDefaultDomain's port_source check was added to close, but with no
+// equivalent signal to key on, since an imported service's port is simply the
+// port it was already listening on. VM apps created through CreateApp get their
+// row in the same transaction as the operation, so the gap this pass repairs
+// (row lost, operation committed) is the only thing left uncovered there, and
+// re-publishing by hand is one call to AttachAppServerHostname.
 func BackfillMissingDefaultDomains(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config) error {
 	if cfg == nil || !cfg.DefaultDomainEnabled || cfg.DefaultDomainBase == "" {
 		return nil
@@ -1861,6 +1923,15 @@ func enqueueDefaultDomainBackfill(ctx context.Context, pool *pgxpool.Pool, proje
 // the row leaves 'failed' (goes to 'pending') or, on a later real failure,
 // comes back with a different status_reason, so this bypass cannot compound
 // into a retry storm against the same row.
+//
+// Unlike BackfillMissingDefaultDomains this runs on BOTH runtimes. Repairing a
+// row somebody already asked for is safe everywhere -- the runtime only decides
+// how it is rendered, and gitops-agent's AttachDefaultDomain handler branches on
+// it. Minting a NEW row is the part that stays k8s-only. The query's own JOIN to
+// a live App snapshot bounds what this can touch on a VM: a loopback carrier
+// hostname, which by construction has no App snapshot of its own, is never
+// selected here and therefore has no reconciler behind it -- re-attach it by
+// hand if it breaks.
 func ReattachOrphanedHostnames(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config) error {
 	if cfg == nil {
 		return nil
@@ -1874,14 +1945,13 @@ func ReattachOrphanedHostnames(ctx context.Context, pool *pgxpool.Pool, cfg *con
 		     ON rs.environment_id = dh.environment_id AND rs.kind = 'App' AND rs.name = dh.app_name
 		   LEFT JOIN domain_authorizations da ON da.id = dh.authorization_id
 		  WHERE dh.status = 'failed'
-		    AND e.runtime = $1
-		    AND rs.first_seen_at < NOW() - ($2 * INTERVAL '1 second')
-		    AND dh.reattach_count < $3
+		    AND rs.first_seen_at < NOW() - ($1 * INTERVAL '1 second')
+		    AND dh.reattach_count < $2
 		    AND (
-		        dh.status_reason = $5
-		        OR dh.updated_at < NOW() - ($4 * INTERVAL '1 second')
+		        dh.status_reason = $4
+		        OR dh.updated_at < NOW() - ($3 * INTERVAL '1 second')
 		    )`,
-		models.EnvironmentRuntimeK8s, defaultDomainBackfillGrace.Seconds(),
+		defaultDomainBackfillGrace.Seconds(),
 		hostnameReattachMaxAttempts, hostnameReattachCooldown.Seconds(),
 		hostnameReasonAppDeleted,
 	)

@@ -1,7 +1,7 @@
 {
   "name": "dada-cloud",
   "version": "0.1.0",
-  "description": "Deploy and manage apps on Dada Cloud from Claude Code, and get a Dada Box — an ephemeral root sandbox — in one tool call. 42 curated MCP tools plus guided deploy/configure/diagnose prompts, over an authenticated browser login.",
+  "description": "Deploy and manage apps on Dada Cloud from Claude Code, and get a Dada Box — an ephemeral root sandbox — in one tool call. 45 curated MCP tools plus guided deploy/configure/diagnose prompts, over an authenticated browser login.",
   "author": {
     "name": "Dada Cloud",
     "url": "https://console.dada-tuda.ru"
