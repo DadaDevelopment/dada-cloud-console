@@ -126,6 +126,7 @@ func buildMCPServer(tools []GeneratedTool, backendURL, basePath string) *sdkmcp.
 	srv := sdkmcp.NewServer(&sdkmcp.Implementation{Name: serverName, Version: serverVersion}, nil)
 	for _, g := range tools {
 		applyAddressing(&g)
+		advertiseSubjectAliases(&g)
 		proxy := MakeHandler(g, backendURL, basePath)
 		tool := &sdkmcp.Tool{
 			Name:        g.Name,

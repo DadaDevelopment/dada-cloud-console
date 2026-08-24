@@ -86,6 +86,7 @@ func MakeHandler(g GeneratedTool, backendURL, basePath string) ToolHandler {
 		}
 
 		applyToolDefaults(g.Name, args)
+		applySubjectAliases(g, args)
 		if msg := resolveAddressArgs(ctx, g, args, backendURL, basePath); msg != "" {
 			return errResult(msg), nil
 		}
@@ -94,7 +95,7 @@ func MakeHandler(g GeneratedTool, backendURL, basePath string) ToolHandler {
 		for _, name := range g.PathParams {
 			val, ok := args[name]
 			if !ok {
-				return errResult(fmt.Sprintf("missing required path parameter %q", name)), nil
+				return errResult(missingParamMessage(g, name, args)), nil
 			}
 			filledPath = strings.ReplaceAll(filledPath, "{"+name+"}", url.PathEscape(fmt.Sprint(val)))
 		}
