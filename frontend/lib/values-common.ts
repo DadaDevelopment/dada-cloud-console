@@ -88,12 +88,48 @@ function formatValue(field: keyof CommonConfig, value: string): string {
 }
 
 /**
+ * directCommonFields are the common.* fields that live as a direct child of
+ * `common`, so a file missing one can have it inserted back. The nested fields
+ * (image.*, resources.*) are always emitted by the template.
+ */
+const directCommonFields: (keyof CommonConfig)[] = ["servicePort", "replicas", "useDotEnv"];
+
+/**
+ * insertUnderCommon adds `key: value` as the first child of the top-level
+ * `common:` mapping, matching the indent the file already uses for its other
+ * children. A file with no `common:` block is left untouched.
+ */
+function insertUnderCommon(lines: string[], key: string, value: string): string[] {
+  const commonIdx = lines.findIndex((l) => /^common:\s*$/.test(l));
+  if (commonIdx < 0) return lines;
+  let indent = 2;
+  for (let i = commonIdx + 1; i < lines.length; i++) {
+    const m = lines[i].match(/^(\s+)[A-Za-z0-9_.-]+:/);
+    if (m) {
+      indent = m[1].length;
+      break;
+    }
+  }
+  const out = lines.slice();
+  out.splice(commonIdx + 1, 0, `${" ".repeat(indent)}${key}: ${value}`);
+  return out;
+}
+
+/**
  * patchCommon replaces the value of each known common.* line in place, preserving
- * indentation, key, and the rest of the document. A field whose line is absent is
- * skipped (the template always emits them, so this only guards a hand-edited file).
+ * indentation, key, and the rest of the document.
+ *
+ * A direct child of `common` that the file does not carry is INSERTED rather
+ * than skipped. Skipping it silently dropped the field while the save still
+ * reported success: a worker app renders with no `common.servicePort` line at
+ * all (renderer emits it omitempty and the app's port is 0), so typing a port
+ * into this form committed a values.yaml without it and the field came back
+ * empty on the next read -- the port "reverting" on save. Nested fields
+ * (image.*, resources.*) are still skipped when absent; the template always
+ * emits them.
  */
 export function patchCommon(yaml: string, cfg: CommonConfig): string {
-  const lines = yaml.split("\n");
+  let lines = yaml.split("\n");
   const map = scan(yaml);
   (Object.keys(PATHS) as (keyof CommonConfig)[]).forEach((field) => {
     const info = map.get(PATHS[field]);
@@ -101,11 +137,18 @@ export function patchCommon(yaml: string, cfg: CommonConfig): string {
     lines[info.idx] = `${" ".repeat(info.indent)}${info.key}: ${formatValue(field, cfg[field])}`;
   });
 
+  for (const field of directCommonFields) {
+    if (map.get(PATHS[field]) || !cfg[field].trim()) continue;
+    const key = PATHS[field].slice("common.".length);
+    lines = insertUnderCommon(lines, key, formatValue(field, cfg[field]));
+  }
+
   // Keep the no-route choice explicit for Helm. Older values files do not
   // carry common.service.enabled, so add it next to servicePort when needed.
   const enabled = cfg.servicePort.trim() !== "";
-  const enabledInfo = map.get("common.service.enabled");
-  const portInfo = map.get(PATHS.servicePort);
+  const after = scan(lines.join("\n"));
+  const enabledInfo = after.get("common.service.enabled");
+  const portInfo = after.get(PATHS.servicePort);
   if (enabledInfo) {
     lines[enabledInfo.idx] = `${" ".repeat(enabledInfo.indent)}${enabledInfo.key}: ${enabled}`;
   } else if (portInfo) {

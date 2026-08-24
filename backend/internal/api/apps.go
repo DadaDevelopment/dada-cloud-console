@@ -1634,10 +1634,15 @@ type updateAppPortRequest struct {
 // skipped the same way -- there is nothing to redeploy -- and the port write
 // still succeeds so the value takes effect on the app's first deploy.
 //
-// Worker apps have no HTTP service (worker=true clears the port at deploy
-// time regardless of what is stored -- see deployPortAndWorker) so changing
-// their port is rejected rather than silently accepted and then ignored by
-// the renderer.
+// Setting a port on a worker app CONVERTS it into a web app: worker=true
+// clears the port at deploy time regardless of what is stored (see
+// deployPortAndWorker), so the flag has to come off or the write would be
+// accepted and then ignored by the renderer. Rejecting the call instead was
+// the state this endpoint shipped in, and it left a real user with no lever at
+// all: an app created as a worker that turned out to serve HTTP answered 502
+// on its domain, the port field refused every value, and nothing else in the
+// product could clear the flag. Typing a port is the user saying this app
+// serves HTTP, which is exactly the statement worker=false makes.
 //
 // @ID          updateAppPort
 // @Summary     Change an app's container port
@@ -1726,12 +1731,12 @@ func (h *Handler) UpdateAppPort(c *gin.Context) {
 
 	var cur map[string]any
 	_ = json.Unmarshal(summaryRaw, &cur)
-	if worker, _ := cur["worker"].(bool); worker {
-		respondErrorCode(c, http.StatusBadRequest, "app_is_worker", "worker apps have no HTTP port to change")
-		return
-	}
+	wasWorker, _ := cur["worker"].(bool)
 	cur["port"] = req.Port
 	cur["port_source"] = appPortSourceUser
+	if wasWorker {
+		cur["worker"] = false
+	}
 	updatedJSON, err := json.Marshal(cur)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to marshal snapshot")
@@ -1761,6 +1766,9 @@ func (h *Handler) UpdateAppPort(c *gin.Context) {
 	}
 
 	auditMetadata := map[string]string{"port": strconv.Itoa(req.Port)}
+	if wasWorker {
+		auditMetadata["worker_cleared"] = "true"
+	}
 	message := "Port updated; takes effect on the app's next deploy"
 	if redeployOp != nil {
 		auditMetadata["redeploy_operation_id"] = redeployOp.ID.String()
@@ -1779,9 +1787,13 @@ func (h *Handler) UpdateAppPort(c *gin.Context) {
 		Metadata:      auditMetadata,
 	})
 
+	if wasWorker {
+		message += "; the app now serves HTTP and gets a Service"
+	}
 	resp := gin.H{
-		"port":    req.Port,
-		"message": message,
+		"port":           req.Port,
+		"message":        message,
+		"worker_cleared": wasWorker,
 	}
 	if redeployOp != nil {
 		resp["operation"] = redeployOp

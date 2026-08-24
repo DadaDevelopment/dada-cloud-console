@@ -71,10 +71,16 @@ export function PortEditor({ projectId, envId, appName, canEdit }: Props) {
    * Errors branch only on `err.status` / `err.code`, never on `err.message`
    * text -- see lib/env-error.ts for the same house rule against regexing
    * error prose.
+   *
+   * A bare 400 is NOT the range error. Reading every 400 as one is how a user
+   * whose app was rejected with `app_is_worker` was told for two days that
+   * 8080 is outside 1..65535: the form accused the value it had just been
+   * given while the real reason went unsaid. An unrecognised 400 now shows the
+   * backend's own sentence, and only `invalid_port` claims the range.
    */
   function describeError(err: unknown): string {
     const e = err as { status?: number; code?: string; message?: string } | undefined;
-    if (e?.status === 400 || e?.code === "invalid_port") return t("apps.port.error.invalid");
+    if (e?.code === "invalid_port") return t("apps.port.error.invalid");
     if (e?.status === 403) return t("apps.port.error.forbidden");
     if (e?.status === 404) return t("apps.port.error.notFound");
     return e?.message || t("apps.port.error.save");
