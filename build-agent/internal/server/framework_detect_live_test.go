@@ -55,8 +55,8 @@ func TestLiveDetectFrameworks(t *testing.T) {
 		wantStart   string
 	}{
 		{name: "gitbucket-mcp-plugin", repo: "DadaDevelopment/gitbucket-mcp-plugin", root: ".", want: "scala", wantPM: "gradle", wantPort: 8080, wantBuild: "./gradlew shadowJar", wantInstall: "./gradlew dependencies"},
-		{name: "reels-tracker", repo: "DadaDevelopment/reels-tracker", root: ".", want: "fastapi", wantPM: "pip", wantPort: 8000, wantInstall: "pip install -r requirements.txt"},
-		{name: "telemost-bot", repo: "DadaDevelopment/telemost-bot", root: ".", want: "fastapi", wantPM: "pip", wantPort: 8000, wantInstall: "pip install -r requirements.txt"},
+		{name: "reels-tracker", repo: "DadaDevelopment/reels-tracker", root: ".", want: "fastapi", wantPM: "pip", wantPort: 8000, wantInstall: "uv pip install --system --no-cache -r requirements.txt"},
+		{name: "telemost-bot", repo: "DadaDevelopment/telemost-bot", root: ".", want: "fastapi", wantPM: "pip", wantPort: 8000, wantInstall: "uv pip install --system --no-cache -r requirements.txt"},
 		{name: "dada-development-site", repo: "DadaDevelopment/dada-development-site", root: ".", want: "react", wantPM: "npm", wantPort: 5173, wantBuild: "npm run build", wantInstall: "npm ci", wantStart: "npm run preview"},
 		{name: "dada-cloud-console", repo: "DadaDevelopment/dada-cloud-console", root: ".", want: "nextjs", wantPM: "npm", wantPort: 3000, wantBuild: "npm run build", wantInstall: "npm ci", wantStart: "npm run start"},
 	}

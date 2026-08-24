@@ -1642,7 +1642,7 @@ func detectPythonFramework(ctx context.Context, token, owner, repo string, entry
 			cand.detection.PackageManager = ptrString("pip")
 		}
 		if cand.detection.InstallCommand == nil || *cand.detection.InstallCommand == "" {
-			cand.detection.InstallCommand = ptrString("pip install -r requirements.txt")
+			cand.detection.InstallCommand = ptrString("uv pip install --system --no-cache -r requirements.txt")
 		}
 	}
 	return cand, true
@@ -1657,11 +1657,11 @@ func pythonPackageManagerFromContent(raw, path string) (packageManagerSpec, stri
 	case strings.Contains(lower, "[tool.uv]") || strings.Contains(lower, "uv ="):
 		return packageManagerSpec{name: "uv"}, "uv sync"
 	case strings.Contains(path, "requirements.txt"):
-		return packageManagerSpec{name: "pip"}, "pip install -r requirements.txt"
+		return packageManagerSpec{name: "pip"}, "uv pip install --system --no-cache -r requirements.txt"
 	case strings.Contains(path, "setup.py"):
-		return packageManagerSpec{name: "pip"}, "pip install -e ."
+		return packageManagerSpec{name: "pip"}, "uv pip install --system --no-cache -e ."
 	default:
-		return packageManagerSpec{name: "pip"}, "pip install -e ."
+		return packageManagerSpec{name: "pip"}, "uv pip install --system --no-cache -e ."
 	}
 }
 
@@ -1681,7 +1681,7 @@ func detectPythonContent(raw, path string, depth, score int) (frameworkCandidate
 	build := ""
 	pm, install := pythonPackageManagerFromContent(raw, path)
 	if pm.name == "pip" && strings.Contains(strings.ToLower(path), "requirements.txt") {
-		install = "pip install -r requirements.txt"
+		install = "uv pip install --system --no-cache -r requirements.txt"
 	}
 	if pm.name == "poetry" && strings.Contains(strings.ToLower(path), "pyproject.toml") {
 		install = "poetry install"
@@ -1891,7 +1891,7 @@ func detectNodeFrameworkFromLockfileEntry(ctx context.Context, token, owner, rep
 func detectPythonLockfileFramework(raw string, path string, depth int) (frameworkCandidate, bool) {
 	lower := strings.ToLower(raw)
 	pm := packageManagerSpec{name: "pip"}
-	install := "pip install -r requirements.txt"
+	install := "uv pip install --system --no-cache -r requirements.txt"
 	switch {
 	case strings.Contains(strings.ToLower(path), "poetry.lock"):
 		pm = packageManagerSpec{name: "poetry"}

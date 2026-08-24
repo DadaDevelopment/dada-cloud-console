@@ -169,7 +169,8 @@ const buildFailMissingManifest = "missing_manifest"
 // manifest is absent to the manifest the generated Dockerfile expected.
 var missingManifestSignatures = []struct{ signature, manifest, step string }{
 	{"Could not read package.json", "package.json", "npm install"},
-	{"Could not open requirements file", "requirements.txt", "pip install -r requirements.txt"},
+	{"Could not open requirements file", "requirements.txt", "uv pip install --system -r requirements.txt"},
+	{"File not found: `requirements.txt`", "requirements.txt", "uv pip install --system -r requirements.txt"},
 	{"go.mod file not found", "go.mod", "go build"},
 }
 
