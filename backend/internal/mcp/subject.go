@@ -168,7 +168,11 @@ func advertiseSubjectAliases(g *GeneratedTool) {
 	}
 	desc, _ := prop["description"].(string)
 	note := "Also accepted as " + strings.Join(quoteAll(aliases), " / ") + "."
-	prop["description"] = strings.TrimSpace(strings.TrimSpace(desc) + " " + note)
+	desc = strings.TrimSpace(desc)
+	if desc != "" && !strings.HasSuffix(desc, ".") {
+		desc += "."
+	}
+	prop["description"] = strings.TrimSpace(desc + " " + note)
 }
 
 // declaredParams is every argument name the tool defines in its own right. An
