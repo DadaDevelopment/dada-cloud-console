@@ -1155,7 +1155,6 @@ definitions:
     properties:
       metrics:
         additionalProperties:
-          format: float64
           type: number
         type: object
       source:
@@ -16689,7 +16688,9 @@ paths:
 
         The answer also carries the next level down: resolving a project lists its environments, resolving an environment lists its app NAMES. Resolving an app additionally returns its current image, phase, the env-var keys the console manages and the env-var keys actually present in the cluster.
 
-        An ambiguous name (the same project name visible in two orgs) is a 409 that names the candidates rather than a guess.
+        The project may be named by its slug ("agents") or by the display name the console shows ("Agent Runtime"); case, spaces, dashes and underscores are ignored. A slug match always wins over a display-name match.
+
+        An ambiguous name (the same project name visible in two orgs) is a 409 that names the candidates rather than a guess. A name that matches nothing is a 404 that lists the visible projects whose names look like it.
       operationId: resolveRef
       parameters:
       - description: 'Address: project, project/env or project/env/app'

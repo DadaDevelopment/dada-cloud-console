@@ -67,7 +67,9 @@ type resolveResponse struct {
 // @Description
 // @Description The answer also carries the next level down: resolving a project lists its environments, resolving an environment lists its app NAMES. Resolving an app additionally returns its current image, phase, the env-var keys the console manages and the env-var keys actually present in the cluster.
 // @Description
-// @Description An ambiguous name (the same project name visible in two orgs) is a 409 that names the candidates rather than a guess.
+// @Description The project may be named by its slug ("agents") or by the display name the console shows ("Agent Runtime"); case, spaces, dashes and underscores are ignored. A slug match always wins over a display-name match.
+// @Description
+// @Description An ambiguous name (the same project name visible in two orgs) is a 409 that names the candidates rather than a guess. A name that matches nothing is a 404 that lists the visible projects whose names look like it.
 // @Tags        resolve
 // @Produce     json
 // @Param       ref query string false "Address: project, project/env or project/env/app"
@@ -103,7 +105,15 @@ func (h *Handler) ResolveRef(c *gin.Context) {
 	}
 	switch len(candidates) {
 	case 0:
-		respondNotFound(c)
+		near, nerr := h.nameCandidates(ctx, claims, projectName)
+		if nerr != nil {
+			near = nil
+		}
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":      "no such project",
+			"asked":      projectName,
+			"candidates": near,
+		})
 		return
 	case 1:
 	default:
@@ -209,22 +219,90 @@ func joinRef(parts ...string) string {
 	return strings.Join(out, "/")
 }
 
-// visibleProjectsByName finds projects with this name that the caller may see,
-// using the same three visibility sources as ListProjects (ADR-009): an
-// explicit project role, the org Owner/Admin cascade, or /platform-admins.
+// visibleProjectsByName finds projects the caller may see whose name the
+// caller could plausibly have written, using the same three visibility sources
+// as ListProjects (ADR-009): an explicit project role, the org Owner/Admin
+// cascade, or /platform-admins.
 //
-// It returns every match rather than the first: project names are unique per
-// owner, not globally, so a name can resolve to two projects in two orgs. The
-// caller turns more than one into a 409 instead of picking, because picking is
-// how an agent writes to the wrong tenant.
+// It matches display_name as well as name, and both in a normalized form
+// (case folded, punctuation and spaces removed). The console breadcrumb, the
+// project switcher and every screenshot show display_name — "Agent Runtime" —
+// while the address is the slug "agents". Matching only the slug meant the one
+// name a caller can actually read was the one name that resolved to a 404.
+//
+// Matches are ranked so a literal slug always beats a display name: dozens of
+// projects share the display_name "Default", and letting those collide with a
+// project genuinely named "default" would turn an exact address into a 409.
+//
+// Within a rank it returns every match rather than the first: names are unique
+// per owner, not globally, so one name can resolve to two projects in two orgs.
+// The caller turns more than one into a 409 instead of picking, because picking
+// is how an agent writes to the wrong tenant.
 func (h *Handler) visibleProjectsByName(ctx context.Context, claims *auth.Claims, name string) ([]refProject, error) {
+	rows, err := h.pool.Query(ctx,
+		`SELECT p.id, p.name, p.display_name, COALESCE(p.org_id, ''),
+		        CASE
+		          WHEN lower(p.name) = lower($1) THEN 1
+		          WHEN lower(COALESCE(p.display_name, '')) = lower($1) THEN 2
+		          WHEN `+normalizedSQL("p.name")+` = $5 THEN 3
+		          ELSE 4
+		        END AS rank
+		   FROM projects p
+		  WHERE ($2 OR p.id = ANY($3) OR p.org_id = ANY($4))
+		    AND (lower(p.name) = lower($1)
+		         OR lower(COALESCE(p.display_name, '')) = lower($1)
+		         OR `+normalizedSQL("p.name")+` = $5
+		         OR `+normalizedSQL("COALESCE(p.display_name, '')")+` = $5)
+		    AND $5 <> ''
+		  ORDER BY rank, p.name`,
+		name, isGod(claims), claimProjectIDs(claims), adminOrgIDs(claims), normalizeName(name),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []refProject
+	bestRank := 0
+	for rows.Next() {
+		var p refProject
+		var rank int
+		if err := rows.Scan(&p.ID, &p.Name, &p.DisplayName, &p.OrgID, &rank); err != nil {
+			return nil, err
+		}
+		if bestRank == 0 {
+			bestRank = rank
+		}
+		if rank != bestRank {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// nameCandidates is what the caller gets instead of a bare "not found": the
+// visible projects whose name or display name looks like what was asked for.
+//
+// A miss with no candidates is what sends an agent back to listing every
+// project — the walk this endpoint exists to remove. Every other miss here
+// (no such environment, no such app) already names what it could see; the
+// project level was the one that did not.
+func (h *Handler) nameCandidates(ctx context.Context, claims *auth.Claims, name string) ([]refProject, error) {
+	norm := normalizeName(name)
+	if norm == "" {
+		return nil, nil
+	}
 	rows, err := h.pool.Query(ctx,
 		`SELECT p.id, p.name, p.display_name, COALESCE(p.org_id, '')
 		   FROM projects p
-		  WHERE lower(p.name) = lower($1)
-		    AND ($2 OR p.id = ANY($3) OR p.org_id = ANY($4))
-		  ORDER BY p.name`,
-		name, isGod(claims), claimProjectIDs(claims), adminOrgIDs(claims),
+		  WHERE ($2 OR p.id = ANY($3) OR p.org_id = ANY($4))
+		    AND (`+normalizedSQL("p.name")+` LIKE '%' || $1 || '%'
+		         OR `+normalizedSQL("COALESCE(p.display_name, '')")+` LIKE '%' || $1 || '%'
+		         OR $1 LIKE '%' || `+normalizedSQL("p.name")+` || '%')
+		  ORDER BY length(p.name), p.name
+		  LIMIT 10`,
+		norm, isGod(claims), claimProjectIDs(claims), adminOrgIDs(claims),
 	)
 	if err != nil {
 		return nil, err
@@ -240,6 +318,23 @@ func (h *Handler) visibleProjectsByName(ctx context.Context, claims *auth.Claims
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// normalizedSQL folds an identifier the same way normalizeName folds the
+// argument, so "Agent Runtime", "agent-runtime" and "AgentRuntime" are one key.
+func normalizedSQL(column string) string {
+	return "regexp_replace(lower(" + column + "), '[^a-z0-9]', '', 'g')"
+}
+
+// normalizeName is normalizedSQL in Go, for the argument side of the match.
+func normalizeName(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func (h *Handler) projectEnvironments(ctx context.Context, projectID uuid.UUID) ([]refEnvironment, error) {
