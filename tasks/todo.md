@@ -229,6 +229,29 @@ Whole path is k8s-hardwired; needs compose branches in doAttachCustomHostname / 
 
 ---
 
+# Delegated-subdomain custom-domain authorization (2026-08-25)
+
+- [x] Reproduce the incorrect derivation of `fanclub.run.place` as `run.place`.
+- [x] Trace the value through the domain-authorization UI and DNS challenge endpoint.
+- [x] Preserve the entered hostname as the new authorization scope rather than replacing it with its parent domain.
+- [x] Add unit coverage for delegated subdomains, pending parents, and existing authorizations.
+- [x] Run the focused test and confirm the complete unit suite reaches the new coverage.
+- [ ] Run frontend lint/build after restoring the checkout's missing dependencies.
+
+## Review
+
+- The UI now starts a new authorization at the exact hostname when no verified
+  authorization covers it. A pending parent authorization cannot intercept a
+  delegated child domain; a verified authorization continues to cover its
+  children. The API's existing suffix check then limits attachment to that
+  verified scope.
+- `frontend/lib/domain-authorization.test.ts` passes. The full unit suite has
+  431 passing tests and 3 environment-blocked tests because `jsdom` and
+  `oidc-client-ts` are absent; lint and build are blocked for the same missing
+  dependency installation.
+
+---
+
 ## SEO weekly loop (2026-07-31)
 
 Plan and evidence: `tasks/seo/PLAN.md`, baseline `tasks/seo/2026-07-30.md` / `.json`.

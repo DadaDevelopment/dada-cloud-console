@@ -4,6 +4,7 @@ import { useParams } from "next/navigation";
 import { customDomainsApi, appsApi, managedDnsApi } from "@/lib/api";
 import { UpgradeDialog } from "@/components/billing/upgrade-dialog";
 import { docsHref } from "@/lib/site";
+import { deriveAuthorizationDomain } from "@/lib/domain-authorization";
 import type {
   DomainAuthorization,
   DomainChallenge,
@@ -36,22 +37,6 @@ function normalizeDomain(raw: string): string {
   if (slash >= 0) s = s.slice(0, slash);
   if (s.endsWith(".")) s = s.slice(0, -1);
   return s;
-}
-
-/**
- * Resolve the apex an entered hostname belongs to. Prefers an existing
- * authorization matched by suffix; otherwise falls back to the naive
- * last-two-labels registrable apex (good enough for the common .com/.ru case).
- */
-function deriveApex(
-  host: string,
-  auths: DomainAuthorization[]
-): { apex: string; existing: DomainAuthorization | null } {
-  const match = auths.find((a) => host === a.apex_domain || host.endsWith("." + a.apex_domain));
-  if (match) return { apex: match.apex_domain, existing: match };
-  const parts = host.split(".");
-  const apex = parts.length <= 2 ? host : parts.slice(-2).join(".");
-  return { apex, existing: null };
 }
 
 /** The verified/known apex a hostname sorts under, or the hostname itself. */
@@ -679,7 +664,7 @@ function AddDomainFunnel({
     const host = normalizeDomain(domainInput);
     if (!host) return;
     setTargetHost(host);
-    const { apex, existing } = deriveApex(host, auths);
+    const { domain, existing } = deriveAuthorizationDomain(host, auths);
     setBusy(true);
     try {
       if (existing && existing.status === "verified") {
@@ -689,7 +674,7 @@ function AddDomainFunnel({
         setAuth(existing);
         setStep("verify");
       } else {
-        const res = await customDomainsApi.addAuthorization(projectId, apex);
+        const res = await customDomainsApi.addAuthorization(projectId, domain);
         const created = { ...res.authorization, challenge: res.challenge };
         setAuth(created);
         void onChanged();
