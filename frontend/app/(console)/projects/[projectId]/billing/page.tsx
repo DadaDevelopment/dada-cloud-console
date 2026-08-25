@@ -13,6 +13,7 @@ import { resumablePaymentUrl } from "@/lib/checkout-status";
 import { trackUxEvent } from "@/lib/ux-telemetry";
 import { reachGoal } from "@/lib/metrika";
 import { promoErrorMessageKey, normalizePromoCode } from "@/lib/billing-promo";
+import { shouldShowQuotaGraceWarning } from "@/lib/billing-quota";
 import { clsx } from "clsx";
 
 const PLAN_ORDER: BillingPlanKey[] = ["free", "startup", "business", "enterprise"];
@@ -469,7 +470,7 @@ export default function BillingPage() {
         <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{t("billing.title")}</h1>
       </div>
 
-      {graceDate && (
+      {shouldShowQuotaGraceWarning(graceDate, overLimit) && (
         <div className="mb-6 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/40 px-5 py-4">
           <p className="text-sm font-semibold text-blue-800 dark:text-blue-300">{t("billing.graceTitle")}</p>
           <p className="mt-1 text-sm text-blue-700 dark:text-blue-400">{t("billing.graceText", { date: graceDate })}</p>

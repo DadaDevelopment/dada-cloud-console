@@ -1,3 +1,25 @@
+# Billing grace banner accuracy (2026-08-25)
+
+- [x] Trace the billing-page banner condition and API over-limit contract.
+- [x] Make the grace warning require a real `quota_over_limit` row.
+- [x] Add a regression test for an in-limit Free account with an active grace date.
+- [x] Run the focused frontend unit suite and review the owned diff.
+
+## Review — Billing grace banner accuracy
+
+- Root cause: the project billing page rendered overage copy whenever
+  `quota_grace_until` existed, even when the API returned
+  `quota_over_limit: []`. The shell banner already used the correct combined
+  predicate.
+- The page now requires both an active grace date and at least one actual
+  over-limit resource. Focused regression tests pass 3/3.
+- The complete local unit command reaches 434 passing tests but has three
+  unrelated dependency failures because this checkout lacks `oidc-client-ts`
+  and `jsdom`. Local ESLint is likewise unavailable because the checkout lacks
+  the `eslint` package; the owned diff passes `git diff --check`.
+
+---
+
 # Detailed funnel reconstruction (2026-08-23)
 
 ## Sankey-first correction (2026-08-23)
