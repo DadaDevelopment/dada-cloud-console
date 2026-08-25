@@ -2569,11 +2569,23 @@ func (w *DBWatcher) mergeAppValues(mgr *git.Manager, valuesPath, renderedValues 
 // the clobber guard: nothing was deleted, a number changed.
 //
 // service.enabled travels with it: it is derived from the same guessed port.
+//
+// common.resources is advisory on every deploy, port or no port. A deploy is
+// about an image; the operation that is about an app's size is ResizeApp, which
+// patches the six scalars inside the file already in git and re-derives nothing.
+// Letting a deploy write the envelope too means the console's idea of the size
+// silently overwrites whatever the file says, in either direction and with no
+// caller asking for it: on 2026-08-25 leadgen/prod/lead-gen was raised by hand
+// to 1536Mi because its headless browser OOM-killed the pod mid-scan at 256Mi,
+// and the very next console write would have put 256Mi back and returned the
+// app to a crash loop. Advisory keeps the console authoritative where it is the
+// only source -- a freshly created app still gets its envelope, because git is
+// silent about it -- and silent everywhere it is not.
 func advisoryValuesKeys(cur map[string]any) []string {
 	if source, _ := cur["port_source"].(string); source == appPortSourceUser {
-		return nil
+		return []string{"resources"}
 	}
-	return []string{"servicePort", "service"}
+	return []string{"servicePort", "service", "resources"}
 }
 
 // guardValuesClobber refuses a deploy that would delete parts of an app's
