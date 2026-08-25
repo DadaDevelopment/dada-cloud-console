@@ -17,6 +17,10 @@
   unrelated dependency failures because this checkout lacks `oidc-client-ts`
   and `jsdom`. Local ESLint is likewise unavailable because the checkout lacks
   the `eslint` package; the owned diff passes `git diff --check`.
+- Jenkins #1353 ran the complete frontend unit suite (450/450 pass) and then
+  caught a TypeScript narrowing error in the page. The helper now exposes a
+  type predicate so the same combined runtime check also narrows `graceDate`
+  to `string` inside the rendered block; delivery is being retried.
 
 ---
 

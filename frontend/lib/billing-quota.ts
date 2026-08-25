@@ -6,6 +6,6 @@
 export function shouldShowQuotaGraceWarning(
   graceDate: string | null,
   overLimit: readonly unknown[],
-): boolean {
+): graceDate is string {
   return graceDate !== null && overLimit.length > 0;
 }
