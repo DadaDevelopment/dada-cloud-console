@@ -664,7 +664,7 @@ function AddDomainFunnel({
     const host = normalizeDomain(domainInput);
     if (!host) return;
     setTargetHost(host);
-    const { domain, existing } = deriveAuthorizationDomain(host, auths);
+    const { domain, existing, superseded } = deriveAuthorizationDomain(host, auths);
     setBusy(true);
     try {
       if (existing && existing.status === "verified") {
@@ -674,6 +674,7 @@ function AddDomainFunnel({
         setAuth(existing);
         setStep("verify");
       } else {
+        if (superseded) await customDomainsApi.deleteAuthorization(projectId, superseded.id);
         const res = await customDomainsApi.addAuthorization(projectId, domain);
         const created = { ...res.authorization, challenge: res.challenge };
         setAuth(created);

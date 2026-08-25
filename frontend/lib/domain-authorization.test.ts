@@ -6,6 +6,7 @@ test("starts verification at the entered subdomain when it has no authorization"
   assert.deepEqual(deriveAuthorizationDomain("fanclub.run.place", []), {
     domain: "fanclub.run.place",
     existing: null,
+    superseded: null,
   });
 });
 
@@ -15,7 +16,7 @@ test("uses the most-specific existing authorization that covers the hostname", (
 
   assert.deepEqual(
     deriveAuthorizationDomain("www.fanclub.run.place", [parent, delegated]),
-    { domain: "fanclub.run.place", existing: delegated },
+    { domain: "fanclub.run.place", existing: delegated, superseded: null },
   );
 });
 
@@ -24,6 +25,6 @@ test("does not reuse a pending parent authorization for a delegated subdomain", 
 
   assert.deepEqual(
     deriveAuthorizationDomain("fanclub.run.place", [pendingParent]),
-    { domain: "fanclub.run.place", existing: null },
+    { domain: "fanclub.run.place", existing: null, superseded: pendingParent },
   );
 });
