@@ -733,12 +733,87 @@ func (h *Handler) StartAppAutoscaleWatcher(ctx context.Context) {
 // and CrashLooping are what let the grow path tell real starvation from a
 // pod repeatedly failing its own startup: both come off the same list call
 // podAppLabels already makes, so reading them costs no extra API round trip.
+//
+// OOMKilled is the one health signal that also carries a cause. The kernel
+// naming a container as out of memory is the strongest evidence the watcher
+// can get that its limit is too small, and it is evidence the pressure query
+// can miss entirely: working set is scraped periodically, and a process that
+// goes from idle to over the limit inside one scrape interval is killed
+// without ever producing a sample above the threshold.
 type podApp struct {
 	App          string
 	Age          time.Duration
 	Ready        bool
 	CrashLooping bool
 	RestartCount int32
+	OOMKilled    bool
+}
+
+// appAutoscaleOOMWindow is how recently a container must have been OOM-killed
+// for the watcher to still treat that kill as current. Kubernetes keeps
+// lastTerminationState for the life of the pod, so a pod that was killed once
+// last Tuesday and has been healthy since would otherwise read as starving
+// forever and grow once per cooldown until it hit the platform cap.
+const appAutoscaleOOMWindow = appAutoscaleFreshWindow
+
+// podOOMKilledRecently reports whether any container in the pod was killed for
+// running out of memory inside the window, reading both the state it is in now
+// and the one it was in before its last restart: a crash-looping container
+// spends most of its life in Waiting with the kill recorded behind it, and a
+// container killed seconds ago is still Terminated.
+func podOOMKilledRecently(pod *corev1.Pod, now time.Time, window time.Duration) bool {
+	for _, cs := range pod.Status.ContainerStatuses {
+		for _, term := range []*corev1.ContainerStateTerminated{cs.State.Terminated, cs.LastTerminationState.Terminated} {
+			if term == nil || term.Reason != "OOMKilled" {
+				continue
+			}
+			if term.FinishedAt.IsZero() || now.Sub(term.FinishedAt.Time) <= window {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// oomStarvedPods turns the pods a namespace listing says were just OOM-killed
+// into starvation records the resize path understands, at ratio 1.0: the
+// container did not approach its limit, it reached it and died there.
+//
+// Sorted by pod name so a namespace with several killed pods produces the same
+// decision and the same audit row on every tick.
+func oomStarvedPods(namespace string, pods map[string]podApp) []starvedPod {
+	names := make([]string, 0, len(pods))
+	for name, ref := range pods {
+		if ref.OOMKilled && ref.App != "" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	out := make([]starvedPod, 0, len(names))
+	for _, name := range names {
+		out = append(out, starvedPod{Namespace: namespace, Pod: name, Reason: "memory", Ratio: 1})
+	}
+	return out
+}
+
+// oomOverridesReadiness reports whether a pod that fails the readiness gate
+// should be grown anyway.
+//
+// The gate exists because a pod that never served traffic is usually broken
+// for a reason no amount of memory fixes -- a bad image, a missing variable --
+// and reels-tracker-deploy was grown five times while crash-looping on its own
+// startup. An OOMKill is the exception, and the only one: it is the kernel, not
+// a heuristic, saying the container asked for more memory than it was allowed,
+// which is exactly what growing the memory dimension repairs. Without this an
+// app whose real need is above its limit is refused precisely because the limit
+// already killed it, and it stays down until a human finds it: on 2026-08-25
+// leadgen/prod/lead-gen ran a headless browser that was killed mid-scan at
+// 256Mi, and every lever the product offered topped out at 1Gi.
+//
+// Every other gate still applies -- cooldown, LimitRange, quota, plan, platform
+// cap -- so the blast radius stays one doubling per app per 6h.
+func oomOverridesReadiness(pod podApp, s starvedPod) bool {
+	return pod.OOMKilled && s.Reason == "memory"
 }
 
 // podAppLabels maps pod names in namespace to the app they belong to, via the
@@ -768,6 +843,7 @@ func (w *appAutoscaleWatcher) podAppLabels(ctx context.Context, namespace string
 			Ready:        podIsReady(pod),
 			CrashLooping: podIsCrashLooping(pod),
 			RestartCount: podRestartCount(pod),
+			OOMKilled:    podOOMKilledRecently(pod, time.Now(), appAutoscaleOOMWindow),
 		}
 	}
 	return out
@@ -961,9 +1037,13 @@ func envelopeFromPodSpec(containers []corev1.Container) (resourceEnvelope, bool)
 	return e, true
 }
 
-// tick runs one pass: query both pressure dimensions, restrict to user
-// namespaces, resolve pods to apps, and resize whatever is starved and out of
-// cooldown. Every failure is logged and swallowed — one bad namespace must
+// tick runs one pass: query both pressure dimensions, list the pods of every
+// user namespace, and resize whatever is starved and out of cooldown.
+//
+// The pod listing is unconditional rather than restricted to the namespaces the
+// pressure queries lit up, because an OOM-killed pod may produce no sample
+// above the threshold at all -- see podApp.OOMKilled. One label-selected List
+// per namespace per 15 minutes buys the kills the queries cannot see. Every failure is logged and swallowed — one bad namespace must
 // never block the rest, and the watcher must never crash the backend pod it
 // runs inside.
 func (w *appAutoscaleWatcher) tick(ctx context.Context) {
@@ -1001,10 +1081,13 @@ func (w *appAutoscaleWatcher) tick(ctx context.Context) {
 	log.Printf("app-autoscale: tick cpu_series=%d mem_series=%d starved=%d hot_user_ns=%d",
 		len(cpuSamples), len(memSamples), len(starved), len(byNamespace))
 
-	for ns, hot := range byNamespace {
-		env := nsProjects[ns]
+	for ns, env := range nsProjects {
 		podApp := w.podAppLabels(ctx, ns)
 		if podApp == nil {
+			continue
+		}
+		hot := append(oomStarvedPods(ns, podApp), byNamespace[ns]...)
+		if len(hot) == 0 {
 			continue
 		}
 		seen := map[string]bool{}
@@ -1625,12 +1708,16 @@ func (w *appAutoscaleWatcher) maybeResize(ctx context.Context, projectID uuid.UU
 		return
 	}
 	if !pod.Ready || pod.CrashLooping {
-		log.Printf("app-autoscale: %s/%s is not ready (ready=%v crashlooping=%v restarts=%d), refusing to grow a pod that has never served traffic",
+		if !oomOverridesReadiness(pod, s) {
+			log.Printf("app-autoscale: %s/%s is not ready (ready=%v crashlooping=%v restarts=%d), refusing to grow a pod that has never served traffic",
+				namespace, appName, pod.Ready, pod.CrashLooping, pod.RestartCount)
+			w.auditRefusal(ctx, projectID, st, namespace, appName, "app_not_ready", s, map[string]any{
+				"ready": pod.Ready, "crashlooping": pod.CrashLooping, "restart_count": pod.RestartCount,
+			})
+			return
+		}
+		log.Printf("app-autoscale: %s/%s is not ready (ready=%v crashlooping=%v restarts=%d) but was OOM-killed, growing its memory anyway",
 			namespace, appName, pod.Ready, pod.CrashLooping, pod.RestartCount)
-		w.auditRefusal(ctx, projectID, st, namespace, appName, "app_not_ready", s, map[string]any{
-			"ready": pod.Ready, "crashlooping": pod.CrashLooping, "restart_count": pod.RestartCount,
-		})
-		return
 	}
 
 	from, known := st.Envelope()
@@ -1714,6 +1801,7 @@ func (w *appAutoscaleWatcher) maybeResize(ctx context.Context, projectID uuid.UU
 			"direction":     "up",
 			"from_envelope": from.String(), "to_envelope": to.String(),
 			"dimension": s.Reason, "ratio": s.Ratio, "pod": s.Pod,
+			"oom_killed":    pod.OOMKilled,
 			"namespace":     namespace,
 			"claimed_by":    "app-autoscale-watcher",
 			"in_place_pods": live.Resized + live.Pending,
