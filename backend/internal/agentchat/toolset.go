@@ -21,10 +21,10 @@ import (
 //
 // Deliberately absent: downloadAppDirectory and downloadAppFile (binary
 // octet-stream bodies would be dumped into the model context), getBoxConnection
-// (hands out one-time access to a box), diagnoseApp and triggerAutofix (they
-// call the LLM gateway themselves, so an LLM turn would recurse into another
-// paid LLM run), every /admin/* and /mlflow/* operation, ingestLogs and
-// ingestMetrics, and everything in denyTools.
+// (hands out one-time access to a box), diagnoseApp (it calls the LLM gateway
+// itself, so an LLM turn would recurse into another paid LLM run), every
+// /admin/* and /mlflow/* operation, ingestLogs and ingestMetrics, and
+// everything in denyTools.
 //
 // getAppHealth is how the assistant now answers "is this app broken" without
 // touching the LLM gateway: it reuses the same verdict predicates
@@ -32,6 +32,21 @@ import (
 // noSignalAppSnapshotPredicate) and does one DB read, so it costs nothing to
 // expose. diagnoseApp still stays out for the LLM-recursion reason above --
 // health facts no longer require it.
+//
+// triggerAutofix WAS on that same excluded list (it too launches a paid
+// DadaAgent/agent-sync-hub run, its own LLM turn nested inside this one) but
+// moved to writeKeepTools + riskyWriteTools once the console UI grew a
+// same-endpoint button (admin overview's "Auto-fix with AI" on the failed-
+// builds panel, app-latest-build-card.tsx, deployments/page.tsx): the chat
+// assistant is not adding a capability the platform did not already expose
+// and charge for elsewhere, only a second door onto the identical call, so
+// gating it as a confirmation card (never silent, in every mode -- see
+// riskyWriteTools) accepts the double-LLM-cost as the price of that
+// convenience rather than a new exposure. The server-side gate the request
+// still goes through (autofix.go TriggerAutofix's fail_reason check,
+// platformCapacityRefusal) is unchanged and applies no matter which caller
+// reached it, so a build the platform itself broke is refused with 422 the
+// same way from chat as from the button.
 //
 // getPlatformStatus is getAppHealth's platform-wide counterpart: five cheap
 // read-only SQL reads against the console's own state tables, no k8s call,
@@ -94,6 +109,7 @@ var keepTools = []string{
 // requires write access and audits every download.
 var writeKeepTools = []string{
 	"restartApp", "triggerBuild", "deployTrigger", "cancelBuild", "retryOperation",
+	"triggerAutofix",
 	"setEnvVar", "deleteEnvVar",
 	"rollbackApp", "rollbackDeployment", "promoteDeployment", "updateAppImage",
 	"updateAppProfile", "updateAppStorage",
@@ -153,6 +169,14 @@ var vmOnlyTools = map[string]bool{
 // publicly, changes where a domain points, or mints a credential. Everything
 // else in writeKeepTools is an operational action the user can simply repeat or
 // reverse from the console, so in edit mode it runs without interrupting them.
+//
+// triggerAutofix is here for a different reason than its neighbours: it spends
+// real AI budget on a nested DadaAgent/agent-sync-hub run and opens a pull
+// request against the user's repository, so it must always cost a card even in
+// ModeEdit -- an app that keeps failing the same build must never trigger a
+// second paid run without the user seeing it about to happen, the same
+// spend-control reasoning that puts restoreDatabase and downloadDatabaseBackup
+// here.
 var riskyWriteTools = map[string]bool{
 	"restoreDatabase":        true,
 	"downloadDatabaseBackup": true,
@@ -168,6 +192,7 @@ var riskyWriteTools = map[string]bool{
 	"deleteEnvVar":           true,
 	"updateAppStorage":       true,
 	"promoteDeployment":      true,
+	"triggerAutofix":         true,
 }
 
 // Mode is how much autonomy the user granted this session. It comes from the

@@ -454,6 +454,10 @@ func TestOverviewFailedLatestBuilds(t *testing.T) {
 		t.Fatal("expected the app whose latest build failed to be reported")
 	} else if b.CommitSha != "sha2" {
 		t.Fatalf("CommitSha = %q, want the LATEST build's sha (sha2)", b.CommitSha)
+	} else if b.ProjectID != projectID {
+		t.Fatalf("ProjectID = %v, want %v -- the auto-fix button needs this to call TriggerAutofix", b.ProjectID, projectID)
+	} else if b.EnvironmentID != envID {
+		t.Fatalf("EnvironmentID = %v, want %v -- the auto-fix button needs this to call TriggerAutofix", b.EnvironmentID, envID)
 	}
 	if _, ok := byApp[healthyApp]; ok {
 		t.Fatal("an app whose latest build succeeded must not be reported, even though an earlier build failed")

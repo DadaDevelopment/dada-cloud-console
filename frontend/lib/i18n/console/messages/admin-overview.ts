@@ -66,5 +66,15 @@ export const adminOverview: Messages = {
   "adminOverview.notReady.col.reason": { ru: "Причина", en: "Reason" },
   "adminOverview.notReady.col.owner": { ru: "Владелец", en: "Owner" },
 
+  "adminOverview.notReady.autofix.action": { ru: "Исправить с AI", en: "Auto-fix with AI" },
+  "adminOverview.notReady.autofix.running": { ru: "Запуск…", en: "Starting…" },
+  "adminOverview.notReady.autofix.started": { ru: "Автофикс запущен", en: "Auto-fix running" },
+  "adminOverview.notReady.autofix.viewPr": { ru: "Открыть PR", en: "View PR" },
+  "adminOverview.notReady.autofix.notFixable": {
+    ru: "Причина сбоя не в коде приложения — автофикс тут не поможет",
+    en: "This failure isn't in the app's code — auto-fix can't help here",
+  },
+  "adminOverview.notReady.autofix.error": { ru: "Не удалось запустить автофикс", en: "Failed to start auto-fix" },
+
   "adminOverview.linkAudit": { ru: "Журнал аудита", en: "Audit log" },
 };
