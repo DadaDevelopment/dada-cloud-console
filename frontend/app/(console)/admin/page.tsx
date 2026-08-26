@@ -101,17 +101,6 @@ export default function AdminOverviewPage() {
     />
   );
 
-  if (forbidden) {
-    return (
-      <div>
-        {crumb}
-        <div className="mt-4 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
-          {t("adminOverview.accessDenied")}
-        </div>
-      </div>
-    );
-  }
-
   async function handleFailedBuildAutofix(row: AdminOverviewFailedBuild) {
     const key = `${row.project_id}/${row.app_name}`;
     setAutofixBusy(key);
@@ -176,6 +165,21 @@ export default function AdminOverviewPage() {
     }, 4000);
     return () => clearInterval(timer);
   }, [autofixTaskIds, t]);
+
+  // Every hook above this point must run on every render (react-hooks/
+  // rules-of-hooks): the forbidden early-return has to come AFTER them,
+  // not before, or hook call order changes across renders the instant
+  // `forbidden` flips true/false.
+  if (forbidden) {
+    return (
+      <div>
+        {crumb}
+        <div className="mt-4 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
+          {t("adminOverview.accessDenied")}
+        </div>
+      </div>
+    );
+  }
 
   const ready = data?.projects.apps.ready ?? 0;
   const appsTotal = data?.projects.apps.total ?? 0;
