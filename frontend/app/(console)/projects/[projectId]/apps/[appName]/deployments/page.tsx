@@ -203,7 +203,8 @@ export default function AppDeploymentsPage() {
         errorMessage: build.error_message,
       });
       await cloudTasksApi.triggerAutofix(projectId, envId, appName, summary);
-      router.push(`/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}#agent`);
+      const envQuery = envId ? `envId=${envId}&` : "";
+      router.push(`/projects/${projectId}/apps/${appName}?${envQuery}justRan=autofix#agent`);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("apps.deployments.error.autofix"));
       setActionId(null);

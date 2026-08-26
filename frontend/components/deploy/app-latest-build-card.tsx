@@ -194,7 +194,8 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appUrlSt
         errorMessage: build.error_message,
       });
       await cloudTasksApi.triggerAutofix(projectId, envId, appName, summary);
-      router.push(`/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}#agent`);
+      const envQuery = envId ? `envId=${envId}&` : "";
+      router.push(`/projects/${projectId}/apps/${appName}?${envQuery}justRan=autofix#agent`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("apps.deployments.error.autofix");
       setRebuildError(/no connected git repo/i.test(msg) ? t("apps.deployments.error.noRepo") : msg);

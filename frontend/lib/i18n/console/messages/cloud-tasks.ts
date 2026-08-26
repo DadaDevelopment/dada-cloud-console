@@ -14,4 +14,5 @@ export const cloudTasks: Messages = {
   "cloudTasks.status.completed": { ru: "Готово", en: "Completed" },
   "cloudTasks.status.failed": { ru: "Ошибка", en: "Failed" },
   "cloudTasks.status.canceled": { ru: "Отменено", en: "Canceled" },
+  "cloudTasks.justFired": { ru: "Только что запущено вами", en: "Just started by you" },
 };

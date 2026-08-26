@@ -688,6 +688,7 @@ export default function AppDetailPage() {
           appName={appName}
           appKind={isCompose ? "compose" : "web"}
           canMutate={canMutate(role)}
+          highlightTaskType={searchParams.get("justRan") ?? undefined}
         />
       </div>
       )}

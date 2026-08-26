@@ -60,6 +60,7 @@ export default function AdminOverviewPage() {
   const [autofixBusy, setAutofixBusy] = useState<string | null>(null);
   const [autofixDone, setAutofixDone] = useState<Record<string, string>>({});
   const [autofixError, setAutofixError] = useState<Record<string, string>>({});
+  const [autofixTaskIds, setAutofixTaskIds] = useState<Record<string, { projectId: string; taskId: string }>>({});
 
   const load = useCallback(async (opts: { silent?: boolean } = {}) => {
     if (!opts.silent) setIsLoading(true);
@@ -120,7 +121,18 @@ export default function AdminOverviewPage() {
         row.fail_reason ? `\nFailure reason: ${row.fail_reason}` : ""
       }${row.error_message ? `\nCause: ${row.error_message}` : ""}`;
       const res = await cloudTasksApi.triggerAutofix(row.project_id, row.environment_id, row.app_name, summary);
-      setAutofixDone((prev) => ({ ...prev, [key]: res.cloud_task.pr_url ?? "" }));
+      const prUrl = res.cloud_task.pr_url ?? "";
+      setAutofixDone((prev) => ({ ...prev, [key]: prUrl }));
+      // TriggerAutofix answers 202 with the run just claimed, before the
+      // agent has even started -- pr_url is empty at this point on every
+      // real run (the PR does not exist yet; DadaAgent opens it minutes
+      // later and reports back over its own webhook). Without polling,
+      // this row would say "Автофикс запущен" forever even once the PR is
+      // actually open, because nothing ever re-fetches it. Poll the task by
+      // id until it lands on a PR, an error, or a terminal non-PR state.
+      if (!prUrl) {
+        setAutofixTaskIds((prev) => ({ ...prev, [key]: { projectId: row.project_id, taskId: res.cloud_task.id } }));
+      }
     } catch (err) {
       setAutofixError((prev) => ({
         ...prev,
@@ -130,6 +142,40 @@ export default function AdminOverviewPage() {
       setAutofixBusy(null);
     }
   }
+
+  /**
+   * Polls every in-flight autofix cloud task every 4s until it either
+   * reports a pr_url, fails, or is canceled -- see the comment in
+   * handleFailedBuildAutofix for why this exists (the trigger response
+   * never carries the PR; only the agent's later webhook does).
+   */
+  useEffect(() => {
+    const entries = Object.entries(autofixTaskIds);
+    if (entries.length === 0) return;
+    const timer = setInterval(() => {
+      entries.forEach(([key, { projectId, taskId }]) => {
+        cloudTasksApi
+          .get(projectId, taskId)
+          .then(({ cloud_task }) => {
+            if (cloud_task.pr_url) {
+              const prUrl = cloud_task.pr_url;
+              setAutofixDone((prev) => ({ ...prev, [key]: prUrl }));
+              setAutofixTaskIds((prev) => { const next = { ...prev }; delete next[key]; return next; });
+            } else if (cloud_task.status === "failed" || cloud_task.status === "canceled") {
+              setAutofixError((prev) => ({ ...prev, [key]: cloud_task.error ?? t("adminOverview.notReady.autofix.error") }));
+              setAutofixDone((prev) => { const next = { ...prev }; delete next[key]; return next; });
+              setAutofixTaskIds((prev) => { const next = { ...prev }; delete next[key]; return next; });
+            }
+          })
+          .catch(() => {
+            // Transient poll failure: leave the row in "started" and retry
+            // on the next tick rather than surfacing a spurious error for
+            // what is likely a momentary network blip.
+          });
+      });
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [autofixTaskIds, t]);
 
   const ready = data?.projects.apps.ready ?? 0;
   const appsTotal = data?.projects.apps.total ?? 0;
