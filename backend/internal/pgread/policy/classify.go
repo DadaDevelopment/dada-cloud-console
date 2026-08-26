@@ -4,18 +4,31 @@
 // was reconstructed from a validated AST -- never the caller's original
 // bytes.
 //
-// The parser is github.com/pganalyze/pg_query_go/v5, a Go binding over the
-// real libpg_query grammar (the same C code Postgres itself parses SQL
-// with). No SQL grammar is hand-rolled here; this package is policy on top
-// of someone else's parser, on purpose -- see the design review this
-// package implements.
+// Parsing goes through github.com/wasilibs/go-pgquery, a WebAssembly
+// (wazero, pure Go) build of the same libpg_query grammar
+// pganalyze/pg_query_go wraps via cgo -- the same C code Postgres itself
+// parses SQL with. This package started on pg_query_go/v5's own Parse/
+// Deparse directly; that broke CI the moment the backend built with
+// CGO_ENABLED=0 (its normal build mode, for the minimal alpine runtime
+// image), because pg_query_go's entry points are behind a `//go:build cgo`
+// tag and are simply absent from a cgo-disabled build -- not a runtime
+// failure, a compile failure, and one this package's own tests could not
+// catch since `go test` here runs with cgo available. go-pgquery is a
+// documented drop-in for exactly Parse/Deparse/Scan; everything else
+// (every generated struct and Node_* variant below) still comes from
+// pg_query_go/v6 directly, which go-pgquery itself depends on and
+// re-exports parse results as. Both imports are required: gopgquery for
+// the two entry points, pg_query for every type. No SQL grammar is
+// hand-rolled either way; this package is policy on top of someone else's
+// parser, on purpose -- see the design review this package implements.
 package policy
 
 import (
 	"fmt"
 	"strings"
 
-	pg_query "github.com/pganalyze/pg_query_go/v5"
+	pg_query "github.com/pganalyze/pg_query_go/v6"
+	gopgquery "github.com/wasilibs/go-pgquery"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
@@ -70,7 +83,7 @@ func Classify(sql string) (*Result, error) {
 		return nil, errf(CodeParseError, "empty query")
 	}
 
-	tree, perr := pg_query.Parse(sql)
+	tree, perr := gopgquery.Parse(sql)
 	if perr != nil {
 		return nil, errf(CodeParseError, perr.Error())
 	}
@@ -129,7 +142,7 @@ func Classify(sql string) (*Result, error) {
 		return nil, err
 	}
 
-	deparsed, derr := pg_query.Deparse(&pg_query.ParseResult{
+	deparsed, derr := gopgquery.Deparse(&pg_query.ParseResult{
 		Version: tree.Version,
 		Stmts:   []*pg_query.RawStmt{{Stmt: deparseTarget}},
 	})
