@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -13,6 +14,17 @@ import (
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/crypto"
 )
+
+func (h *Handler) hasConfiguredAIKeyCredentialPool(ctx context.Context, gatewayKeyID uuid.UUID) (bool, error) {
+	var configured bool
+	err := h.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM ai_gateway_key_credentials
+			 WHERE (gateway_key_id = $1 OR gateway_key_id IS NULL)
+			   AND enabled AND deleted_at IS NULL
+		)`, gatewayKeyID).Scan(&configured)
+	return configured, err
+}
 
 type aiKeyCredentialInput struct {
 	Provider string `json:"provider"`
@@ -334,6 +346,17 @@ func (h *Handler) AIGetCredentialCandidates(c *gin.Context) {
 	}
 	req.Provider = strings.ToLower(strings.TrimSpace(req.Provider))
 	model := strings.TrimSpace(req.Model)
+	configured, err := h.hasConfiguredAIKeyCredentialPool(c.Request.Context(), req.GatewayKeyID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "check credential pool")
+		return
+	}
+	if !configured {
+		// A 404 deliberately means "the new pool contract is not configured".
+		// The gateway may then use the pre-pool project/global credential path.
+		respondNotFound(c)
+		return
+	}
 	rows, err := h.pool.Query(c.Request.Context(), `
 		SELECT c.id, c.provider, c.label, c.api_base, c.api_key_encrypted, c.priority
 		  FROM ai_gateway_key_credentials c
@@ -462,6 +485,15 @@ func (h *Handler) AIGetKeyModels(c *gin.Context) {
 	var req aiKeyModelsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		respondError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	configured, err := h.hasConfiguredAIKeyCredentialPool(c.Request.Context(), req.GatewayKeyID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "check credential pool")
+		return
+	}
+	if !configured {
+		respondNotFound(c)
 		return
 	}
 	rows, err := h.pool.Query(c.Request.Context(), `
