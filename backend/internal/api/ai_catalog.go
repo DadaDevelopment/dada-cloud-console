@@ -16,10 +16,11 @@ import (
 // quickstart snippet and to warn when a project has no credential for the
 // provider behind the model it just picked.
 type aiCatalogModel struct {
-	Alias    string `json:"alias"`
-	Provider string `json:"provider"`
-	Kind     string `json:"kind"`
-	Upstream string `json:"upstream"`
+	Alias          string   `json:"alias"`
+	Provider       string   `json:"provider"`
+	Kind           string   `json:"kind"`
+	Upstream       string   `json:"upstream"`
+	RouteProviders []string `json:"-"`
 }
 
 // aiCatalogProvider is one upstream a project can hold a BYOK credential for.
@@ -72,6 +73,9 @@ var aiCatalogModels = []aiCatalogModel{
 	{Alias: "text-embedding-3-small", Provider: "openai", Kind: "embeddings", Upstream: "openai/text-embedding-3-small"},
 	{Alias: "claude", Provider: "anthropic", Kind: "chat", Upstream: "anthropic/claude-sonnet-5"},
 	{Alias: "claude-haiku", Provider: "anthropic", Kind: "chat", Upstream: "anthropic/claude-haiku-4-5-20251001"},
+	{Alias: "sota-opus", Provider: "sotamodel", Kind: "chat", Upstream: "openai/claude-opus-5"},
+	{Alias: "sota-opus-xhigh", Provider: "sotamodel", Kind: "chat", Upstream: "openai/claude-opus-5-xhigh"},
+	{Alias: "sota-opus-max", Provider: "sotamodel", Kind: "chat", Upstream: "openai/claude-opus-5-max"},
 	{Alias: "or-gpt-41-mini", Provider: "openrouter", Kind: "chat", Upstream: "openrouter/openai/gpt-4.1-mini"},
 	{Alias: "or-gpt-41-mini-online", Provider: "openrouter", Kind: "chat", Upstream: "openrouter/openai/gpt-4.1-mini:online"},
 	{Alias: "or-gpt-4o-mini", Provider: "openrouter", Kind: "chat", Upstream: "openrouter/openai/gpt-4o-mini"},
@@ -79,11 +83,28 @@ var aiCatalogModels = []aiCatalogModel{
 	{Alias: "groq-gpt-oss", Provider: "groq", Kind: "chat", Upstream: "groq/openai/gpt-oss-20b"},
 	{Alias: "groq-llama", Provider: "groq", Kind: "chat", Upstream: "groq/llama-3.3-70b-versatile"},
 	{Alias: "sambanova-llama", Provider: "sambanova", Kind: "chat", Upstream: "sambanova/Meta-Llama-3.3-70B-Instruct"},
-	{Alias: "fast", Provider: aiCatalogPlatformProvider, Kind: "chat", Upstream: "tier alias, fails over across nvidia_nim (x2) and groq"},
-	{Alias: "medium", Provider: aiCatalogPlatformProvider, Kind: "chat", Upstream: "tier alias, fails over across nvidia_nim (x2) and sambanova"},
-	{Alias: "smart", Provider: aiCatalogPlatformProvider, Kind: "chat", Upstream: "tier alias, fails over across nvidia_nim (x3)"},
-	{Alias: "vision", Provider: aiCatalogPlatformProvider, Kind: "chat", Upstream: "image input, nvidia_nim (x2) -- no other reachable provider reads the image"},
+	{Alias: "fast", Provider: aiCatalogPlatformProvider, Kind: "chat", Upstream: "tier alias, fails over across nvidia_nim (x2) and groq", RouteProviders: []string{"nvidia_nim", "groq"}},
+	{Alias: "medium", Provider: aiCatalogPlatformProvider, Kind: "chat", Upstream: "tier alias, fails over across nvidia_nim (x2) and sambanova", RouteProviders: []string{"nvidia_nim", "sambanova"}},
+	{Alias: "smart", Provider: aiCatalogPlatformProvider, Kind: "chat", Upstream: "tier alias, fails over across nvidia_nim (x3)", RouteProviders: []string{"nvidia_nim"}},
+	{Alias: "vision", Provider: aiCatalogPlatformProvider, Kind: "chat", Upstream: "image input, nvidia_nim (x2) -- no other reachable provider reads the image", RouteProviders: []string{"nvidia_nim"}},
 	{Alias: "search", Provider: "groq", Kind: "chat", Upstream: "groq/groq/compound-mini, answer grounded in a web search groq runs itself; rejects requests carrying tools"},
+}
+
+func aiAliasesForProvider(provider string) []string {
+	aliases := []string{}
+	for _, model := range aiCatalogModels {
+		providers := model.RouteProviders
+		if len(providers) == 0 {
+			providers = []string{model.Provider}
+		}
+		for _, routeProvider := range providers {
+			if routeProvider == provider {
+				aliases = append(aliases, model.Alias)
+				break
+			}
+		}
+	}
+	return aliases
 }
 
 // isKnownAIAlias reports whether the gateway serves this model group.

@@ -289,11 +289,12 @@ func TestReplaceCredentialModelsAcceptsGlobalPlatformCredential(t *testing.T) {
 		t.Fatalf("replace global credential models: %v", err)
 	}
 	var count int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM ai_gateway_key_credential_models WHERE credential_id=$1`, credentialID).Scan(&count); err != nil {
+	var status string
+	if err := pool.QueryRow(ctx, `SELECT count(*),max(c.status) FROM ai_gateway_key_credential_models m JOIN ai_gateway_key_credentials c ON c.id=m.credential_id WHERE m.credential_id=$1`, credentialID).Scan(&count, &status); err != nil {
 		t.Fatalf("count models: %v", err)
 	}
-	if count != 1 {
-		t.Fatalf("model count=%d want deduplicated 1", count)
+	if count != 1 || status != "healthy" {
+		t.Fatalf("model count=%d status=%q want deduplicated 1 and healthy", count, status)
 	}
 }
 
@@ -336,7 +337,17 @@ func TestUpdateRediscoveryReplacesStaleGlobalModels(t *testing.T) {
 		}
 		models = append(models, model)
 	}
-	if strings.Join(models, ",") != "gpt-5.6-sol" {
-		t.Fatalf("models=%v want only refreshed model", models)
+	if strings.Join(models, ",") != "gpt-5.6-sol,sota-opus,sota-opus-max,sota-opus-xhigh" {
+		t.Fatalf("models=%v want refreshed wire model plus stable Sota aliases", models)
+	}
+}
+
+func TestSotaAliasesUseEffectiveProviderCatalog(t *testing.T) {
+	got := strings.Join(aiAliasesForProvider("sotamodel"), ",")
+	if got != "sota-opus,sota-opus-xhigh,sota-opus-max" {
+		t.Fatalf("sotamodel aliases=%q", got)
+	}
+	if strings.Contains(strings.Join(aiAliasesForProvider("openai"), ","), "sota-opus") {
+		t.Fatal("OpenAI-compatible wire transport must not own Sota credentials")
 	}
 }

@@ -84,15 +84,15 @@ func (h *Handler) ListAdminAICredentials(c *gin.Context) {
 			it.APIBase = *base
 		}
 		it.Source = "pool"
-		if importedLegacy {
+		if importedLegacy && it.Status == "legacy" {
 			it.Source = "legacy_import"
 		}
 		it.Scope = "platform"
 		it.Editable = true
 		out = append(out, it)
-		if it.Enabled && !importedLegacy {
+		if it.Enabled {
 			var modelCount int
-			if err := h.pool.QueryRow(c.Request.Context(), `SELECT count(*) FROM ai_gateway_key_credential_models WHERE credential_id=$1`, it.ID).Scan(&modelCount); err == nil && modelCount == 0 {
+			if err := h.pool.QueryRow(c.Request.Context(), `SELECT count(*) FROM ai_gateway_key_credential_models WHERE credential_id=$1`, it.ID).Scan(&modelCount); err == nil && (modelCount == 0 || it.Status == "pending_discovery") {
 				discoveries = append(discoveries, createdCredentialDiscovery{ID: it.ID, Provider: it.Provider, APIBase: it.APIBase, APIKey: string(plain)})
 			}
 		}

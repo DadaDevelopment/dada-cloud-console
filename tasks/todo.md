@@ -837,3 +837,17 @@ web OAuth client lacks the local callback used by `seo-google`. See
 - Полные секреты не возвращаются: API использует существующий first-4/last-4 `key_hint`; regression на public JSON зелёный.
 - 12 project-scoped BYOK не повышаются до global scope и не получают кнопок редактирования в platform pool UI.
 - Импортированный platform credential виден с типом `legacy fallback`, но не активирует новый model-aware pool автоматически; включение в UI является явным cutover.
+
+## Promotion platform-owned BYOK credentials (2026-08-26)
+
+- [x] Зафиксировать scope: `internal` + `platform` + project-less platform credential; исключить `fin-core`.
+- [x] Скопировать ciphertext идемпотентно с provenance, не читая и не логируя секреты.
+- [x] Сохранить static aliases при upstream discovery и добавить Sota aliases к effective provider `sotamodel`.
+- [x] Прогнать migrations/tests/secret scan.
+- [ ] Доставить через Jenkins/GitOps и проверить production pool/models/fallback.
+
+### Review before delivery
+
+- Production-schema rehearsal inside `BEGIN/ROLLBACK`: pool=12, enabled=12, pending=12, snapshots=37 across 12 credentials, fin_core_promoted=0.
+- `go test ./internal/api/...` and backend `go test ./...` pass.
+- Native npm audit still reports the repository's existing 7 findings (1 moderate, 6 high); no dependency or lockfile changed in this task and no forced upgrade was applied.

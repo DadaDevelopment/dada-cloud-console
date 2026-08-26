@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -204,25 +205,24 @@ func normalizeDiscoveredModels(raw []string) ([]string, error) {
 }
 
 func replaceCredentialModels(ctx context.Context, pool *pgxpool.Pool, credentialID uuid.UUID, models []string) error {
-	models, err := normalizeDiscoveredModels(models)
-	if err != nil {
-		return err
-	}
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	var exists bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (
-		SELECT 1 FROM ai_gateway_key_credentials c
+	var provider string
+	if err := tx.QueryRow(ctx, `SELECT c.provider FROM ai_gateway_key_credentials c
 		LEFT JOIN ai_gateway_keys k ON k.id = c.gateway_key_id
 		WHERE c.id = $1 AND c.deleted_at IS NULL
-		  AND (c.gateway_key_id IS NULL OR k.revoked_at IS NULL))`, credentialID).Scan(&exists); err != nil {
+		  AND (c.gateway_key_id IS NULL OR k.revoked_at IS NULL)`, credentialID).Scan(&provider); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errors.New("credential not found")
+		}
 		return err
 	}
-	if !exists {
-		return errors.New("credential not found")
+	models, err = normalizeDiscoveredModels(append(models, aiAliasesForProvider(provider)...))
+	if err != nil {
+		return err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM ai_gateway_key_credential_models WHERE credential_id = $1`, credentialID); err != nil {
 		return err
@@ -231,6 +231,9 @@ func replaceCredentialModels(ctx context.Context, pool *pgxpool.Pool, credential
 		if _, err := tx.Exec(ctx, `INSERT INTO ai_gateway_key_credential_models (credential_id, model_id) VALUES ($1, $2)`, credentialID, model); err != nil {
 			return err
 		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE ai_gateway_key_credentials SET status='healthy',updated_at=now() WHERE id=$1`, credentialID); err != nil {
+		return err
 	}
 	return tx.Commit(ctx)
 }
