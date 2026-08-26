@@ -35,8 +35,6 @@ export default function AIGatewayUsagePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editValues, setEditValues] = useState<CredentialEditValues>({ label: "", apiBase: "", apiKey: "", priority: "100" });
 
   const load = useCallback(async (opts: { silent?: boolean } = {}) => {
     if (!opts.silent) setIsLoading(true);
@@ -194,6 +192,8 @@ function CredentialPool({ t, usage }: { t: Tr; usage: AIGatewayCredentialUsageSt
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValues, setEditValues] = useState<CredentialEditValues>({ label: "", apiBase: "", apiKey: "", priority: "100" });
 
   const loadPool = useCallback(async () => {
     setIsLoading(true);
