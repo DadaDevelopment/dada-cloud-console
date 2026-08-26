@@ -123,7 +123,17 @@ func (h *Handler) connectTenantRole(ctx context.Context, target dbQueryTenantTar
 
 	conn, err := pgx.Connect(ctx, dsn)
 	if err != nil {
-		return nil, "", fmt.Errorf("connect as %s: %w", creds.Username, err)
+		// Wrapped with errDBCredentialsUnavailable (not left bare) so
+		// respondDBCredentialError's errors.Is check catches this branch
+		// too and surfaces the REAL failure (connection refused, no route
+		// to host, password authentication failed, ...) to the caller
+		// instead of falling through to the generic "cannot reach the
+		// database instance right now" message -- that generic fallback
+		// is what an agent actually saw in production for this exact
+		// branch before this fix, which is diagnostically useless: it
+		// looks identical whether the secret is stale, the network path
+		// is down, or the instance itself is unreachable.
+		return nil, "", fmt.Errorf("%w: connect as %s: %v", errDBCredentialsUnavailable, creds.Username, err)
 	}
 	return conn, creds.Username, nil
 }
