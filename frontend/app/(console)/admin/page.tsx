@@ -1,8 +1,8 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { adminApi } from "@/lib/api";
-import type { AdminOverviewResponse } from "@/lib/types";
+import { adminApi, cloudTasksApi } from "@/lib/api";
+import type { AdminOverviewFailedBuild, AdminOverviewResponse } from "@/lib/types";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { AdminTabs } from "@/components/console/admin-tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,6 +13,7 @@ import { useT } from "@/lib/i18n/console/context";
 import type { EChartsOption } from "echarts";
 import { liveUrlHeadline, liveUrlOkShare, liveUrlStaleDominates } from "@/lib/live-urls";
 import { platformHealthAgeSeconds, platformHealthIsStale, platformHealthState } from "@/lib/platform-health";
+import { isRepoFixable } from "@/lib/build-failure";
 
 const REFRESH_MS = 60_000;
 const DYNAMICS_DAYS = 14;
@@ -56,6 +57,9 @@ export default function AdminOverviewPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
+  const [autofixBusy, setAutofixBusy] = useState<string | null>(null);
+  const [autofixDone, setAutofixDone] = useState<Record<string, string>>({});
+  const [autofixError, setAutofixError] = useState<Record<string, string>>({});
 
   const load = useCallback(async (opts: { silent?: boolean } = {}) => {
     if (!opts.silent) setIsLoading(true);
@@ -105,6 +109,26 @@ export default function AdminOverviewPage() {
         </div>
       </div>
     );
+  }
+
+  async function handleFailedBuildAutofix(row: AdminOverviewFailedBuild) {
+    const key = `${row.project_id}/${row.app_name}`;
+    setAutofixBusy(key);
+    setAutofixError((prev) => { const next = { ...prev }; delete next[key]; return next; });
+    try {
+      const summary = `Build failed (commit ${(row.commit_sha || "").slice(0, 12) || "unknown"})${
+        row.fail_reason ? `\nFailure reason: ${row.fail_reason}` : ""
+      }${row.error_message ? `\nCause: ${row.error_message}` : ""}`;
+      const res = await cloudTasksApi.triggerAutofix(row.project_id, row.environment_id, row.app_name, summary);
+      setAutofixDone((prev) => ({ ...prev, [key]: res.cloud_task.pr_url ?? "" }));
+    } catch (err) {
+      setAutofixError((prev) => ({
+        ...prev,
+        [key]: err instanceof Error ? err.message : t("adminOverview.notReady.autofix.error"),
+      }));
+    } finally {
+      setAutofixBusy(null);
+    }
   }
 
   const ready = data?.projects.apps.ready ?? 0;
@@ -258,6 +282,49 @@ export default function AdminOverviewPage() {
     { key: "commit", header: "Коммит", render: (r) => <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{(r.commit_sha || "").slice(0, 8) || "—"}</span> },
     { key: "error", header: "Ошибка", render: (r) => <span className="text-xs text-gray-500 dark:text-gray-400">{r.error_message || "—"}</span> },
     { key: "age", header: "Как давно", render: (r) => <span className="text-xs text-gray-500 dark:text-gray-400">{ageLabel(r.age_seconds)}</span> },
+    {
+      key: "autofix",
+      header: "",
+      render: (r) => {
+        const key = `${r.project_id}/${r.app_name}`;
+        const prUrl = autofixDone[key];
+        if (prUrl !== undefined) {
+          return prUrl ? (
+            <a
+              href={prUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+            >
+              {t("adminOverview.notReady.autofix.viewPr")}
+            </a>
+          ) : (
+            <span className="text-xs text-gray-400 dark:text-gray-500">{t("adminOverview.notReady.autofix.started")}</span>
+          );
+        }
+        if (!isRepoFixable(r.fail_reason)) {
+          return (
+            <span className="text-xs text-gray-400 dark:text-gray-500" title={t("adminOverview.notReady.autofix.notFixable")}>
+              —
+            </span>
+          );
+        }
+        const err = autofixError[key];
+        return (
+          <div className="flex flex-col items-start gap-1">
+            <button
+              onClick={() => handleFailedBuildAutofix(r)}
+              disabled={autofixBusy === key}
+              data-ux="admin_overview:failed_build_autofix"
+              className="rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+            >
+              {autofixBusy === key ? t("adminOverview.notReady.autofix.running") : t("adminOverview.notReady.autofix.action")}
+            </button>
+            {err && <span className="text-xs text-red-600 dark:text-red-400">{err}</span>}
+          </div>
+        );
+      },
+    },
   ];
 
   const platformUnhealthyColumns: Column<NonNullable<AdminOverviewResponse["platform_health"]>["unhealthy"][number]>[] = [

@@ -40,6 +40,7 @@ var agentChatCardFixtures = map[string]agentChatCardFixture{
 	"updateAppImage":     {args: map[string]any{"appName": "api", "image": "ghcr.io/acme/api:v3"}, want: []string{"api", "ghcr.io/acme/api:v3"}},
 	"updateAppProfile":   {args: map[string]any{"appName": "api", "profile": "medium"}, want: []string{"api", "medium"}},
 	"updateAppStorage":   {args: map[string]any{"appName": "api", "size": "10Gi", "path": "/data"}, want: []string{"api", "10Gi", "/data", "never shrunk"}},
+	"triggerAutofix":     {args: map[string]any{"appName": "api", "error": "npm ci failed"}, want: []string{"api", "npm ci failed", "pull request"}},
 	"probeAppNetwork":    {args: map[string]any{"appName": "api", "target": "s3.ru1.storage.beget.cloud", "port": float64(443)}, want: []string{"api", "s3.ru1.storage.beget.cloud", "443"}},
 
 	"createDatabase": {args: map[string]any{"name": "orders", "database": "orders", "app_ref": "api", "backup_enabled": true}, want: []string{"orders", "api", "backups enabled", "PostgreSQL"}},
@@ -173,7 +174,7 @@ func TestAgentChatSummaryFor_EveryProjectScopedWriteToolResolvesNames(t *testing
 		"retryOperation": true, "setEnvVar": true, "deleteEnvVar": true, "rollbackApp": true,
 		"rollbackDeployment": true, "promoteDeployment": true, "updateAppImage": true,
 		"updateAppProfile": true, "updateAppStorage": true, "ensureDefaultProject": true,
-		"createProject": true, "probeAppNetwork": true,
+		"createProject": true, "probeAppNetwork": true, "triggerAutofix": true,
 	}
 	for name, props := range schemas {
 		if appScoped[name] || !props["projectId"] {

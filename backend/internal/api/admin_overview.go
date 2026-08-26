@@ -12,6 +12,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 const (
@@ -1026,11 +1027,14 @@ func (h *Handler) overviewStuckOperations(ctx context.Context) (overviewStuckOpe
 }
 
 type overviewFailedBuild struct {
-	AppName      string `json:"app_name"`
-	ProjectName  string `json:"project_name"`
-	CommitSha    string `json:"commit_sha"`
-	ErrorMessage string `json:"error_message,omitempty"`
-	AgeSeconds   int    `json:"age_seconds"`
+	AppName       string    `json:"app_name"`
+	ProjectID     uuid.UUID `json:"project_id"`
+	ProjectName   string    `json:"project_name"`
+	EnvironmentID uuid.UUID `json:"environment_id"`
+	CommitSha     string    `json:"commit_sha"`
+	ErrorMessage  string    `json:"error_message,omitempty"`
+	FailReason    string    `json:"fail_reason,omitempty"`
+	AgeSeconds    int       `json:"age_seconds"`
 }
 
 // overviewFailedLatestBuilds lists apps whose MOST RECENT build failed, using
@@ -1041,14 +1045,23 @@ type overviewFailedBuild struct {
 // that gap is invisible everywhere else on this panel -- Ready apps never
 // appear in overviewNotReadyApps, and overviewBuilds only reports a 7-day
 // failure COUNT with no way to tell which app it belongs to.
+//
+// ProjectID/EnvironmentID/FailReason ride along so the console can offer a
+// one-click "Auto-fix with AI" action straight from this row (TriggerAutofix,
+// autofix.go) instead of making the operator navigate to the app first --
+// FailReason is what lets the button gate on isRepoFixable the same way the
+// per-app surfaces already do (frontend/lib/build-failure.ts), so an admin
+// is never offered a run against a platform_error/git_auth_failed/app_deleted
+// build that no PR could fix.
 func (h *Handler) overviewFailedLatestBuilds(ctx context.Context) ([]overviewFailedBuild, error) {
 	rows, err := h.pool.Query(ctx, `
-		SELECT gr.app_name, p.display_name, lb.commit_sha, COALESCE(lb.error_message, ''),
+		SELECT gr.app_name, gr.project_id, p.display_name, gr.environment_id,
+		       lb.commit_sha, COALESCE(lb.error_message, ''), COALESCE(lb.fail_reason, ''),
 		       extract(epoch FROM now() - lb.created_at)::int
 		FROM git_repos gr
 		JOIN projects p ON p.id = gr.project_id
 		JOIN LATERAL (
-			SELECT status, commit_sha, error_message, created_at
+			SELECT status, commit_sha, error_message, fail_reason, created_at
 			FROM builds b
 			WHERE b.git_repo_id = gr.id
 			ORDER BY b.created_at DESC
@@ -1066,7 +1079,8 @@ func (h *Handler) overviewFailedLatestBuilds(ctx context.Context) ([]overviewFai
 	out := []overviewFailedBuild{}
 	for rows.Next() {
 		var b overviewFailedBuild
-		if err := rows.Scan(&b.AppName, &b.ProjectName, &b.CommitSha, &b.ErrorMessage, &b.AgeSeconds); err != nil {
+		if err := rows.Scan(&b.AppName, &b.ProjectID, &b.ProjectName, &b.EnvironmentID,
+			&b.CommitSha, &b.ErrorMessage, &b.FailReason, &b.AgeSeconds); err != nil {
 			return nil, err
 		}
 		out = append(out, b)

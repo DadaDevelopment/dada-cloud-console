@@ -1342,9 +1342,12 @@ export interface AdminOverviewStuckOperations {
 /** An app whose most recent build failed, regardless of the app's current phase. */
 export interface AdminOverviewFailedBuild {
   app_name: string;
+  project_id: string;
   project_name: string;
+  environment_id: string;
   commit_sha: string;
   error_message?: string;
+  fail_reason?: string;
   age_seconds: number;
 }
 

@@ -11,6 +11,7 @@ import (
 // drift apart and a new write tool ships with the generic "Run x" placeholder.
 var agentChatWriteToolNames = []string{
 	"restartApp", "triggerBuild", "deployTrigger", "cancelBuild", "retryOperation",
+	"triggerAutofix",
 	"setEnvVar", "deleteEnvVar",
 	"rollbackApp", "rollbackDeployment", "promoteDeployment", "updateAppImage",
 	"updateAppProfile", "updateAppStorage",

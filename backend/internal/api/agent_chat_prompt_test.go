@@ -238,7 +238,7 @@ func TestAgentChatSystemPrompt_AdvertisesNoCapabilityItLacks(t *testing.T) {
 		"createBox", "boxUp", "resumeBox", "suspendBox", "extendBox", "crystallizeBox", "deleteBox",
 		"deleteApp", "deleteProject", "moveApp",
 		"uploadSourceArchive",
-		"diagnoseApp", "autofixApp", "triggerAutofix",
+		"diagnoseApp", "autofixApp",
 		"revealEnvVar", "getDatabaseCredentials", "getS3Credentials", "revealModelKey",
 		"scaleApp", "updateAppReplicas", "addProjectMember", "createAIGatewayKey", "changeBillingPlan",
 	}
@@ -258,6 +258,31 @@ func TestAgentChatSystemPrompt_AdvertisesNoCapabilityItLacks(t *testing.T) {
 		if !strings.Contains(prompt, must) {
 			t.Errorf("prompt lost the %q statement", must)
 		}
+	}
+}
+
+// TestTriggerAutofix_ReachableFromChatAndAlwaysConfirmed pins the reversal of
+// the earlier design: triggerAutofix moved from the excluded (LLM-recursion)
+// list into writeKeepTools once the console UI grew its own "Auto-fix with
+// AI" button on the admin overview's failed-builds panel -- the chat
+// assistant now offers the same call, not a new one, and it must always stop
+// for a confirmation card (riskyWriteTools) because it spends AI budget and
+// opens a PR, in every mode including ModeEdit.
+func TestTriggerAutofix_ReachableFromChatAndAlwaysConfirmed(t *testing.T) {
+	ts := agentChatTestToolset(t)
+	if !ts.Has("triggerAutofix") {
+		t.Fatal("triggerAutofix must be reachable from chat: the same run the admin overview button launches")
+	}
+	if !ts.IsWrite("triggerAutofix") {
+		t.Fatal("triggerAutofix must be classified as a write tool")
+	}
+	edit := ts.NewView(agentchat.ModeEdit)
+	if !edit.NeedsConfirmation("triggerAutofix") {
+		t.Error("triggerAutofix must still confirm in ModeEdit -- it spends AI budget and opens a PR, unlike the reversible writes ModeEdit runs silently")
+	}
+	manual := ts.NewView(agentchat.ModeManual)
+	if !manual.NeedsConfirmation("triggerAutofix") {
+		t.Error("triggerAutofix must confirm in ModeManual like every other write")
 	}
 }
 

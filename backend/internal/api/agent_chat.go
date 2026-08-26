@@ -823,6 +823,12 @@ func agentChatConfirmSummary(toolName, argsJSON, projectName, envName string) st
 		return fmt.Sprintf("Issue a deploy-hook token %q for app %s. Anyone holding the token can trigger a deploy, so store it as a CI secret.", name, appName)
 	case "restartApp":
 		return fmt.Sprintf("Restart app %s", appName)
+	case "triggerAutofix":
+		errText := agentChatArg(args, "error")
+		if errText == "" {
+			return fmt.Sprintf("Launch an AI auto-fix run against app %s's most recent failed build. This spends AI budget and, if it finds a fix, opens a pull request for you to review and merge -- it never merges anything itself.", appName)
+		}
+		return fmt.Sprintf("Launch an AI auto-fix run against app %s for: %s. This spends AI budget and, if it finds a fix, opens a pull request for you to review and merge -- it never merges anything itself.", appName, errText)
 	case "rollbackApp":
 		return fmt.Sprintf("Roll back app %s to its previous version", appName)
 	case "rollbackDeployment":
@@ -1244,6 +1250,11 @@ func buildAgentChatSystemPrompt(catalog []string) string {
 	sb.WriteString("# DATABASE INSIGHTS\n")
 	sb.WriteString("When a user asks why their database is slow, big, or growing, do not answer from general PostgreSQL knowledge and do not ask them to run diagnostics -- the platform already measures their instance. Call getDatabaseInsights for size against quota, growth and cache hit ratio, listDatabaseAdvisories for what the platform itself concluded (unused indexes, append-only tables with no retention, stale statistics, slow queries, quota forecast), listDatabaseTables for per-table size, row counts and dead tuples, and listDatabaseQueries for the top statements by total time. Lead with the advisories: they carry the evidence and the exact SQL. For one table use getDatabaseTable, and when the question is about what is happening at this very moment -- a stuck request, a lock, a connection nobody closed -- use getDatabaseActivity, which reads the instance live. ")
 	sb.WriteString("The platform never runs DDL inside a user's database: an advisory's SQL (DROP INDEX, ANALYZE, and the like) is text for the owner to run themselves, so present it as a suggestion with its measured justification, never as something you are about to do or have done. If insights come back empty, the collector has not gathered a window yet -- say that plainly instead of concluding the database is healthy.\n\n")
+
+	sb.WriteString("# AUTO-FIXING A FAILED BUILD\n")
+	sb.WriteString("When a user's build failed, first read WHY it failed before offering to fix anything: listBuilds/getBuild carry fail_reason. A build that never reached the app's code (fail_reason platform_error, git_auth_failed, or no repo connected at all) cannot be fixed by any commit -- say what actually broke and, for git_auth_failed, tell them to reconnect the repo (getGitInstallUrl or /projects/{projectId}/git/import) instead of offering an AI fix. ")
+	sb.WriteString("Only when the failure is inside the build itself (fail_reason dockerfile_build_failed, or any failure whose cause is a real line from the build log -- a missing dependency, a syntax error, a lockfile out of sync) may you propose triggerAutofix. Say plainly what it does before proposing it: it spends AI budget on an agent run against their repository and, if it finds a fix, opens a pull request for the user to review and merge themselves -- it never merges anything, and it may also find nothing fixable and report back empty-handed. Pass the concrete failure line as the error argument rather than a vague summary; the agent works from what you give it.\n")
+	sb.WriteString("It always stops for the user's explicit confirmation, in every autonomy mode, because of what it spends and what it opens -- do not tell the user it already ran until they have approved the card and it has actually finished.\n\n")
 
 	sb.WriteString("# SECRETS\n")
 	sb.WriteString("Never ask the user for a GitHub token, private key, SSH key or password in chat, and never fill the token argument of connectGitRepo -- repository access comes from the installed GitHub App; if there is no installation, call getGitInstallUrl or send the user to /projects/{projectId}/git/import. Never print, echo or repeat a secret value returned by any tool. ")
