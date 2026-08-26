@@ -293,7 +293,13 @@ func (h *Handler) DeleteAIGatewayKey(c *gin.Context) {
 	}
 
 	var tokenPrefix string
-	err = h.pool.QueryRow(c.Request.Context(),
+	tx, err := h.pool.Begin(c.Request.Context())
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to revoke ai key")
+		return
+	}
+	defer func() { _ = tx.Rollback(c.Request.Context()) }()
+	err = tx.QueryRow(c.Request.Context(),
 		`UPDATE ai_gateway_keys SET revoked_at = now()
 		  WHERE id = $1 AND project_id = $2 AND revoked_at IS NULL
 		  RETURNING token_prefix`,
@@ -315,6 +321,21 @@ func (h *Handler) DeleteAIGatewayKey(c *gin.Context) {
 	}
 	if err != nil {
 		rejectRevoke(http.StatusInternalServerError, "revoke_failed", func() {
+			respondError(c, http.StatusInternalServerError, "failed to revoke ai key")
+		})
+		return
+	}
+	// Revocation is permanent, so remove the encrypted upstream material in the
+	// same transaction instead of retaining secrets that can never be used.
+	if _, err := tx.Exec(c.Request.Context(),
+		`DELETE FROM ai_gateway_key_credentials WHERE gateway_key_id = $1`, keyID); err != nil {
+		rejectRevoke(http.StatusInternalServerError, "credential_delete_failed", func() {
+			respondError(c, http.StatusInternalServerError, "failed to revoke ai key")
+		})
+		return
+	}
+	if err := tx.Commit(c.Request.Context()); err != nil {
+		rejectRevoke(http.StatusInternalServerError, "commit_failed", func() {
 			respondError(c, http.StatusInternalServerError, "failed to revoke ai key")
 		})
 		return
@@ -350,13 +371,14 @@ type aiKeyIntrospectRequest struct {
 // both sides shipping together -- the field only decides whether the operator
 // is told why.
 type aiKeyIntrospectResponse struct {
-	Valid       bool   `json:"valid"`
-	ProjectID   string `json:"project_id,omitempty"`
-	OrgID       string `json:"org_id,omitempty"`
-	Scopes      string `json:"scopes,omitempty"`
-	PrincipalID string `json:"principal_id,omitempty"`
-	IdentityID  string `json:"identity_id,omitempty"`
-	Reason      string `json:"reason,omitempty"`
+	Valid        bool   `json:"valid"`
+	GatewayKeyID string `json:"gateway_key_id,omitempty"`
+	ProjectID    string `json:"project_id,omitempty"`
+	OrgID        string `json:"org_id,omitempty"`
+	Scopes       string `json:"scopes,omitempty"`
+	PrincipalID  string `json:"principal_id,omitempty"`
+	IdentityID   string `json:"identity_id,omitempty"`
+	Reason       string `json:"reason,omitempty"`
 }
 
 // aiIntrospectReasonBudget is the rejection reason for an identity that has
@@ -414,9 +436,10 @@ func (h *Handler) AIIntrospectKey(c *gin.Context) {
 	h.touchAIKey(c.Request.Context(), keyID)
 
 	resp := aiKeyIntrospectResponse{
-		Valid:     true,
-		ProjectID: projectID.String(),
-		Scopes:    scopes,
+		Valid:        true,
+		GatewayKeyID: keyID.String(),
+		ProjectID:    projectID.String(),
+		Scopes:       scopes,
 	}
 	if orgID != nil {
 		resp.OrgID = *orgID

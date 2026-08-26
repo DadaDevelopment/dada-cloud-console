@@ -63,6 +63,7 @@ var aiCatalogProviders = []aiCatalogProvider{
 	{Name: "openrouter", Label: "OpenRouter", KeyURL: "https://openrouter.ai/keys"},
 	{Name: "groq", Label: "Groq", KeyURL: "https://console.groq.com/keys"},
 	{Name: "sambanova", Label: "SambaNova", KeyURL: "https://cloud.sambanova.ai/apis"},
+	{Name: "sotamodel", Label: "SotaModel", KeyURL: ""},
 }
 
 var aiCatalogModels = []aiCatalogModel{

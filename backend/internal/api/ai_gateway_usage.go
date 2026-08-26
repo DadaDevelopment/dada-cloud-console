@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
+	"github.com/dada-tuda/console/backend/internal/crypto"
 )
 
 const agentTokenSourceGateway = "gateway"
@@ -30,6 +32,8 @@ type aiUsageRecordRequest struct {
 	Source            string     `json:"source"`
 	KeyOwner          string     `json:"key_owner"`
 	IdentityID        string     `json:"identity_id"`
+	CredentialID      string     `json:"credential_id"`
+	GatewayKeyID      string     `json:"gateway_key_id"`
 }
 
 // aiKeyOwnerFor decides whose provider key paid for a call. The gateway may
@@ -79,6 +83,27 @@ func (h *Handler) aiBilledUSD(ctx context.Context, projectID uuid.UUID, keyOwner
 	return costUSD * markup
 }
 
+func (h *Handler) resolveUsageCredentialID(ctx context.Context, credentialRaw, gatewayKeyRaw, provider string) *uuid.UUID {
+	credentialID, err := uuid.Parse(credentialRaw)
+	if err != nil {
+		return nil
+	}
+	var gatewayKeyArg any
+	if id, err := uuid.Parse(gatewayKeyRaw); err == nil {
+		gatewayKeyArg = id
+	}
+	var resolved uuid.UUID
+	err = h.pool.QueryRow(ctx, `SELECT c.id FROM ai_gateway_key_credentials c
+		WHERE c.id=$1 AND c.provider=$2
+		  AND (c.gateway_key_id IS NULL OR c.gateway_key_id=(
+		      SELECT k.id FROM ai_gateway_keys k WHERE k.id=$3 AND k.revoked_at IS NULL))`,
+		credentialID, provider, gatewayKeyArg).Scan(&resolved)
+	if err != nil {
+		return nil
+	}
+	return &resolved
+}
+
 // AIRecordUsage persists one gateway-observed usage row into the shared
 // agent_token_usage ledger. Called by the AI Gateway's LiteLLM success
 // callback for every completed call it routes -- BYOK-direct and
@@ -120,22 +145,30 @@ func (h *Handler) AIRecordUsage(c *gin.Context) {
 	if id, err := uuid.Parse(req.IdentityID); err == nil {
 		identityArg = id
 	}
-
 	ctx := c.Request.Context()
+	credentialID := h.resolveUsageCredentialID(ctx, req.CredentialID, req.GatewayKeyID, req.Provider)
+	if credentialID != nil {
+		_, _ = h.pool.Exec(ctx, `UPDATE ai_gateway_key_credentials
+			SET status='healthy',unavailable_until=NULL,updated_at=now() WHERE id=$1`, *credentialID)
+	}
 	keyOwner := h.aiKeyOwnerFor(ctx, req.ProjectID, req.Provider, req.KeyOwner)
+	if credentialID != nil {
+		keyOwner = aiKeyOwnerPlatform
+	}
 	billed := h.aiBilledUSD(ctx, req.ProjectID, keyOwner, req.CostUSD)
 
 	if _, err := h.pool.Exec(ctx, `
 		INSERT INTO agent_token_usage
 			(source, org_id, project_id, env_id, user_sub, model, provider,
 			 prompt_tokens, completion_tokens, total_tokens, cost_usd, platform_request_id,
-			 key_owner, billed_usd, identity_id)
+			 key_owner, billed_usd, identity_id, upstream_credential_id)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-			(SELECT id FROM service_identities WHERE id = $15))
+			(SELECT id FROM service_identities WHERE id = $15),
+			$16)
 		ON CONFLICT (platform_request_id) WHERE platform_request_id IS NOT NULL DO NOTHING
 	`, source, orgArg, req.ProjectID, req.EnvID, userArg, req.Model, req.Provider,
 		req.PromptTokens, req.CompletionTokens, req.TotalTokens, req.CostUSD, req.PlatformRequestID,
-		keyOwner, billed, identityArg,
+		keyOwner, billed, identityArg, credentialID,
 	); err != nil {
 		respondError(c, http.StatusInternalServerError, "record usage: "+err.Error())
 		return
@@ -169,6 +202,17 @@ type aiGatewaySourceStat struct {
 	Source  string  `json:"source"`
 	Calls   int64   `json:"calls"`
 	CostUSD float64 `json:"cost_usd"`
+}
+
+type aiGatewayCredentialStat struct {
+	CredentialID string  `json:"credential_id"`
+	Provider     string  `json:"provider"`
+	Label        string  `json:"label"`
+	KeyHint      string  `json:"key_hint"`
+	Calls        int64   `json:"calls"`
+	TotalTokens  int64   `json:"total_tokens"`
+	CostUSD      float64 `json:"cost_usd"`
+	BilledUSD    float64 `json:"billed_usd"`
 }
 
 // GetAIGatewayUsage returns a provider/project/model/source cost-and-token
@@ -227,6 +271,11 @@ func (h *Handler) GetAIGatewayUsage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "load source breakdown: "+err.Error())
 		return
 	}
+	credentials, err := h.aiGatewayByCredential(ctx, from, to)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "load credential breakdown: "+err.Error())
+		return
+	}
 
 	var totalCost float64
 	var totalCalls int64
@@ -245,7 +294,39 @@ func (h *Handler) GetAIGatewayUsage(c *gin.Context) {
 		"projects":    projects,
 		"models":      models,
 		"sources":     sources,
+		"credentials": credentials,
 	})
+}
+
+func (h *Handler) aiGatewayByCredential(ctx context.Context, from, to time.Time) ([]aiGatewayCredentialStat, error) {
+	rows, err := h.pool.Query(ctx, `
+		SELECT c.id::text, c.provider, c.label, c.api_key_encrypted,
+		       COUNT(*), COALESCE(SUM(u.total_tokens),0),
+		       COALESCE(SUM(u.cost_usd),0)::float8, COALESCE(SUM(u.billed_usd),0)::float8
+		  FROM agent_token_usage u
+		  JOIN ai_gateway_key_credentials c ON c.id = u.upstream_credential_id
+		 WHERE u.created_at >= $1 AND u.created_at < $2
+		 GROUP BY c.id, c.provider, c.label, c.api_key_encrypted
+		 ORDER BY 7 DESC`, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []aiGatewayCredentialStat{}
+	for rows.Next() {
+		var s aiGatewayCredentialStat
+		var enc []byte
+		if err := rows.Scan(&s.CredentialID, &s.Provider, &s.Label, &enc, &s.Calls, &s.TotalTokens, &s.CostUSD, &s.BilledUSD); err != nil {
+			return nil, err
+		}
+		plain, err := crypto.DecryptToken(h.cfg.GitopsEncryptionKey, enc)
+		if err != nil {
+			return nil, errors.New("decrypt credential hint")
+		}
+		s.KeyHint = maskAIKey(string(plain))
+		out = append(out, s)
+	}
+	return out, rows.Err()
 }
 
 func (h *Handler) aiGatewayByProvider(ctx context.Context, from, to time.Time) ([]aiGatewayProviderStat, error) {

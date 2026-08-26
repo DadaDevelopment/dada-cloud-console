@@ -1751,6 +1751,66 @@ info:
   title: DADA Cloud Console API
   version: "1.0"
 paths:
+  /admin/ai-gateway/credentials:
+    get:
+      operationId: listAdminAICredentials
+      produces:
+      - application/json
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: List global AI upstream credentials (platform-admin only)
+      tags:
+      - admin
+      - ai-gateway
+    post:
+      consumes:
+      - application/json
+      operationId: createAdminAICredentials
+      produces:
+      - application/json
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Add credentials to the global AI upstream pool (platform-admin only)
+      tags:
+      - admin
+      - ai-gateway
+  /admin/ai-gateway/credentials/{credentialId}:
+    delete:
+      operationId: deleteAdminAICredential
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Delete a global AI upstream credential (platform-admin only)
+      tags:
+      - admin
+      - ai-gateway
+    patch:
+      consumes:
+      - application/json
+      operationId: updateAdminAICredential
+      produces:
+      - application/json
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Update a global AI upstream credential (platform-admin only)
+      tags:
+      - admin
+      - ai-gateway
+  /admin/ai-gateway/models/stats:
+    get:
+      operationId: listAdminAIModelStats
+      produces:
+      - application/json
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: List models available in the global AI upstream pool
+      tags:
+      - admin
+      - ai-gateway
   /admin/ai-gateway/usage:
     get:
       description: Returns provider/project/model/source cost-and-token breakdown
@@ -4711,6 +4771,17 @@ paths:
       security:
       - BearerAuth: []
       summary: Revoke an AI Gateway key
+      tags:
+      - ai-gateway
+  /projects/{projectId}/ai/keys/{keyId}/models:
+    get:
+      operationId: listAIKeyModels
+      produces:
+      - application/json
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: List discovered models for one AI Gateway key
       tags:
       - ai-gateway
   /projects/{projectId}/ai/routing:

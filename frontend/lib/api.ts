@@ -116,6 +116,8 @@ import type {
   DeployHookCreated,
   AIGatewayKey,
   AIGatewayKeyCreated,
+  AdminAIGatewayCredential,
+  AdminAIGatewayModelStatsResponse,
   AIProviderCredential,
   AICatalogResponse,
   ProjectAIUsage,
@@ -1445,6 +1447,37 @@ export const adminApi = {
     apiFetch<AdminCostsResponse>(`/api/v1/admin/costs?days=${days}`),
   getAIGatewayUsage: (days: 7 | 30 = 7) =>
     apiFetch<AIGatewayUsageResponse>(`/api/v1/admin/ai-gateway/usage?days=${days}`),
+
+  listAIGatewayCredentials: () =>
+    apiFetch<{ credentials: AdminAIGatewayCredential[] }>(`/api/v1/admin/ai-gateway/credentials`),
+
+  createAIGatewayCredentials: (data: {
+    provider: string;
+    label?: string;
+    api_base?: string;
+    api_keys: string[];
+  }) => apiFetch<{ credentials: AdminAIGatewayCredential[] }>(`/api/v1/admin/ai-gateway/credentials`, {
+    method: "POST",
+    body: data,
+  }),
+
+  updateAIGatewayCredential: (credentialId: string, data: {
+    enabled?: boolean;
+    label?: string;
+    api_base?: string;
+    api_key?: string;
+    priority?: number;
+  }) =>
+    apiFetch<{ status: string }>(`/api/v1/admin/ai-gateway/credentials/${credentialId}`, {
+      method: "PATCH",
+      body: data,
+    }),
+
+  deleteAIGatewayCredential: (credentialId: string) =>
+    apiFetch<void>(`/api/v1/admin/ai-gateway/credentials/${credentialId}`, { method: "DELETE" }),
+
+  getAIGatewayModelStats: () =>
+    apiFetch<AdminAIGatewayModelStatsResponse>(`/api/v1/admin/ai-gateway/models/stats`),
   getDBShards: () => apiFetch<AdminDBShardsResponse>(`/api/v1/admin/db-shards`),
   getFunnel: (params: { window?: string; excludeKinds?: string[] } = {}) => {
     const q = new URLSearchParams();

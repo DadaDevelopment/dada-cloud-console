@@ -15,6 +15,100 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/admin/ai-gateway/credentials": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin",
+                    "ai-gateway"
+                ],
+                "summary": "List global AI upstream credentials (platform-admin only)",
+                "operationId": "listAdminAICredentials",
+                "responses": {}
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin",
+                    "ai-gateway"
+                ],
+                "summary": "Add credentials to the global AI upstream pool (platform-admin only)",
+                "operationId": "createAdminAICredentials",
+                "responses": {}
+            }
+        },
+        "/admin/ai-gateway/credentials/{credentialId}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "admin",
+                    "ai-gateway"
+                ],
+                "summary": "Delete a global AI upstream credential (platform-admin only)",
+                "operationId": "deleteAdminAICredential",
+                "responses": {}
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin",
+                    "ai-gateway"
+                ],
+                "summary": "Update a global AI upstream credential (platform-admin only)",
+                "operationId": "updateAdminAICredential",
+                "responses": {}
+            }
+        },
+        "/admin/ai-gateway/models/stats": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin",
+                    "ai-gateway"
+                ],
+                "summary": "List models available in the global AI upstream pool",
+                "operationId": "listAdminAIModelStats",
+                "responses": {}
+            }
+        },
         "/admin/ai-gateway/usage": {
             "get": {
                 "security": [
@@ -4297,6 +4391,24 @@ const docTemplate = `{
                         }
                     }
                 }
+            }
+        },
+        "/projects/{projectId}/ai/keys/{keyId}/models": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-gateway"
+                ],
+                "summary": "List discovered models for one AI Gateway key",
+                "operationId": "listAIKeyModels",
+                "responses": {}
             }
         },
         "/projects/{projectId}/ai/routing": {

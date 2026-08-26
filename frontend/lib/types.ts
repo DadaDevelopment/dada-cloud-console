@@ -1709,6 +1709,17 @@ export interface AIGatewaySourceStat {
   cost_usd: number;
 }
 
+export interface AIGatewayCredentialUsageStat {
+  credential_id: string;
+  provider: string;
+  label: string;
+  key_hint: string;
+  calls: number;
+  total_tokens: number;
+  cost_usd: number;
+  billed_usd: number;
+}
+
 export interface AIGatewayUsageResponse {
   days: number;
   window: { from: string; to: string };
@@ -1719,6 +1730,7 @@ export interface AIGatewayUsageResponse {
   projects: AIGatewayProjectStat[];
   models: AIGatewayModelStat[];
   sources: AIGatewaySourceStat[];
+  credentials?: AIGatewayCredentialUsageStat[];
 }
 
 export interface AdminAgentTokenEconomics {
@@ -1982,6 +1994,31 @@ export interface AIGatewayKeyCreated {
   scopes: string;
   base_url: string;
   created_at: string;
+}
+
+/** Platform-owned upstream credential. Secret values are accepted on create and never returned. */
+export interface AdminAIGatewayCredential {
+  id: string;
+  provider: string;
+  label: string;
+  key_hint: string;
+  api_base?: string;
+  enabled: boolean;
+  priority: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminAIGatewayModelStat {
+  id: string;
+  provider?: string;
+  credential_count: number;
+  discovered_at: string;
+}
+
+export interface AdminAIGatewayModelStatsResponse {
+  models: AdminAIGatewayModelStat[];
+  refreshed_at?: string;
 }
 
 /** A stored BYOK provider credential, secret-free: `key_hint` is masked and unusable. */

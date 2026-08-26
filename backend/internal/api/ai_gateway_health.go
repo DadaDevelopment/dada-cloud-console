@@ -2,8 +2,10 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"github.com/dada-tuda/console/backend/internal/metrics"
 )
@@ -23,6 +25,22 @@ type aiFailureRecordRequest struct {
 	Status        int    `json:"status"`
 	ExceptionType string `json:"exception_type"`
 	Fallback      bool   `json:"fallback"`
+	CredentialID  string `json:"credential_id"`
+}
+
+func aiCredentialCooldown(status int) time.Duration {
+	switch {
+	case status == 401 || status == 403:
+		return 24 * time.Hour
+	case status == 402:
+		return time.Hour
+	case status == 429:
+		return time.Minute
+	case status >= 500:
+		return 30 * time.Second
+	default:
+		return 0
+	}
 }
 
 // AIRecordFailure counts an AI gateway upstream failure so an alert can see it.
@@ -66,6 +84,16 @@ func (h *Handler) AIRecordFailure(c *gin.Context) {
 
 	metrics.RecordAIUpstreamFailure(
 		aiMetricLabel(req.ModelGroup), aiProviderLabel(req.Provider), req.Status)
+	if h.pool != nil {
+		if credentialID, err := uuid.Parse(req.CredentialID); err == nil {
+			cooldown := aiCredentialCooldown(req.Status)
+			if cooldown > 0 {
+				_, _ = h.pool.Exec(c.Request.Context(), `UPDATE ai_gateway_key_credentials
+					SET status='cooldown',unavailable_until=now()+$2 * interval '1 second',updated_at=now()
+					WHERE id=$1 AND deleted_at IS NULL`, credentialID, int64(cooldown/time.Second))
+			}
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
