@@ -19,9 +19,10 @@ func (h *Handler) hasConfiguredAIKeyCredentialPool(ctx context.Context, gatewayK
 	var configured bool
 	err := h.pool.QueryRow(ctx, `
 		SELECT EXISTS (
-			SELECT 1 FROM ai_gateway_key_credentials
-			 WHERE (gateway_key_id = $1 OR gateway_key_id IS NULL)
-			   AND enabled AND deleted_at IS NULL
+			SELECT 1 FROM ai_gateway_key_credentials c
+			 WHERE (c.gateway_key_id = $1 OR c.gateway_key_id IS NULL)
+			   AND c.enabled AND c.deleted_at IS NULL
+			   AND EXISTS (SELECT 1 FROM ai_gateway_key_credential_models m WHERE m.credential_id = c.id)
 		)`, gatewayKeyID).Scan(&configured)
 	return configured, err
 }
@@ -64,6 +65,11 @@ type aiKeyCredentialListItem struct {
 	UpdatedAt        time.Time  `json:"updated_at"`
 	Status           string     `json:"status"`
 	UnavailableUntil *time.Time `json:"unavailable_until,omitempty"`
+	Source           string     `json:"source,omitempty"`
+	Scope            string     `json:"scope,omitempty"`
+	ProjectID        *uuid.UUID `json:"project_id,omitempty"`
+	ProjectName      string     `json:"project_name,omitempty"`
+	Editable         bool       `json:"editable"`
 }
 
 type aiKeyCredentialUpdateRequest struct {

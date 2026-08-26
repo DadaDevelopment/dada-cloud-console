@@ -64,6 +64,7 @@ func (h *Handler) ListAdminAICredentials(c *gin.Context) {
 	}
 	defer rows.Close()
 	out := []aiKeyCredentialListItem{}
+	discoveries := []createdCredentialDiscovery{}
 	for rows.Next() {
 		var it aiKeyCredentialListItem
 		var base *string
@@ -81,7 +82,58 @@ func (h *Handler) ListAdminAICredentials(c *gin.Context) {
 		if base != nil {
 			it.APIBase = *base
 		}
+		it.Source = "pool"
+		it.Scope = "platform"
+		it.Editable = true
 		out = append(out, it)
+		if it.Enabled {
+			var modelCount int
+			if err := h.pool.QueryRow(c.Request.Context(), `SELECT count(*) FROM ai_gateway_key_credential_models WHERE credential_id=$1`, it.ID).Scan(&modelCount); err == nil && modelCount == 0 {
+				discoveries = append(discoveries, createdCredentialDiscovery{ID: it.ID, Provider: it.Provider, APIBase: it.APIBase, APIKey: string(plain)})
+			}
+		}
+	}
+	legacyRows, err := h.pool.Query(c.Request.Context(), `
+		SELECT legacy.id, legacy.provider, legacy.api_base, legacy.api_key_encrypted,
+		       legacy.created_at, legacy.updated_at, legacy.project_id, COALESCE(p.name,'')
+		  FROM ai_provider_credentials legacy
+		  LEFT JOIN projects p ON p.id=legacy.project_id
+		 WHERE legacy.project_id IS NOT NULL
+		 ORDER BY p.name, legacy.provider, legacy.id`)
+	if err != nil {
+		respondError(c, 500, "failed to query legacy credential inventory")
+		return
+	}
+	defer legacyRows.Close()
+	for legacyRows.Next() {
+		var it aiKeyCredentialListItem
+		var base *string
+		var enc []byte
+		var projectID uuid.UUID
+		if err := legacyRows.Scan(&it.ID, &it.Provider, &base, &enc, &it.CreatedAt, &it.UpdatedAt, &projectID, &it.ProjectName); err != nil {
+			respondError(c, 500, "failed to scan legacy credential inventory")
+			return
+		}
+		plain, err := crypto.DecryptToken(h.cfg.GitopsEncryptionKey, enc)
+		if err != nil {
+			respondError(c, 500, "failed to decrypt legacy credential hint")
+			return
+		}
+		it.KeyHint = maskAIKey(string(plain))
+		if base != nil {
+			it.APIBase = *base
+		}
+		it.Label = it.ProjectName + " · " + it.Provider
+		it.Enabled = true
+		it.Status = "legacy"
+		it.Source = "legacy_byok"
+		it.Scope = "project"
+		it.ProjectID = &projectID
+		it.Editable = false
+		out = append(out, it)
+	}
+	if len(discoveries) > 0 {
+		discoverCreatedCredentials(c.Request.Context(), h.pool, discoveries)
 	}
 	c.JSON(http.StatusOK, gin.H{"credentials": out})
 }
@@ -165,7 +217,7 @@ func (h *Handler) CreateAdminAICredentials(c *gin.Context) {
 			respondError(c, 500, "store credential")
 			return
 		}
-		out = append(out, aiKeyCredentialListItem{ID: id, Provider: req.Provider, Label: req.Label, KeyHint: maskAIKey(req.APIKey), APIBase: req.APIBase, Enabled: enabled, Priority: priority, CreatedAt: createdAt, UpdatedAt: updatedAt})
+		out = append(out, aiKeyCredentialListItem{ID: id, Provider: req.Provider, Label: req.Label, KeyHint: maskAIKey(req.APIKey), APIBase: req.APIBase, Enabled: enabled, Priority: priority, CreatedAt: createdAt, UpdatedAt: updatedAt, Source: "pool", Scope: "platform", Editable: true})
 		out[len(out)-1].Status = "healthy"
 		if enabled {
 			discoveries = append(discoveries, createdCredentialDiscovery{ID: id, Provider: req.Provider, APIBase: req.APIBase, APIKey: req.APIKey})

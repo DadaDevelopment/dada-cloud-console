@@ -43,8 +43,8 @@ export const aiGatewayUsage: Messages = {
 
   "aiGateway.empty": { ru: "Нет данных за выбранный период", en: "No data for the selected window" },
 
-  "aiGateway.pool.title": { ru: "Глобальный пул ключей провайдеров", en: "Global provider key pool" },
-  "aiGateway.pool.subtitle": { ru: "Клиенты используют только ключи Dada. Эти секреты видят и меняют только администраторы платформы; шлюз перебирает их автоматически.", en: "Customers use Dada keys only. These secrets are managed by platform admins, and the gateway automatically falls back across them." },
+  "aiGateway.pool.title": { ru: "Ключи AI-провайдеров", en: "AI provider credentials" },
+  "aiGateway.pool.subtitle": { ru: "Единый инвентарь: глобальный пул Dada и проектные BYOK. Секреты всегда скрыты; шлюз перебирает ключи глобального пула автоматически.", en: "Unified inventory of the Dada global pool and project BYOK credentials. Secrets are always masked; the gateway automatically falls back across the global pool." },
   "aiGateway.pool.provider": { ru: "Провайдер", en: "Provider" },
   "aiGateway.pool.label": { ru: "Метка пачки", en: "Batch label" },
   "aiGateway.pool.label.placeholder": { ru: "например, sota основной", en: "e.g. sota primary" },
@@ -65,6 +65,8 @@ export const aiGatewayUsage: Messages = {
   "aiGateway.pool.edit.cancel": { ru: "Отмена", en: "Cancel" },
   "aiGateway.pool.disabled": { ru: "выключен", en: "disabled" },
   "aiGateway.pool.enabled": { ru: "в пуле", en: "in pool" },
+  "aiGateway.pool.projectByok": { ru: "BYOK проекта", en: "project BYOK" },
+  "aiGateway.pool.projectScope": { ru: "проект: {project}", en: "project: {project}" },
   "aiGateway.pool.priority": { ru: "приоритет {priority}", en: "priority {priority}" },
   "aiGateway.pool.delete": { ru: "Удалить", en: "Delete" },
   "aiGateway.pool.delete.confirm": { ru: "Удалить ключ «{label}» из глобального пула?", en: "Delete “{label}” from the global pool?" },

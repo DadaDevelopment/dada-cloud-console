@@ -822,3 +822,17 @@ web OAuth client lacks the local callback used by `seo-google`. See
 ### Итог
 - Раньше три попытки сгорали за секунды одного и того же простоя Jenkins: перезапущенная сборка была claimable на следующем тике дрейна. Теперь 30с → 60с → 120с, потолок 300с.
 - Колонка nullable без DEFAULT: строки, записанные предыдущим образом во время rolling update, читаются как «можно брать сейчас».
+
+## Единый инвентарь AI credentials (2026-08-26)
+
+- [x] Найти реальные источники ключей без вывода секретов: 13 legacy DB rows, 0 YAML/runtime secrets.
+- [x] Идемпотентно импортировать только global legacy credentials в новый pool с сохранением ciphertext.
+- [x] Показать project BYOK в общей админке как read-only masked inventory с проектом и provenance.
+- [x] Не активировать новый pool до появления успешного model snapshot, сохранив legacy fallback на время discovery.
+- [x] Проверить миграцию на production schema внутри транзакции с `ROLLBACK`.
+
+### Review
+
+- Production rehearsal импортирует 1 platform credential и показывает 13 записей суммарно; транзакция откатана.
+- Полные секреты не возвращаются: API использует существующий first-4/last-4 `key_hint`; regression на public JSON зелёный.
+- 12 project-scoped BYOK не повышаются до global scope и не получают кнопок редактирования в platform pool UI.

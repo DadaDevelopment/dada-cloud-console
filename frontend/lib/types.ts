@@ -2007,6 +2007,11 @@ export interface AdminAIGatewayCredential {
   priority: number;
   created_at: string;
   updated_at: string;
+  source?: "pool" | "legacy_byok";
+  scope?: "platform" | "project";
+  project_id?: string;
+  project_name?: string;
+  editable: boolean;
 }
 
 export interface AdminAIGatewayModelStat {

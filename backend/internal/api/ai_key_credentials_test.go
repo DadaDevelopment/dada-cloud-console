@@ -75,12 +75,18 @@ func TestAIKeyCredentialPublicShapeNeverSerializesSecret(t *testing.T) {
 		KeyHint:  "sk-p...mnop",
 		Enabled:  true,
 		Priority: 10,
+		Source:   "pool",
+		Scope:    "platform",
+		Editable: true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(b), "api_key") || strings.Contains(string(b), "secret") {
 		t.Fatalf("public response leaked secret-bearing field: %s", b)
+	}
+	if !strings.Contains(string(b), `"key_hint":"sk-p...mnop"`) || !strings.Contains(string(b), `"source":"pool"`) {
+		t.Fatalf("public response lost safe inventory metadata: %s", b)
 	}
 }
 

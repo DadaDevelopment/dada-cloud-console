@@ -38,6 +38,7 @@ var aiProviderDefaultBases = map[string]string{
 	"groq":       "https://api.groq.com/openai",
 	"sambanova":  "https://api.sambanova.ai",
 	"sotamodel":  "https://www.sotamodel.net",
+	"nvidia_nim": "https://integrate.api.nvidia.com",
 }
 
 func modelDiscoveryURL(apiBase string) (string, error) {
