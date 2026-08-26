@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	feedbackDefaultLimit      = 50
-	feedbackMaxLimit          = 200
+	feedbackDefaultLimit       = 50
+	feedbackMaxLimit           = 200
 	feedbackAgentContextMaxLen = 6000
 )
 

@@ -20,14 +20,14 @@ func TestNotifyAutofixOutcomeSettlesFeedbackWithoutNotifier(t *testing.T) {
 
 	h := &Handler{pool: pool}
 	h.notifyAutofixOutcome(context.Background(), cloudTaskTransition{
-		Matched: true,
-		ID: taskID,
-		ProjectID: projectID,
+		Matched:       true,
+		ID:            taskID,
+		ProjectID:     projectID,
 		EnvironmentID: envID,
-		TaskType: "autofix",
-		NewStatus: "failed",
-		OldStatus: "running",
-		Error: "agent unavailable",
+		TaskType:      "autofix",
+		NewStatus:     "failed",
+		OldStatus:     "running",
+		Error:         "agent unavailable",
 	})
 
 	var status, resolution string
