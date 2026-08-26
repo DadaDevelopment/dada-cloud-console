@@ -851,3 +851,4 @@ web OAuth client lacks the local callback used by `seo-google`. See
 - Production-schema rehearsal inside `BEGIN/ROLLBACK`: pool=12, enabled=12, pending=12, snapshots=37 across 12 credentials, fin_core_promoted=0.
 - `go test ./internal/api/...` and backend `go test ./...` pass.
 - Native npm audit still reports the repository's existing 7 findings (1 moderate, 6 high); no dependency or lockfile changed in this task and no forced upgrade was applied.
+- Live OpenRouter `/models` returned 417 rows, including 12 invalid wire IDs; discovery now drops those 12 individually instead of rejecting the 405 valid rows.

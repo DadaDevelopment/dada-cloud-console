@@ -107,7 +107,7 @@ func TestDiscoverUpstreamModelsOpenAICompatible(t *testing.T) {
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("path=%q want /v1/models", r.URL.Path)
 		}
-		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gpt-5.6-sol"},{"id":"gpt-5.6-sol"},{"id":"embed-1"}]}`))
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gpt-5.6-sol"},{"id":"gpt-5.6-sol"},{"id":"invalid display name"},{"id":"embed-1"}]}`))
 	}))
 
 	got, err := discoverUpstreamModels(context.Background(), client, "sotamodel", baseURL, "top-secret")

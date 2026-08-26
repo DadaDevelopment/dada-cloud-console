@@ -159,7 +159,10 @@ func discoverUpstreamModels(ctx context.Context, client *http.Client, provider, 
 				continue
 			}
 			if err := validateDiscoveredModelID(id); err != nil {
-				return nil, err
+				// Upstream catalogues are untrusted and may contain display names
+				// that are not legal wire model ids. Drop only that row; the
+				// authenticated report endpoint remains strict for callers.
+				continue
 			}
 			if _, exists := seen[id]; exists {
 				continue
