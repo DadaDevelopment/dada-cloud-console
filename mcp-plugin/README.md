@@ -31,6 +31,23 @@ set, so it works without Dynamic Client Registration — sidestepping the Claude
 Code native-OAuth limitation. The token is stored locally by `mcp-remote` and
 refreshed automatically.
 
+The pin works from any machine because `mcp-remote` takes its callback on
+loopback (`http://localhost:<port>`), and `dada-mcp` whitelists loopback on any
+port. Nobody has to register anything per user.
+
+## Do not copy this config into a hosted agent
+
+The `client_id: dada-mcp` line above is safe here and wrong anywhere the agent
+runs on a server. A hosted agent — a self-hosted gateway, a remote harness — has
+to take its OAuth callback on a public `https` URL of its own, and that URL is
+in nobody's whitelist, so Dada ID answers `invalid_redirect_uri` before the
+sign-in page renders. Registering one callback per installation does not scale,
+and Dynamic Client Registration is still closed on Dada ID.
+
+Until it opens, a server-side agent talks to the same endpoint with a bearer
+token (`Authorization: Bearer <dada-id-token>`), which the MCP server accepts.
+See [Control DADA Cloud from an AI agent](https://console.dada-tuda.ru/docs/mcp-ai-agents).
+
 You only ever see resources your Dada ID account has a role on; all tool calls
 carry your bearer and are authorized by the backend per project.
 

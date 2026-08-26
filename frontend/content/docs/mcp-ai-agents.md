@@ -25,7 +25,7 @@ clicked it yourself.
 | MCP endpoint | `https://console.dada-tuda.ru/mcp` |
 | Transport | Streamable HTTP |
 | Auth | OAuth 2.0 (browser sign-in with DADA ID) or a bearer token |
-| OAuth client id | `dada-mcp` — public, **no client secret** |
+| OAuth client id | `dada-mcp` — public, **no client secret**, callback on `localhost`/`127.0.0.1` only |
 | Authorization server | Discovered automatically (RFC 9728 metadata) |
 
 Hitting the endpoint without a token returns `401` with a `WWW-Authenticate`
@@ -62,15 +62,25 @@ you, so you never handle a URL, a client id or a token.
 
 Point the client at `https://console.dada-tuda.ru/mcp` over Streamable HTTP.
 
-Clients that let you pin a static OAuth client id should use `dada-mcp` (public,
-no secret). Clients that discover it dynamically need nothing from you.
+A client that runs on your own machine and takes its OAuth callback on
+`http://localhost:<port>` or `http://127.0.0.1:<port>` can pin the static client
+id `dada-mcp` (public, no secret). Those loopback callbacks are whitelisted on
+any port, so the pin works from any laptop without anyone registering anything.
 
-If your client cannot do a browser login at all, send a DADA ID access token as a
-header instead:
+**Do not pin `dada-mcp` from an agent that runs on a server.** A hosted agent
+(a self-hosted gateway, a remote harness, anything whose callback is an `https`
+URL on your own host) sends a redirect URI nobody has whitelisted, and Dada ID
+rejects the login with `invalid_redirect_uri` before the sign-in page renders.
+Dynamic Client Registration is not open on Dada ID either, so the client cannot
+register its own callback yet. Until it is, a server-side agent authenticates
+with a bearer token:
 
 ```
 Authorization: Bearer <your-token>
 ```
+
+The same header is the answer for any client that cannot do a browser login at
+all.
 
 To check the server is reachable before you blame your client, ask it for its
 discovery document. This needs no credentials:
@@ -135,6 +145,7 @@ multi-step flow instead of leaving it to improvise:
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `401` from the endpoint, no login prompt | The client is not doing OAuth discovery | Set the OAuth client id to `dada-mcp` manually, or send a bearer token |
+| `invalid_redirect_uri` before the login page renders | The client pinned `dada-mcp` but its callback is not a loopback URL — typically an agent hosted on a server | Only loopback callbacks are whitelisted for `dada-mcp`; use a bearer token from a hosted agent |
 | `invalid_scope` before the login page renders | The client asked for scopes the public client cannot grant | Make sure the client reads the protected-resource metadata rather than the authorization server's full scope list |
 | Tools appear but every call 404s | `projectId` was given as a slug | `projectId` and `envId` are UUIDs — call `listProjects`, then `getProject` |
 | `missing required path parameter "envId"` | Nothing supplied the environment id | `getProject` returns the project's environments with their ids |
