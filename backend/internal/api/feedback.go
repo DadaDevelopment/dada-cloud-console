@@ -117,6 +117,8 @@ func (h *Handler) SubmitFeedback(c *gin.Context) {
 		AppName:     appName,
 	})
 
+	h.dispatchSupportIntake(id, message, senderEmail, appName)
+
 	c.JSON(http.StatusCreated, gin.H{"status": "ok", "id": id})
 }
 

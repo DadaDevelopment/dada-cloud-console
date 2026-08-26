@@ -31,6 +31,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/pdns"
 	"github.com/dada-tuda/console/backend/internal/portainer"
 	"github.com/dada-tuda/console/backend/internal/prometheus"
+	"github.com/dada-tuda/console/backend/internal/supporttask"
 	"github.com/dada-tuda/console/backend/internal/userservice"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -69,6 +70,12 @@ type Handler struct {
 	// is the JWKS verifier that gates the agent webhook callback; nil disables it.
 	dadagent      *dadagent.Client
 	agentVerifier *auth.KeycloakVerifier
+
+	// supportTask files a new feedback ticket onto the AgentSyncHub kanban
+	// (see internal/supporttask). nil when DADA_AGENT_BASE_URL /
+	// CLOUD_AGENT_CLIENT_ID are unset -- SubmitFeedback degrades to
+	// "recorded, not auto-dispatched" instead of failing the request.
+	supportTask *supporttask.Client
 
 	// boxAgentVerifier gates the box-agent ingest webhooks (status + samples).
 	// nil disables them, exactly like agentVerifier: the routes are registered
@@ -287,6 +294,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	if cfg.DadaAgentBaseURL != "" && cfg.CloudAgentClientID != "" {
 		ts := dadagent.NewTokenSource(cfg.KeycloakTokenURL, cfg.CloudAgentClientID, cfg.CloudAgentClientSecret)
 		h.dadagent = dadagent.New(cfg.DadaAgentBaseURL, ts)
+		h.supportTask = supporttask.New(cfg.DadaAgentBaseURL, ts)
 	}
 	if os.Getenv("PROJECT_GROUP_SYNC_ENABLED") == "true" &&
 		cfg.UserServiceURL != "" && cfg.KeycloakTokenURL != "" && cfg.CloudAgentClientID != "" {

@@ -45,6 +45,7 @@ func (h *Handler) notifyAutofixOutcome(ctx context.Context, tr cloudTaskTransiti
 	}
 
 	h.recordAutofixResolution(ctx, tr)
+	h.settleFeedbackForTask(ctx, tr)
 
 	if h.auditNotifier == nil {
 		return
@@ -53,7 +54,6 @@ func (h *Handler) notifyAutofixOutcome(ctx context.Context, tr cloudTaskTransiti
 		notifyCtx, cancel := context.WithTimeout(context.Background(), autofixNotifyTimeout)
 		defer cancel()
 		h.sendAutofixOutcome(notifyCtx, tr)
-		h.settleFeedbackForTask(notifyCtx, tr)
 	}()
 }
 
