@@ -69,6 +69,7 @@ require (
 	github.com/oapi-codegen/runtime v1.7.0 // indirect
 	github.com/oasdiff/yaml v0.1.0 // indirect
 	github.com/oasdiff/yaml3 v0.0.13 // indirect
+	github.com/pganalyze/pg_query_go/v5 v5.1.0 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/common v0.66.1 // indirect

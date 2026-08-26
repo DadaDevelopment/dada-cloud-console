@@ -134,6 +134,19 @@ keep:
   # customer's whole account.
   - getBoxUsage
 
+  # PostgreSQL read-only ad-hoc SQL (DADA Cloud MCP PostgreSQL Read Tools
+  # v0.1). Grammar-classified SELECT/WITH-SELECT only (internal/pgread/
+  # policy), executed under the database's OWN connection credential (the
+  # same one getDatabaseCredentials reveals) inside a READ ONLY transaction
+  # that always rolls back (internal/pgread/pgexec), capped at 1000 rows /
+  # 5 MB / 5s. Cannot modify database state at the capability layer, not
+  # just by instruction -- see backend/internal/api/db_query.go's package
+  # doc. Degrades to DATABASE_NOT_ACCESSIBLE while the database's connection
+  # secret does not exist yet (still provisioning), same as
+  # getDatabaseCredentials.
+  - queryDatabase
+  - explainDatabaseQuery
+
 rename: {}
 annotate: {}
 group: {}

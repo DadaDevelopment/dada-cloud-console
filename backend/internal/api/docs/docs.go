@@ -16217,6 +16217,109 @@ const docTemplate = `{
                 }
             }
         },
+        "/projects/{projectId}/environments/{envId}/databases/{name}/explain": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the PostgreSQL query plan for a read-only SELECT / WITH ... SELECT against this database, connecting as the database's own credential. ANALYZE, BUFFERS and WAL are never available as options here -- the gateway always wraps the statement as EXPLAIN (VERBOSE, COSTS, FORMAT \u003cformat\u003e), so this endpoint cannot execute the statement even if the caller tries to request it.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "database"
+                ],
+                "summary": "Get the query plan for a read-only query, without running it",
+                "operationId": "explainDatabaseQuery",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Database resource name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Query to explain; format is text or json",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.dbExplainRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/environments/{envId}/databases/{name}/insights": {
             "get": {
                 "security": [
@@ -16366,6 +16469,109 @@ const docTemplate = `{
                             "additionalProperties": {
                                 "type": "string"
                             }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/environments/{envId}/databases/{name}/query": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Executes a single read-only SQL statement (SELECT or WITH ... SELECT) against this managed PostgreSQL database, connecting as the database's own credential (the same one reveal-credentials exposes) inside a READ ONLY transaction that is always rolled back, under a 5 second statement timeout, capped at 1000 rows / 5 MB. INSERT/UPDATE/DELETE/DDL/administrative functions (pg_sleep, pg_read_file, dblink, set_config, ...) are rejected before reaching the database by SQL-grammar classification, and PostgreSQL itself refuses any write inside the READ ONLY transaction regardless of the connecting role's own privileges. Multi-statement input is rejected. Params are positional $1, $2, ... bind values -- never interpolate values into the query text. Every call is audited under both the calling platform user and the database role the statement actually ran as.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "database"
+                ],
+                "summary": "Run a read-only SQL query against this database",
+                "operationId": "queryDatabase",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Database resource name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Query and optional bind params",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.dbQueryRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "QUERY_PARSE_ERROR, QUERY_MULTI_STATEMENT, QUERY_NOT_READ_ONLY, QUERY_FORBIDDEN_CONSTRUCT or QUERY_FORBIDDEN_FUNCTION",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "DATABASE_NOT_ACCESSIBLE, QUERY_TIMEOUT, LOCK_TIMEOUT or DATABASE_ERROR",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -23508,6 +23714,35 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "working_dir": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.dbExplainRequest": {
+            "type": "object",
+            "required": [
+                "query"
+            ],
+            "properties": {
+                "format": {
+                    "type": "string"
+                },
+                "query": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.dbQueryRequest": {
+            "type": "object",
+            "required": [
+                "query"
+            ],
+            "properties": {
+                "params": {
+                    "type": "array",
+                    "items": {}
+                },
+                "query": {
                     "type": "string"
                 }
             }

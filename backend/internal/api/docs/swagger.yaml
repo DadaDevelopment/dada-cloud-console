@@ -1007,6 +1007,25 @@ definitions:
       working_dir:
         type: string
     type: object
+  api.dbExplainRequest:
+    properties:
+      format:
+        type: string
+      query:
+        type: string
+    required:
+    - query
+    type: object
+  api.dbQueryRequest:
+    properties:
+      params:
+        items: {}
+        type: array
+      query:
+        type: string
+    required:
+    - query
+    type: object
   api.deployOperationStatusResponse:
     properties:
       error_code:
@@ -13011,6 +13030,80 @@ paths:
       summary: Reveal a database's connection credentials
       tags:
       - database
+  /projects/{projectId}/environments/{envId}/databases/{name}/explain:
+    post:
+      consumes:
+      - application/json
+      description: Returns the PostgreSQL query plan for a read-only SELECT / WITH
+        ... SELECT against this database, connecting as the database's own credential.
+        ANALYZE, BUFFERS and WAL are never available as options here -- the gateway
+        always wraps the statement as EXPLAIN (VERBOSE, COSTS, FORMAT <format>), so
+        this endpoint cannot execute the statement even if the caller tries to request
+        it.
+      operationId: explainDatabaseQuery
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Database resource name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Query to explain; format is text or json
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.dbExplainRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get the query plan for a read-only query, without running it
+      tags:
+      - database
   /projects/{projectId}/environments/{envId}/databases/{name}/insights:
     get:
       description: 'Returns the headline insight numbers for a managed PostgreSQL
@@ -13121,6 +13214,87 @@ paths:
       security:
       - BearerAuth: []
       summary: Slowest and heaviest queries
+      tags:
+      - database
+  /projects/{projectId}/environments/{envId}/databases/{name}/query:
+    post:
+      consumes:
+      - application/json
+      description: Executes a single read-only SQL statement (SELECT or WITH ... SELECT)
+        against this managed PostgreSQL database, connecting as the database's own
+        credential (the same one reveal-credentials exposes) inside a READ ONLY transaction
+        that is always rolled back, under a 5 second statement timeout, capped at
+        1000 rows / 5 MB. INSERT/UPDATE/DELETE/DDL/administrative functions (pg_sleep,
+        pg_read_file, dblink, set_config, ...) are rejected before reaching the database
+        by SQL-grammar classification, and PostgreSQL itself refuses any write inside
+        the READ ONLY transaction regardless of the connecting role's own privileges.
+        Multi-statement input is rejected. Params are positional $1, $2, ... bind
+        values -- never interpolate values into the query text. Every call is audited
+        under both the calling platform user and the database role the statement actually
+        ran as.
+      operationId: queryDatabase
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Database resource name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Query and optional bind params
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.dbQueryRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: QUERY_PARSE_ERROR, QUERY_MULTI_STATEMENT, QUERY_NOT_READ_ONLY,
+            QUERY_FORBIDDEN_CONSTRUCT or QUERY_FORBIDDEN_FUNCTION
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: DATABASE_NOT_ACCESSIBLE, QUERY_TIMEOUT, LOCK_TIMEOUT or DATABASE_ERROR
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Run a read-only SQL query against this database
       tags:
       - database
   /projects/{projectId}/environments/{envId}/databases/{name}/restore:

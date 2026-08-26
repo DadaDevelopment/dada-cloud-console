@@ -451,6 +451,8 @@ func SetupRouterWithHandler(pool *pgxpool.Pool, cfg *config.Config) (*gin.Engine
 		api.GET("/projects/:projectId/environments/:envId/databases/:name/advisories", h.ListDatabaseAdvisories)
 		api.GET("/projects/:projectId/environments/:envId/databases/:name/activity", h.GetDatabaseActivity)
 		api.POST("/projects/:projectId/environments/:envId/databases/:name/activity/:pid/cancel", h.CancelDatabaseBackend)
+		api.POST("/projects/:projectId/environments/:envId/databases/:name/query", h.QueryDatabase)
+		api.POST("/projects/:projectId/environments/:envId/databases/:name/explain", h.ExplainDatabaseQuery)
 		api.POST("/projects/:projectId/environments/:envId/ingress", h.CreateIngress)
 
 		// Object Storage (S3Bucket XR)
