@@ -66,6 +66,7 @@ export const aiGatewayUsage: Messages = {
   "aiGateway.pool.disabled": { ru: "выключен", en: "disabled" },
   "aiGateway.pool.enabled": { ru: "в пуле", en: "in pool" },
   "aiGateway.pool.projectByok": { ru: "BYOK проекта", en: "project BYOK" },
+  "aiGateway.pool.legacyFallback": { ru: "legacy fallback", en: "legacy fallback" },
   "aiGateway.pool.projectScope": { ru: "проект: {project}", en: "project: {project}" },
   "aiGateway.pool.priority": { ru: "приоритет {priority}", en: "priority {priority}" },
   "aiGateway.pool.delete": { ru: "Удалить", en: "Delete" },

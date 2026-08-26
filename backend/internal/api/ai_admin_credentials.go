@@ -55,7 +55,7 @@ func (h *Handler) ListAdminAICredentials(c *gin.Context) {
 	}
 	rows, err := h.pool.Query(c.Request.Context(), `
 		SELECT id, provider, label, api_base, api_key_encrypted, enabled, priority, created_at, updated_at,
-		       status, unavailable_until
+		       status, unavailable_until, legacy_provider_credential_id IS NOT NULL
 		FROM ai_gateway_key_credentials WHERE gateway_key_id IS NULL AND deleted_at IS NULL
 		ORDER BY priority, created_at, id`)
 	if err != nil {
@@ -69,7 +69,8 @@ func (h *Handler) ListAdminAICredentials(c *gin.Context) {
 		var it aiKeyCredentialListItem
 		var base *string
 		var enc []byte
-		if err := rows.Scan(&it.ID, &it.Provider, &it.Label, &base, &enc, &it.Enabled, &it.Priority, &it.CreatedAt, &it.UpdatedAt, &it.Status, &it.UnavailableUntil); err != nil {
+		var importedLegacy bool
+		if err := rows.Scan(&it.ID, &it.Provider, &it.Label, &base, &enc, &it.Enabled, &it.Priority, &it.CreatedAt, &it.UpdatedAt, &it.Status, &it.UnavailableUntil, &importedLegacy); err != nil {
 			respondError(c, 500, "failed to scan credential")
 			return
 		}
@@ -83,10 +84,13 @@ func (h *Handler) ListAdminAICredentials(c *gin.Context) {
 			it.APIBase = *base
 		}
 		it.Source = "pool"
+		if importedLegacy {
+			it.Source = "legacy_import"
+		}
 		it.Scope = "platform"
 		it.Editable = true
 		out = append(out, it)
-		if it.Enabled {
+		if it.Enabled && !importedLegacy {
 			var modelCount int
 			if err := h.pool.QueryRow(c.Request.Context(), `SELECT count(*) FROM ai_gateway_key_credential_models WHERE credential_id=$1`, it.ID).Scan(&modelCount); err == nil && modelCount == 0 {
 				discoveries = append(discoveries, createdCredentialDiscovery{ID: it.ID, Provider: it.Provider, APIBase: it.APIBase, APIKey: string(plain)})

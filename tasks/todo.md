@@ -836,3 +836,4 @@ web OAuth client lacks the local callback used by `seo-google`. See
 - Production rehearsal импортирует 1 platform credential и показывает 13 записей суммарно; транзакция откатана.
 - Полные секреты не возвращаются: API использует существующий first-4/last-4 `key_hint`; regression на public JSON зелёный.
 - 12 project-scoped BYOK не повышаются до global scope и не получают кнопок редактирования в platform pool UI.
+- Импортированный platform credential виден с типом `legacy fallback`, но не активирует новый model-aware pool автоматически; включение в UI является явным cutover.
