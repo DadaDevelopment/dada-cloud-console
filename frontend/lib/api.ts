@@ -11,6 +11,9 @@ import type {
   Operation,
   DatabasesResponse,
   CreateDatabaseResponse,
+  CachesResponse,
+  CreateCacheResponse,
+  CacheCredentialsResponse,
   DBBackup,
   DBBackupsResponse,
   DBBackupDownloadResponse,
@@ -604,6 +607,29 @@ export const databasesApi = {
   advisories: (projectId: string, envId: string, name: string) =>
     apiFetch<DatabaseAdvisoriesResponse>(
       `/api/v1/projects/${projectId}/environments/${envId}/databases/${name}/advisories`
+    ),
+};
+
+export const cachesApi = {
+  list: (projectId: string, envId: string) =>
+    apiFetch<CachesResponse>(`/api/v1/projects/${projectId}/environments/${envId}/caches`),
+
+  create: (projectId: string, envId: string, data: {
+    name: string; app_ref: string; key_prefix: string; profile: string;
+  }) =>
+    apiFetch<CreateCacheResponse>(`/api/v1/projects/${projectId}/environments/${envId}/caches`, {
+      method: "POST", body: data,
+    }),
+
+  remove: (projectId: string, envId: string, name: string) =>
+    apiFetch<OperationResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/caches/${name}`,
+      { method: "DELETE" }
+    ),
+
+  credentials: (projectId: string, envId: string, name: string) =>
+    apiFetch<CacheCredentialsResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/caches/${name}/credentials?reveal=true`
     ),
 };
 

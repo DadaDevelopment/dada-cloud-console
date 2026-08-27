@@ -100,6 +100,13 @@ type Handler struct {
 	// Resolve fails with a clear "not configured" error.
 	dbcreds cloudtask.DBCredentialsResolver
 
+	// rediscreds reveals a managed Redis cache user's connection credentials by
+	// reading its Crossplane connection secret ("<appRef>-<name>-redis-credentials"
+	// in the app namespace) on demand. Never nil: off-cluster it returns a
+	// resolver whose Resolve fails with a clear "not configured" error.
+	// Mirrors dbcreds exactly.
+	rediscreds cloudtask.RedisCredentialsResolver
+
 	// kanister drives per-database backup/restore via Kanister ActionSets. Never
 	// nil: off-cluster it is disabled (Enabled() == false) and every create fails
 	// with a clear "not configured" error.
@@ -312,6 +319,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	h.counters = cloudtask.NewCounterResolver()
 	h.s3creds = cloudtask.NewS3CredentialsResolver(cfg.CrossplaneSecretNamespace)
 	h.dbcreds = cloudtask.NewDBCredentialsResolver()
+	h.rediscreds = cloudtask.NewRedisCredentialsResolver()
 	h.kanister = cloudtask.NewKanisterClient()
 	h.dbBackupPresigner = cloudtask.NewDBBackupPresigner(
 		cfg.DBBackupS3Endpoint, cfg.DBBackupS3Bucket, cfg.DBBackupS3Region,

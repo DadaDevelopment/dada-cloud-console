@@ -191,6 +191,7 @@ type overviewProjects struct {
 	Total     int          `json:"total"`
 	Apps      overviewApps `json:"apps"`
 	Databases int          `json:"databases"`
+	Caches    int          `json:"caches"`
 }
 
 type overviewBuilds struct {
@@ -575,6 +576,13 @@ func (h *Handler) overviewProjects(ctx context.Context) (overviewProjects, error
 		SELECT count(*) FROM resource_snapshots
 		WHERE kind IN ('ServiceDatabase', 'ServiceDatabaseV2')`,
 	).Scan(&out.Databases); err != nil {
+		return out, err
+	}
+
+	if err := h.pool.QueryRow(ctx, `
+		SELECT count(*) FROM resource_snapshots
+		WHERE kind = 'ServiceCacheV2'`,
+	).Scan(&out.Caches); err != nil {
 		return out, err
 	}
 

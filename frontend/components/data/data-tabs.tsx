@@ -8,11 +8,12 @@ import { useT } from "@/lib/i18n/console/context";
  * page itself. Links rather than a Radix Tabs root: each tab is a real route
  * with its own data fetching, and a client-side tab would strand deep links.
  */
-export function DataTabs({ projectId, active }: { projectId: string; active: "databases" | "storage" }) {
+export function DataTabs({ projectId, active }: { projectId: string; active: "databases" | "storage" | "redis" }) {
   const { t } = useT();
-  const tabs: Array<{ key: "databases" | "storage"; href: string }> = [
+  const tabs: Array<{ key: "databases" | "storage" | "redis"; href: string }> = [
     { key: "databases", href: `/projects/${projectId}/databases` },
     { key: "storage", href: `/projects/${projectId}/storage` },
+    { key: "redis", href: `/projects/${projectId}/redis` },
   ];
   return (
     <div className="mt-3 inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 p-1 dark:border-gray-800 dark:bg-gray-900">

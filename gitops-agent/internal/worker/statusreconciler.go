@@ -243,6 +243,7 @@ func (r *StatusReconciler) tick(ctx context.Context) {
 	owners := r.snapshotEnvOwners(ctx)
 	r.reconcileModels(ctx, owners)
 	r.reconcileDatabases(ctx, owners)
+	r.reconcileServiceCaches(ctx, owners)
 	r.reconcilePublicApis(ctx, owners)
 	r.reconcileS3Buckets(ctx, owners)
 	if r.cfg.OrphanGCEnabled {
@@ -527,6 +528,60 @@ func (r *StatusReconciler) reconcileDatabases(ctx context.Context, owners map[uu
 	}
 	if updated > 0 {
 		log.Debug().Int("updated", updated).Msg("status-reconciler: synced database statuses")
+	}
+}
+
+// reconcileServiceCaches mirrors reconcileDatabases for ServiceCacheV2 --
+// the Redis ACL user analogue of a ServiceDatabaseV2 role. There is no
+// shard/tier concept to carry back (see servicecache-composition.yaml:
+// capability is fixed at create time by profile, not adjusted live), so
+// this only syncs phase + provision error, matching reconcileS3Buckets'
+// shape more than reconcileDatabases'.
+func (r *StatusReconciler) reconcileServiceCaches(ctx context.Context, owners map[uuid.UUID]envOwner) {
+	cacheEnvs, err := db.SnapshotEnvsByKind(ctx, r.pool, "ServiceCacheV2")
+	if err != nil {
+		log.Error().Err(err).Msg("status-reconciler: list servicecache envs")
+		return
+	}
+	if len(cacheEnvs) == 0 {
+		return
+	}
+
+	list, err := r.clients.Dynamic.Resource(pgvr("servicecachesv2")).Namespace("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Warn().Err(err).Msg("status-reconciler: list servicecachesv2")
+		return
+	}
+
+	updated := 0
+	for i := range list.Items {
+		cr := &list.Items[i]
+		name := cr.GetName()
+		envID, ok := r.resolveSnapshotEnv("ServiceCacheV2", name, cacheEnvs[name], cr.GetLabels(), owners)
+		if !ok {
+			continue
+		}
+		phase := crPhase(cr)
+		msg, reason, _ := crProvisionError(cr)
+		fields := map[string]any{
+			"status":                 phase,
+			"conditions":             crConditions(cr),
+			"live_source":            "crossplane",
+			"live_at":                time.Now().UTC().Format(time.RFC3339),
+			"provision_error":        msg,
+			"provision_error_reason": reason,
+			"console_managed":        crConsoleManaged(cr),
+		}
+		patch, _ := json.Marshal(fields)
+		n, err := db.UpdateLiveStatus(ctx, r.pool, envID, "ServiceCacheV2", name, phase, patch)
+		if err != nil {
+			log.Error().Err(err).Str("cache", name).Msg("status-reconciler: update servicecache")
+			continue
+		}
+		updated += int(n)
+	}
+	if updated > 0 {
+		log.Debug().Int("updated", updated).Msg("status-reconciler: synced servicecache statuses")
 	}
 }
 

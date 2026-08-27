@@ -53,6 +53,7 @@ const (
 
 	impactGroupDomain      = "domain"
 	impactGroupDatabase    = "database"
+	impactGroupCache       = "cache"
 	impactGroupStorage     = "storage"
 	impactGroupIngress     = "ingress"
 	impactGroupCertificate = "certificate"
@@ -70,6 +71,7 @@ var (
 	publicApiGVR         = platformGVR("publicapis")
 	serviceDatabaseV2GVR = platformGVR("servicedatabasesv2")
 	s3BucketGVR          = platformGVR("s3buckets")
+	serviceCacheV2GVR    = platformGVR("servicecachesv2")
 )
 
 // clusterScanTarget declares one live GVR to scan for app-owned resources, and
@@ -84,6 +86,7 @@ var clusterScanTargets = []clusterScanTarget{
 	{ingressGVR, "Ingress", impactGroupIngress},
 	{publicApiGVR, "PublicApi", impactGroupDomain},
 	{serviceDatabaseV2GVR, "ServiceDatabaseV2", impactGroupDatabase},
+	{serviceCacheV2GVR, "ServiceCacheV2", impactGroupCache},
 	{s3BucketGVR, "S3Bucket", impactGroupStorage},
 	{certificateGVR, "Certificate", impactGroupCertificate},
 	{pvcGVR, "PersistentVolumeClaim", impactGroupStorage},
@@ -97,6 +100,8 @@ func snapshotGroup(kind string) string {
 		return impactGroupDomain
 	case "ServiceDatabaseV2":
 		return impactGroupDatabase
+	case "ServiceCacheV2":
+		return impactGroupCache
 	case "S3Bucket":
 		return impactGroupStorage
 	default:

@@ -119,6 +119,33 @@ type DeleteS3BucketPayload struct {
 	AppRef string `json:"app_ref,omitempty"`
 }
 
+// CreateServiceCachePayload is the typed payload for CreateServiceCache
+// operations: provisions a single, scoped Redis ACL user (ServiceCacheV2)
+// on a shared managed-Redis instance. Mirrors CreateServiceDatabasePayload's
+// shape; unlike Postgres, Redis ACL has no single "grant the whole engine"
+// concept, so Profile selects one of provider-redis's named capability
+// profiles (see docs/capability-profiles-addendum.md) instead of an
+// implicit "give me a database".
+//
+// AppRef is required (unlike ServiceDatabaseV2's optional appRef): a cache
+// user with no owning app has no chart to live in and no natural
+// credentials-secret consumer, so the console does not offer a standalone
+// cache the way it offers a standalone database.
+type CreateServiceCachePayload struct {
+	Name      string `json:"name"`
+	AppRef    string `json:"app_ref"`
+	KeyPrefix string `json:"key_prefix"`
+	Profile   string `json:"profile"`
+	Shard     string `json:"shard,omitempty"`
+}
+
+// DeleteServiceCachePayload is the typed payload for DeleteServiceCache
+// operations. AppRef names the app whose chart carries the User CR.
+type DeleteServiceCachePayload struct {
+	Name   string `json:"name"`
+	AppRef string `json:"app_ref"`
+}
+
 // AppVolume describes a persistent data directory for a Helm (Kubernetes) app.
 // It maps directly to the workload chart's common.pvc block: a ReadWriteMany
 // PersistentVolumeClaim of Size mounted at Path on every replica. RWX is the

@@ -455,6 +455,14 @@ func SetupRouterWithHandler(pool *pgxpool.Pool, cfg *config.Config) (*gin.Engine
 		api.POST("/projects/:projectId/environments/:envId/databases/:name/explain", h.ExplainDatabaseQuery)
 		api.POST("/projects/:projectId/environments/:envId/ingress", h.CreateIngress)
 
+		// Managed Redis cache users (ServiceCacheV2 CRD) -- 1:1 mirror of
+		// the Databases block above, minus the backup/table/query
+		// sub-resources Postgres has and Redis ACL users do not.
+		api.GET("/projects/:projectId/environments/:envId/caches", h.ListServiceCaches)
+		api.POST("/projects/:projectId/environments/:envId/caches", h.CreateServiceCache)
+		api.DELETE("/projects/:projectId/environments/:envId/caches/:name", h.DeleteServiceCache)
+		api.GET("/projects/:projectId/environments/:envId/caches/:name/credentials", h.GetServiceCacheCredentials)
+
 		// Object Storage (S3Bucket XR)
 		api.GET("/projects/:projectId/environments/:envId/s3buckets", h.ListS3Buckets)
 		api.POST("/projects/:projectId/environments/:envId/s3buckets", h.CreateS3Bucket)

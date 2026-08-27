@@ -66,6 +66,8 @@ export const CONSOLE_ROUTES: readonly string[] = [
   "/projects/[projectId]/databases",
   "/projects/[projectId]/databases/[name]",
   "/projects/[projectId]/databases/[name]/tables/[table]",
+  "/projects/[projectId]/redis",
+  "/projects/[projectId]/redis/[name]",
   "/projects/[projectId]/domains",
   "/projects/[projectId]/git",
   "/projects/[projectId]/git/import",

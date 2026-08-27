@@ -104,6 +104,67 @@ func ServiceDatabaseResourcesValuesGitPath(projectSlug, envSlug, appRef string) 
 	return AppResourcesValuesGitPath(projectSlug, envSlug, ServiceDatabaseOwnerApp(appRef, projectSlug))
 }
 
+// ServiceCacheSpec holds parameters for a ServiceCacheV2 manifest -- the
+// Redis analogue of ServiceDatabaseSpec. Unlike a database, a cache user has
+// no independent identity a caller connects "to the engine" for: it is
+// always one scoped capability (Profile) bound to one owning app (AppRef is
+// required, not optional like ServiceDatabaseSpec's).
+//
+// Shard mirrors ServiceDatabaseSpec.Shard exactly: the Redis instance this
+// user lives on, selecting the provider-redis ProviderConfig used for the
+// User object. Empty omits the field so the XRD default (shard-0, the only
+// instance today) applies.
+type ServiceCacheSpec struct {
+	Name        string
+	Namespace   string
+	ProjectSlug string
+	EnvSlug     string
+	AppRef      string
+	KeyPrefix   string
+	Profile     string
+	Shard       string
+	OperationID string
+}
+
+var serviceCacheTmpl = template.Must(template.New("servicecache").Parse(`apiVersion: platform.dada-tuda.ru/v1alpha1
+kind: ServiceCacheV2
+metadata:
+  name: {{ .Name }}
+  labels:
+    dada.io/project: {{ .ProjectSlug }}
+    dada.io/environment: {{ .EnvSlug }}
+    dada.io/operation: {{ .OperationID }}
+spec:
+  appRef: {{ .AppRef }}
+  namespace: {{ .Namespace }}
+  keyPrefix: {{ .KeyPrefix }}
+  profile: {{ .Profile }}
+{{- if .Shard }}
+  shard: {{ .Shard }}
+{{- end }}
+`))
+
+// RenderServiceCache renders a ServiceCacheV2 manifest. Mirrors
+// RenderServiceDatabase.
+func RenderServiceCache(spec ServiceCacheSpec) (string, error) {
+	var buf bytes.Buffer
+	if err := serviceCacheTmpl.Execute(&buf, spec); err != nil {
+		return "", fmt.Errorf("rendering ServiceCache: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// ServiceCacheResourcesValuesGitPath returns the resources.values.yaml of the
+// app that owns a cache user's CR. Unlike ServiceDatabaseResourcesValuesGitPath,
+// AppRef is never empty here (ServiceCacheV2 has no standalone owner app --
+// see ServiceCacheSpec's doc), so this is a thin AppRef-only wrapper kept as
+// its own function for the same reason ServiceDatabaseResourcesValuesGitPath
+// is: callers should never have to know the underlying values-file layout
+// convention themselves.
+func ServiceCacheResourcesValuesGitPath(projectSlug, envSlug, appRef string) string {
+	return AppResourcesValuesGitPath(projectSlug, envSlug, appRef)
+}
+
 // SecretRefEnvVar is one environment variable sourced from a foreign k8s
 // Secret: Name is the variable as the container sees it, SecretName/SecretKey
 // name the Secret and the key inside it.

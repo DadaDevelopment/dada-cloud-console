@@ -375,6 +375,33 @@ export interface DatabaseCredentialsResponse {
   external_dsn?: string;
 }
 
+export interface CachesResponse {
+  caches: ResourceSnapshot[];
+}
+
+export interface CreateCacheResponse {
+  operation: Operation;
+  message: string;
+}
+
+export interface CacheCredentialsResponse {
+  host: string;
+  port: string;
+  username: string;
+  password: string;
+  dsn?: string;
+}
+
+/** Capability profiles ServiceCacheV2 accepts (see backend's serviceCacheProfiles). */
+export type CacheProfile =
+  | "redis-kv-readonly"
+  | "redis-kv-readwrite"
+  | "redis-stream-producer"
+  | "redis-stream-consumer"
+  | "redis-stream-admin"
+  | "redis-list-producer"
+  | "redis-list-consumer";
+
 export interface DatabaseInsights {
   collectedAt: string | null;
   stale?: boolean;

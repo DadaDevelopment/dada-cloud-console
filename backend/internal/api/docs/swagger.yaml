@@ -963,6 +963,17 @@ definitions:
       region:
         type: string
     type: object
+  api.createServiceCacheRequest:
+    properties:
+      app_ref:
+        type: string
+      key_prefix:
+        type: string
+      name:
+        type: string
+      profile:
+        type: string
+    type: object
   api.createServiceDatabaseRequest:
     properties:
       app_ref:
@@ -12297,6 +12308,228 @@ paths:
       summary: Get an app's persistent volume usage
       tags:
       - app
+  /projects/{projectId}/environments/{envId}/caches:
+    get:
+      description: Returns all managed Redis ACL users (ServiceCacheV2) in the given
+        project environment, with their live phase/status.
+      operationId: listServiceCaches
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with a caches array of ResourceSnapshot
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List managed Redis cache users in an environment
+      tags:
+      - cache
+    post:
+      consumes:
+      - application/json
+      description: 'Provisions a scoped Redis ACL user (ServiceCacheV2) on the shared
+        managed-Redis instance, bound to app_ref. Asynchronous: returns 202 with an
+        operation; poll the operation until it reaches a terminal status.'
+      operationId: createServiceCache
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Cache user specification
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.createServiceCacheRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Order a managed Redis cache user
+      tags:
+      - cache
+  /projects/{projectId}/environments/{envId}/caches/{name}:
+    delete:
+      description: 'Destructive: permanently removes a managed Redis ACL user (ServiceCacheV2).
+        The agent drops the CR entry from git and Argo prunes it. Asynchronous: returns
+        202 with an operation; poll the operation until terminal.'
+      operationId: deleteServiceCache
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Cache resource name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a managed Redis cache user
+      tags:
+      - cache
+  /projects/{projectId}/environments/{envId}/caches/{name}/credentials:
+    get:
+      description: Reveals the host, port, username and password for a managed Redis
+        ACL user (ServiceCacheV2) by reading its Crossplane connection secret. Requires
+        reveal=true and write access; every reveal is audited. Returns 404 while the
+        cache user is still provisioning (no secret yet) and 503 when in-cluster credential
+        access is not configured.
+      operationId: getServiceCacheCredentials
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Cache resource name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Must be true to reveal the credentials
+        in: query
+        name: reveal
+        required: true
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with host, port, username, password and a ready-to-paste
+            dsn
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Reveal a Redis cache user's connection credentials
+      tags:
+      - cache
   /projects/{projectId}/environments/{envId}/databases:
     get:
       description: Returns all managed PostgreSQL (ServiceDatabaseV2) resources in

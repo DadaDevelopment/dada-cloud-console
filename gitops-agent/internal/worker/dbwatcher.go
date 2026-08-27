@@ -247,6 +247,7 @@ func (w *DBWatcher) poll(ctx context.Context) {
 // fails terminally can have that Pending row removed.
 var optimisticSnapshotKindByAction = map[string]string{
 	"CreateServiceDatabase": "ServiceDatabaseV2",
+	"CreateServiceCache":    "ServiceCacheV2",
 	"CreateApp":             "App",
 	"CreatePublicApi":       "PublicApi",
 	"CreateS3Bucket":        "S3Bucket",
@@ -274,6 +275,10 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 		return w.doCreateServiceDatabase(ctx, op)
 	case "DeleteServiceDatabase":
 		return w.doDeleteServiceDatabase(ctx, op)
+	case "CreateServiceCache":
+		return w.doCreateServiceCache(ctx, op)
+	case "DeleteServiceCache":
+		return w.doDeleteServiceCache(ctx, op)
 	case "SetDatabaseEnforcement":
 		return w.doSetDatabaseEnforcement(ctx, op)
 	case "SetDatabaseShard":
@@ -1007,6 +1012,152 @@ func (w *DBWatcher) doDeleteServiceDatabase(ctx context.Context, op db.Operation
 	_, _ = w.pool.Exec(ctx,
 		`DELETE FROM resource_snapshots
 		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'ServiceDatabaseV2' AND name = $3`,
+		op.ProjectID, op.EnvironmentID, p.Name,
+	)
+	return nil
+}
+
+func (w *DBWatcher) doCreateServiceCache(ctx context.Context, op db.Operation) error {
+	var p struct {
+		Name      string `json:"name"`
+		AppRef    string `json:"app_ref"`
+		KeyPrefix string `json:"key_prefix"`
+		Profile   string `json:"profile"`
+		Shard     string `json:"shard"`
+	}
+	if err := json.Unmarshal(op.Payload, &p); err != nil {
+		return fmt.Errorf("parse payload: %w", err)
+	}
+	if p.AppRef == "" {
+		return fmt.Errorf("create service cache: app_ref is required")
+	}
+
+	projectName, envName, envNamespace, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
+	if err != nil {
+		return fmt.Errorf("project/env lookup: %w", err)
+	}
+
+	yaml, err := renderer.RenderServiceCache(renderer.ServiceCacheSpec{
+		Name:        p.Name,
+		Namespace:   envNamespace,
+		ProjectSlug: projectName,
+		EnvSlug:     envName,
+		AppRef:      p.AppRef,
+		KeyPrefix:   p.KeyPrefix,
+		Profile:     p.Profile,
+		Shard:       p.Shard,
+		OperationID: op.ID.String(),
+	})
+	if err != nil {
+		return err
+	}
+
+	mgr, err := w.managerFor(ctx, op.ProjectID)
+	if err != nil {
+		return err
+	}
+
+	// Owner app: always the bound app (app_ref is required for ServiceCacheV2 --
+	// there is no standalone "service-caches-<project>" carrier, unlike
+	// ServiceDatabaseV2, because a cache user with no owning app has no
+	// natural credentials-secret consumer).
+	appFiles, err := w.ensureAppExists(mgr, projectName, envName, p.AppRef, envNamespace, op.ID.String())
+	if err != nil {
+		return err
+	}
+	valuesPath := renderer.ServiceCacheResourcesValuesGitPath(projectName, envName, p.AppRef)
+	manifestFile, err := upsertManifestFile(mgr, valuesPath, yaml)
+	if err != nil {
+		return err
+	}
+	files := append(appFiles, manifestFile)
+
+	commitMsg := fmt.Sprintf(
+		"[DADA Console] Create ServiceCacheV2 %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
+		p.Name, op.ID, projectName, envName,
+	)
+	if err := w.commitFilesAndRecord(ctx, op, mgr, valuesPath, files, commitMsg); err != nil {
+		return err
+	}
+
+	// Upsert snapshot immediately so the cache user appears in the console UI
+	// without waiting for the next gitwatcher poll cycle. Mirrors
+	// doCreateServiceDatabase.
+	summaryJSON, _ := json.Marshal(map[string]any{
+		"name": p.Name,
+		"kind": "ServiceCacheV2",
+		"spec": map[string]any{
+			"appRef":    p.AppRef,
+			"namespace": envNamespace,
+			"keyPrefix": p.KeyPrefix,
+			"profile":   p.Profile,
+			"shard":     p.Shard,
+		},
+	})
+	return db.UpsertSnapshot(ctx, w.pool,
+		op.ProjectID, op.EnvironmentID,
+		"ServiceCacheV2", p.Name, "Pending", summaryJSON, time.Now(),
+	)
+}
+
+// doDeleteServiceCache removes a managed ServiceCacheV2 CR entry from its
+// owner app's resources.values.yaml and drops the snapshot; Argo prunes the
+// CR once it leaves git. Mirrors doDeleteServiceDatabase, minus the
+// standalone-owner-app teardown branch: ServiceCacheV2 always has an owner
+// app, so removing its CR never empties out a carrier chart the way an
+// env-level database's removal can.
+func (w *DBWatcher) doDeleteServiceCache(ctx context.Context, op db.Operation) error {
+	var p struct {
+		Name   string `json:"name"`
+		AppRef string `json:"app_ref"`
+	}
+	if err := json.Unmarshal(op.Payload, &p); err != nil {
+		return fmt.Errorf("parse payload: %w", err)
+	}
+	if p.Name == "" {
+		return fmt.Errorf("delete service cache: name is required")
+	}
+	if p.AppRef == "" {
+		return fmt.Errorf("delete service cache: app_ref is required")
+	}
+	projectName, envName, _, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
+	if err != nil {
+		return fmt.Errorf("project/env lookup: %w", err)
+	}
+	mgr, err := w.managerFor(ctx, op.ProjectID)
+	if err != nil {
+		return err
+	}
+	if err := mgr.EnsureCloned(); err != nil {
+		return err
+	}
+	valuesPath := renderer.ServiceCacheResourcesValuesGitPath(projectName, envName, p.AppRef)
+	manifestFile, changed, err := removeManifestsFile(mgr, valuesPath, [][2]string{
+		{"ServiceCacheV2", p.Name},
+	})
+	if err != nil {
+		return fmt.Errorf("remove manifests: %w", err)
+	}
+	commitMsg := fmt.Sprintf(
+		"[DADA Console] Delete ServiceCacheV2 %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
+		p.Name, op.ID, projectName, envName,
+	)
+	var sha string
+	if changed {
+		sha, err = mgr.CommitFilesAndPush([]git.FileChange{manifestFile}, commitMsg, w.cfg.BotName, w.cfg.BotEmail)
+		if err != nil {
+			return fmt.Errorf("git push (remove manifests): %w", err)
+		}
+		opID := op.ID
+		_ = db.InsertCommit(ctx, w.pool, sha, mgr.RepoURL(), mgr.Branch(),
+			valuesPath, commitMsg, w.cfg.BotName, w.cfg.BotEmail, &opID, "agent")
+	}
+	if err := db.MarkCommitted(ctx, w.pool, op.ID, sha, valuesPath); err != nil {
+		return err
+	}
+	_, _ = w.pool.Exec(ctx,
+		`DELETE FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'ServiceCacheV2' AND name = $3`,
 		op.ProjectID, op.EnvironmentID, p.Name,
 	)
 	return nil

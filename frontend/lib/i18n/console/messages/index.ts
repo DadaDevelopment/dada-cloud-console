@@ -5,6 +5,7 @@ import { roles } from "./roles";
 import { projects } from "./projects";
 import { overview } from "./overview";
 import { databases } from "./databases";
+import { caches } from "./caches";
 import { apps } from "./apps";
 import { files } from "./files";
 import { operations } from "./operations";
@@ -57,6 +58,7 @@ export const messages: Messages = {
   ...projects,
   ...overview,
   ...databases,
+  ...caches,
   ...apps,
   ...files,
   ...operations,
