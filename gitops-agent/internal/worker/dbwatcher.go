@@ -1028,9 +1028,6 @@ func (w *DBWatcher) doCreateServiceCache(ctx context.Context, op db.Operation) e
 	if err := json.Unmarshal(op.Payload, &p); err != nil {
 		return fmt.Errorf("parse payload: %w", err)
 	}
-	if p.AppRef == "" {
-		return fmt.Errorf("create service cache: app_ref is required")
-	}
 
 	projectName, envName, envNamespace, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
 	if err != nil {
@@ -1057,11 +1054,12 @@ func (w *DBWatcher) doCreateServiceCache(ctx context.Context, op db.Operation) e
 		return err
 	}
 
-	// Owner app: always the bound app (app_ref is required for ServiceCacheV2 --
-	// there is no standalone "service-caches-<project>" carrier, unlike
-	// ServiceDatabaseV2, because a cache user with no owning app has no
-	// natural credentials-secret consumer).
-	appFiles, err := w.ensureAppExists(mgr, projectName, envName, p.AppRef, envNamespace, op.ID.String())
+	// Owner app: the bound app (app_ref) or — when standalone — the shared
+	// per-project "service-caches-<project>" chart. Mirrors
+	// doCreateServiceDatabase exactly.
+	ownerApp := renderer.ServiceCacheOwnerApp(p.AppRef, projectName)
+
+	appFiles, err := w.ensureAppExists(mgr, projectName, envName, ownerApp, envNamespace, op.ID.String())
 	if err != nil {
 		return err
 	}
@@ -1102,10 +1100,11 @@ func (w *DBWatcher) doCreateServiceCache(ctx context.Context, op db.Operation) e
 
 // doDeleteServiceCache removes a managed ServiceCacheV2 CR entry from its
 // owner app's resources.values.yaml and drops the snapshot; Argo prunes the
-// CR once it leaves git. Mirrors doDeleteServiceDatabase, minus the
-// standalone-owner-app teardown branch: ServiceCacheV2 always has an owner
-// app, so removing its CR never empties out a carrier chart the way an
-// env-level database's removal can.
+// CR once it leaves git. Mirrors doDeleteServiceDatabase exactly, including
+// the standalone-owner-app teardown branch: a standalone cache user (no
+// app_ref) can now be the last resource in "service-caches-<project>", the
+// same way a standalone database can be the last one in
+// "service-databases-<project>".
 func (w *DBWatcher) doDeleteServiceCache(ctx context.Context, op db.Operation) error {
 	var p struct {
 		Name   string `json:"name"`
@@ -1116,9 +1115,6 @@ func (w *DBWatcher) doDeleteServiceCache(ctx context.Context, op db.Operation) e
 	}
 	if p.Name == "" {
 		return fmt.Errorf("delete service cache: name is required")
-	}
-	if p.AppRef == "" {
-		return fmt.Errorf("delete service cache: app_ref is required")
 	}
 	projectName, envName, _, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
 	if err != nil {
@@ -1144,7 +1140,21 @@ func (w *DBWatcher) doDeleteServiceCache(ctx context.Context, op db.Operation) e
 	)
 	var sha string
 	if changed {
-		sha, err = mgr.CommitFilesAndPush([]git.FileChange{manifestFile}, commitMsg, w.cfg.BotName, w.cfg.BotEmail)
+		lastOne := false
+		if p.AppRef == "" {
+			lastOne, err = manifestsFileIsEmpty(manifestFile)
+			if err != nil {
+				return err
+			}
+		}
+		if lastOne {
+			ownerApp := renderer.ServiceCacheOwnerApp(p.AppRef, projectName)
+			sha, err = mgr.RemoveAndPush(
+				standaloneOwnerAppPaths(projectName, envName, ownerApp),
+				commitMsg, w.cfg.BotName, w.cfg.BotEmail)
+		} else {
+			sha, err = mgr.CommitFilesAndPush([]git.FileChange{manifestFile}, commitMsg, w.cfg.BotName, w.cfg.BotEmail)
+		}
 		if err != nil {
 			return fmt.Errorf("git push (remove manifests): %w", err)
 		}

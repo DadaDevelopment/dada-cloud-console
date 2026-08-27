@@ -23,8 +23,12 @@ import (
 // mirroring the enum in argo-infra's servicecache-xrd.yaml exactly -- kept
 // in sync by hand since the console has no live schema introspection of the
 // XRD. See provider-redis's docs/capability-profiles-addendum.md for what
-// each one grants.
+// each one grants. redis-full-access is the default: everything except
+// server/cluster administration, confined to the user's key prefix -- the
+// Redis analogue of "your own Postgres database". Narrower profiles are for
+// callers who explicitly want to hand a workload less than that.
 var serviceCacheProfiles = map[string]bool{
+	"redis-full-access":     true,
 	"redis-kv-readonly":     true,
 	"redis-kv-readwrite":    true,
 	"redis-stream-producer": true,
@@ -33,6 +37,8 @@ var serviceCacheProfiles = map[string]bool{
 	"redis-list-producer":   true,
 	"redis-list-consumer":   true,
 }
+
+const defaultServiceCacheProfile = "redis-full-access"
 
 // ListServiceCaches returns all ServiceCacheV2 resources in a project environment.
 //
@@ -197,23 +203,32 @@ func (h *Handler) CreateServiceCache(c *gin.Context) {
 		rejectErr(http.StatusBadRequest, "invalid_name", err.Error())
 		return
 	}
-	// app_ref is required (unlike ServiceDatabaseV2's optional appRef): a cache
-	// user has no standalone owner chart, see models.CreateServiceCachePayload.
-	if req.AppRef == "" {
-		rejectErr(http.StatusBadRequest, "app_ref_required", "app_ref is required")
-		return
+	// app_ref is optional, exactly like ServiceDatabaseV2's: empty resolves
+	// to the environment's sole App (resolveSoleAppRef) if there is exactly
+	// one, otherwise stays empty and the cache user is created standalone
+	// (renderer.ServiceCacheOwnerApp then owns it under the shared
+	// "service-caches-<project>" chart). A vibe-coder should never be
+	// required to name an app just to get a Redis credential.
+	if req.AppRef != "" {
+		if err := validateKubeName(req.AppRef); err != nil {
+			rejectErr(http.StatusBadRequest, "invalid_app_ref", "app_ref must be a bare app name (lowercase alphanumeric with hyphens, max 63 chars): "+err.Error())
+			return
+		}
 	}
-	if err := validateKubeName(req.AppRef); err != nil {
-		rejectErr(http.StatusBadRequest, "invalid_app_ref", "app_ref must be a bare app name (lowercase alphanumeric with hyphens, max 63 chars): "+err.Error())
-		return
-	}
+	// key_prefix is optional: defaults to req.Name, which is already a
+	// valid k8s name and therefore already a valid key prefix (see
+	// validateKeyPrefix's character class). Most callers should never have
+	// to think about it -- it exists to let one app scope several cache
+	// users to non-overlapping key spaces, an advanced case.
 	if req.KeyPrefix == "" {
-		rejectErr(http.StatusBadRequest, "key_prefix_required", "key_prefix is required")
-		return
+		req.KeyPrefix = req.Name
 	}
 	if err := validateKeyPrefix(req.KeyPrefix); err != nil {
 		rejectErr(http.StatusBadRequest, "invalid_key_prefix", err.Error())
 		return
+	}
+	if req.Profile == "" {
+		req.Profile = defaultServiceCacheProfile
 	}
 	if !serviceCacheProfiles[req.Profile] {
 		rejectErr(http.StatusBadRequest, "invalid_profile",
@@ -237,9 +252,30 @@ func (h *Handler) CreateServiceCache(c *gin.Context) {
 
 	shard := h.placeTenantCacheShard(c.Request.Context())
 
+	// Auto-bind to the environment's sole App the same way createManagedDatabase
+	// does: the console has no app picker on the create-cache form, so every
+	// cache user is ordered with app_ref="" unless the caller set it. Any
+	// other app count (zero, or two-plus) is ambiguous and left unresolved,
+	// same as Postgres -- appRef stays "" (NOT req.Name) and flows through
+	// as "" all the way to dbwatcher.doCreateServiceCache, whose
+	// renderer.ServiceCacheOwnerApp("", projectName) reads "" as "put this
+	// under the shared service-caches-<project> chart", exactly the signal
+	// ServiceDatabaseOwnerApp uses for a standalone database. The live XR's
+	// own spec.appRef self-fills to the resource's name at render time
+	// (renderer.RenderServiceCache) -- a DIFFERENT, later step from this
+	// one, and conflating the two here would misdirect ensureAppExists into
+	// creating a whole new App resource per standalone cache user instead of
+	// reusing the one shared carrier chart.
+	appRef := req.AppRef
+	if appRef == "" {
+		if resolved, rerr := h.resolveSoleAppRef(c.Request.Context(), projectID, envID); rerr == nil {
+			appRef = resolved
+		}
+	}
+
 	payload := models.CreateServiceCachePayload{
 		Name:      req.Name,
-		AppRef:    req.AppRef,
+		AppRef:    appRef,
 		KeyPrefix: req.KeyPrefix,
 		Profile:   req.Profile,
 		Shard:     shard,
@@ -275,7 +311,7 @@ func (h *Handler) CreateServiceCache(c *gin.Context) {
 		"name": req.Name,
 		"kind": "ServiceCacheV2",
 		"spec": map[string]any{
-			"appRef":    req.AppRef,
+			"appRef":    appRef,
 			"keyPrefix": req.KeyPrefix,
 			"profile":   req.Profile,
 			"shard":     shard,
@@ -291,7 +327,7 @@ func (h *Handler) CreateServiceCache(c *gin.Context) {
 	}
 
 	audit(op.ID, auditOutcomeSuccess, map[string]any{
-		"app_ref":    req.AppRef,
+		"app_ref":    appRef,
 		"key_prefix": req.KeyPrefix,
 		"profile":    req.Profile,
 		"shard":      shard,
@@ -509,9 +545,15 @@ func (h *Handler) GetServiceCacheCredentials(c *gin.Context) {
 	// (the Composition ties the secret name to both spec.appRef and the XR's
 	// own name, unlike ServiceDatabaseV2's "<appRef>-db-credentials" -- a
 	// single app can hold multiple cache users, one per capability profile,
-	// so appRef alone would collide).
+	// so appRef alone would collide). spec.appRef is never blank on a live
+	// XR (renderer.RenderServiceCache falls back to the resource's own name,
+	// mirroring RenderServiceDatabase), but fall back defensively here too,
+	// the same belt-and-suspenders GetDatabaseCredentials uses.
 	namespace := serviceCacheNamespace(summaryRaw)
 	appRef := serviceCacheAppRef(summaryRaw)
+	if appRef == "" {
+		appRef = name
+	}
 	secretName := fmt.Sprintf("%s-%s-redis-credentials", appRef, name)
 
 	creds, err := h.rediscreds.Resolve(c.Request.Context(), namespace, secretName)

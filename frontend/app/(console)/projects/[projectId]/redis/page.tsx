@@ -38,7 +38,10 @@ function generateCacheName(): string {
   return `cache-${suffix}`;
 }
 
+const DEFAULT_CACHE_PROFILE: CacheProfile = "redis-full-access";
+
 const CACHE_PROFILES: CacheProfile[] = [
+  "redis-full-access",
   "redis-kv-readonly",
   "redis-kv-readwrite",
   "redis-stream-producer",
@@ -69,8 +72,9 @@ export default function CachesPage() {
     name: generateCacheName(),
     app_ref: "",
     key_prefix: "",
-    profile: "redis-kv-readwrite",
+    profile: DEFAULT_CACHE_PROFILE,
   }));
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [apps, setApps] = useState<ResourceSnapshot[]>([]);
@@ -80,17 +84,11 @@ export default function CachesPage() {
     if (selectedEnvId) {
       appsApi
         .list(projectId, selectedEnvId)
-        .then((data) => {
-          const list = data.apps ?? [];
-          setApps(list);
-          if (list.length === 1) {
-            setForm((prev) => ({ ...prev, app_ref: list[0].name }));
-          }
-        })
+        .then((data) => setApps(data.apps ?? []))
         .catch(() => setApps([]));
     }
-    const name = generateCacheName();
-    setForm({ name, app_ref: "", key_prefix: name, profile: "redis-kv-readwrite" });
+    setForm({ name: generateCacheName(), app_ref: "", key_prefix: "", profile: DEFAULT_CACHE_PROFILE });
+    setShowAdvanced(false);
     setSubmitError(null);
     setIsModalOpen(true);
   }
@@ -271,54 +269,66 @@ export default function CachesPage() {
             />
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
-              {t("caches.modal.appRef.label")}
-            </label>
-            <select
-              required
-              value={form.app_ref}
-              onChange={(e) => handleFormChange("app_ref", e.target.value)}
-              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            >
-              <option value="" disabled>—</option>
-              {apps.map((app) => (
-                <option key={app.name} value={app.name}>
-                  {app.name}
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("caches.modal.appRef.required")}</p>
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((v) => !v)}
+            className="text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+          >
+            {showAdvanced ? t("caches.modal.advanced.hide") : t("caches.modal.advanced.show")}
+          </button>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
-              {t("caches.modal.keyPrefix.label")}
-            </label>
-            <input
-              type="text"
-              required
-              value={form.key_prefix}
-              onChange={(e) => handleFormChange("key_prefix", e.target.value)}
-              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 font-mono text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("caches.modal.keyPrefix.hint")}</p>
-          </div>
+          {showAdvanced && (
+            <div className="space-y-4 rounded-lg border border-gray-200 dark:border-gray-800 p-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
+                  {t("caches.modal.appRef.label")}
+                </label>
+                <select
+                  value={form.app_ref}
+                  onChange={(e) => handleFormChange("app_ref", e.target.value)}
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="">{t("caches.modal.appRef.auto")}</option>
+                  {apps.map((app) => (
+                    <option key={app.name} value={app.name}>
+                      {app.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("caches.modal.appRef.optionalHint")}</p>
+              </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
-              {t("caches.modal.profile.label")}
-            </label>
-            <select
-              value={form.profile}
-              onChange={(e) => handleFormChange("profile", e.target.value)}
-              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            >
-              {CACHE_PROFILES.map((p) => (
-                <option key={p} value={p}>{t(profileLabelKey(p))}</option>
-              ))}
-            </select>
-          </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
+                  {t("caches.modal.keyPrefix.label")}
+                </label>
+                <input
+                  type="text"
+                  value={form.key_prefix}
+                  onChange={(e) => handleFormChange("key_prefix", e.target.value)}
+                  placeholder={form.name}
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 font-mono text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("caches.modal.keyPrefix.hint")}</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
+                  {t("caches.modal.profile.label")}
+                </label>
+                <select
+                  value={form.profile}
+                  onChange={(e) => handleFormChange("profile", e.target.value)}
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  {CACHE_PROFILES.map((p) => (
+                    <option key={p} value={p}>{t(profileLabelKey(p))}</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("caches.modal.profile.hint")}</p>
+              </div>
+            </div>
+          )}
 
           {submitError && (
             <div role="alert" className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">

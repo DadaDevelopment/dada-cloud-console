@@ -394,6 +394,7 @@ export interface CacheCredentialsResponse {
 
 /** Capability profiles ServiceCacheV2 accepts (see backend's serviceCacheProfiles). */
 export type CacheProfile =
+  | "redis-full-access"
   | "redis-kv-readonly"
   | "redis-kv-readwrite"
   | "redis-stream-producer"

@@ -104,11 +104,27 @@ func ServiceDatabaseResourcesValuesGitPath(projectSlug, envSlug, appRef string) 
 	return AppResourcesValuesGitPath(projectSlug, envSlug, ServiceDatabaseOwnerApp(appRef, projectSlug))
 }
 
+// ServiceCacheOwnerApp returns the app whose chart owns a cache user: the
+// bound app (appRef) when set, otherwise the per-project standalone
+// "service-caches-<project>" chart. Mirrors ServiceDatabaseOwnerApp exactly
+// -- a cache user with no app_ref is now a first-class, standalone resource
+// the same way a standalone Postgres database is (2026-08-27 UX fix: an
+// earlier version of this comment argued a cache user has no identity
+// outside an app, which produced a create form that FORCED picking an app
+// before Redis could be provisioned at all -- correct per the ACL model but
+// wrong UX, see docs/capability-profiles-addendum.md's changelog).
+func ServiceCacheOwnerApp(appRef, projectSlug string) string {
+	if appRef == "" {
+		return StandaloneOwnerApp("service-caches", projectSlug)
+	}
+	return appRef
+}
+
 // ServiceCacheSpec holds parameters for a ServiceCacheV2 manifest -- the
-// Redis analogue of ServiceDatabaseSpec. Unlike a database, a cache user has
-// no independent identity a caller connects "to the engine" for: it is
-// always one scoped capability (Profile) bound to one owning app (AppRef is
-// required, not optional like ServiceDatabaseSpec's).
+// Redis analogue of ServiceDatabaseSpec. AppRef is optional exactly like
+// ServiceDatabaseSpec's: empty means a standalone, environment-level cache
+// user owned by the project's shared "service-caches-<project>" chart (see
+// ServiceCacheOwnerApp), set means bound to that app's own chart.
 //
 // Shard mirrors ServiceDatabaseSpec.Shard exactly: the Redis instance this
 // user lives on, selecting the provider-redis ProviderConfig used for the
@@ -135,7 +151,7 @@ metadata:
     dada.io/environment: {{ .EnvSlug }}
     dada.io/operation: {{ .OperationID }}
 spec:
-  appRef: {{ .AppRef }}
+  appRef: {{ if .AppRef }}{{ .AppRef }}{{ else }}{{ .Name }}{{ end }}
   namespace: {{ .Namespace }}
   keyPrefix: {{ .KeyPrefix }}
   profile: {{ .Profile }}
@@ -155,14 +171,11 @@ func RenderServiceCache(spec ServiceCacheSpec) (string, error) {
 }
 
 // ServiceCacheResourcesValuesGitPath returns the resources.values.yaml of the
-// app that owns a cache user's CR. Unlike ServiceDatabaseResourcesValuesGitPath,
-// AppRef is never empty here (ServiceCacheV2 has no standalone owner app --
-// see ServiceCacheSpec's doc), so this is a thin AppRef-only wrapper kept as
-// its own function for the same reason ServiceDatabaseResourcesValuesGitPath
-// is: callers should never have to know the underlying values-file layout
-// convention themselves.
+// app that owns a cache user's CR -- the bound app (appRef) or, when
+// standalone, the shared per-project "service-caches-<project>" app. Mirrors
+// ServiceDatabaseResourcesValuesGitPath exactly.
 func ServiceCacheResourcesValuesGitPath(projectSlug, envSlug, appRef string) string {
-	return AppResourcesValuesGitPath(projectSlug, envSlug, appRef)
+	return AppResourcesValuesGitPath(projectSlug, envSlug, ServiceCacheOwnerApp(appRef, projectSlug))
 }
 
 // SecretRefEnvVar is one environment variable sourced from a foreign k8s
