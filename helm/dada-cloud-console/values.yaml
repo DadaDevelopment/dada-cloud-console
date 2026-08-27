@@ -76,6 +76,20 @@ backend:
     pullPolicy: IfNotPresent
   service:
     port: 8080
+  # pgRouterHostAliasIP: the in-cluster ClusterIP of the shared managed-Postgres
+  # router (pg-router.databases.svc.cluster.local). When set, the backend's own
+  # pod gets a hostAliases entry mapping db.pv.dada-tuda.ru to this IP -- the
+  # SAME mechanism gitops-agent renders into every OTHER app's pod
+  # (renderer.go's AppSpec.PgRouterHostAliasIP) for the identical reason: with
+  # MANAGED_DB_TLS_DSN_ENABLED=true, postgresDSN (databases.go) issues DSNs
+  # naming db.pv.dada-tuda.ru with sslmode=require, and that hostname only
+  # resolves inside a pod via this alias -- otherwise it falls through to
+  # public DNS, which does not point at pg-router at all, and the TLS
+  # handshake fails. The backend needs this too because it is itself a client
+  # of pg-router (queryDatabase/explainDatabaseQuery, GetDatabaseCredentials'
+  # reveal path use the same real tenant credential the DSN generator issues).
+  # Empty/unset renders no hostAliases block at all (pre-existing behavior).
+  pgRouterHostAliasIP: "10.96.139.238"
   env:
     APP_ENV: production
     PORT: "8080"

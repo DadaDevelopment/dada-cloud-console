@@ -38,6 +38,23 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.backend.pgRouterHostAliasIP }}
+      # The backend is itself a client of the shared managed-Postgres router
+      # (connectTenantRole in db_query_helpers.go, GetDatabaseCredentials'
+      # reveal path): when MANAGED_DB_TLS_DSN_ENABLED=true, postgresDSN
+      # rewrites the bare in-cluster host to db.pv.dada-tuda.ru with
+      # sslmode=require (see databases.go's pgRouterTLSHostname). That name
+      # only resolves inside a pod via this hostAliases entry -- the same
+      # mechanism gitops-agent renders for every OTHER app's pod
+      # (renderer.go's AppSpec.PgRouterHostAliasIP) -- and this chart never
+      # had the entry for the backend's OWN pod, so its outbound queries hit
+      # the public IP instead of the in-cluster router and the TLS handshake
+      # fails ("server refused TLS connection"). Confirmed live 2026-08-27.
+      hostAliases:
+        - ip: {{ . }}
+          hostnames:
+            - db.pv.dada-tuda.ru
+      {{- end }}
       containers:
         - name: backend
           image: "{{ .Values.global.imageRegistry }}/{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
