@@ -364,6 +364,25 @@ func (h *Handler) createManagedDatabase(ctx context.Context, actorID, projectID,
 	if err := validatePgName(req.Database); err != nil {
 		return nil, &opFault{http.StatusBadRequest, "invalid_database_name", err.Error()}
 	}
+	// app_ref becomes ServiceDatabaseV2.spec.appRef verbatim, and
+	// dbcreds.Resolve later treats it as a bare k8s resource name to build
+	// the connection secret name ("<appRef>-db-credentials", see
+	// cloudtask/dbcreds.go). A caller following this MCP surface's own
+	// pervasive project/env/app addressing convention (every OTHER tool
+	// takes ref="project/env/app") naturally writes the same shape here --
+	// there was nothing in the request schema or docs distinguishing "bare
+	// app name" from "full ref" until this validation. An unvalidated
+	// app_ref like "leadgen/prod/lead-gen" is accepted, silently breaks
+	// secret resolution, and only surfaces later as a confusing
+	// DATABASE_NOT_ACCESSIBLE from queryDatabase or reveal-credentials --
+	// reject it here instead, at creation time, with a message that names
+	// the actual problem.
+	if req.AppRef != "" {
+		if err := validateKubeName(req.AppRef); err != nil {
+			return nil, &opFault{http.StatusBadRequest, "invalid_app_ref",
+				"app_ref must be a bare app name (lowercase alphanumeric with hyphens, max 63 chars), not a project/env/app ref: " + err.Error()}
+		}
+	}
 
 	var existing int
 	if err := h.pool.QueryRow(ctx,
