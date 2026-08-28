@@ -213,6 +213,7 @@ export interface Dict {
   djangoAlt: AltPage;
   streamlitAlt: AltPage;
   vkBotAlt: AltPage;
+  tgGatewayAlt: AltPage;
   uploadDeployAlt: UploadDeployPage;
   mcpAlt: UploadDeployPage;
   acceptPaymentsAlt: UploadDeployPage;
@@ -1522,6 +1523,39 @@ const ru: Dict = {
       { title: "Отвечать нужно за 3 секунды", desc: "Если бот не ответил ok вовремя, ВК повторит событие - и пользователь получит дубль. Долгую работу выносите в фоновую задачу, а ok возвращайте сразу." },
     ],
   },
+  tgGatewayAlt: {
+    heroTitle: "Подключите AI-агента к Telegram-боту без строчки кода",
+    heroSubtitle:
+      "Вставьте токен бота в форме агента в консоли Dada Cloud - и агент, который уже работает на платформе, начнёт отвечать в Telegram. Без своего long polling, без вебхука, без отдельного приложения ради этой интеграции.",
+    featuresTitle: "Что делает Telegram-шлюз для агентов",
+    features: [
+      { title: "Токен проверяется сразу", desc: "При вставке токена платформа сама вызывает Telegram getMe. Неверный токен - это мгновенная ошибка в поле формы, а не молчаливый мёртвый поллер, который никогда никому не ответит." },
+      { title: "Long polling, а не вебхук", desc: "Шлюз сам опрашивает Telegram getUpdates. Домен, TLS-сертификат и отдельный веб-сервер под бота не нужны вообще - разворачивать под это нечего." },
+      { title: "Привязка в один клик", desc: "Бот привязывается к агенту прямо в форме, где вы его уже создаёте и редактируете - без нового раздела консоли и без второго деплоя ради интеграции." },
+      { title: "Отключение безопасно всегда", desc: "Кнопка «Отключить» работает и когда привязки нет. Повторный вызов ничего не ломает - это самая частая причина сломанных интеграций «отключил дважды»." },
+      { title: "Агент ещё разворачивается - вы узнаете", desc: "Если сообщение пришло раньше, чем агент поднялся, шлюз повторяет попытку с задержкой, а после примерно 30 секунд неудач пишет об этом в чат вместо тишины." },
+      { title: "Перезапуск шлюза не роняет привязки", desc: "Все привязки хранятся в базе. При рестарте процесса каждый поллер поднимается заново сам - пересвязывать бота вручную не нужно." },
+    ],
+    faqTitle: "Telegram-шлюз для агентов - частые вопросы",
+    faq: [
+      { q: "Это вебхук или поллинг?", a: "Поллинг - шлюз сам опрашивает Telegram getUpdates. Домен, TLS-сертификат и отдельный HTTP-сервер под бота не требуются." },
+      { q: "Что если агент ещё не готов, когда придёт сообщение?", a: "Шлюз повторяет попытку с задержкой. Если агент не поднимается дольше примерно 30 секунд, в Telegram придёт сообщение, что агент ещё разворачивается, а не тишина." },
+      { q: "Что если я вставлю неверный токен?", a: "Форма проверяет токен через Telegram getMe до сохранения. Неверный токен возвращает ошибку сразу в поле формы, привязка не создаётся." },
+      { q: "Может один бот отвечать от нескольких агентов?", a: "Нет, связка строго один к одному: один токен бота - один агент. Для второго бота заведите нового у @BotFather и привяжите отдельно." },
+      { q: "Может один агент отвечать в нескольких ботах?", a: "Тоже нет, привязка один к одному в обе стороны. Для второго бота нужен либо отдельный агент, либо отключение первой привязки перед новой." },
+      { q: "Что будет с привязкой при перезапуске шлюза?", a: "Ничего не потеряется - шлюз хранит привязки в базе и поднимает все поллеры заново при старте. Пересвязывать бота вручную не нужно." },
+      { q: "Я потерял токен бота, что делать?", a: "Отключите текущую привязку, получите новый токен у @BotFather (старый при этом можно отозвать) и привяжите заново - шаги те же, что при первой привязке." },
+      { q: "Нужно ли писать свой код поллинга или вебхука?", a: "Нет. Обычно связка Telegram-бота с LLM - это отдельный процесс на aiogram или похожей библиотеке, который вы разворачиваете и поддерживаете сами. Здесь эта часть - встроенная функция платформы для агентов, которые у вас уже работают." },
+    ],
+    howtoTitle: "Как это работает",
+    howtoSubtitle: "От токена бота до первого ответа в Telegram - без промежуточных сервисов.",
+    howtoSteps: [
+      { num: "01", title: "Создайте агента", desc: "Разверните агента в консоли Dada Cloud как обычно - с промптом и нужными инструментами." },
+      { num: "02", title: "Вставьте токен бота", desc: "В форме агента вставьте токен, полученный от @BotFather. Платформа проверит его через Telegram getMe до сохранения." },
+      { num: "03", title: "Готово - бот отвечает", desc: "Шлюз запускает поллер для этого токена, передаёт каждое входящее сообщение агенту по A2A и возвращает ответ обратно в тот же чат Telegram." },
+      { num: "04", title: "Отключайте и переподключайте свободно", desc: "Смена токена - это отключение и новая привязка, без частичных обновлений и зависших состояний." },
+    ],
+  },
   uploadDeployAlt: {
     heroTitle: "Деплой без git: залей zip - получи рабочий адрес",
     heroSubtitle:
@@ -1906,6 +1940,7 @@ const ru: Dict = {
       { label: "Аналог Fly.io", href: "/analog-fly-io" },
       { label: "Деплой из v0 / Lovable / Bolt", href: "/deploy-vibe-coding" },
       { label: "Приём платежей (ЮKassa)", href: "/accept-payments" },
+      { label: "Telegram-бот для AI-агента", href: "/telegram-agent-gateway" },
       { label: "Переезд с Vercel", href: "/migrate-vercel" },
       { label: "Доступность Vercel/Railway из России", href: "/status" },
       { label: "Цены", href: "/pricing" },
@@ -3124,6 +3159,39 @@ const en: Dict = {
       { title: "You have three seconds to answer", desc: "If the bot doesn't return ok in time, VK retries the event and the user sees a duplicate. Push slow work into a background task and return ok immediately." },
     ],
   },
+  tgGatewayAlt: {
+    heroTitle: "Connect an AI agent to Telegram without writing polling code",
+    heroSubtitle:
+      "Paste a bot token into the agent's form in the Dada Cloud console and an agent you already run on the platform starts answering in Telegram. No long-polling script to host, no webhook domain or TLS to set up, no separate app just for the wiring.",
+    featuresTitle: "What the Telegram gateway actually does",
+    features: [
+      { title: "Token validated on the spot", desc: "Paste the token and the platform calls Telegram's getMe right away. A bad token comes back as an inline form error - never a poller that silently never talks to anyone." },
+      { title: "Long polling, not a webhook", desc: "The gateway polls Telegram's getUpdates itself. No domain, no TLS certificate, no extra web server to run just for the bot - there is nothing separate to deploy." },
+      { title: "One click, no extra app", desc: "Binding a bot happens in the same form where you already create and edit the agent - no new console page, no second deployment for the integration." },
+      { title: "Disconnect is always safe", desc: "The disconnect action works even when there is no existing binding. Calling it twice does nothing the second time, instead of erroring out." },
+      { title: "You hear about it if the agent isn't ready", desc: "If a message arrives while the agent is still deploying, the gateway retries with backoff and after about 30 seconds of failures tells the user in the chat instead of staying silent." },
+      { title: "Gateway restarts don't lose bindings", desc: "Every binding lives in the database. A gateway pod restart rebuilds every poller on boot by itself - no manual re-bind needed." },
+    ],
+    faqTitle: "Telegram gateway for agents - FAQ",
+    faq: [
+      { q: "Is this a webhook or polling?", a: "Polling - the gateway calls Telegram's getUpdates itself. No domain, TLS certificate, or separate HTTP server is needed for the bot." },
+      { q: "What happens if the agent isn't ready when a message arrives?", a: "The gateway retries with backoff. If the agent isn't up after about 30 seconds, the Telegram chat gets a message saying the agent is still deploying, instead of silence." },
+      { q: "What if I paste the wrong token?", a: "The form validates the token against Telegram's getMe before saving anything. A bad token returns an inline error immediately and no binding is created." },
+      { q: "Can one bot answer for multiple agents?", a: "No, the binding is strictly one to one: one bot token, one agent. For a second bot, create another one with @BotFather and bind it separately." },
+      { q: "Can one agent answer in multiple bots?", a: "Also no - the binding is one to one in both directions. A second bot needs either a separate agent or disconnecting the first binding before making a new one." },
+      { q: "What happens to the binding when the gateway restarts?", a: "Nothing is lost - the gateway stores bindings in its database and rebuilds every poller on startup. No manual re-bind needed." },
+      { q: "I lost my bot token, what now?", a: "Disconnect the current binding, get a new token from @BotFather (you can revoke the old one), and bind again - the same steps as the first time." },
+      { q: "Do I need to write my own polling or webhook code?", a: "No. Normally wiring a Telegram bot to an LLM means writing and hosting your own process, something like aiogram, and keeping it running. Here that part is a built-in feature for agents you already run on the platform." },
+    ],
+    howtoTitle: "How it works",
+    howtoSubtitle: "From a bot token to the first reply in Telegram, no extra services in between.",
+    howtoSteps: [
+      { num: "01", title: "Create an agent", desc: "Deploy an agent in the Dada Cloud console the normal way, with its prompt and tools." },
+      { num: "02", title: "Paste the bot token", desc: "In the agent's form, paste the token you got from @BotFather. The platform checks it against Telegram's getMe before saving." },
+      { num: "03", title: "Done, the bot replies", desc: "The gateway starts a poller for that token, relays every incoming message to the agent over A2A, and relays the reply back to the same Telegram chat." },
+      { num: "04", title: "Disconnect and reconnect freely", desc: "Changing the token means disconnecting and binding again - no partial updates, no stuck state." },
+    ],
+  },
   uploadDeployAlt: {
     heroTitle: "Deploy without git: upload a zip, get a live URL",
     heroSubtitle:
@@ -3508,6 +3576,7 @@ const en: Dict = {
       { label: "Fly.io alternative", href: "/analog-fly-io" },
       { label: "Deploy from v0 / Lovable / Bolt", href: "/deploy-vibe-coding" },
       { label: "Accept payments (YooKassa)", href: "/accept-payments" },
+      { label: "Telegram bot for an AI agent", href: "/telegram-agent-gateway" },
       { label: "Migrate from Vercel", href: "/migrate-vercel" },
       { label: "Vercel/Railway status from Russia", href: "/status" },
       { label: "Pricing", href: "/pricing" },

@@ -29,6 +29,7 @@ const MARKETING_PATHS = new Set([
   "/deploy-aiogram-bot",
   "/hosting-discord-bot",
   "/hosting-vk-bot",
+  "/telegram-agent-gateway",
   "/hosting-fastapi",
   "/hosting-flask",
   "/hosting-django",

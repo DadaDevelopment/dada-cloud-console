@@ -35,6 +35,7 @@ const STATIC_ROUTES: Array<{ path: string; priority: number; changeFrequency: Me
   { path: "/hosting-django", priority: 0.8, changeFrequency: "monthly" },
   { path: "/hosting-streamlit", priority: 0.8, changeFrequency: "monthly" },
   { path: "/hosting-vk-bot", priority: 0.8, changeFrequency: "monthly" },
+  { path: "/telegram-agent-gateway", priority: 0.8, changeFrequency: "monthly" },
   { path: "/migrate-vercel", priority: 0.8, changeFrequency: "monthly" },
   { path: "/status", priority: 0.8, changeFrequency: "hourly" },
   { path: "/cloud-servers", priority: 0.8, changeFrequency: "monthly" },
