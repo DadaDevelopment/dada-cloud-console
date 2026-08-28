@@ -1,7 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { agentFormFromSnapshot, envLines, isConsoleOwnedAgent, parseEnvLines, toolNames } from "./agents.ts";
+import {
+  agentFormFromSnapshot,
+  customTools,
+  customToolToRef,
+  envLines,
+  isConsoleOwnedAgent,
+  parseEnvLines,
+  parseHeaderLines,
+  toolNames,
+} from "./agents.ts";
 import type { ResourceSnapshot } from "./types.ts";
 
 test("an env value keeps every character after the first equals sign", () => {
@@ -71,4 +80,37 @@ test("stored env entries survive a round trip through the textarea", () => {
 test("an agent written into git by hand is not editable here", () => {
   assert.equal(isConsoleOwnedAgent("Agent"), false);
   assert.equal(isConsoleOwnedAgent("ManagedAgent"), true);
+});
+
+test("custom MCP servers round-trip through the editor", () => {
+  const summary = {
+    tools: [
+      { name: "platform-task-tools" },
+      {
+        name: "sandbox-notion",
+        url: "https://mcp.notion.com/mcp",
+        protocol: "SSE",
+        headers: [{ name: "Authorization", value: "Bearer ${NOTION_TOKEN}" }],
+      },
+    ],
+  };
+
+  assert.deepEqual(toolNames(summary), ["platform-task-tools"]);
+
+  const own = customTools(summary);
+  assert.deepEqual(own.length, 1);
+  assert.deepEqual(own[0].headers, "Authorization: Bearer ${NOTION_TOKEN}");
+
+  const ref = customToolToRef(own[0]);
+  assert.deepEqual(ref.url, "https://mcp.notion.com/mcp");
+  assert.deepEqual(ref.protocol, "SSE");
+  assert.deepEqual(ref.headers, [{ name: "Authorization", value: "Bearer ${NOTION_TOKEN}" }]);
+});
+
+test("a header value keeps every colon after the first", () => {
+  const headers = parseHeaderLines("Authorization: Bearer a:b:c\nX-Base: https://x.example.com/v1");
+  assert.deepEqual(headers, [
+    { name: "Authorization", value: "Bearer a:b:c" },
+    { name: "X-Base", value: "https://x.example.com/v1" },
+  ]);
 });

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/kagent"
@@ -29,6 +30,8 @@ type AgentToolResponse struct {
 	Name            string             `json:"name"`
 	Description     string             `json:"description"`
 	URL             string             `json:"url,omitempty"`
+	Protocol        string             `json:"protocol,omitempty"`
+	Project         string             `json:"project,omitempty"`
 	Ready           bool               `json:"ready"`
 	DiscoveredTools []kagent.ToolEntry `json:"discovered_tools"`
 }
@@ -38,10 +41,11 @@ type AgentToolResponse struct {
 //
 // @ID          listAgentTools
 // @Summary     List the MCP servers an agent can use
-// @Description Reads the RemoteMCPServer objects of the agent runtime, including whether each one is accepted and which tools it actually discovered. The cluster-internal URL is returned to platform admins only. 503 when this console cannot see the agent runtime.
+// @Description Reads the RemoteMCPServer objects of the agent runtime, including whether each one is accepted and which tools it actually discovered. Pass the project to also see the MCP servers that project added itself; another project's servers are never listed. The cluster-internal URL is returned to platform admins and to the project that owns the server. 503 when this console cannot see the agent runtime.
 // @Tags        agents
 // @Produce     json
 // @Security    BearerAuth
+// @Param       project query string false "Project id or name whose own MCP servers should be included"
 // @Success     200 {object} map[string]interface{} "object with the tools array"
 // @Failure     401 {object} map[string]string
 // @Failure     503 {object} map[string]string
@@ -63,15 +67,21 @@ func (h *Handler) ListAgentTools(c *gin.Context) {
 		return
 	}
 
+	project := h.toolProjectName(c)
 	out := make([]AgentToolResponse, 0, len(tools))
 	for _, t := range tools {
+		if t.Project != "" && t.Project != project && !claims.IsPlatformAdmin() {
+			continue
+		}
 		item := AgentToolResponse{
 			Name:            t.Name,
 			Description:     t.Description,
+			Protocol:        t.Protocol,
+			Project:         t.Project,
 			Ready:           t.Ready,
 			DiscoveredTools: t.DiscoveredTools,
 		}
-		if claims.IsPlatformAdmin() {
+		if claims.IsPlatformAdmin() || (t.Project != "" && t.Project == project) {
 			item.URL = t.URL
 		}
 		out = append(out, item)
@@ -204,4 +214,29 @@ func (h *Handler) GetAgentState(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, state)
+}
+
+// toolProjectName resolves the ?project= the agent form sends -- the project the
+// form is being filled in for -- into the project name the composition stamps
+// onto a tool server it owns.
+//
+// Without it the list is every RemoteMCPServer of one shared namespace, which
+// is every tenant's servers offered to every tenant. An unresolvable value is
+// not an error: it simply matches nothing, so the caller is left with the
+// platform's own servers rather than with somebody else's.
+func (h *Handler) toolProjectName(c *gin.Context) string {
+	raw := c.Query("project")
+	if raw == "" {
+		return ""
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	var name string
+	if err := h.pool.QueryRow(c.Request.Context(),
+		`SELECT name FROM projects WHERE id = $1`, id).Scan(&name); err != nil {
+		return ""
+	}
+	return name
 }

@@ -2,6 +2,8 @@ package kagent
 
 import (
 	"fmt"
+	"net/url"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 )
@@ -81,3 +83,82 @@ func ValidateHeader(header string) error {
 	}
 	return nil
 }
+
+// ProtocolStreamableHTTP and ProtocolSSE are the two MCP transports the runtime
+// speaks. The wrong one is not a soft failure: the server never connects, the
+// agent starts healthy and answers every question with no tools.
+const (
+	ProtocolStreamableHTTP = "STREAMABLE_HTTP"
+	ProtocolSSE            = "SSE"
+)
+
+// ValidateProtocol reports why protocol cannot be an MCP transport, or nil. An
+// empty protocol is the default, streamable HTTP.
+func ValidateProtocol(protocol string) error {
+	switch protocol {
+	case "", ProtocolStreamableHTTP, ProtocolSSE:
+		return nil
+	default:
+		return fmt.Errorf("protocol must be %s or %s", ProtocolStreamableHTTP, ProtocolSSE)
+	}
+}
+
+// ValidateToolURL reports why rawURL cannot be an MCP endpoint, or nil.
+//
+// Plain HTTP is refused outside the cluster because the whole point of the
+// headers on this server is a bearer token: sending it over http hands the
+// token to every hop on the way. Inside the cluster the address never leaves
+// the node network, and the platform's own tool servers are plain http.
+func ValidateToolURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("MCP address is not a URL: %v", err)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("MCP address needs a host, e.g. https://mcp.example.com/mcp")
+	}
+	switch u.Scheme {
+	case "https":
+		return nil
+	case "http":
+		host := u.Hostname()
+		if host == "localhost" || strings.HasSuffix(host, ".svc") || strings.HasSuffix(host, ".svc.cluster.local") {
+			return nil
+		}
+		return fmt.Errorf("plain http is only allowed for a cluster-internal address; use https for %s, or the token in its headers travels in the clear", host)
+	default:
+		return fmt.Errorf("MCP address must be http or https, got %q", u.Scheme)
+	}
+}
+
+// ValidateOutgoingHeaderName reports why name cannot be a header this agent
+// sends to a tool server, or nil.
+//
+// Unlike allowedHeaders, which the runtime lowercases when it replays a
+// caller's headers, these are written verbatim onto every outgoing call, so
+// "Authorization" stays the "Authorization" the third party documents.
+func ValidateOutgoingHeaderName(name string) error {
+	if name == "" {
+		return fmt.Errorf("header name is required")
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '-', r == '_':
+		default:
+			return fmt.Errorf("header %q may contain only letters, digits, dashes and underscores", name)
+		}
+	}
+	return nil
+}
+
+// EnvReferences returns the names a header value refers to as ${VAR}.
+func EnvReferences(value string) []string {
+	var out []string
+	for _, m := range envRefPattern.FindAllStringSubmatch(value, -1) {
+		out = append(out, m[1])
+	}
+	return out
+}
+
+var envRefPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)

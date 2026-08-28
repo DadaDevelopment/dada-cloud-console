@@ -1731,6 +1731,13 @@ definitions:
       value:
         type: string
     type: object
+  models.AgentToolHeader:
+    properties:
+      name:
+        type: string
+      value:
+        type: string
+    type: object
   models.AgentToolRef:
     properties:
       allowed_headers:
@@ -1739,7 +1746,13 @@ definitions:
         type: array
       description:
         type: string
+      headers:
+        items:
+          $ref: '#/definitions/models.AgentToolHeader'
+        type: array
       name:
+        type: string
+      protocol:
         type: string
       timeout:
         type: string
@@ -3297,10 +3310,17 @@ paths:
   /agents/tools:
     get:
       description: Reads the RemoteMCPServer objects of the agent runtime, including
-        whether each one is accepted and which tools it actually discovered. The cluster-internal
-        URL is returned to platform admins only. 503 when this console cannot see
-        the agent runtime.
+        whether each one is accepted and which tools it actually discovered. Pass
+        the project to also see the MCP servers that project added itself; another
+        project's servers are never listed. The cluster-internal URL is returned to
+        platform admins and to the project that owns the server. 503 when this console
+        cannot see the agent runtime.
       operationId: listAgentTools
+      parameters:
+      - description: Project id or name whose own MCP servers should be included
+        in: query
+        name: project
+        type: string
       produces:
       - application/json
       responses:
@@ -17381,7 +17401,7 @@ paths:
 
         The answer also carries the next level down: resolving a project lists its environments, resolving an environment lists its app NAMES. Resolving an app additionally returns its current image, phase, the env-var keys the console manages and the env-var keys actually present in the cluster.
 
-        The project may be named by its slug ("agents") or by the display name the console shows ("Agent Runtime"); case, spaces, dashes and underscores are ignored. A slug match always wins over a display-name match.
+        The project may be named by its slug ("agents") or by the display name the console shows ("Agent Runtime"); case, spaces, dashes and underscores are ignored. A slug match always wins over a display-name match. A project id is also a valid first segment, and an environment id a valid second one, so an address that came back from another tool can be pasted straight back in.
 
         An ambiguous name (the same project name visible in two orgs) is a 409 that names the candidates rather than a guess. A name that matches nothing is a 404 that lists the visible projects whose names look like it.
       operationId: resolveRef

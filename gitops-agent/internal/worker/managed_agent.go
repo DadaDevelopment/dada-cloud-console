@@ -30,10 +30,15 @@ type managedAgentPayload struct {
 	Runtime       string `json:"runtime"`
 	Namespace     string `json:"namespace"`
 	Tools         []struct {
-		Name           string   `json:"name"`
-		URL            string   `json:"url"`
-		Description    string   `json:"description"`
-		Timeout        string   `json:"timeout"`
+		Name        string `json:"name"`
+		URL         string `json:"url"`
+		Description string `json:"description"`
+		Timeout     string `json:"timeout"`
+		Protocol    string `json:"protocol"`
+		Headers     []struct {
+			Name  string `json:"name"`
+			Value string `json:"value"`
+		} `json:"headers"`
 		AllowedHeaders []string `json:"allowed_headers"`
 	} `json:"tools"`
 	Env []struct {
@@ -128,13 +133,18 @@ func (w *DBWatcher) doCreateAgent(ctx context.Context, op db.Operation) error {
 		Runtime:       p.Runtime,
 	}
 	for _, t := range p.Tools {
-		spec.Tools = append(spec.Tools, renderer.ManagedAgentToolRef{
+		tool := renderer.ManagedAgentToolRef{
 			Name:           t.Name,
 			URL:            t.URL,
 			Description:    t.Description,
 			Timeout:        t.Timeout,
+			Protocol:       t.Protocol,
 			AllowedHeaders: t.AllowedHeaders,
-		})
+		}
+		for _, h := range t.Headers {
+			tool.Headers = append(tool.Headers, renderer.ManagedAgentToolHeader{Name: h.Name, Value: h.Value})
+		}
+		spec.Tools = append(spec.Tools, tool)
 	}
 	for _, e := range p.Env {
 		spec.Env = append(spec.Env, renderer.ManagedAgentEnvVar{Name: e.Name, Value: e.Value})

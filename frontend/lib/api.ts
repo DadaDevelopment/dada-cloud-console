@@ -490,7 +490,10 @@ export const agentsApi = {
       { method: "DELETE" }
     ),
 
-  tools: () => apiFetch<AgentToolsResponse>("/api/v1/agents/tools"),
+  tools: (projectId?: string) =>
+    apiFetch<AgentToolsResponse>(
+      projectId ? `/api/v1/agents/tools?project=${encodeURIComponent(projectId)}` : "/api/v1/agents/tools",
+    ),
 
   validate: (draft: { name: string; prompt: string; tools: string[]; allowed_headers: string[] }) =>
     apiFetch<AgentValidateResponse>("/api/v1/agents/validate", { method: "POST", body: draft }),

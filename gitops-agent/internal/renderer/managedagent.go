@@ -19,7 +19,17 @@ type ManagedAgentToolRef struct {
 	URL            string
 	Description    string
 	Timeout        string
+	Protocol       string
+	Headers        []ManagedAgentToolHeader
 	AllowedHeaders []string
+}
+
+// ManagedAgentToolHeader is one header sent on every call to a tool server this
+// claim owns. Value may refer to the agent's own env as ${VAR}, which the
+// composition resolves, so a token is written once in the claim.
+type ManagedAgentToolHeader struct {
+	Name  string
+	Value string
 }
 
 // ManagedAgentMemory is the long-term memory of an agent.
@@ -99,7 +109,13 @@ spec:
     - name: {{ .Name }}{{ if .URL }}
       url: {{ .URL }}{{ end }}{{ if .Description }}
       description: {{ quote .Description }}{{ end }}{{ if .Timeout }}
-      timeout: {{ .Timeout }}{{ end }}{{ if .AllowedHeaders }}
+      timeout: {{ .Timeout }}{{ end }}{{ if .Protocol }}
+      protocol: {{ .Protocol }}{{ end }}{{ if .Headers }}
+      headers:
+{{- range .Headers }}
+        - name: {{ quote .Name }}
+          value: {{ quote .Value }}
+{{- end }}{{ end }}{{ if .AllowedHeaders }}
       allowedHeaders:
 {{- range .AllowedHeaders }}
         - {{ . }}

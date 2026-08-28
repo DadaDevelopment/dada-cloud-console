@@ -37,6 +37,7 @@ type Tool struct {
 	Description     string      `json:"description"`
 	URL             string      `json:"url"`
 	Protocol        string      `json:"protocol"`
+	Project         string      `json:"project,omitempty"`
 	Ready           bool        `json:"ready"`
 	Reason          string      `json:"reason,omitempty"`
 	DiscoveredTools []ToolEntry `json:"discovered_tools"`
@@ -163,6 +164,7 @@ func toolFromObject(obj *unstructured.Unstructured) Tool {
 	t.Description, _, _ = unstructured.NestedString(obj.Object, "spec", "description")
 	t.URL, _, _ = unstructured.NestedString(obj.Object, "spec", "url")
 	t.Protocol, _, _ = unstructured.NestedString(obj.Object, "spec", "protocol")
+	t.Project = obj.GetLabels()[ProjectLabel]
 
 	t.Ready, t.Reason, _ = conditionState(obj, "Accepted")
 
@@ -263,6 +265,13 @@ func (r *Reader) promptVersion(ctx context.Context, name string) string {
 // credentials, so two agents of the same cluster legitimately write into two
 // different projects, and the console cannot know which from its own config.
 const LangfuseProjectAnnotation = "platform.dada-tuda.ru/langfuse-project"
+
+// ProjectLabel is the project a tool server belongs to. A server without it is
+// platform infrastructure every project may point an agent at; a server with it
+// belongs to one tenant, and the whole runtime shares a single namespace, so
+// this label is the only thing separating one tenant's MCP server from another
+// tenant's list of choices.
+const ProjectLabel = "platform.dada-tuda.ru/project"
 
 // tracesURL points at the Langfuse project this one agent reports into, or ""
 // when the agent does not say which project that is. An empty string is the

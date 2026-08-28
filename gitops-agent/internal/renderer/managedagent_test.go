@@ -151,3 +151,53 @@ func TestRenderManagedAgent_UpsertsIntoTheCarrierFile(t *testing.T) {
 		t.Errorf("carrier path = %q", got)
 	}
 }
+
+// TestRenderManagedAgent_CarriesTheOwnMCPServerIntoTheClaim: an agent points at
+// a third-party MCP server through two fields the console did not use to have,
+// and a renderer that drops either one produces a claim that syncs green while
+// the server is never reached -- the wrong transport connects to nothing, and a
+// missing header earns a 401 the agent reports as "no tools".
+func TestRenderManagedAgent_CarriesTheOwnMCPServerIntoTheClaim(t *testing.T) {
+	spec := agentSpec()
+	spec.Tools = []ManagedAgentToolRef{{
+		Name:     "sandbox-notion",
+		URL:      "https://mcp.notion.com/mcp",
+		Protocol: "SSE",
+		Headers: []ManagedAgentToolHeader{
+			{Name: "Authorization", Value: "Bearer ${NOTION_TOKEN}"},
+		},
+	}}
+
+	out, err := RenderManagedAgent(spec)
+	if err != nil {
+		t.Fatalf("RenderManagedAgent: %v", err)
+	}
+
+	var claim struct {
+		Spec struct {
+			Tools []struct {
+				Name     string `yaml:"name"`
+				URL      string `yaml:"url"`
+				Protocol string `yaml:"protocol"`
+				Headers  []struct {
+					Name  string `yaml:"name"`
+					Value string `yaml:"value"`
+				} `yaml:"headers"`
+			} `yaml:"tools"`
+		} `yaml:"spec"`
+	}
+	if err := yaml.Unmarshal([]byte(out), &claim); err != nil {
+		t.Fatalf("rendered claim does not parse: %v\n%s", err, out)
+	}
+	if len(claim.Spec.Tools) != 1 {
+		t.Fatalf("tools = %+v", claim.Spec.Tools)
+	}
+	tool := claim.Spec.Tools[0]
+	if tool.Protocol != "SSE" {
+		t.Errorf("protocol = %q, the wrong transport reaches no server at all", tool.Protocol)
+	}
+	if len(tool.Headers) != 1 || tool.Headers[0].Name != "Authorization" ||
+		tool.Headers[0].Value != "Bearer ${NOTION_TOKEN}" {
+		t.Errorf("headers = %+v; the ${VAR} must reach the composition unresolved, it is what keeps the token in env only", tool.Headers)
+	}
+}

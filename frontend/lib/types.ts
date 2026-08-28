@@ -2372,7 +2372,20 @@ export interface AgentToolRef {
   url?: string;
   description?: string;
   timeout?: string;
+  /** MCP transport: STREAMABLE_HTTP (default) or SSE. */
+  protocol?: string;
+  /** Headers sent on every call to a server this agent owns. */
+  headers?: AgentToolHeader[];
   allowed_headers?: string[];
+}
+
+/**
+ * One header of an own MCP server. The value may refer to the agent's env as
+ * ${VAR}, so the token is written once and the header stays readable.
+ */
+export interface AgentToolHeader {
+  name: string;
+  value: string;
 }
 
 /** One plain environment variable of the agent runtime. */

@@ -211,6 +211,11 @@ func (h *Handler) SaveAgent(c *gin.Context) {
 		return
 	}
 
+	if problems := h.toolOwnershipProblems(c.Request.Context(), projectID, req.Tools); len(problems) > 0 {
+		reject(http.StatusConflict, "tool_owned_by_another_project", gin.H{"valid": false, "errors": problems})
+		return
+	}
+
 	existingKind, err := h.agentSnapshotKind(c.Request.Context(), projectID, envID, req.Name)
 	if err != nil {
 		reject(http.StatusInternalServerError, "lookup_failed", gin.H{"error": "failed to look up agent"})
@@ -401,6 +406,10 @@ func validateAgentDraft(req saveAgentRequest) []AgentFieldError {
 	if err := kagent.ValidatePrompt(req.Prompt); err != nil {
 		problems = append(problems, AgentFieldError{Field: "prompt", Message: err.Error()})
 	}
+	envNames := map[string]bool{}
+	for _, e := range req.Env {
+		envNames[e.Name] = true
+	}
 	seen := map[string]bool{}
 	for i, t := range req.Tools {
 		if t.Name == "" {
@@ -418,6 +427,42 @@ func validateAgentDraft(req saveAgentRequest) []AgentFieldError {
 			continue
 		}
 		seen[t.Name] = true
+		if t.URL == "" && (len(t.Headers) > 0 || t.Protocol != "") {
+			problems = append(problems, AgentFieldError{
+				Field:   fmt.Sprintf("tools[%d].url", i),
+				Message: fmt.Sprintf("%s has no address, so it points at a server somebody else owns; its protocol and headers are set there, not here", t.Name),
+			})
+		}
+		if t.URL != "" {
+			if err := kagent.ValidateToolURL(t.URL); err != nil {
+				problems = append(problems, AgentFieldError{
+					Field:   fmt.Sprintf("tools[%d].url", i),
+					Message: err.Error(),
+				})
+			}
+		}
+		if err := kagent.ValidateProtocol(t.Protocol); err != nil {
+			problems = append(problems, AgentFieldError{
+				Field:   fmt.Sprintf("tools[%d].protocol", i),
+				Message: err.Error(),
+			})
+		}
+		for j, hdr := range t.Headers {
+			if err := kagent.ValidateOutgoingHeaderName(hdr.Name); err != nil {
+				problems = append(problems, AgentFieldError{
+					Field:   fmt.Sprintf("tools[%d].headers[%d].name", i, j),
+					Message: err.Error(),
+				})
+			}
+			for _, ref := range kagent.EnvReferences(hdr.Value) {
+				if !envNames[ref] {
+					problems = append(problems, AgentFieldError{
+						Field:   fmt.Sprintf("tools[%d].headers[%d].value", i, j),
+						Message: fmt.Sprintf("this agent has no environment variable %s, so the header would be sent with an empty value and the server would answer 401", ref),
+					})
+				}
+			}
+		}
 		for j, hdr := range t.AllowedHeaders {
 			if err := kagent.ValidateHeader(hdr); err != nil {
 				problems = append(problems, AgentFieldError{
@@ -434,6 +479,55 @@ func validateAgentDraft(req saveAgentRequest) []AgentFieldError {
 				Message: "an environment variable needs a name",
 			})
 		}
+	}
+	return problems
+}
+
+// toolOwnershipProblems refuses a draft that would take over, or point at, an
+// MCP server another project owns.
+//
+// The agent runtime is one namespace for the whole platform, so a
+// RemoteMCPServer name is global: a claim that declares a server under a name
+// somebody else already owns does not merge with it, it fights it, and the
+// loser's agent quietly loses its tools. A reference without an address is the
+// same hole read-only -- it would hand this project an agent that calls another
+// tenant's server with that tenant's credentials.
+//
+// A cluster this console cannot see yields no problems: refusing every save
+// because the reader is down would turn a monitoring outage into an editing
+// outage, and the composition still cannot produce a duplicate object.
+func (h *Handler) toolOwnershipProblems(ctx context.Context, projectID uuid.UUID, tools []models.AgentToolRef) []AgentFieldError {
+	if len(tools) == 0 {
+		return nil
+	}
+	runtime := h.agentRuntime()
+	if !runtime.Enabled() {
+		return nil
+	}
+	existing, err := runtime.ListTools(ctx)
+	if err != nil {
+		return nil
+	}
+	owner := map[string]string{}
+	for _, t := range existing {
+		owner[t.Name] = t.Project
+	}
+
+	var projectName string
+	if err := h.pool.QueryRow(ctx, `SELECT name FROM projects WHERE id = $1`, projectID).Scan(&projectName); err != nil {
+		return nil
+	}
+
+	var problems []AgentFieldError
+	for i, t := range tools {
+		ownedBy, known := owner[t.Name]
+		if !known || ownedBy == "" || ownedBy == projectName {
+			continue
+		}
+		problems = append(problems, AgentFieldError{
+			Field:   fmt.Sprintf("tools[%d].name", i),
+			Message: fmt.Sprintf("the MCP server %s belongs to another project; pick a different name for your own server", t.Name),
+		})
 	}
 	return problems
 }

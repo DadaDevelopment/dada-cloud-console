@@ -499,11 +499,24 @@ type SaveAgentPayload struct {
 // AllowedHeaders is what the agent is permitted to replay to that server, which
 // is the only channel a caller's identity travels on.
 type AgentToolRef struct {
-	Name           string   `json:"name"`
-	URL            string   `json:"url,omitempty"`
-	Description    string   `json:"description,omitempty"`
-	Timeout        string   `json:"timeout,omitempty"`
-	AllowedHeaders []string `json:"allowed_headers,omitempty"`
+	Name           string            `json:"name"`
+	URL            string            `json:"url,omitempty"`
+	Description    string            `json:"description,omitempty"`
+	Timeout        string            `json:"timeout,omitempty"`
+	Protocol       string            `json:"protocol,omitempty"`
+	Headers        []AgentToolHeader `json:"headers,omitempty"`
+	AllowedHeaders []string          `json:"allowed_headers,omitempty"`
+}
+
+// AgentToolHeader is one header the agent sends on every call to its own MCP
+// server, which is how a third-party server is authorized.
+//
+// Value may refer to the agent's own environment as ${VAR}: the token then
+// lives in one place -- the env of the agent -- and the header stays readable
+// as "Bearer ${NOTION_TOKEN}" instead of being a second copy of the secret.
+type AgentToolHeader struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 // AgentEnvVar is one plain environment variable of the agent runtime.

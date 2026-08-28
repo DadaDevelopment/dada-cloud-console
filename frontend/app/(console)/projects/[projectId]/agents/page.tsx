@@ -24,6 +24,9 @@ import { useT } from "@/lib/i18n/console/context";
 import { trackUxEvent } from "@/lib/ux-telemetry";
 import {
   agentFormFromSnapshot,
+  customToolToRef,
+  EMPTY_CUSTOM_TOOL,
+  type CustomToolForm,
   isConsoleOwnedAgent,
   parseEnvLines,
   EMPTY_AGENT_FORM,
@@ -132,10 +135,10 @@ export default function AgentsPage() {
     if (!isEditorOpen) return;
     trackUxEvent("view", "agent_editor:opened");
     agentsApi
-      .tools()
+      .tools(projectId)
       .then((data) => setTools(data.tools ?? []))
       .catch(() => setTools([]));
-  }, [isEditorOpen]);
+  }, [isEditorOpen, projectId]);
 
   useEffect(() => {
     if (!isEditorOpen || !editingExisting || !form.name) return;
@@ -198,6 +201,21 @@ export default function AgentsPage() {
     }));
   }
 
+  function addCustomTool() {
+    setForm((prev) => ({ ...prev, customTools: [...prev.customTools, { ...EMPTY_CUSTOM_TOOL }] }));
+  }
+
+  function removeCustomTool(index: number) {
+    setForm((prev) => ({ ...prev, customTools: prev.customTools.filter((_, i) => i !== index) }));
+  }
+
+  function changeCustomTool(index: number, field: keyof CustomToolForm, value: string) {
+    setForm((prev) => ({
+      ...prev,
+      customTools: prev.customTools.map((tool, i) => (i === index ? { ...tool, [field]: value } : tool)),
+    }));
+  }
+
   function errorFor(field: string): string | null {
     const hit = fieldErrors.find((e) => e.field === field || e.field.startsWith(`${field}[`));
     return hit ? hit.message : null;
@@ -215,7 +233,7 @@ export default function AgentsPage() {
       prompt: form.prompt,
       prompt_version: form.prompt_version.trim() || undefined,
       model_config: form.model_config.trim() || undefined,
-      tools: form.tools.map((name) => ({ name })),
+      tools: [...form.tools.map((name) => ({ name })), ...form.customTools.map(customToolToRef)],
       env: parseEnvLines(form.env),
     };
     try {
@@ -553,6 +571,65 @@ export default function AgentsPage() {
               </div>
             )}
             {errorFor("tools") && <p className="mt-1 text-xs text-red-600">{errorFor("tools")}</p>}
+
+            <div className="mt-3 space-y-3">
+              {form.customTools.map((tool, index) => (
+                <div
+                  key={index}
+                  className="space-y-2 rounded-lg border border-gray-200 dark:border-gray-800 p-3"
+                >
+                  <div className="flex gap-2">
+                    <input
+                      value={tool.name}
+                      onChange={(e) => changeCustomTool(index, "name", e.target.value)}
+                      placeholder={t("agents.modal.customMcp.namePlaceholder")}
+                      className="min-w-0 flex-1 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 font-mono text-sm"
+                    />
+                    <select
+                      value={tool.protocol}
+                      onChange={(e) => changeCustomTool(index, "protocol", e.target.value)}
+                      className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                    >
+                      <option value="STREAMABLE_HTTP">HTTP</option>
+                      <option value="SSE">SSE</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => removeCustomTool(index)}
+                      className="shrink-0 rounded-lg border border-red-200 dark:border-red-900 px-3 py-2 text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40"
+                    >
+                      {t("agents.modal.customMcp.remove")}
+                    </button>
+                  </div>
+                  <input
+                    value={tool.url}
+                    onChange={(e) => changeCustomTool(index, "url", e.target.value)}
+                    placeholder="https://mcp.example.com/mcp"
+                    className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 font-mono text-sm"
+                  />
+                  <textarea
+                    value={tool.headers}
+                    onChange={(e) => changeCustomTool(index, "headers", e.target.value)}
+                    rows={2}
+                    placeholder={t("agents.modal.customMcp.headersPlaceholder")}
+                    className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 font-mono text-sm"
+                  />
+                  {errorFor(`tools[${form.tools.length + index}]`) && (
+                    <p className="text-xs text-red-600">
+                      {errorFor(`tools[${form.tools.length + index}]`)}
+                    </p>
+                  )}
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={addCustomTool}
+                className="rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+              >
+                {t("agents.modal.customMcp.add")}
+              </button>
+              <p className="text-xs text-gray-400">{t("agents.modal.customMcp.hint")}</p>
+            </div>
           </div>
 
           <div>

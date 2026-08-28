@@ -1935,7 +1935,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Reads the RemoteMCPServer objects of the agent runtime, including whether each one is accepted and which tools it actually discovered. The cluster-internal URL is returned to platform admins only. 503 when this console cannot see the agent runtime.",
+                "description": "Reads the RemoteMCPServer objects of the agent runtime, including whether each one is accepted and which tools it actually discovered. Pass the project to also see the MCP servers that project added itself; another project's servers are never listed. The cluster-internal URL is returned to platform admins and to the project that owns the server. 503 when this console cannot see the agent runtime.",
                 "produces": [
                     "application/json"
                 ],
@@ -1944,6 +1944,14 @@
                 ],
                 "summary": "List the MCP servers an agent can use",
                 "operationId": "listAgentTools",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project id or name whose own MCP servers should be included",
+                        "name": "project",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "object with the tools array",
@@ -22433,7 +22441,7 @@
         },
         "/resolve": {
             "get": {
-                "description": "Turns the address people and logs actually use — \"internal/prod/telemost-bot\" — into the ids every other tool takes, in ONE call.\n\nPrefer this over the listProjects -\u003e getProject -\u003e listApps walk: those are three calls, two of which return whole records, and the app listing can be large enough to blow a context window. Pass `ref` as `project`, `project/env` or `project/env/app` (or pass `project`, `env` and `app` separately).\n\nThe answer also carries the next level down: resolving a project lists its environments, resolving an environment lists its app NAMES. Resolving an app additionally returns its current image, phase, the env-var keys the console manages and the env-var keys actually present in the cluster.\n\nThe project may be named by its slug (\"agents\") or by the display name the console shows (\"Agent Runtime\"); case, spaces, dashes and underscores are ignored. A slug match always wins over a display-name match.\n\nAn ambiguous name (the same project name visible in two orgs) is a 409 that names the candidates rather than a guess. A name that matches nothing is a 404 that lists the visible projects whose names look like it.",
+                "description": "Turns the address people and logs actually use — \"internal/prod/telemost-bot\" — into the ids every other tool takes, in ONE call.\n\nPrefer this over the listProjects -\u003e getProject -\u003e listApps walk: those are three calls, two of which return whole records, and the app listing can be large enough to blow a context window. Pass `ref` as `project`, `project/env` or `project/env/app` (or pass `project`, `env` and `app` separately).\n\nThe answer also carries the next level down: resolving a project lists its environments, resolving an environment lists its app NAMES. Resolving an app additionally returns its current image, phase, the env-var keys the console manages and the env-var keys actually present in the cluster.\n\nThe project may be named by its slug (\"agents\") or by the display name the console shows (\"Agent Runtime\"); case, spaces, dashes and underscores are ignored. A slug match always wins over a display-name match. A project id is also a valid first segment, and an environment id a valid second one, so an address that came back from another tool can be pasted straight back in.\n\nAn ambiguous name (the same project name visible in two orgs) is a 409 that names the candidates rather than a guess. A name that matches nothing is a 404 that lists the visible projects whose names look like it.",
                 "produces": [
                     "application/json"
                 ],
@@ -25310,6 +25318,17 @@
                 }
             }
         },
+        "models.AgentToolHeader": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "value": {
+                    "type": "string"
+                }
+            }
+        },
         "models.AgentToolRef": {
             "type": "object",
             "properties": {
@@ -25322,7 +25341,16 @@
                 "description": {
                     "type": "string"
                 },
+                "headers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.AgentToolHeader"
+                    }
+                },
                 "name": {
+                    "type": "string"
+                },
+                "protocol": {
                     "type": "string"
                 },
                 "timeout": {

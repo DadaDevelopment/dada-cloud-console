@@ -74,6 +74,17 @@ export const agents: Messages = {
   "agents.modal.telegram.disconnecting": { ru: "Отключаем…", en: "Disconnecting…" },
   "agents.modal.telegram.errorBind": { ru: "Не удалось подключить бота", en: "Failed to connect the bot" },
   "agents.modal.telegram.errorUnbind": { ru: "Не удалось отключить бота", en: "Failed to disconnect the bot" },
+  "agents.modal.customMcp.add": { ru: "Добавить свой MCP", en: "Add your own MCP" },
+  "agents.modal.customMcp.remove": { ru: "Убрать", en: "Remove" },
+  "agents.modal.customMcp.namePlaceholder": { ru: "имя-сервера", en: "server-name" },
+  "agents.modal.customMcp.headersPlaceholder": {
+    ru: "Authorization: Bearer ${MCP_TOKEN}",
+    en: "Authorization: Bearer ${MCP_TOKEN}",
+  },
+  "agents.modal.customMcp.hint": {
+    ru: "По строке на заголовок. Значение может ссылаться на переменную окружения агента: ${MCP_TOKEN} — тогда токен лежит только в env, а не в двух местах.",
+    en: "One header per line. A value may refer to this agent's environment as ${MCP_TOKEN}, so the token lives in env only.",
+  },
   "agents.modal.env": { ru: "Переменные окружения", en: "Environment variables" },
   "agents.modal.envHint": { ru: "По строке на переменную: KEY=value", en: "One per line: KEY=value" },
   "agents.modal.save": { ru: "Сохранить", en: "Save" },
