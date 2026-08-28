@@ -1995,7 +1995,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Checks name, prompt and requested MCP servers against everything the cluster would refuse later. Returns 400 with a per-field error list, or 200 when the draft is safe to commit.",
+                "description": "Checks name, prompt and requested MCP servers against everything the cluster would refuse later. Returns 400 with a per-field error list, or 200 when the draft is safe to commit. Each tools entry is either a bare server name (a server the platform runs) or the whole reference this project brings itself, with url, protocol and headers; a header value may cite the agent env as ${VAR}.",
                 "consumes": [
                     "application/json"
                 ],
@@ -22860,6 +22860,12 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "env": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.AgentEnvVar"
+                    }
+                },
                 "name": {
                     "type": "string"
                 },
@@ -22869,7 +22875,7 @@ const docTemplate = `{
                 "tools": {
                     "type": "array",
                     "items": {
-                        "type": "string"
+                        "$ref": "#/definitions/models.AgentToolRef"
                     }
                 }
             }

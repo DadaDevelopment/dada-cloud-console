@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -9,6 +10,7 @@ import (
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/kagent"
+	"github.com/dada-tuda/console/backend/internal/models"
 )
 
 // agentRuntime is the reader NewHandler built, or a disabled one for a Handler
@@ -91,10 +93,45 @@ func (h *Handler) ListAgentTools(c *gin.Context) {
 
 // ValidateAgentRequest is a draft agent as the form holds it.
 type ValidateAgentRequest struct {
-	Name           string   `json:"name"`
-	Prompt         string   `json:"prompt"`
-	Tools          []string `json:"tools"`
-	AllowedHeaders []string `json:"allowed_headers"`
+	Name           string               `json:"name"`
+	Prompt         string               `json:"prompt"`
+	Tools          agentToolDraft       `json:"tools"`
+	AllowedHeaders []string             `json:"allowed_headers"`
+	Env            []models.AgentEnvVar `json:"env"`
+}
+
+// agentToolDraft is the tools list of a draft agent, in either shape the save
+// endpoint accepts: a bare name for a server somebody else runs, or the whole
+// reference for a server this project brings itself.
+//
+// The two shapes exist because this endpoint predates custom MCP servers and is
+// called by clients that still send `["reels-task-tools"]`. Refusing those would
+// break them; answering "no such MCP server" for a draft that saves fine would
+// be worse -- the validator would be lying about the very draft it is meant to
+// clear.
+type agentToolDraft []models.AgentToolRef
+
+// UnmarshalJSON accepts a string or an object per element.
+func (d *agentToolDraft) UnmarshalJSON(raw []byte) error {
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return err
+	}
+	out := make([]models.AgentToolRef, 0, len(items))
+	for _, item := range items {
+		var name string
+		if err := json.Unmarshal(item, &name); err == nil {
+			out = append(out, models.AgentToolRef{Name: name})
+			continue
+		}
+		var ref models.AgentToolRef
+		if err := json.Unmarshal(item, &ref); err != nil {
+			return err
+		}
+		out = append(out, ref)
+	}
+	*d = out
+	return nil
 }
 
 // AgentFieldError names the field a draft agent fails on.
@@ -117,7 +154,7 @@ type AgentFieldError struct {
 // an outage.
 // @ID          validateAgent
 // @Summary     Validate a draft agent before it is written to git
-// @Description Checks name, prompt and requested MCP servers against everything the cluster would refuse later. Returns 400 with a per-field error list, or 200 when the draft is safe to commit.
+// @Description Checks name, prompt and requested MCP servers against everything the cluster would refuse later. Returns 400 with a per-field error list, or 200 when the draft is safe to commit. Each tools entry is either a bare server name (a server the platform runs) or the whole reference this project brings itself, with url, protocol and headers; a header value may cite the agent env as ${VAR}.
 // @Tags        agents
 // @Accept      json
 // @Produce     json
@@ -138,13 +175,12 @@ func (h *Handler) ValidateAgent(c *gin.Context) {
 		return
 	}
 
-	var problems []AgentFieldError
-	if err := kagent.ValidateName(req.Name); err != nil {
-		problems = append(problems, AgentFieldError{Field: "name", Message: err.Error()})
-	}
-	if err := kagent.ValidatePrompt(req.Prompt); err != nil {
-		problems = append(problems, AgentFieldError{Field: "prompt", Message: err.Error()})
-	}
+	problems := validateAgentDraft(saveAgentRequest{
+		Name:   req.Name,
+		Prompt: req.Prompt,
+		Tools:  req.Tools,
+		Env:    req.Env,
+	})
 	for _, header := range req.AllowedHeaders {
 		if err := kagent.ValidateHeader(header); err != nil {
 			problems = append(problems, AgentFieldError{Field: "allowed_headers", Message: err.Error()})
@@ -166,10 +202,13 @@ func (h *Handler) ValidateAgent(c *gin.Context) {
 				known[t.Name] = true
 			}
 			for _, want := range req.Tools {
-				if !known[want] {
+				if want.URL != "" || want.Name == "" {
+					continue
+				}
+				if !known[want.Name] {
 					problems = append(problems, AgentFieldError{
 						Field:   "tools",
-						Message: "no MCP server named " + want + " exists in the agent runtime",
+						Message: "no MCP server named " + want.Name + " exists in the agent runtime",
 					})
 				}
 			}

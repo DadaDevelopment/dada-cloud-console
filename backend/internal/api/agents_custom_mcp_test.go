@@ -167,3 +167,35 @@ func TestValidateAgentDraft_AcceptsAnOwnServerAuthorizedFromEnv(t *testing.T) {
 		t.Fatalf("a working custom MCP must pass: %+v", problems)
 	}
 }
+
+// TestValidateAgent_ClearsACustomServerItCannotSeeYet closes the gap between the
+// two halves of the surface: the draft endpoint took bare tool names, so a
+// custom MCP server -- which by definition is not in the runtime until the claim
+// lands -- came back as "no MCP server named ... exists" from the validator and
+// as 202 from the save right after it. A validator that refuses what the save
+// accepts is worse than no validator.
+func TestValidateAgent_ClearsACustomServerItCannotSeeYet(t *testing.T) {
+	h := agentTestHandler([]runtime.Object{testMCPServer("reels-task-tools", "http://reels/mcp")})
+
+	valid := `{"name":"probe","prompt":"You are a helpful agent.","env":[{"name":"PROBE_TOKEN","value":"s3cr3t"}],` +
+		`"tools":["reels-task-tools",{"name":"probe-mcp","url":"https://example.com/mcp","protocol":"SSE",` +
+		`"headers":[{"name":"authorization","value":"Bearer ${PROBE_TOKEN}"}]}]}`
+	c, w := agentTestContext(t, "POST", "/agents/validate", valid, testAgentClaims())
+	h.ValidateAgent(c)
+	if w.Code != 200 {
+		t.Fatalf("a draft that saveAgent accepts must validate, got %d: %s", w.Code, w.Body.String())
+	}
+
+	cases := map[string]string{
+		"header points at an env var that does not exist": `{"name":"probe","prompt":"hi","tools":[{"name":"probe-mcp","url":"https://example.com/mcp","headers":[{"name":"authorization","value":"Bearer ${NOPE}"}]}]}`,
+		"protocol the runtime does not speak":             `{"name":"probe","prompt":"hi","tools":[{"name":"probe-mcp","url":"https://example.com/mcp","protocol":"WEBSOCKET"}]}`,
+		"plaintext address off the cluster":               `{"name":"probe","prompt":"hi","tools":[{"name":"probe-mcp","url":"http://example.com/mcp"}]}`,
+	}
+	for why, body := range cases {
+		c, w := agentTestContext(t, "POST", "/agents/validate", body, testAgentClaims())
+		h.ValidateAgent(c)
+		if w.Code != 400 {
+			t.Errorf("%s: status = %d, want 400 (%s)", why, w.Code, w.Body.String())
+		}
+	}
+}

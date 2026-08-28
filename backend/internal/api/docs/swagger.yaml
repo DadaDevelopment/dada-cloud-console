@@ -75,13 +75,17 @@ definitions:
         items:
           type: string
         type: array
+      env:
+        items:
+          $ref: '#/definitions/models.AgentEnvVar'
+        type: array
       name:
         type: string
       prompt:
         type: string
       tools:
         items:
-          type: string
+          $ref: '#/definitions/models.AgentToolRef'
         type: array
     type: object
   api.addDomainAuthorizationRequest:
@@ -3352,7 +3356,10 @@ paths:
       - application/json
       description: Checks name, prompt and requested MCP servers against everything
         the cluster would refuse later. Returns 400 with a per-field error list, or
-        200 when the draft is safe to commit.
+        200 when the draft is safe to commit. Each tools entry is either a bare server
+        name (a server the platform runs) or the whole reference this project brings
+        itself, with url, protocol and headers; a header value may cite the agent
+        env as ${VAR}.
       operationId: validateAgent
       parameters:
       - description: Draft agent
