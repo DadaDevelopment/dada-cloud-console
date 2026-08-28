@@ -320,6 +320,47 @@ func TestRecordAuditDropsNilActor(t *testing.T) {
 	}
 }
 
+// TestWithClientClaimMetadataHandlesNilMap reproduces the exact panic that
+// hit every successful DeleteAgent call in prod: a nil map[string]any passed
+// as auditEntry.Metadata is a non-nil interface wrapping a nil map, so
+// json.Marshal produces "null" rather than "{}", and json.Unmarshal("null",
+// &merged) then sets merged itself back to nil -- a later `merged[k] = v`
+// panics with "assignment to entry in nil map".
+func TestWithClientClaimMetadataHandlesNilMap(t *testing.T) {
+	var nilMap map[string]any
+	metaBytes, err := json.Marshal(any(nilMap))
+	if err != nil {
+		t.Fatalf("marshal nil map: %v", err)
+	}
+	if string(metaBytes) != "null" {
+		t.Fatalf("expected marshaling a nil map to produce \"null\", got %q", metaBytes)
+	}
+
+	out := withClientClaimMetadata(metaBytes, clientClaim{client: "ui"})
+
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("result must be valid JSON, got %q: %v", out, err)
+	}
+	if got[auditClientMetaKey] != "ui" {
+		t.Fatalf("expected %s=ui in merged metadata, got %v", auditClientMetaKey, got)
+	}
+}
+
+// TestMergeAuditMetadataHandlesNilMap covers the same "null" input for
+// mergeAuditMetadata, which had the identical nil-map footgun.
+func TestMergeAuditMetadataHandlesNilMap(t *testing.T) {
+	out := mergeAuditMetadata([]byte("null"), map[string]string{"unresolved_project_id": "abc"})
+
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("result must be valid JSON, got %q: %v", out, err)
+	}
+	if got["unresolved_project_id"] != "abc" {
+		t.Fatalf("expected unresolved_project_id=abc in merged metadata, got %v", got)
+	}
+}
+
 func countSessionStarts(t *testing.T, pool *pgxpool.Pool, actorID uuid.UUID) int {
 	t.Helper()
 	var n int

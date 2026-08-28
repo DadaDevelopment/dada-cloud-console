@@ -243,7 +243,7 @@ func clientClaimFromContext(ctx context.Context) (clientClaim, bool) {
 // distinguishable in the stored JSON.
 func withClientClaimMetadata(meta []byte, claim clientClaim) []byte {
 	merged := map[string]any{}
-	if err := json.Unmarshal(meta, &merged); err != nil {
+	if err := json.Unmarshal(meta, &merged); err != nil || merged == nil {
 		merged = map[string]any{}
 	}
 	if _, exists := merged[auditClientMetaKey]; !exists {
@@ -539,7 +539,7 @@ const pgForeignKeyViolation = "23503"
 // is still readable on the row.
 func mergeAuditMetadata(meta []byte, extra map[string]string) []byte {
 	merged := map[string]any{}
-	if err := json.Unmarshal(meta, &merged); err != nil {
+	if err := json.Unmarshal(meta, &merged); err != nil || merged == nil {
 		merged = map[string]any{}
 	}
 	for k, v := range extra {
