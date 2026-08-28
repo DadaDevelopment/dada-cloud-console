@@ -147,6 +147,48 @@ keep:
   - queryDatabase
   - explainDatabaseQuery
 
+  # Agents (ManagedAgent CRUD + runtime introspection). An agent that can spin
+  # up apps, boxes and databases through this surface should be able to spin up
+  # ANOTHER agent the same way -- that loop was simply never wired in until now.
+  #
+  # listAgentTools stays exposed for the same reason getProject does above: it
+  # is the only source of the RemoteMCPServer names saveAgent.tools and
+  # validateAgent.tools accept, and its output is shared platform infra, not a
+  # tenant secret (the cluster-internal URL is still admin-only in the response
+  # itself, per internal/api/agents_runtime.go).
+  #
+  # validateAgent and getAgentState are the two checks that turn a silent
+  # failure into a visible one: a bad name/prompt/tool reference otherwise
+  # surfaces as an Argo sync failure minutes later with no connection to the
+  # save that caused it, and an agent that fails to start otherwise looks
+  # exactly like a healthy one that answers with the bare model's voice.
+  #
+  # deleteAgent IS exposed, unlike deleteApp/deleteDatabase below -- an agent
+  # that iterates on its own draft (wrong name, bad prompt, wrong tool refs)
+  # needs to retire the bad attempt, the same way deleteBox lets it retire a
+  # bad box. It is marked destructive; see mcp-tool-reference.md.
+  #
+  # NOT exposed: agentChat / agentChatConfirm / agentChatClearContext /
+  # agentChatGetHistory / agentListInstallationBranches / agentMintInstallToken
+  # / agentListGitInstallations / agentListInstallationRepos. Despite the name
+  # these back the CONSOLE's own built-in ops assistant (the admin auto-fix
+  # button) and its git access, not the ManagedAgent runtime -- wiring them in
+  # here would hand a tenant's agent the platform's own git-write credentials.
+  - listAgents
+  - saveAgent
+  - deleteAgent
+  - validateAgent
+  - getAgentState
+  - listAgentTools
+  # Access grants. This is how an agent identity gets scoped access to a
+  # project at all -- see the /agents Keycloak-group gate in
+  # internal/auth/jwt.go and internal/api/permissions.go. createAgentGrant
+  # still requires Owner/Admin on the target project: this tool lends access
+  # the caller already has, it does not mint new authority.
+  - listAgentGrants
+  - createAgentGrant
+  - revokeAgentGrant
+
 rename: {}
 annotate: {}
 group: {}
