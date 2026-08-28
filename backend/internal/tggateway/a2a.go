@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 )
 
 // A2AClient sends a text message to an agent and returns its reply text.
@@ -103,11 +104,42 @@ func (c *httpA2AClient) Send(ctx context.Context, agentName string, text string)
 		return "", fmt.Errorf("a2a %s: %s", agentName, parsed.Error.Message)
 	}
 
+	if isInputRequired(parsed.Result) {
+		log.Warn().Str("agent", agentName).Msg("tggateway: agent paused on input-required (ask_user or similar HITL tool) - this client is one-shot and cannot resume it")
+		return a2aInputRequiredFallback, nil
+	}
+
 	text = extractText(parsed.Result)
 	if text == "" {
 		return "", fmt.Errorf("a2a %s: no text in response", agentName)
 	}
 	return text, nil
+}
+
+// a2aInputRequiredFallback is sent to the Telegram user when an agent pauses
+// mid-task waiting for a confirmation handshake (e.g. the kagent/ADK
+// built-in ask_user tool). This client is a stateless one-shot A2A caller -
+// it has no way to resume a paused task the way kagent's own dashboard
+// does - so instead of leaving the user with silence or a raw transport
+// error, it asks them to rephrase as a single message.
+const a2aInputRequiredFallback = "не смог обработать вопрос за один шаг, переформулируйте его одним сообщением"
+
+// isInputRequired reports whether an A2A result is a paused task
+// (status.state == "input-required"), which happens when the agent's model
+// invokes a human-in-the-loop confirmation tool. Such a response carries no
+// "artifacts" and its question text lives in a shape extractText does not
+// parse (observed: a "question" field, not a "text" part), so it must be
+// detected before falling through to the no-text error path.
+func isInputRequired(raw json.RawMessage) bool {
+	var v struct {
+		Status struct {
+			State string `json:"state"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return false
+	}
+	return v.Status.State == "input-required"
 }
 
 // extractText walks an arbitrary JSON value and concatenates every string

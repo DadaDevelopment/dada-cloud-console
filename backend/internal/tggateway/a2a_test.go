@@ -45,3 +45,36 @@ func TestExtractTextFallsBackToArtifactsWhenNoStatusMessage(t *testing.T) {
 		t.Fatalf("extractText() = %q, want %q", got, want)
 	}
 }
+
+func TestIsInputRequiredDetectsPausedHITLTask(t *testing.T) {
+	raw := json.RawMessage(`{
+		"kind": "task",
+		"status": {
+			"state": "input-required",
+			"message": {
+				"role": "agent",
+				"parts": [{"kind": "data", "data": {"question": "какая валюта?"}}]
+			}
+		}
+	}`)
+
+	if !isInputRequired(raw) {
+		t.Fatal("isInputRequired() = false, want true for status.state == input-required")
+	}
+	if got := extractText(raw); got != "" {
+		t.Fatalf("extractText() = %q, want empty (question lives under a data.question key, not text) - this is exactly why isInputRequired must be checked first", got)
+	}
+}
+
+func TestIsInputRequiredIgnoresCompletedTask(t *testing.T) {
+	raw := json.RawMessage(`{
+		"status": {
+			"state": "completed",
+			"message": {"role": "agent", "parts": [{"kind": "text", "text": "verdict json"}]}
+		}
+	}`)
+
+	if isInputRequired(raw) {
+		t.Fatal("isInputRequired() = true, want false for a normal completed task")
+	}
+}
