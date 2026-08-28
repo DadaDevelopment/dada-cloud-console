@@ -58,6 +58,16 @@ keep:
   # that policy), and nothing issues a DROP. The row leaves the console, the data
   # stays on the shard, visible only in /admin/db-shards as orphan=true. Exposing
   # the tool before the reclaim path exists would hand agents a delete that lies.
+  # Managed Redis (ServiceCacheV2 -- an ACL user on the shared managed-Redis
+  # instance, not a shard of its own). Same create/list/credentials shape as
+  # Databases above, but deleteServiceCache IS exposed unlike deleteDatabase:
+  # this is a scoped user/ACL row, not a shard with a Crossplane Orphan
+  # deletionPolicy behind it, so there is no orphaned-data lie to hand out --
+  # release it and it is actually gone, the same guarantee deleteBox gives.
+  - listServiceCaches
+  - createServiceCache
+  - deleteServiceCache
+  - getServiceCacheCredentials
   # Domains
   - addDomainAuthorization
   - verifyDomainAuthorization
