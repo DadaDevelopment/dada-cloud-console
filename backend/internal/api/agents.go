@@ -518,16 +518,37 @@ func (h *Handler) toolOwnershipProblems(ctx context.Context, projectID uuid.UUID
 		return nil
 	}
 
+	return toolNameTakeovers(tools, owner, projectName)
+}
+
+// toolNameTakeovers is the decision toolOwnershipProblems makes once it knows
+// who owns which name, kept apart from the cluster and the database so it can
+// be read and tested as the rule it is.
+//
+// Declaring an address under a name that already exists is a takeover whoever
+// owns it: the composition writes one object per name, so the platform's own
+// server would be replaced rather than joined. Naming an existing server
+// without an address is only a problem when a project owns it -- that is how
+// the shared platform servers are referenced.
+func toolNameTakeovers(tools []models.AgentToolRef, owner map[string]string, projectName string) []AgentFieldError {
 	var problems []AgentFieldError
 	for i, t := range tools {
 		ownedBy, known := owner[t.Name]
-		if !known || ownedBy == "" || ownedBy == projectName {
+		if !known || ownedBy == projectName {
 			continue
 		}
-		problems = append(problems, AgentFieldError{
-			Field:   fmt.Sprintf("tools[%d].name", i),
-			Message: fmt.Sprintf("the MCP server %s belongs to another project; pick a different name for your own server", t.Name),
-		})
+		switch {
+		case t.URL != "":
+			problems = append(problems, AgentFieldError{
+				Field:   fmt.Sprintf("tools[%d].name", i),
+				Message: fmt.Sprintf("an MCP server named %s already runs on this platform and is not yours; a claim under that name replaces it rather than adding one, so pick a different name for your own server", t.Name),
+			})
+		case ownedBy != "":
+			problems = append(problems, AgentFieldError{
+				Field:   fmt.Sprintf("tools[%d].name", i),
+				Message: fmt.Sprintf("the MCP server %s belongs to another project; pick a different name for your own server", t.Name),
+			})
+		}
 	}
 	return problems
 }

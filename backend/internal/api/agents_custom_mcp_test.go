@@ -199,3 +199,44 @@ func TestValidateAgent_ClearsACustomServerItCannotSeeYet(t *testing.T) {
 		}
 	}
 }
+
+// TestToolNameTakeovers_RefusesAClaimOnAServerThisProjectDoesNotOwn covers the
+// hole the project label alone leaves open: the platform's own MCP servers
+// carry no project, so "not another project's" read as "free to take". One
+// namespace means one object per name -- a tenant declaring an address under
+// reels-task-tools does not add a server, it replaces the platform's.
+func TestToolNameTakeovers_RefusesAClaimOnAServerThisProjectDoesNotOwn(t *testing.T) {
+	owner := map[string]string{
+		"reels-task-tools": "",
+		"neighbour-crm":    "someone-else",
+		"sandbox-notion":   "agent-sandbox",
+	}
+
+	cases := []struct {
+		why     string
+		tool    models.AgentToolRef
+		refused bool
+	}{
+		{"takes over a platform server by naming it with an address",
+			models.AgentToolRef{Name: "reels-task-tools", URL: "https://mine.example.com/mcp"}, true},
+		{"takes over another project's server",
+			models.AgentToolRef{Name: "neighbour-crm", URL: "https://mine.example.com/mcp"}, true},
+		{"points at another project's server without an address",
+			models.AgentToolRef{Name: "neighbour-crm"}, true},
+		{"references a shared platform server, which is what the checkbox does",
+			models.AgentToolRef{Name: "reels-task-tools"}, false},
+		{"updates its own server",
+			models.AgentToolRef{Name: "sandbox-notion", URL: "https://mine.example.com/mcp"}, false},
+		{"brings a server nobody runs yet",
+			models.AgentToolRef{Name: "fresh-name", URL: "https://mine.example.com/mcp"}, false},
+	}
+	for _, tc := range cases {
+		problems := toolNameTakeovers([]models.AgentToolRef{tc.tool}, owner, "agent-sandbox")
+		if tc.refused && len(problems) == 0 {
+			t.Errorf("%s: must be refused, got no problem", tc.why)
+		}
+		if !tc.refused && len(problems) > 0 {
+			t.Errorf("%s: must be allowed, got %q", tc.why, problems[0].Message)
+		}
+	}
+}
