@@ -852,3 +852,81 @@ web OAuth client lacks the local callback used by `seo-google`. See
 - `go test ./internal/api/...` and backend `go test ./...` pass.
 - Native npm audit still reports the repository's existing 7 findings (1 moderate, 6 high); no dependency or lockfile changed in this task and no forced upgrade was applied.
 - Live OpenRouter `/models` returned 417 rows, including 12 invalid wire IDs; discovery now drops those 12 individually instead of rejecting the 405 valid rows.
+
+## fanclub.run.place public TLS timeout (2026-08-26)
+
+- [x] Confirm that the hostname, Ingress backend, Service endpoint, and certificate exist.
+- [x] Reproduce and quantify the public HTTP/TLS timeout against the load-balancer address: TCP connects, then both :80 and :443 return no bytes.
+- [x] Inspect ingress controller placement, public Service traffic policy, node readiness, and load-balancer health path: two Ready controller pods on distinct Ready nodes; every NodePort request reaches them and returns 200.
+- [x] Isolate the failing network hop: Beget platform LB accepts the connection but forwards neither HTTP nor TLS to nginx; its Service is configured with cluster-wide backends and no health-check NodePort.
+- [ ] Deliver the GitOps LB-backend health configuration and verify repeated external HTTP/TLS and HTTPS requests after reconciliation.
+- [ ] Verify repeated external TLS and HTTPS requests after any change.
+
+### Review
+
+- The failure is upstream of ingress-nginx: `fanclub.run.place` resolves to the LB VIP; direct TCP to each node's NodePort completes TLS 1.2 and returns HTTP 200; the same host through the VIP accepts TCP but emits no response and generates no nginx access log.
+- Current remediation is a Service-only GitOps change: `externalTrafficPolicy: Local` allocates a Kubernetes `healthCheckNodePort`, allowing the external LB to retain only nodes with a Ready controller endpoint. No customer application, DNS record, certificate, or Ingress is changed.
+
+## Свои MCP-серверы у агентов (2026-08-28)
+
+Что есть сейчас [code+live]:
+- Форма агента даёт только чекбоксы по уже существующим RemoteMCPServer:
+  `tools: form.tools.map(name => ({ name }))` — ни url, ни заголовков.
+- API/заявка умеют больше: `AgentToolRef{URL, Timeout, AllowedHeaders}`,
+  композиция рендерит RemoteMCPServer при непустом url. Протокол зашит
+  STREAMABLE_HTTP, авторизации нет.
+- `ListAgentTools` отдаёт ВСЕ серверы рантайма любому вошедшему («shared
+  platform infrastructure»), url — только админам. Пока серверы платформенные
+  это дизайн; как только их заводит тенант — утечка и драка за имя.
+- CRD kagent уже умеют всё нужное: `RemoteMCPServer.spec.protocol` (SSE |
+  STREAMABLE_HTTP), `headersFrom[].valueFrom{Secret|ConfigMap}`, `tls`;
+  `MCPServer.spec.transportType: stdio` с deployment.image/cmd/args/env.
+
+### Фаза 1 — свой remote MCP с авторизацией (СДЕЛАНО, в проде)
+- [x] XRD tools[]: `protocol`, `headers[] {name, value | valueFromEnv}`,
+      оставить `timeout`, `allowedHeaders`.
+- [x] Композиция: рендерить protocol и headersFrom; `valueFromEnv` резолвить из
+      `$spec.env` того же клейма (единственный источник — сам клейм).
+- [x] Имя своего сервера в кластере = `<agent>-<tool>`: одно пространство имён на
+      всех, две CR с одним именем — драка, а не слияние.
+- [x] Метка `platform.dada-tuda.ru/project` на своих серверах.
+- [x] `ListAgentTools`: платформенные (без метки проекта) — всем; чужие —
+      скрывать. Заголовки не отдавать никому.
+- [x] Валидатор: url-схема https, имя заголовка по RFC, ссылка на чужой сервер
+      по имени — отказ на поле.
+- [x] renderer/worker gitops-agent: пронести поля, перенос при сохранении.
+- [x] Форма: «Добавить свой MCP» — url, протокол, таймаут, заголовки (значение
+      или переменная из env этого агента).
+
+### Фаза 2 — stdio (qmd-подобное)
+Вывод: kagent запускает stdio-сервер только как контейнер (`image` + `cmd` +
+`args`, init-контейнер подкладывает адаптер). «Скачиваемого бинаря» без образа
+нет. Значит либо тенант даёт свой образ (произвольный код в общем namespace
+рантайма — так нельзя), либо образ собирает наша сборка из его репозитория —
+это уже существующий путь build-agent. Делать после фазы 1 и только со сборкой
+из репозитория и запуском в namespace проекта, не в kagent.
+
+### Разбор фазы 1 (2026-08-29)
+Отгружено: `f7cd3a23` (свой MCP: протокол, заголовки, `${VAR}` из env агента,
+тенант-фильтр в списке тулов), `6fe642bc` (валидатор больше не отказывает в
+черновике, который сохранение принимает), `e167cfee` (перехват имени).
+
+Доказано в проде, песочница `agent-sandbox`:
+- клейм в git несёт `protocol: SSE` и неразрешённый `Bearer ${PROBE_TOKEN}`;
+  composed `RemoteMCPServer/probe-own-mcp` в ns `kagent` — с меткой проекта и
+  уже подставленным значением заголовка (интерполяция на рендере);
+- двухполюсная приёмка протокола: SSE → `Accepted=False`, `failed to connect:
+  Bad Request`; `STREAMABLE_HTTP` → `Accepted=True`, 10 найденных тулов,
+  заголовок на месте;
+- тенант-фильтр: `?project=agents` не видит ни `probe-own-mcp`, ни
+  `tg-agent-tools`; без проекта видны только два платформенных сервера, без url;
+- `/agents/validate` на проде: корректный кастомный MCP → 200; несуществующая
+  `${NOPE}`, `WEBSOCKET`, внешний `http://` → 400 с ошибкой на конкретном поле;
+  старый формат `tools: ["name"]` продолжает проходить.
+
+Два дефекта найдены самим прогоном и закрыты: валидатор врал про черновик
+(`6fe642bc`), и заявка с url под именем безлейблового платформенного сервера
+подменяла его (`e167cfee`).
+
+Песочница убрана: агент `mcp-probe` удалён, клейм ушёл из git,
+`RemoteMCPServer/probe-own-mcp` спрунен.
