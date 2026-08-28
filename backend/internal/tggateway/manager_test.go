@@ -65,6 +65,8 @@ func (fakeTelegram) GetUpdates(ctx context.Context, _ string, _ int64, _ int) ([
 
 func (fakeTelegram) SendMessage(context.Context, string, int64, string) error { return nil }
 
+func (fakeTelegram) SendChatAction(context.Context, string, int64, string) error { return nil }
+
 type fakeA2A struct{}
 
 func (fakeA2A) Send(context.Context, string, string) (string, error) { return "ok", nil }

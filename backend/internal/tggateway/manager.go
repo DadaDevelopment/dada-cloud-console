@@ -23,6 +23,10 @@ const getUpdatesTimeoutSec = 30
 // the chat (design doc: warn once, then keep retrying quietly).
 const a2aFailureWarningAfter = 30 * time.Second
 
+// typingRefreshInterval must stay under Telegram's ~5s "typing" expiry so the
+// indicator never blinks off while a poller is still waiting on the agent.
+const typingRefreshInterval = 4 * time.Second
+
 // ErrInvalidToken is returned by Manager.Bind when Telegram's getMe rejects
 // the token -- the handler maps this to a synchronous 400.
 type ErrInvalidToken struct{ cause error }
@@ -206,7 +210,9 @@ func runPoller(ctx context.Context, tg TelegramClient, a2a A2AClient, b Binding)
 			if u.UpdateID >= offset {
 				offset = u.UpdateID + 1
 			}
+			stopTyping := startTyping(ctx, tg, b.BotToken, u.ChatID)
 			reply, err := a2a.Send(ctx, b.AgentName, u.Text)
+			stopTyping()
 			if err != nil {
 				if !failing {
 					failing = true
@@ -228,6 +234,32 @@ func runPoller(ctx context.Context, tg TelegramClient, a2a A2AClient, b Binding)
 			}
 		}
 	}
+}
+
+// startTyping fires Telegram's "typing" chat action immediately and repeats
+// it on typingRefreshInterval until the returned stop func is called, since a
+// single call expires client-side well before a slow agent reply lands.
+func startTyping(ctx context.Context, tg TelegramClient, token string, chatID int64) func() {
+	tctx, cancel := context.WithCancel(ctx)
+	send := func() {
+		if err := tg.SendChatAction(tctx, token, chatID, "typing"); err != nil {
+			log.Warn().Err(err).Int64("chatID", chatID).Msg("tggateway: sendChatAction failed")
+		}
+	}
+	go func() {
+		send()
+		ticker := time.NewTicker(typingRefreshInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-tctx.Done():
+				return
+			case <-ticker.C:
+				send()
+			}
+		}
+	}()
+	return cancel
 }
 
 func sleepOrDone(ctx context.Context, d time.Duration) {

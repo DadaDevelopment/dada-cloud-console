@@ -29,6 +29,7 @@ type TelegramClient interface {
 	GetMe(ctx context.Context, token string) (username string, err error)
 	GetUpdates(ctx context.Context, token string, offset int64, timeoutSec int) ([]TelegramUpdate, error)
 	SendMessage(ctx context.Context, token string, chatID int64, text string) error
+	SendChatAction(ctx context.Context, token string, chatID int64, action string) error
 }
 
 // httpTelegramClient talks to the real Telegram Bot API (or a fake serving
@@ -146,4 +147,12 @@ func (c *httpTelegramClient) SendMessage(ctx context.Context, token string, chat
 		"text":    text,
 	}
 	return c.call(ctx, token, "sendMessage", body, nil)
+}
+
+func (c *httpTelegramClient) SendChatAction(ctx context.Context, token string, chatID int64, action string) error {
+	body := map[string]any{
+		"chat_id": strconv.FormatInt(chatID, 10),
+		"action":  action,
+	}
+	return c.call(ctx, token, "sendChatAction", body, nil)
 }
