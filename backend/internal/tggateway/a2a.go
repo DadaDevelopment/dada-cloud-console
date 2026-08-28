@@ -111,8 +111,12 @@ func (c *httpA2AClient) Send(ctx context.Context, agentName string, text string)
 }
 
 // extractText walks an arbitrary JSON value and concatenates every string
-// found under a "text" key. Tolerates schema variation across A2A server
-// implementations since no reference payload shape exists to pin against.
+// found under a "text" key, skipping the "history" key. Tolerates schema
+// variation across A2A server implementations since no reference payload
+// shape exists to pin against. history is skipped because A2A Task.history
+// echoes every prior message (including the user's own input) back in the
+// response envelope, which would duplicate the user's message into the
+// extracted reply.
 func extractText(raw json.RawMessage) string {
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {
@@ -127,6 +131,9 @@ func collectText(v any, out *bytes.Buffer) {
 	switch val := v.(type) {
 	case map[string]any:
 		for key, child := range val {
+			if key == "history" {
+				continue
+			}
 			if key == "text" {
 				if s, ok := child.(string); ok {
 					if out.Len() > 0 {
