@@ -1,6 +1,9 @@
 package mcp
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+)
 
 // Response slimming: a tool result is read by a model whose context is the
 // scarce resource, and the REST bodies these tools proxy were shaped for the
@@ -14,6 +17,11 @@ import "encoding/json"
 //     already scoped to that app.
 //   - Constants. Every log entry carried the same "stream" value, once per
 //     line.
+//   - Ids nothing can be addressed with. project_id, environment_id, actor_id
+//     and git_repo_id are stamped on every record the console's grid returns.
+//     No tool on this surface takes them — a project, an environment and an app
+//     are addressed by name — and no tool turns an actor uuid into a person. On
+//     getOperation they were most of the answer (2026-08-28).
 //
 // Nothing is invented here and no field is renamed away from its meaning: the
 // UUIDs are dropped because every tool on this surface accepts the same ref
@@ -24,33 +32,74 @@ import "encoding/json"
 // slimmers maps a tool name onto the transform applied to its successful
 // response body. A tool with no entry is passed through untouched.
 var slimmers = map[string]func(map[string]any) any{
-	"listApps":   slimListApps,
-	"searchLogs": slimSearchLogs,
-	"getProject": slimGetProject,
+	"listApps":     slimListApps,
+	"searchLogs":   slimSearchLogs,
+	"getProject":   slimGetProject,
+	"getOperation": slimGetOperation,
+	"getBuild":     slimGetBuild,
 }
 
-// slimResponse applies the tool's slimmer to a 2xx body. Any body that is not
-// a JSON object, or that does not carry the keys the slimmer expects, is
-// returned byte-for-byte: a shape this code does not recognize is a shape it
-// must not silently truncate.
+// echoIDKeys are dropped from every response this package touches, at any
+// depth. They are the ids of things the caller addressed by name, and of the
+// actor who is usually the caller.
+var echoIDKeys = []string{"project_id", "environment_id", "actor_id", "git_repo_id"}
+
+// slimResponse trims a 2xx body for the MCP reader.
+//
+// Any body that is not a JSON object, or that does not carry the keys a
+// slimmer expects, keeps its own shape: a shape this code does not recognize
+// is a shape it must not silently truncate. Numbers are decoded as
+// json.Number, so a re-marshalled body cannot drift an integer into 1e+06.
 func slimResponse(tool string, body []byte) []byte {
-	fn := slimmers[tool]
-	if fn == nil || len(body) == 0 {
+	if len(body) == 0 {
 		return body
 	}
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.UseNumber()
 	var doc map[string]any
-	if err := json.Unmarshal(body, &doc); err != nil {
+	if err := dec.Decode(&doc); err != nil {
 		return body
 	}
-	out := fn(doc)
-	if out == nil {
-		return body
+
+	var out any = doc
+	if fn := slimmers[tool]; fn != nil {
+		if trimmed := fn(doc); trimmed != nil {
+			out = trimmed
+		}
 	}
-	trimmed, err := json.Marshal(out)
+	dropKeys(out, echoIDKeys)
+
+	marshalled, err := json.Marshal(out)
 	if err != nil {
 		return body
 	}
-	return trimmed
+	return marshalled
+}
+
+// dropKeys deletes keys wherever they appear, however deep. An id stamped on
+// every row of a nested list is exactly the shape being trimmed, so walking
+// only the top level would leave the storm untouched.
+func dropKeys(v any, keys []string) {
+	if len(keys) == 0 {
+		return
+	}
+	switch node := v.(type) {
+	case map[string]any:
+		for _, k := range keys {
+			delete(node, k)
+		}
+		for _, child := range node {
+			dropKeys(child, keys)
+		}
+	case []any:
+		for _, child := range node {
+			dropKeys(child, keys)
+		}
+	case []map[string]any:
+		for _, child := range node {
+			dropKeys(child, keys)
+		}
+	}
 }
 
 // appEchoKeys are the listApps row fields the caller supplied as the call's own
@@ -75,6 +124,34 @@ func slimListApps(doc map[string]any) any {
 		}
 	}
 	return map[string]any{"apps": apps}
+}
+
+// slimGetOperation drops what the caller wrote and what only the console can
+// use: the operation id it just passed as operationId, and git_path, the
+// values.yaml path inside argo-infra. git_commit stays — it is the evidence
+// that the write actually landed in git, and it is not addressable by any
+// other means.
+func slimGetOperation(doc map[string]any) any {
+	return withoutRecordKeys(doc, "operation", "id", "git_path")
+}
+
+// slimGetBuild drops the build id the caller passed as buildId.
+func slimGetBuild(doc map[string]any) any {
+	return withoutRecordKeys(doc, "build", "id")
+}
+
+// withoutRecordKeys deletes keys from the single record an envelope wraps,
+// and only from that record: an id nested deeper belongs to something the
+// caller did not ask about and may still need to address.
+func withoutRecordKeys(doc map[string]any, envelope string, keys ...string) any {
+	record, ok := doc[envelope].(map[string]any)
+	if !ok {
+		return nil
+	}
+	for _, k := range keys {
+		delete(record, k)
+	}
+	return doc
 }
 
 // projectKeepKeys is what a project header is for: the address, the org it
