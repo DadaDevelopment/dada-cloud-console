@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // A2AClient sends a text message to an agent and returns its reply text.
@@ -44,8 +46,9 @@ type a2aPart struct {
 }
 
 type a2aMessage struct {
-	Role  string    `json:"role"`
-	Parts []a2aPart `json:"parts"`
+	Role      string    `json:"role"`
+	MessageID string    `json:"messageId"`
+	Parts     []a2aPart `json:"parts"`
 }
 
 type a2aRequest struct {
@@ -68,7 +71,7 @@ type a2aResponse struct {
 
 func (c *httpA2AClient) Send(ctx context.Context, agentName string, text string) (string, error) {
 	reqBody := a2aRequest{JSONRPC: "2.0", ID: "tg-gateway", Method: "message/send"}
-	reqBody.Params.Message = a2aMessage{Role: "user", Parts: []a2aPart{{Kind: "text", Text: text}}}
+	reqBody.Params.Message = a2aMessage{Role: "user", MessageID: uuid.NewString(), Parts: []a2aPart{{Kind: "text", Text: text}}}
 
 	payload, err := json.Marshal(reqBody)
 	if err != nil {
