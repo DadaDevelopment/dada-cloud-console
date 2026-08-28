@@ -26,6 +26,7 @@ import "encoding/json"
 var slimmers = map[string]func(map[string]any) any{
 	"listApps":   slimListApps,
 	"searchLogs": slimSearchLogs,
+	"getProject": slimGetProject,
 }
 
 // slimResponse applies the tool's slimmer to a 2xx body. Any body that is not
@@ -74,6 +75,79 @@ func slimListApps(doc map[string]any) any {
 		}
 	}
 	return map[string]any{"apps": apps}
+}
+
+// projectKeepKeys is what a project header is for: the address, the org it
+// belongs to and which environment it means by default. Ownership ids, quota
+// blobs and timestamps are the console's own grid; a caller reading getProject
+// is on its way to an app, a database or an agent, and the details belong to
+// that subresource.
+var projectKeepKeys = []string{"id", "name", "display_name", "org_id", "default_environment"}
+
+// slimGetProject turns the project envelope into a header plus a list of
+// environment names.
+//
+// Measured on agent-sandbox (2026-08-28): seven environments came back as full
+// records — project_id repeated on every one, namespace, type, empty
+// limit_range and resource_quota objects, is_ephemeral, created_at and
+// updated_at — for a call whose only purpose was to step into one of them. The
+// ids are dropped because every tool on this surface takes the name.
+func slimGetProject(doc map[string]any) any {
+	project, ok := doc["project"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	envs, ok := doc["environments"].([]any)
+	if !ok {
+		return nil
+	}
+
+	header := map[string]any{}
+	for _, k := range projectKeepKeys {
+		if v, present := project[k]; present && v != "" {
+			header[k] = v
+		}
+	}
+	if header["display_name"] == header["name"] {
+		delete(header, "display_name")
+	}
+
+	out := map[string]any{"project": header}
+	if role, present := doc["role"]; present {
+		out["role"] = role
+	}
+	out["environments"] = slimEnvironments(envs)
+	return out
+}
+
+// slimEnvironments keeps a name and only what distinguishes one environment
+// from the ordinary case: a runtime that is not Kubernetes decides which tools
+// apply at all, and an environment that expires is one a caller must not
+// settle into.
+func slimEnvironments(envs []any) []any {
+	out := make([]any, 0, len(envs))
+	for _, raw := range envs {
+		env, ok := raw.(map[string]any)
+		if !ok {
+			return envs
+		}
+		name, ok := env["name"].(string)
+		if !ok {
+			return envs
+		}
+		row := map[string]any{"name": name}
+		if runtime, _ := env["runtime"].(string); runtime != "" && runtime != "k8s" {
+			row["runtime"] = runtime
+		}
+		if ephemeral, _ := env["is_ephemeral"].(bool); ephemeral {
+			row["is_ephemeral"] = true
+			if v, present := env["expires_at"]; present {
+				row["expires_at"] = v
+			}
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 // logEntryConstantKeys are the log-entry fields worth hoisting out of the array
