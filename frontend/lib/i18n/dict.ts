@@ -1524,10 +1524,10 @@ const ru: Dict = {
     ],
   },
   tgGatewayAlt: {
-    heroTitle: "Подключите AI-агента к Telegram-боту без строчки кода",
+    heroTitle: "Как создать AI-бота для Telegram без кода",
     heroSubtitle:
-      "Вставьте токен бота в форме агента в консоли Dada Cloud - и агент, который уже работает на платформе, начнёт отвечать в Telegram. Без своего long polling, без вебхука, без отдельного приложения ради этой интеграции.",
-    featuresTitle: "Что делает Telegram-шлюз для агентов",
+      "Опишите роль будущего бота в промпте, вставьте токен от @BotFather в форме агента в консоли Dada Cloud - и через пару минут в Telegram отвечает собственный AI-бот. Ни строчки кода, ни своего long polling, ни вебхука, ни отдельного приложения ради интеграции.",
+    featuresTitle: "Почему для этого не нужен код",
     features: [
       { title: "Токен проверяется сразу", desc: "При вставке токена платформа сама вызывает Telegram getMe. Неверный токен - это мгновенная ошибка в поле формы, а не молчаливый мёртвый поллер, который никогда никому не ответит." },
       { title: "Long polling, а не вебхук", desc: "Шлюз сам опрашивает Telegram getUpdates. Домен, TLS-сертификат и отдельный веб-сервер под бота не нужны вообще - разворачивать под это нечего." },
@@ -1536,8 +1536,9 @@ const ru: Dict = {
       { title: "Агент ещё разворачивается - вы узнаете", desc: "Если сообщение пришло раньше, чем агент поднялся, шлюз повторяет попытку с задержкой, а после примерно 30 секунд неудач пишет об этом в чат вместо тишины." },
       { title: "Перезапуск шлюза не роняет привязки", desc: "Все привязки хранятся в базе. При рестарте процесса каждый поллер поднимается заново сам - пересвязывать бота вручную не нужно." },
     ],
-    faqTitle: "Telegram-шлюз для агентов - частые вопросы",
+    faqTitle: "Как создать AI-бота для Telegram - частые вопросы",
     faq: [
+      { q: "Нужно ли писать код, чтобы бот заработал?", a: "Нет. Нужны текстовый промпт с описанием роли агента и токен от @BotFather - оба вставляются в обычную форму в консоли, программировать не нужно." },
       { q: "Это вебхук или поллинг?", a: "Поллинг - шлюз сам опрашивает Telegram getUpdates. Домен, TLS-сертификат и отдельный HTTP-сервер под бота не требуются." },
       { q: "Что если агент ещё не готов, когда придёт сообщение?", a: "Шлюз повторяет попытку с задержкой. Если агент не поднимается дольше примерно 30 секунд, в Telegram придёт сообщение, что агент ещё разворачивается, а не тишина." },
       { q: "Что если я вставлю неверный токен?", a: "Форма проверяет токен через Telegram getMe до сохранения. Неверный токен возвращает ошибку сразу в поле формы, привязка не создаётся." },
@@ -1547,13 +1548,13 @@ const ru: Dict = {
       { q: "Я потерял токен бота, что делать?", a: "Отключите текущую привязку, получите новый токен у @BotFather (старый при этом можно отозвать) и привяжите заново - шаги те же, что при первой привязке." },
       { q: "Нужно ли писать свой код поллинга или вебхука?", a: "Нет. Обычно связка Telegram-бота с LLM - это отдельный процесс на aiogram или похожей библиотеке, который вы разворачиваете и поддерживаете сами. Здесь эта часть - встроенная функция платформы для агентов, которые у вас уже работают." },
     ],
-    howtoTitle: "Как это работает",
-    howtoSubtitle: "От токена бота до первого ответа в Telegram - без промежуточных сервисов.",
+    howtoTitle: "Пошаговая инструкция: от промпта до бота в Telegram",
+    howtoSubtitle: "Четыре шага, ни одной строчки кода.",
     howtoSteps: [
-      { num: "01", title: "Создайте агента", desc: "Разверните агента в консоли Dada Cloud как обычно - с промптом и нужными инструментами." },
-      { num: "02", title: "Вставьте токен бота", desc: "В форме агента вставьте токен, полученный от @BotFather. Платформа проверит его через Telegram getMe до сохранения." },
-      { num: "03", title: "Готово - бот отвечает", desc: "Шлюз запускает поллер для этого токена, передаёт каждое входящее сообщение агенту по A2A и возвращает ответ обратно в тот же чат Telegram." },
-      { num: "04", title: "Отключайте и переподключайте свободно", desc: "Смена токена - это отключение и новая привязка, без частичных обновлений и зависших состояний." },
+      { num: "01", title: "Создайте агента", desc: "В разделе «Агенты» консоли опишите роль будущего бота в системном промпте и при желании подключите MCP-инструменты. Сохраните агента - поле для Telegram-бота появится только после этого." },
+      { num: "02", title: "Получите токен у @BotFather", desc: "Откройте в Telegram чат с @BotFather, создайте бота командой /newbot и скопируйте выданный токен." },
+      { num: "03", title: "Вставьте токен и подключите", desc: "В форме агента, в поле «Telegram-бот», вставьте токен и нажмите «Подключить». Платформа проверит его через Telegram getMe и сразу покажет ошибку, если токен неверный." },
+      { num: "04", title: "Готово - пишите боту", desc: "Как только форма покажет «Подключён как @имя_бота», напишите ему в Telegram: сообщение уйдёт агенту, а ответ модели придёт обратно в тот же чат." },
     ],
   },
   uploadDeployAlt: {
@@ -3160,10 +3161,10 @@ const en: Dict = {
     ],
   },
   tgGatewayAlt: {
-    heroTitle: "Connect an AI agent to Telegram without writing polling code",
+    heroTitle: "How to build an AI Telegram bot with no code",
     heroSubtitle:
-      "Paste a bot token into the agent's form in the Dada Cloud console and an agent you already run on the platform starts answering in Telegram. No long-polling script to host, no webhook domain or TLS to set up, no separate app just for the wiring.",
-    featuresTitle: "What the Telegram gateway actually does",
+      "Describe what the bot should do in a prompt, paste a token from @BotFather into the agent's form in the Dada Cloud console, and within a couple of minutes your own AI bot is answering in Telegram. No lines of code, no polling script to host, no webhook or separate app for the wiring.",
+    featuresTitle: "Why you don't need to write any code",
     features: [
       { title: "Token validated on the spot", desc: "Paste the token and the platform calls Telegram's getMe right away. A bad token comes back as an inline form error - never a poller that silently never talks to anyone." },
       { title: "Long polling, not a webhook", desc: "The gateway polls Telegram's getUpdates itself. No domain, no TLS certificate, no extra web server to run just for the bot - there is nothing separate to deploy." },
@@ -3172,8 +3173,9 @@ const en: Dict = {
       { title: "You hear about it if the agent isn't ready", desc: "If a message arrives while the agent is still deploying, the gateway retries with backoff and after about 30 seconds of failures tells the user in the chat instead of staying silent." },
       { title: "Gateway restarts don't lose bindings", desc: "Every binding lives in the database. A gateway pod restart rebuilds every poller on boot by itself - no manual re-bind needed." },
     ],
-    faqTitle: "Telegram gateway for agents - FAQ",
+    faqTitle: "How to build an AI Telegram bot - FAQ",
     faq: [
+      { q: "Do I need to know how to code?", a: "No. You need a text prompt describing the agent's role and a token from @BotFather - both go into a plain form in the console, no programming required." },
       { q: "Is this a webhook or polling?", a: "Polling - the gateway calls Telegram's getUpdates itself. No domain, TLS certificate, or separate HTTP server is needed for the bot." },
       { q: "What happens if the agent isn't ready when a message arrives?", a: "The gateway retries with backoff. If the agent isn't up after about 30 seconds, the Telegram chat gets a message saying the agent is still deploying, instead of silence." },
       { q: "What if I paste the wrong token?", a: "The form validates the token against Telegram's getMe before saving anything. A bad token returns an inline error immediately and no binding is created." },
@@ -3183,13 +3185,13 @@ const en: Dict = {
       { q: "I lost my bot token, what now?", a: "Disconnect the current binding, get a new token from @BotFather (you can revoke the old one), and bind again - the same steps as the first time." },
       { q: "Do I need to write my own polling or webhook code?", a: "No. Normally wiring a Telegram bot to an LLM means writing and hosting your own process, something like aiogram, and keeping it running. Here that part is a built-in feature for agents you already run on the platform." },
     ],
-    howtoTitle: "How it works",
-    howtoSubtitle: "From a bot token to the first reply in Telegram, no extra services in between.",
+    howtoTitle: "Step by step: from a prompt to a bot in Telegram",
+    howtoSubtitle: "Four steps, zero lines of code.",
     howtoSteps: [
-      { num: "01", title: "Create an agent", desc: "Deploy an agent in the Dada Cloud console the normal way, with its prompt and tools." },
-      { num: "02", title: "Paste the bot token", desc: "In the agent's form, paste the token you got from @BotFather. The platform checks it against Telegram's getMe before saving." },
-      { num: "03", title: "Done, the bot replies", desc: "The gateway starts a poller for that token, relays every incoming message to the agent over A2A, and relays the reply back to the same Telegram chat." },
-      { num: "04", title: "Disconnect and reconnect freely", desc: "Changing the token means disconnecting and binding again - no partial updates, no stuck state." },
+      { num: "01", title: "Create an agent", desc: "In the console's Agents section, describe the bot's role in the system prompt and pick MCP tools if you need them. Save the agent - the Telegram bot field only appears once it exists." },
+      { num: "02", title: "Get a token from @BotFather", desc: "Open a chat with @BotFather in Telegram, create a bot with /newbot, and copy the token it gives you." },
+      { num: "03", title: "Paste the token and connect", desc: "In the agent's form, paste the token into the Telegram bot field and click Connect. The platform checks it against Telegram's getMe right away and shows an inline error if it's wrong." },
+      { num: "04", title: "Done, message the bot", desc: "Once the form shows Connected as @your_bot, message it on Telegram: your message goes to the agent and the model's reply comes back in the same chat." },
     ],
   },
   uploadDeployAlt: {

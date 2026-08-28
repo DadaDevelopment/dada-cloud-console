@@ -1,17 +1,18 @@
 import type { Metadata } from "next";
 
 const SITE_URL = "https://cloud.dada-tuda.ru";
-const TITLE = "Connect an AI Agent to Telegram | Dada Cloud";
+const TITLE = "How to Build an AI Telegram Bot With No Code | Dada Cloud";
 const DESCRIPTION =
-  "Paste a bot token into the agent's form - Dada Cloud validates it against Telegram's getMe and starts long polling with no domain or webhook setup. An agent already running on the platform starts answering in Telegram within a minute.";
+  "Step by step: describe the bot's role in a prompt, get a token from @BotFather, paste it into the Dada Cloud console - and your AI agent starts answering in Telegram. No code, no webhooks, no server to run.";
 
 export const metadata: Metadata = {
   title: TITLE,
   description: DESCRIPTION,
   keywords: [
+    "how to build an ai telegram bot",
+    "ai telegram bot no code",
+    "create ai bot in telegram",
     "telegram bot for ai agent",
-    "connect bot to llm agent",
-    "telegram gateway for agent",
     "ai agent in telegram no code",
     "telegram long polling no domain",
   ],

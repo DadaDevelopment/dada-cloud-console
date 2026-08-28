@@ -1,17 +1,18 @@
 import type { Metadata } from "next";
 
 const SITE_URL = "https://cloud.dada-tuda.ru";
-const TITLE = "Подключить AI-агента к Telegram-боту | Dada Cloud";
+const TITLE = "Как создать AI-бота для Telegram без кода | Dada Cloud";
 const DESCRIPTION =
-  "Вставьте токен бота в форме агента - Dada Cloud проверит его через Telegram getMe и запустит long polling без домена и вебхука. Агент, который уже работает на платформе, начнёт отвечать в Telegram за минуту.";
+  "Пошаговая инструкция: опишите роль в промпте, получите токен у @BotFather, вставьте его в консоли Dada Cloud - и AI-агент начнёт отвечать в Telegram. Без кода, без вебхуков, без своего сервера под бота.";
 
 export const metadata: Metadata = {
   title: TITLE,
   description: DESCRIPTION,
   keywords: [
+    "как создать телеграм бота на ии",
+    "ии бот телеграм без кода",
+    "создать ai бота в telegram",
     "telegram бот для ai агента",
-    "подключить бота к llm агенту",
-    "telegram gateway для агента",
     "ai агент в telegram без кода",
     "long polling telegram без домена",
   ],

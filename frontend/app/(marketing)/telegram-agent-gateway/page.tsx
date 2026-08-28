@@ -23,10 +23,10 @@ export default function TelegramAgentGatewayPage() {
         />
       )}
       <ProductHero title={g.heroTitle} subtitle={g.heroSubtitle} ctaHref={`/register?${UTM}`} />
-      <FeatureGrid title={g.featuresTitle} features={g.features} />
       {g.howtoSteps && g.howtoSteps.length > 0 && (
         <StepsGrid title={g.howtoTitle ?? ""} subtitle={g.howtoSubtitle} steps={g.howtoSteps} />
       )}
+      <FeatureGrid title={g.featuresTitle} features={g.features} />
       <FaqList title={g.faqTitle} items={g.faq} />
       <CtaBand ctaHref={`/register?${UTM}`} />
     </>
