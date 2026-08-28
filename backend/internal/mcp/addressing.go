@@ -52,7 +52,7 @@ var toolDefaults = map[string]map[string]any{
 // addressingHelp is appended to the description of every tool that accepts
 // names, so the model reads the cheap path in the tool list instead of
 // discovering it by trial.
-const addressingHelp = "\n\nADDRESSING: pass names instead of UUIDs — project, env and app (or ref=\"project/env/app\") are accepted wherever projectId/envId/appName are, and are resolved server-side. There is no need to call listProjects/getProject/listApps first. If the project has exactly one environment, env may be omitted."
+const addressingHelp = "\n\nADDRESSING: pass names instead of UUIDs — project, env and app (or ref=\"project/env/app\") are accepted wherever projectId/envId/appName are, and are resolved server-side. Ids work too: a project id may be given as project/projectId, an environment id as env/envId. There is no need to call listProjects/getProject/listApps first. env may be omitted when the project has one environment; on a read it then defaults to prod when the project has one."
 
 // applyAddressing adds the name arguments to a generated tool's input schema
 // and drops the id parameters from `required`: an id the caller can supply by
@@ -85,9 +85,9 @@ func applyAddressing(g *GeneratedTool) {
 	for _, p := range addressable {
 		switch p {
 		case "projectId":
-			add("project", "Project NAME, resolved server-side (alternative to projectId).")
+			add("project", "Project name or id, resolved server-side (alternative to projectId).")
 		case "envId":
-			add("env", "Environment NAME, e.g. prod (alternative to envId). May be omitted if the project has one environment.")
+			add("env", "Environment name or id, e.g. prod (alternative to envId). May be omitted if the project has one environment, or on a read if it has a prod.")
 		case "appName":
 			add("app", "App name (alias of appName).")
 		}
@@ -205,6 +205,10 @@ func resolveAddressArgs(ctx context.Context, g GeneratedTool, args map[string]an
 	case len(ref.Environments) == 0:
 		return fmt.Sprintf("project %q has no environments", projectName)
 	default:
+		if id := canonicalEnvID(g, ref); id != "" {
+			args["envId"] = id
+			return ""
+		}
 		names := make([]string, 0, len(ref.Environments))
 		for _, e := range ref.Environments {
 			names = append(names, e.Name)
@@ -212,6 +216,33 @@ func resolveAddressArgs(ctx context.Context, g GeneratedTool, args map[string]an
 		sort.Strings(names)
 		return fmt.Sprintf("project %q has several environments — pass env=<one of: %s>",
 			projectName, strings.Join(names, ", "))
+	}
+	return ""
+}
+
+// canonicalEnvNames are the names a project's main environment carries. A
+// caller who names the project and nothing else means this one; the others in
+// the list are branch, box and probe environments that nobody addresses by
+// leaving the address out.
+var canonicalEnvNames = []string{"prod", "production", "default", "main"}
+
+// canonicalEnvID picks that environment, but only for a read.
+//
+// Guessing is refused for a write on purpose: a mis-stitched environment id is
+// how a setEnvVar lands in prod instead of staging, and the refusal names the
+// candidates so the caller can address it in one more call. A read pays nothing
+// for a wrong guess, and refusing it is what made listAgents on a project with
+// seven environments cost three calls to reach an empty list.
+func canonicalEnvID(g GeneratedTool, ref resolvedRef) string {
+	if g.Method != http.MethodGet {
+		return ""
+	}
+	for _, want := range canonicalEnvNames {
+		for _, e := range ref.Environments {
+			if strings.EqualFold(e.Name, want) {
+				return e.ID
+			}
+		}
 	}
 	return ""
 }

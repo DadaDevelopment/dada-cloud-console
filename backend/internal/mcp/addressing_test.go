@@ -138,6 +138,90 @@ func TestResolveAddressArgs_OmittedEnvIsTakenOnlyWhenThereIsExactlyOne(t *testin
 	}
 }
 
+// listAgentsTool mirrors the generated shape of a read whose path still needs
+// an environment id: the call the sandbox id could not address on 2026-08-27.
+func listAgentsTool() GeneratedTool {
+	return GeneratedTool{
+		Name:         "listAgents",
+		Method:       http.MethodGet,
+		PathTemplate: "/projects/{projectId}/environments/{envId}/agents",
+		PathParams:   []string{"projectId", "envId"},
+		InputSchema: map[string]any{
+			"type":     "object",
+			"required": []string{"envId", "projectId"},
+		},
+	}
+}
+
+// TestResolveAddressArgs_AProjectIdAloneAddressesTheRead is the regression for
+// the three-call walk: the caller passed the project id every other tool hands
+// back, the resolver was asked for it as a NAME, and answered `no such
+// project`. The id has to reach /resolve as an address.
+func TestResolveAddressArgs_AProjectIdAloneAddressesTheRead(t *testing.T) {
+	const projectID = "7a387969-e082-415c-8b61-1f53f7e18295"
+	srv, asked := resolveStub(t, map[string]any{
+		"project": map[string]any{"id": projectID, "name": "agent-sandbox"},
+		"environments": []map[string]any{
+			{"id": "66666666-6666-6666-6666-666666666666", "name": "box-727369df"},
+			{"id": "77777777-7777-7777-7777-777777777777", "name": "prod"},
+		},
+	})
+
+	args := map[string]any{"projectId": projectID}
+	if msg := resolveAddressArgs(context.Background(), listAgentsTool(), args, srv.URL, "/api/v1"); msg != "" {
+		t.Fatalf("a project id was not enough to address a read: %s", msg)
+	}
+	if args["envId"] != "77777777-7777-7777-7777-777777777777" {
+		t.Errorf("envId = %v, want the project's prod environment", args["envId"])
+	}
+	if len(*asked) != 1 || (*asked)[0] != projectID {
+		t.Errorf("resolve asked for %v, want one lookup of the project id itself", *asked)
+	}
+}
+
+// TestResolveAddressArgs_ANonCanonicalEnvSetIsStillRefused keeps the guess
+// honest: defaulting is a claim about which environment the project IS, and a
+// project with no prod makes no such claim.
+func TestResolveAddressArgs_ANonCanonicalEnvSetIsStillRefused(t *testing.T) {
+	srv, _ := resolveStub(t, map[string]any{
+		"project": map[string]any{"id": "11111111-1111-1111-1111-111111111111", "name": "internal"},
+		"environments": []map[string]any{
+			{"id": "44444444-4444-4444-4444-444444444444", "name": "staging"},
+			{"id": "88888888-8888-8888-8888-888888888888", "name": "canary"},
+		},
+	})
+
+	args := map[string]any{"project": "internal"}
+	msg := resolveAddressArgs(context.Background(), listAgentsTool(), args, srv.URL, "/api/v1")
+	if msg == "" {
+		t.Fatal("an environment was guessed out of a set with no canonical member")
+	}
+	if !strings.Contains(msg, "staging") || !strings.Contains(msg, "canary") {
+		t.Errorf("refusal %q does not name the candidates", msg)
+	}
+}
+
+// TestResolveAddressArgs_AWriteNeverGuessesItsEnvironment is the safety pole of
+// the default. A read that guesses wrong costs a wrong list; a write that
+// guesses wrong lands in prod instead of staging.
+func TestResolveAddressArgs_AWriteNeverGuessesItsEnvironment(t *testing.T) {
+	srv, _ := resolveStub(t, map[string]any{
+		"project": map[string]any{"id": "11111111-1111-1111-1111-111111111111", "name": "internal"},
+		"environments": []map[string]any{
+			{"id": "44444444-4444-4444-4444-444444444444", "name": "staging"},
+			{"id": "55555555-5555-5555-5555-555555555555", "name": "prod"},
+		},
+	})
+
+	args := map[string]any{"project": "internal", "app": "bot", "key": "K", "value": "v"}
+	if msg := resolveAddressArgs(context.Background(), setEnvVarTool(), args, srv.URL, "/api/v1"); msg == "" {
+		t.Fatal("a write picked prod on its own — this is how a setEnvVar lands in the wrong environment")
+	}
+	if _, filled := args["envId"]; filled {
+		t.Error("envId was filled despite the refusal")
+	}
+}
+
 func TestApplyAddressing_MakesIdsOptionalAndAdvertisesNames(t *testing.T) {
 	g := setEnvVarTool()
 	applyAddressing(&g)

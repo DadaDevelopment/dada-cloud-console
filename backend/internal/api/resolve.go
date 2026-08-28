@@ -67,7 +67,7 @@ type resolveResponse struct {
 // @Description
 // @Description The answer also carries the next level down: resolving a project lists its environments, resolving an environment lists its app NAMES. Resolving an app additionally returns its current image, phase, the env-var keys the console manages and the env-var keys actually present in the cluster.
 // @Description
-// @Description The project may be named by its slug ("agents") or by the display name the console shows ("Agent Runtime"); case, spaces, dashes and underscores are ignored. A slug match always wins over a display-name match.
+// @Description The project may be named by its slug ("agents") or by the display name the console shows ("Agent Runtime"); case, spaces, dashes and underscores are ignored. A slug match always wins over a display-name match. A project id is also a valid first segment, and an environment id a valid second one, so an address that came back from another tool can be pasted straight back in.
 // @Description
 // @Description An ambiguous name (the same project name visible in two orgs) is a 409 that names the candidates rather than a guess. A name that matches nothing is a 404 that lists the visible projects whose names look like it.
 // @Tags        resolve
@@ -98,7 +98,7 @@ func (h *Handler) ResolveRef(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
-	candidates, err := h.visibleProjectsByName(ctx, claims, projectName)
+	candidates, err := h.visibleProjects(ctx, claims, projectName)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to resolve project")
 		return
@@ -140,7 +140,7 @@ func (h *Handler) ResolveRef(c *gin.Context) {
 
 	var env *refEnvironment
 	for i := range envs {
-		if strings.EqualFold(envs[i].Name, envName) {
+		if strings.EqualFold(envs[i].Name, envName) || envs[i].ID.String() == envName {
 			env = &envs[i]
 			break
 		}
@@ -217,6 +217,41 @@ func joinRef(parts ...string) string {
 		out = append(out, p)
 	}
 	return strings.Join(out, "/")
+}
+
+// visibleProjects resolves the first segment of an address, which is a name in
+// the general case and an id whenever the caller already holds one.
+//
+// A project id is an address people genuinely write: it is what the console
+// URL carries, what every other tool returns, and what this project's own
+// CLAUDE.md publishes for the sandbox. Matching names only meant that pasting
+// the id back in answered "no such project" with no candidates — the exact
+// dead end this endpoint exists to remove, and the reason listAgents on the
+// sandbox id took three calls on 2026-08-27.
+func (h *Handler) visibleProjects(ctx context.Context, claims *auth.Claims, ask string) ([]refProject, error) {
+	if id, err := uuid.Parse(ask); err == nil {
+		return h.visibleProjectByID(ctx, claims, id)
+	}
+	return h.visibleProjectsByName(ctx, claims, ask)
+}
+
+// visibleProjectByID reads one project through the same visibility sources as
+// visibleProjectsByName, so an id never reaches further than a name would.
+func (h *Handler) visibleProjectByID(ctx context.Context, claims *auth.Claims, id uuid.UUID) ([]refProject, error) {
+	var p refProject
+	err := h.pool.QueryRow(ctx,
+		`SELECT p.id, p.name, COALESCE(p.display_name, ''), COALESCE(p.org_id, '')
+		   FROM projects p
+		  WHERE p.id = $1 AND ($2 OR p.id = ANY($3) OR p.org_id = ANY($4))`,
+		id, isGod(claims), claimProjectIDs(claims), adminOrgIDs(claims),
+	).Scan(&p.ID, &p.Name, &p.DisplayName, &p.OrgID)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return []refProject{p}, nil
 }
 
 // visibleProjectsByName finds projects the caller may see whose name the
