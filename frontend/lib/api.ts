@@ -23,6 +23,8 @@ import type {
   AgentToolsResponse,
   AgentValidateResponse,
   AgentState,
+  AgentTelegramBinding,
+  AgentTelegramBindResponse,
   CreateS3BucketResponse,
   S3BucketCredentialsResponse,
   DatabaseCredentialsResponse,
@@ -495,6 +497,28 @@ export const agentsApi = {
 
   state: (name: string) =>
     apiFetch<AgentState>(`/api/v1/agents/${encodeURIComponent(name)}/state`),
+
+  /**
+   * One bot <-> one agent. `bind` validates the token against Telegram's
+   * `getMe` server-side before persisting, so a bad token comes back as a
+   * field-shaped 400 rather than a poller that silently never starts.
+   * Changing the token has no in-place path: `unbind` then `bind` again.
+   */
+  telegram: {
+    bind: (name: string, botToken: string) =>
+      apiFetch<AgentTelegramBindResponse>(`/api/v1/agents/${encodeURIComponent(name)}/telegram`, {
+        method: "POST",
+        body: { bot_token: botToken },
+      }),
+
+    unbind: (name: string) =>
+      apiFetch<Record<string, never>>(`/api/v1/agents/${encodeURIComponent(name)}/telegram`, {
+        method: "DELETE",
+      }),
+
+    get: (name: string) =>
+      apiFetch<AgentTelegramBinding>(`/api/v1/agents/${encodeURIComponent(name)}/telegram`),
+  },
 };
 
 export const databasesApi = {

@@ -2455,3 +2455,19 @@ export interface AgentValidateResponse {
   valid: boolean;
   errors: AgentFieldError[];
 }
+
+/**
+ * Telegram binding for one agent, read from `GET /api/v1/agents/{name}/telegram`.
+ *
+ * `bound: false` is the normal answer for an agent nobody wired to a bot yet,
+ * not an error -- `bot_username` only appears once `bound` is true.
+ */
+export interface AgentTelegramBinding {
+  bound: boolean;
+  bot_username?: string;
+}
+
+/** Response of `POST /api/v1/agents/{name}/telegram` on a successful bind. */
+export interface AgentTelegramBindResponse {
+  bot_username: string;
+}

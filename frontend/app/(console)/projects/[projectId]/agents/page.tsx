@@ -6,6 +6,7 @@ import type {
   AgentDraft,
   AgentFieldError,
   AgentState,
+  AgentTelegramBinding,
   AgentToolServer,
   ResourceSnapshot,
 } from "@/lib/types";
@@ -50,6 +51,7 @@ export default function AgentsPage() {
   const [error, setError] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
   const [states, setStates] = useState<Record<string, AgentState>>({});
+  const [telegramBindings, setTelegramBindings] = useState<Record<string, AgentTelegramBinding>>({});
 
   const [tools, setTools] = useState<AgentToolServer[]>([]);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
@@ -60,6 +62,13 @@ export default function AgentsPage() {
   const [fieldErrors, setFieldErrors] = useState<AgentFieldError[]>([]);
   const [deleting, setDeleting] = useState<ResourceSnapshot | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  const [tgLoading, setTgLoading] = useState(false);
+  const [tgBound, setTgBound] = useState(false);
+  const [tgUsername, setTgUsername] = useState<string | null>(null);
+  const [tgToken, setTgToken] = useState("");
+  const [tgSubmitting, setTgSubmitting] = useState(false);
+  const [tgError, setTgError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     return agentsApi.list(projectId, selectedEnvId).then((data) => setAgents(data.agents ?? []));
@@ -105,6 +114,21 @@ export default function AgentsPage() {
   }, [agents]);
 
   useEffect(() => {
+    let cancelled = false;
+    for (const agent of agents) {
+      agentsApi.telegram
+        .get(agent.name)
+        .then((binding) => {
+          if (!cancelled) setTelegramBindings((prev) => ({ ...prev, [agent.name]: binding }));
+        })
+        .catch(() => undefined);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [agents]);
+
+  useEffect(() => {
     if (!isEditorOpen) return;
     trackUxEvent("view", "agent_editor:opened");
     agentsApi
@@ -113,11 +137,44 @@ export default function AgentsPage() {
       .catch(() => setTools([]));
   }, [isEditorOpen]);
 
+  useEffect(() => {
+    if (!isEditorOpen || !editingExisting || !form.name) return;
+    let cancelled = false;
+    agentsApi.telegram
+      .get(form.name)
+      .then((binding) => {
+        if (cancelled) return;
+        setTgBound(binding.bound);
+        setTgUsername(binding.bot_username ?? null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setTgBound(false);
+        setTgUsername(null);
+      })
+      .finally(() => {
+        if (!cancelled) setTgLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isEditorOpen, editingExisting, form.name]);
+
+  function resetTelegramSection(willFetch: boolean) {
+    setTgLoading(willFetch);
+    setTgBound(false);
+    setTgUsername(null);
+    setTgToken("");
+    setTgSubmitting(false);
+    setTgError(null);
+  }
+
   function openCreate() {
     setForm(EMPTY_AGENT_FORM);
     setEditingExisting(false);
     setFieldErrors([]);
     setSubmitError(null);
+    resetTelegramSection(false);
     setIsEditorOpen(true);
   }
 
@@ -126,6 +183,7 @@ export default function AgentsPage() {
     setEditingExisting(true);
     setFieldErrors([]);
     setSubmitError(null);
+    resetTelegramSection(true);
     setIsEditorOpen(true);
   }
 
@@ -185,6 +243,39 @@ export default function AgentsPage() {
       setSubmitError(err instanceof Error ? err.message : t("agents.error.delete"));
     } finally {
       setIsDeleting(false);
+    }
+  }
+
+  async function handleTelegramBind() {
+    if (!form.name) return;
+    setTgSubmitting(true);
+    setTgError(null);
+    try {
+      const res = await agentsApi.telegram.bind(form.name, tgToken);
+      setTgBound(true);
+      setTgUsername(res.bot_username);
+      setTgToken("");
+      setTelegramBindings((prev) => ({ ...prev, [form.name]: { bound: true, bot_username: res.bot_username } }));
+    } catch (err) {
+      setTgError(err instanceof Error ? err.message : t("agents.modal.telegram.errorBind"));
+    } finally {
+      setTgSubmitting(false);
+    }
+  }
+
+  async function handleTelegramUnbind() {
+    if (!form.name) return;
+    setTgSubmitting(true);
+    setTgError(null);
+    try {
+      await agentsApi.telegram.unbind(form.name);
+      setTgBound(false);
+      setTgUsername(null);
+      setTelegramBindings((prev) => ({ ...prev, [form.name]: { bound: false } }));
+    } catch (err) {
+      setTgError(err instanceof Error ? err.message : t("agents.modal.telegram.errorUnbind"));
+    } finally {
+      setTgSubmitting(false);
     }
   }
 
@@ -298,6 +389,16 @@ export default function AgentsPage() {
                     className="mt-2 inline-block text-xs font-medium text-blue-600 hover:text-blue-700"
                   >
                     {t("agents.state.traces")}
+                  </a>
+                )}
+                {telegramBindings[agent.name]?.bound && telegramBindings[agent.name]?.bot_username && (
+                  <a
+                    href={"https://t.me/" + telegramBindings[agent.name]!.bot_username}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-2 block text-xs font-medium text-blue-600 hover:text-blue-700"
+                  >
+                    {t("agents.state.telegram", { username: telegramBindings[agent.name]!.bot_username! })}
                   </a>
                 )}
 
@@ -452,6 +553,59 @@ export default function AgentsPage() {
               </div>
             )}
             {errorFor("tools") && <p className="mt-1 text-xs text-red-600">{errorFor("tools")}</p>}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              {t("agents.modal.telegram.label")}
+            </label>
+            {!editingExisting ? (
+              <p className="mt-1 text-xs text-gray-400">{t("agents.modal.telegram.saveFirst")}</p>
+            ) : tgLoading ? (
+              <div className="mt-2 flex items-center gap-2 text-xs text-gray-400">
+                <Spinner size="sm" />
+                {t("agents.modal.telegram.checking")}
+              </div>
+            ) : tgBound ? (
+              <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2">
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  {t("agents.modal.telegram.connected", { username: tgUsername ?? "" })}
+                </span>
+                {canWrite && (
+                  <button
+                    type="button"
+                    onClick={handleTelegramUnbind}
+                    disabled={tgSubmitting}
+                    className="shrink-0 rounded-lg border border-red-200 dark:border-red-900 px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 disabled:opacity-50"
+                  >
+                    {tgSubmitting ? t("agents.modal.telegram.disconnecting") : t("agents.modal.telegram.disconnect")}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="mt-2 flex gap-2">
+                <input
+                  type="password"
+                  value={tgToken}
+                  onChange={(e) => setTgToken(e.target.value)}
+                  placeholder={t("agents.modal.telegram.tokenPlaceholder")}
+                  disabled={!canWrite || tgSubmitting}
+                  autoComplete="off"
+                  className="min-w-0 flex-1 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 font-mono text-sm disabled:opacity-60"
+                />
+                {canWrite && (
+                  <button
+                    type="button"
+                    onClick={handleTelegramBind}
+                    disabled={tgSubmitting || !tgToken.trim()}
+                    className="shrink-0 rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+                  >
+                    {tgSubmitting ? t("agents.modal.telegram.connecting") : t("agents.modal.telegram.connect")}
+                  </button>
+                )}
+              </div>
+            )}
+            {tgError && <p className="mt-1 text-xs text-red-600">{tgError}</p>}
           </div>
 
           <div>

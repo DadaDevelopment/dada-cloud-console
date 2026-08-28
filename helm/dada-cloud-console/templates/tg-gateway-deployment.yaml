@@ -1,0 +1,66 @@
+{{- if .Values.tgGateway.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dada-cloud-console.fullname" . }}-tg-gateway
+  labels:
+    {{- include "dada-cloud-console.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tg-gateway
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "dada-cloud-console.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: tg-gateway
+  template:
+    metadata:
+      labels:
+        {{- include "dada-cloud-console.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: tg-gateway
+    spec:
+      serviceAccountName: {{ include "dada-cloud-console.fullname" . }}
+      {{- with .Values.global.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: tg-gateway
+          image: "{{ .Values.global.imageRegistry }}/{{ .Values.tgGateway.image.repository }}:{{ .Values.tgGateway.image.tag }}"
+          imagePullPolicy: {{ .Values.tgGateway.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.tgGateway.service.port }}
+          env:
+            - name: TG_GATEWAY_PORT
+              value: {{ .Values.tgGateway.service.port | quote }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "dada-cloud-console.fullname" . }}-config
+            - secretRef:
+                name: {{ default (printf "%s-backend" (include "dada-cloud-console.fullname" .)) .Values.backend.existingSecret }}
+            - secretRef:
+                name: {{ default (printf "%s-tg-gateway" (include "dada-cloud-console.fullname" .)) .Values.tgGateway.existingSecret }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.tgGateway.resources | nindent 12 }}
+{{- end }}

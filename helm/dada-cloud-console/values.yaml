@@ -422,6 +422,25 @@ buildAgent:
       cpu: 500m
       memory: 512Mi
 
+tgGateway:
+  enabled: false
+  image:
+    repository: dada-cloud-console-tg-gateway
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  service:
+    port: 8082
+  databaseUrl: ""
+  existingSecret: ""
+  secret: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
 # portainerAgent is the control-plane worker that provisions/connects VMs,
 # SSH-installs the Portainer Edge Agent, registers edge endpoints in the
 # in-cluster Portainer, and deploys compose stacks (DeployStack) via its API.

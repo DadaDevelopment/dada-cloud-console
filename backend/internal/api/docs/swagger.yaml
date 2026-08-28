@@ -497,6 +497,11 @@ definitions:
       code:
         type: string
     type: object
+  api.bindAgentTelegramRequest:
+    properties:
+      bot_token:
+        type: string
+    type: object
   api.bindInstallationRequest:
     properties:
       installation_id:
@@ -3165,6 +3170,128 @@ paths:
       security:
       - BearerAuth: []
       summary: Live state of one agent
+      tags:
+      - agents
+  /agents/{agentName}/telegram:
+    delete:
+      description: Stops the long-poll bridge and forgets the token. Safe to call
+        for an agent with no binding.
+      operationId: unbindAgentTelegram
+      parameters:
+      - description: Agent name
+        in: path
+        name: agentName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Disconnect an agent's Telegram bot
+      tags:
+      - agents
+    get:
+      description: Returns whether the agent has a bot connected, and its @username
+        when it does. Reports bound=false rather than 404 when there is none.
+      operationId: getAgentTelegram
+      parameters:
+      - description: Agent name
+        in: path
+        name: agentName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: bound, bot_username
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get an agent's Telegram binding
+      tags:
+      - agents
+    post:
+      consumes:
+      - application/json
+      description: Validates the bot token via Telegram getMe (through tg-gateway)
+        and starts a long-poll bridge between the bot and the agent's A2A endpoint.
+        400 when the token is invalid, 503 when tg-gateway is unreachable or unconfigured.
+      operationId: bindAgentTelegram
+      parameters:
+      - description: Agent name
+        in: path
+        name: agentName
+        required: true
+        type: string
+      - description: Bot token
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.bindAgentTelegramRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: bot_username
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Connect a Telegram bot to an agent
       tags:
       - agents
   /agents/tools:

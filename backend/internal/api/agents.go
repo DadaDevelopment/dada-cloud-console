@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
@@ -377,6 +378,13 @@ func (h *Handler) DeleteAgent(c *gin.Context) {
 	}
 
 	audit(op.ID, auditOutcomeSuccess, nil)
+
+	if h.tgGateway != nil {
+		if err := h.tgGateway.Unbind(c.Request.Context(), name); err != nil {
+			log.Printf("tg-gateway unbind on agent delete %q: %v", name, err)
+		}
+	}
+
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "agent deletion queued"})
 }
 

@@ -120,6 +120,14 @@ type Config struct {
 	BuildAgentWSURL       string // BUILD_AGENT_WS_URL
 	BuildAgentTokenSecret string // BUILD_AGENT_TOKEN_SECRET
 
+	// TGGatewayURL is the base HTTP URL of tg-gateway (backend/cmd/tg-gateway,
+	// the Telegram <-> kagent agent bridge): a cluster-internal, ClusterIP-only
+	// service the backend proxies /agents/{name}/telegram through, the same
+	// posture BuildAgentURL has toward the build-agent. Empty disables Telegram
+	// binding outright -- the three telegram endpoints answer 503 rather than
+	// failing to start.
+	TGGatewayURL string // TG_GATEWAY_URL
+
 	// GitHub App slug (the public name in github.com/apps/<slug>). Required for
 	// the connect flow: the install-url endpoint sends the browser to
 	// github.com/apps/<slug>/installations/new and GitHub redirects back to our
@@ -437,6 +445,15 @@ type Config struct {
 	// empty falls back to DBURL. GatewayPort is the gateway's listen port.
 	GatewayDBURL string // GATEWAY_DB_URL
 	GatewayPort  string // GATEWAY_PORT (default 8081)
+
+	// tg-gateway (Telegram <-> kagent agent bridge, backend/cmd/tg-gateway) --
+	// standalone long-poll service, single replica by hard requirement (two
+	// pollers holding the same Telegram bot token race getUpdates and Telegram
+	// answers the second one 409 Conflict). TGGatewayDBURL is its own Postgres
+	// role (tg_bindings only); empty falls back to DBURL. TGGatewayPort is its
+	// listen port.
+	TGGatewayDBURL string // TG_GATEWAY_DB_URL
+	TGGatewayPort  string // TG_GATEWAY_PORT (default 8082)
 
 	// UserServiceURL is the base URL of user-service. The telemetry gateway calls
 	// its POST /v1/apikeys/introspect endpoint to resolve unified sk-dada- ingest
@@ -843,6 +860,7 @@ func Load() (*Config, error) {
 		BuildAgentURL:               getEnv("BUILD_AGENT_URL", ""),
 		BuildAgentWSURL:             getEnv("BUILD_AGENT_WS_URL", ""),
 		BuildAgentTokenSecret:       getEnv("BUILD_AGENT_TOKEN_SECRET", ""),
+		TGGatewayURL:                getEnv("TG_GATEWAY_URL", ""),
 		GitAppSlug:                  getEnv("GIT_APP_SLUG", ""),
 		NexusRawURL:                 getEnv("NEXUS_RAW_URL", ""),
 		NexusUser:                   getEnv("NEXUS_USER", ""),
@@ -934,6 +952,8 @@ func Load() (*Config, error) {
 		GatewayDBURL:                getEnv("GATEWAY_DB_URL", ""),
 		UserServiceURL:              getEnv("USER_SERVICE_URL", ""),
 		GatewayPort:                 getEnv("GATEWAY_PORT", "8081"),
+		TGGatewayDBURL:              getEnv("TG_GATEWAY_DB_URL", ""),
+		TGGatewayPort:               getEnv("TG_GATEWAY_PORT", "8082"),
 		SMTPHost:                    getEnv("SMTP_HOST", ""),
 		SMTPPort:                    getEnvInt("SMTP_PORT", 587),
 		SMTPUser:                    getEnv("SMTP_USER", ""),

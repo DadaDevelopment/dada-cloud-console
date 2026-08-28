@@ -54,3 +54,8 @@ data:
   GIT_APP_SLUG: {{ .Values.buildAgent.gitAppSlug | quote }}
   {{- end }}
   {{- end }}
+  {{- if .Values.tgGateway.enabled }}
+  {{- if not (hasKey .Values.backend.env "TG_GATEWAY_URL") }}
+  TG_GATEWAY_URL: {{ printf "http://%s-tg-gateway:%v" (include "dada-cloud-console.fullname" .) .Values.tgGateway.service.port | quote }}
+  {{- end }}
+  {{- end }}

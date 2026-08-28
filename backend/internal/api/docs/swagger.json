@@ -2092,6 +2092,187 @@
                 }
             }
         },
+        "/agents/{agentName}/telegram": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns whether the agent has a bot connected, and its @username when it does. Reports bound=false rather than 404 when there is none.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agents"
+                ],
+                "summary": "Get an agent's Telegram binding",
+                "operationId": "getAgentTelegram",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent name",
+                        "name": "agentName",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "bound, bot_username",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Validates the bot token via Telegram getMe (through tg-gateway) and starts a long-poll bridge between the bot and the agent's A2A endpoint. 400 when the token is invalid, 503 when tg-gateway is unreachable or unconfigured.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agents"
+                ],
+                "summary": "Connect a Telegram bot to an agent",
+                "operationId": "bindAgentTelegram",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent name",
+                        "name": "agentName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Bot token",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.bindAgentTelegramRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "bot_username",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Stops the long-poll bridge and forgets the token. Safe to call for an agent with no binding.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agents"
+                ],
+                "summary": "Disconnect an agent's Telegram bot",
+                "operationId": "unbindAgentTelegram",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent name",
+                        "name": "agentName",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/ai/catalog": {
             "get": {
                 "security": [
@@ -23299,6 +23480,14 @@
             "type": "object",
             "properties": {
                 "code": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.bindAgentTelegramRequest": {
+            "type": "object",
+            "properties": {
+                "bot_token": {
                     "type": "string"
                 }
             }
