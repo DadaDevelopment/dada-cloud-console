@@ -123,6 +123,14 @@ func isKnownAIAlias(name string) bool {
 	return false
 }
 
+func knownAIAliases() []string {
+	aliases := make([]string, 0, len(aiCatalogModels))
+	for _, model := range aiCatalogModels {
+		aliases = append(aliases, model.Alias)
+	}
+	return aliases
+}
+
 // isKnownAIProvider reports whether the gateway can route to this provider at
 // all. Storing a credential for anything else would silently never be used.
 func isKnownAIProvider(name string) bool {

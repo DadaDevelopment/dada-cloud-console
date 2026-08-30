@@ -454,6 +454,7 @@ func (h *Handler) ListAIKeyModels(c *gin.Context) {
 	if !ok {
 		return
 	}
+	aliases := knownAIAliases()
 	rows, err := h.pool.Query(c.Request.Context(), `
 		SELECT m.model_id,
 		       CASE WHEN count(DISTINCT c.provider) = 1 THEN min(c.provider) ELSE '' END,
@@ -462,7 +463,8 @@ func (h *Handler) ListAIKeyModels(c *gin.Context) {
 		  JOIN ai_gateway_key_credentials c ON c.id = m.credential_id
 		 WHERE (c.gateway_key_id = $1 OR c.gateway_key_id IS NULL) AND c.enabled AND c.deleted_at IS NULL
 		   AND (c.unavailable_until IS NULL OR c.unavailable_until <= now())
-		 GROUP BY m.model_id ORDER BY m.model_id`, keyID)
+		   AND m.model_id = ANY($2)
+		 GROUP BY m.model_id ORDER BY m.model_id`, keyID, aliases)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to query discovered models")
 		return
@@ -502,6 +504,7 @@ func (h *Handler) AIGetKeyModels(c *gin.Context) {
 		respondNotFound(c)
 		return
 	}
+	aliases := knownAIAliases()
 	rows, err := h.pool.Query(c.Request.Context(), `
 		SELECT m.model_id,
 		       CASE WHEN count(DISTINCT c.provider) = 1 THEN min(c.provider) ELSE '' END,
@@ -511,7 +514,8 @@ func (h *Handler) AIGetKeyModels(c *gin.Context) {
 		 WHERE (c.gateway_key_id = $1 OR c.gateway_key_id IS NULL) AND c.enabled AND c.deleted_at IS NULL
 		   AND (c.unavailable_until IS NULL OR c.unavailable_until <= now())
 		   AND EXISTS (SELECT 1 FROM ai_gateway_keys active_key WHERE active_key.id = $1 AND active_key.revoked_at IS NULL)
-		 GROUP BY m.model_id ORDER BY m.model_id`, req.GatewayKeyID)
+		   AND m.model_id = ANY($2)
+		 GROUP BY m.model_id ORDER BY m.model_id`, req.GatewayKeyID, aliases)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to query discovered models")
 		return

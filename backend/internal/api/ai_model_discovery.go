@@ -235,7 +235,12 @@ func replaceCredentialModels(ctx context.Context, pool *pgxpool.Pool, credential
 			return err
 		}
 	}
-	if _, err := tx.Exec(ctx, `UPDATE ai_gateway_key_credentials SET status='healthy',updated_at=now() WHERE id=$1`, credentialID); err != nil {
+	// A successful GET /models proves only that this credential may enumerate
+	// the upstream catalogue. It does not prove that any advertised model can
+	// complete an inference (a key may be out of credit, lack entitlement, or
+	// be rate-limited). Only a successful inference recorded by AIRecordUsage
+	// is allowed to clear cooldown and mark the credential healthy.
+	if _, err := tx.Exec(ctx, `UPDATE ai_gateway_key_credentials SET updated_at=now() WHERE id=$1`, credentialID); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

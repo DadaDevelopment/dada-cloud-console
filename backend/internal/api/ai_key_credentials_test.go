@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -298,6 +299,34 @@ func TestReplaceCredentialModelsAcceptsGlobalPlatformCredential(t *testing.T) {
 	}
 }
 
+func TestModelDiscoveryDoesNotHealInferenceCooldown(t *testing.T) {
+	pool := testAICredPool(t)
+	ctx := context.Background()
+	var credentialID uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO ai_gateway_key_credentials
+		(gateway_key_id,provider,label,api_key_encrypted,status,unavailable_until)
+		VALUES (NULL,'openai','catalog-only','\x74657374'::bytea,'cooldown',now()+interval '1 hour')
+		RETURNING id`).Scan(&credentialID); err != nil {
+		t.Fatalf("insert credential: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM ai_gateway_key_credentials WHERE id=$1`, credentialID)
+	})
+
+	if err := replaceCredentialModels(ctx, pool, credentialID, []string{"gpt-4o"}); err != nil {
+		t.Fatalf("store discovery: %v", err)
+	}
+	var status string
+	var unavailable bool
+	if err := pool.QueryRow(ctx, `SELECT status,unavailable_until > now()
+		FROM ai_gateway_key_credentials WHERE id=$1`, credentialID).Scan(&status, &unavailable); err != nil {
+		t.Fatal(err)
+	}
+	if status != "cooldown" || !unavailable {
+		t.Fatalf("catalog discovery healed inference state: status=%q unavailable=%v", status, unavailable)
+	}
+}
+
 func TestUpdateRediscoveryReplacesStaleGlobalModels(t *testing.T) {
 	pool := testAICredPool(t)
 	ctx := context.Background()
@@ -349,5 +378,17 @@ func TestSotaAliasesUseEffectiveProviderCatalog(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(aiAliasesForProvider("openai"), ","), "sota-opus") {
 		t.Fatal("OpenAI-compatible wire transport must not own Sota credentials")
+	}
+}
+
+func TestPublicModelAllowlistContainsOnlyCuratedAliases(t *testing.T) {
+	aliases := knownAIAliases()
+	if len(aliases) != len(aiCatalogModels) {
+		t.Fatalf("aliases=%d catalog=%d", len(aliases), len(aiCatalogModels))
+	}
+	for _, raw := range []string{"gpt-5.6-sol", "claude-sonnet-5", "meta/llama-3.1-405b"} {
+		if slices.Contains(aliases, raw) {
+			t.Fatalf("raw upstream model %q leaked into public allowlist", raw)
+		}
 	}
 }
