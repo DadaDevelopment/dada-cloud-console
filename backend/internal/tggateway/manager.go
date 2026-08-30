@@ -18,14 +18,19 @@ const reconcileInterval = 5 * time.Second
 // every getUpdates call.
 const getUpdatesTimeoutSec = 30
 
-// a2aFailureWarningAfter is how long a poller keeps failing to reach an
-// agent's A2A endpoint before it sends the one "still deploying" message to
-// the chat (design doc: warn once, then keep retrying quietly).
-const a2aFailureWarningAfter = 30 * time.Second
-
 // typingRefreshInterval must stay under Telegram's ~5s "typing" expiry so the
 // indicator never blinks off while a poller is still waiting on the agent.
 const typingRefreshInterval = 4 * time.Second
+
+// a2aFailureFallback is sent to the chat on the first a2a.Send failure of a
+// streak. getUpdates already advances the offset before Send runs, so a
+// failed update is never retried -- there is nothing to wait for, and a
+// prior 30s silent-then-warn grace period just meant the user's message
+// vanished with no reply at all when the streak self-healed inside that
+// window (reproduced live 2026-08-30: ~10% of turns against a healthy agent
+// hit this path). warned still gates to one message per continuous streak,
+// so a real outage still doesn't spam every failed message.
+const a2aFailureFallback = "не получилось обработать сообщение, попробуйте отправить его ещё раз"
 
 // ErrInvalidToken is returned by Manager.Bind when Telegram's getMe rejects
 // the token -- the handler maps this to a synchronous 400.
@@ -183,7 +188,6 @@ func (m *Manager) liveCount() int {
 func runPoller(ctx context.Context, tg TelegramClient, a2a A2AClient, b Binding) {
 	var offset int64
 	var failing bool
-	var failSince time.Time
 	var warned bool
 
 	backoff := time.Second
@@ -216,13 +220,12 @@ func runPoller(ctx context.Context, tg TelegramClient, a2a A2AClient, b Binding)
 			if err != nil {
 				if !failing {
 					failing = true
-					failSince = time.Now()
 					warned = false
 				}
 				log.Warn().Err(err).Str("agent", b.AgentName).Msg("tggateway: a2a send failed")
-				if !warned && time.Since(failSince) >= a2aFailureWarningAfter {
+				if !warned {
 					warned = true
-					if sendErr := tg.SendMessage(ctx, b.BotToken, u.ChatID, "агент ещё разворачивается, попробуйте чуть позже"); sendErr != nil {
+					if sendErr := tg.SendMessage(ctx, b.BotToken, u.ChatID, a2aFailureFallback); sendErr != nil {
 						log.Warn().Err(sendErr).Str("agent", b.AgentName).Msg("tggateway: warning send failed")
 					}
 				}

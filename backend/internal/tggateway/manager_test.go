@@ -198,6 +198,103 @@ func TestBind_RejectsInvalidToken(t *testing.T) {
 	}
 }
 
+// onceTelegram returns a fixed batch of updates on its first GetUpdates
+// call, then blocks like fakeTelegram -- a poller loop needs exactly one
+// pass over the batch to exercise the a2a-failure path without spinning.
+// SendMessage calls are recorded so tests can assert on what the user
+// actually received.
+type onceTelegram struct {
+	fakeTelegram
+	mu      sync.Mutex
+	updates []TelegramUpdate
+	served  bool
+	sent    []string
+}
+
+func (o *onceTelegram) GetUpdates(ctx context.Context, token string, offset int64, timeoutSec int) ([]TelegramUpdate, error) {
+	o.mu.Lock()
+	if !o.served {
+		o.served = true
+		batch := o.updates
+		o.mu.Unlock()
+		return batch, nil
+	}
+	o.mu.Unlock()
+	return o.fakeTelegram.GetUpdates(ctx, token, offset, timeoutSec)
+}
+
+func (o *onceTelegram) SendMessage(_ context.Context, _ string, _ int64, text string) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.sent = append(o.sent, text)
+	return nil
+}
+
+func (o *onceTelegram) sentCount() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return len(o.sent)
+}
+
+// failingA2A errors on Send until failures calls have happened, then
+// succeeds -- lets a test drive an exact-length failure streak.
+type failingA2A struct {
+	mu       sync.Mutex
+	failures int
+	calls    int
+}
+
+func (f *failingA2A) Send(context.Context, string, string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	if f.calls <= f.failures {
+		return "", errors.New("a2a unreachable")
+	}
+	return "ok", nil
+}
+
+// TestRunPoller_WarnsOnFirstFailureNotAfterDelay guards the 2026-08-30
+// production incident: a single a2a.Send failure used to be silent for 30s
+// before the user got any reply, and getUpdates already advances past the
+// failed message with no retry -- so on a one-off failure the user got
+// nothing at all. The fix warns on the first failure of a streak.
+func TestRunPoller_WarnsOnFirstFailureNotAfterDelay(t *testing.T) {
+	tg := &onceTelegram{updates: []TelegramUpdate{{UpdateID: 1, ChatID: 42, Text: "hi"}}}
+	a2a := &failingA2A{failures: 1}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go runPoller(ctx, tg, a2a, Binding{AgentName: "agent-g", BotToken: "tok-g"})
+
+	waitFor(t, func() bool { return tg.sentCount() == 1 })
+	if got := tg.sent[0]; got != a2aFailureFallback {
+		t.Fatalf("expected fallback message %q, got %q", a2aFailureFallback, got)
+	}
+}
+
+// TestRunPoller_DoesNotDuplicateWarningWithinSameFailureStreak keeps the
+// original "warn once" design doc intent: several updates failing in the
+// same streak must not each trigger their own message.
+func TestRunPoller_DoesNotDuplicateWarningWithinSameFailureStreak(t *testing.T) {
+	tg := &onceTelegram{updates: []TelegramUpdate{
+		{UpdateID: 1, ChatID: 42, Text: "one"},
+		{UpdateID: 2, ChatID: 42, Text: "two"},
+		{UpdateID: 3, ChatID: 42, Text: "three"},
+	}}
+	a2a := &failingA2A{failures: 3}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go runPoller(ctx, tg, a2a, Binding{AgentName: "agent-h", BotToken: "tok-h"})
+
+	waitFor(t, func() bool { return tg.sentCount() >= 1 })
+	time.Sleep(50 * time.Millisecond)
+	if got := tg.sentCount(); got != 1 {
+		t.Fatalf("expected exactly 1 fallback message for a 3-failure streak, got %d", got)
+	}
+}
+
 func TestUnbind_StopsPollerAndRemovesRow(t *testing.T) {
 	store := newFakeStore()
 	mgr := NewManager(store, fakeTelegram{}, fakeA2A{})
