@@ -392,3 +392,33 @@ func TestPublicModelAllowlistContainsOnlyCuratedAliases(t *testing.T) {
 		}
 	}
 }
+
+func TestExpiredCooldownIsNotHealthyCatalogEvidence(t *testing.T) {
+	pool := testAICredPool(t)
+	ctx := context.Background()
+	var credentialID uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO ai_gateway_key_credentials
+		(gateway_key_id,provider,label,api_key_encrypted,status,unavailable_until)
+		VALUES (NULL,'anthropic','expired','\x74657374'::bytea,'cooldown',now()-interval '1 minute')
+		RETURNING id`).Scan(&credentialID); err != nil {
+		t.Fatalf("insert credential: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM ai_gateway_key_credentials WHERE id=$1`, credentialID)
+	})
+	if err := replaceCredentialModels(ctx, pool, credentialID, []string{"claude"}); err != nil {
+		t.Fatal(err)
+	}
+	var visible bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM ai_gateway_key_credential_models m
+		JOIN ai_gateway_key_credentials c ON c.id=m.credential_id
+		WHERE c.id=$1 AND c.status='healthy'
+		  AND (c.unavailable_until IS NULL OR c.unavailable_until<=now())
+		  AND m.model_id='claude')`, credentialID).Scan(&visible); err != nil {
+		t.Fatal(err)
+	}
+	if visible {
+		t.Fatal("an expired cooldown advertised claude without a successful recovery inference")
+	}
+}

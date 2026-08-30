@@ -462,6 +462,7 @@ func (h *Handler) ListAIKeyModels(c *gin.Context) {
 		  FROM ai_gateway_key_credential_models m
 		  JOIN ai_gateway_key_credentials c ON c.id = m.credential_id
 		 WHERE (c.gateway_key_id = $1 OR c.gateway_key_id IS NULL) AND c.enabled AND c.deleted_at IS NULL
+		   AND c.status = 'healthy'
 		   AND (c.unavailable_until IS NULL OR c.unavailable_until <= now())
 		   AND m.model_id = ANY($2)
 		 GROUP BY m.model_id ORDER BY m.model_id`, keyID, aliases)
@@ -512,6 +513,7 @@ func (h *Handler) AIGetKeyModels(c *gin.Context) {
 		  FROM ai_gateway_key_credential_models m
 		  JOIN ai_gateway_key_credentials c ON c.id = m.credential_id
 		 WHERE (c.gateway_key_id = $1 OR c.gateway_key_id IS NULL) AND c.enabled AND c.deleted_at IS NULL
+		   AND c.status = 'healthy'
 		   AND (c.unavailable_until IS NULL OR c.unavailable_until <= now())
 		   AND EXISTS (SELECT 1 FROM ai_gateway_keys active_key WHERE active_key.id = $1 AND active_key.revoked_at IS NULL)
 		   AND m.model_id = ANY($2)
