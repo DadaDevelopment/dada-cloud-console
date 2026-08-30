@@ -1,6 +1,9 @@
 package api
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // TestCauseRefreshOutcomePreservesCauseOnEmptyLog is RED-proof for the live
 // bug observed on envprobe0816 (2026-08-16): a flapping pod's reason
@@ -79,5 +82,53 @@ func TestCauseRefreshOutcomeAlwaysRefreshesOnKubeAuthoritativeReason(t *testing.
 	}
 	if cause == "" || causeKind == "" {
 		t.Fatalf("expected cause/causeKind to pass through unchanged, got cause=%q causeKind=%q logExcerpt=%q causeLine=%q", cause, causeKind, logExcerpt, causeLine)
+	}
+}
+
+// TestEscalatedCooldownLadderMatchesSQL pins the Go ladder
+// (appHealthAlertEscalationSteps, consumed by escalatedCooldown) to the same
+// cutoffs the claim's WHERE clause inlines as interval literals ('3 days' ->
+// +2 days of cooldown, '14 days' -> +6 days). The SQL cannot be expressed
+// from the slice without building it at init time, so the two must simply
+// agree; this test is the agreement. If you change one side, change both.
+func TestEscalatedCooldownLadderMatchesSQL(t *testing.T) {
+	if len(appHealthAlertEscalationSteps) != 3 {
+		t.Fatalf("the SQL WHERE clause hardcodes two cutoffs (3d, 14d); expected exactly 3 steps, got %d", len(appHealthAlertEscalationSteps))
+	}
+	wantAfter := []time.Duration{0, 3 * 24 * time.Hour, 14 * 24 * time.Hour}
+	wantCooldown := []time.Duration{24 * time.Hour, 3 * 24 * time.Hour, 7 * 24 * time.Hour}
+	for i, s := range appHealthAlertEscalationSteps {
+		if s.after != wantAfter[i] || s.cooldown != wantCooldown[i] {
+			t.Fatalf("step %d = (after %v, cooldown %v), SQL inlines (after %v, cooldown %v)", i, s.after, s.cooldown, wantAfter[i], wantCooldown[i])
+		}
+	}
+}
+
+// TestEscalatedCooldown walks the ladder end to end: day 0 (fresh incident)
+// and day 2 alert daily; day 3 through day 13 alert every three days; day 14
+// and beyond alert weekly. A first_detected_at in the future (clock skew
+// between replicas) must not produce a negative age, which would otherwise
+// pick no step at all.
+func TestEscalatedCooldown(t *testing.T) {
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		age  time.Duration
+		want time.Duration
+	}{
+		{age: 0, want: 24 * time.Hour},
+		{age: 2 * 24 * time.Hour, want: 24 * time.Hour},
+		{age: 3 * 24 * time.Hour, want: 3 * 24 * time.Hour},
+		{age: 13 * 24 * time.Hour, want: 3 * 24 * time.Hour},
+		{age: 14 * 24 * time.Hour, want: 7 * 24 * time.Hour},
+		{age: 90 * 24 * time.Hour, want: 7 * 24 * time.Hour},
+	}
+	for _, c := range cases {
+		first := now.Add(-c.age)
+		if got := escalatedCooldown(first, now); got != c.want {
+			t.Fatalf("age %v: got cooldown %v, want %v", c.age, got, c.want)
+		}
+	}
+	if got := escalatedCooldown(now.Add(time.Hour), now); got != 24*time.Hour {
+		t.Fatalf("future first_detected_at (clock skew): got %v, want the young cadence %v", got, 24*time.Hour)
 	}
 }

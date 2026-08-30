@@ -468,6 +468,43 @@ func detectPodAlertAt(pod *corev1.Pod, now time.Time, window time.Duration) (app
 	return appHealthAlert{}, false
 }
 
+// appHealthAlertEscalationSteps is the escalating cooldown ladder for one
+// continuous incident (same reason on every tick): an email every 24h while
+// the incident is younger than three days, every 72h until it is two weeks
+// old, then weekly. Owner feedback (2026-08-30, gateway in internal-prod
+// crashlooping for 2.5 days with 492 restarts): a flat 24h cooldown on an
+// incident that never changes reads as daily spam -- nothing about day N of
+// the same crash is more actionable than day N-1 was. The age is measured
+// from first_detected_at (see migration 146), which a reason change resets,
+// so a genuinely NEW failure always alerts on the young cadence again.
+var appHealthAlertEscalationSteps = []struct {
+	after    time.Duration
+	cooldown time.Duration
+}{
+	{after: 0, cooldown: 24 * time.Hour},
+	{after: 3 * 24 * time.Hour, cooldown: 3 * 24 * time.Hour},
+	{after: 14 * 24 * time.Hour, cooldown: 7 * 24 * time.Hour},
+}
+
+// escalatedCooldown converts an incident's age into the cooldown currently
+// in force: the last step whose `after` threshold the age has reached. The
+// returned duration feeds claimAppHealthAlertSlot's WHERE clause unchanged,
+// so a failed-send rollback (recordAppHealthAlertSend) keeps working against
+// whatever cadence the incident has escalated to.
+func escalatedCooldown(firstDetected time.Time, now time.Time) time.Duration {
+	age := now.Sub(firstDetected)
+	if age < 0 {
+		age = 0
+	}
+	step := appHealthAlertEscalationSteps[0].cooldown
+	for _, s := range appHealthAlertEscalationSteps {
+		if age >= s.after {
+			step = s.cooldown
+		}
+	}
+	return step
+}
+
 // claimAppHealthAlertSlot atomically claims the right to send one alert for
 // (namespace, app) by upserting app_health_alerts, succeeding only when no
 // send is recorded within cooldown. The conditional upsert makes the claim
@@ -476,6 +513,12 @@ func detectPodAlertAt(pod *corev1.Pod, now time.Time, window time.Duration) (app
 // (namespace, app_name) key and so to a single email. reason/detail are
 // persisted alongside the cooldown timestamp (P1-ALERTS-IN-UI) so the console
 // can read back "what was detected" without a live cluster scan.
+//
+// The cooldown is the ESCALATED one (escalatedCooldown): 24h for a young
+// incident, 72h once the same reason has persisted three days, weekly after
+// two weeks. The SQL measures the age itself, from first_detected_at to
+// now(), so the ladder applies identically across replicas without either
+// needing the other's clock.
 //
 // The second WHERE branch is the catch-up slot, and it exists because the
 // cooldown is a clock while the diagnosis is a discovery, and the two do not
@@ -503,14 +546,27 @@ func detectPodAlertAt(pod *corev1.Pod, now time.Time, window time.Duration) (app
 // the change and at worst grants one truthful email to an app that is still
 // failing right now — claim is only ever reached from a live detection, so
 // rows for long-dead apps never qualify.
+//
+// The escalation cutoffs (3d, 14d) are inlined in the WHERE as plain
+// interval literals rather than parameterized from
+// appHealthAlertEscalationSteps: the SQL and the Go ladder must agree, and
+// TestEscalatedCooldownLadderMatchesSQL pins the Go side to the same numbers
+// so the two cannot drift silently.
 func claimAppHealthAlertSlot(ctx context.Context, pool *pgxpool.Pool, namespace, appName, reason, detail string, cooldown time.Duration) bool {
 	ct, err := pool.Exec(ctx,
-		`INSERT INTO app_health_alerts (namespace, app_name, last_sent_at, reason, detail)
-		 VALUES ($1, $2, now(), $3, $4)
+		`INSERT INTO app_health_alerts (namespace, app_name, last_sent_at, first_detected_at, reason, detail)
+		 VALUES ($1, $2, now(), now(), $3, $4)
 		 ON CONFLICT (namespace, app_name) DO UPDATE SET
 		     last_sent_at = now(), reason = $3, detail = $4,
+		     first_detected_at = CASE WHEN app_health_alerts.reason = $3
+		         THEN app_health_alerts.first_detected_at ELSE now() END,
 		     last_sent_cause_kind = NULLIF(app_health_alerts.cause_kind, '')
 		 WHERE app_health_alerts.last_sent_at <= now() - make_interval(secs => $5)
+		                                                            - CASE
+		 WHEN app_health_alerts.first_detected_at <= now() - interval '14 days' THEN interval '6 days'
+		 WHEN app_health_alerts.first_detected_at <= now() - interval '3 days' THEN interval '2 days'
+		 ELSE interval '0'
+		 END
 		    OR (app_health_alerts.last_sent_cause_kind IS NULL
 		        AND COALESCE(app_health_alerts.cause_kind, '') <> '')`,
 		namespace, appName, reason, detail, cooldown.Seconds())
@@ -618,17 +674,34 @@ func recordAppHealthAlertSend(ctx context.Context, pool *pgxpool.Pool, namespace
 //     stale verdict from a past crash silently outlives the reason it
 //     explained.
 //
+// The reason-change reset also covers the sticky-verdict shape that survived
+// the refreshed flag (live case 2026-08-30, gateway in internal-prod): an
+// old ErrImagePull episode left cause_kind=platform_registry on the row, the
+// app went to CrashLoopBackOff where the Java stack trace matches NO
+// signature, so every tick read refreshed=false and the COALESCE kept
+// re-adopting the registry verdict forever — the owner got an email whose
+// body blamed the registry while the reason line said CrashLoopBackOff and
+// the log excerpt showed a running Spring app. The COALESCE below is now
+// gated on the reason being unchanged: once the reason flips, the stored
+// triplet is cleared outright on the next touch (see
+// TestTouchAppHealthAlertSeenClearsStaleVerdictOnReasonChange) and
+// maybeCauseRefresh's cheap-skip loses to the changed reason on the same
+// tick, so the verdict is re-derived from fresh evidence or honestly left
+// empty — never carried across a failure boundary.
+//
 // The INSERT path always just stores whatever came in via NULLIF, since a
 // brand-new row has nothing to preserve either way.
 func touchAppHealthAlertSeen(ctx context.Context, pool *pgxpool.Pool, namespace, appName, reason, detail, cause, causeLine, causeKind string, refreshed bool) {
 	_, err := pool.Exec(ctx,
-		`INSERT INTO app_health_alerts (namespace, app_name, last_sent_at, last_seen_at, reason, detail, cause, cause_line, cause_kind)
-		 VALUES ($1, $2, to_timestamp(0), now(), $3, $4, NULLIF($5, ''), NULLIF($6, ''), NULLIF($7, ''))
+		`INSERT INTO app_health_alerts (namespace, app_name, last_sent_at, first_detected_at, last_seen_at, reason, detail, cause, cause_line, cause_kind)
+		 VALUES ($1, $2, to_timestamp(0), now(), now(), $3, $4, NULLIF($5, ''), NULLIF($6, ''), NULLIF($7, ''))
 		 ON CONFLICT (namespace, app_name) DO UPDATE SET
 		     last_seen_at = now(), reason = $3, detail = $4,
-		     cause = CASE WHEN $8 THEN NULLIF($5, '') ELSE COALESCE(NULLIF($5, ''), app_health_alerts.cause) END,
-		     cause_line = CASE WHEN $8 THEN NULLIF($6, '') ELSE COALESCE(NULLIF($6, ''), app_health_alerts.cause_line) END,
-		     cause_kind = CASE WHEN $8 THEN NULLIF($7, '') ELSE COALESCE(NULLIF($7, ''), app_health_alerts.cause_kind) END`,
+		     first_detected_at = CASE WHEN app_health_alerts.reason = $3
+		         THEN app_health_alerts.first_detected_at ELSE now() END,
+		     cause = CASE WHEN app_health_alerts.reason = $3 THEN CASE WHEN $8 THEN NULLIF($5, '') ELSE COALESCE(NULLIF($5, ''), app_health_alerts.cause) END ELSE NULLIF($5, '') END,
+		     cause_line = CASE WHEN app_health_alerts.reason = $3 THEN CASE WHEN $8 THEN NULLIF($6, '') ELSE COALESCE(NULLIF($6, ''), app_health_alerts.cause_line) END ELSE NULLIF($6, '') END,
+		     cause_kind = CASE WHEN app_health_alerts.reason = $3 THEN CASE WHEN $8 THEN NULLIF($7, '') ELSE COALESCE(NULLIF($7, ''), app_health_alerts.cause_kind) END ELSE NULLIF($7, '') END`,
 		namespace, appName, reason, detail, cause, causeLine, causeKind, refreshed)
 	if err != nil {
 		log.Printf("app-health: touch-seen for %s/%s failed: %v", namespace, appName, err)
