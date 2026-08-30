@@ -33,7 +33,7 @@ type httpA2AClient struct {
 
 // a2aHTTPTimeout bounds one agent round trip; pollers apply their own
 // retry/backoff on top of this.
-const a2aHTTPTimeout = 20 * time.Second
+const a2aHTTPTimeout = 90 * time.Second
 
 // NewA2AClient builds an A2AClient that posts JSON-RPC 2.0 message/send
 // requests directly to each agent's derived cluster-internal URL.
