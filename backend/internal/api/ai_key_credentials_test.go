@@ -366,17 +366,17 @@ func TestUpdateRediscoveryReplacesStaleGlobalModels(t *testing.T) {
 		}
 		models = append(models, model)
 	}
-	if strings.Join(models, ",") != "gpt-5.6-sol,sota-opus,sota-opus-max,sota-opus-xhigh" {
+	if strings.Join(models, ",") != "gpt-5.6-sol,opus" {
 		t.Fatalf("models=%v want refreshed wire model plus stable Sota aliases", models)
 	}
 }
 
 func TestSotaAliasesUseEffectiveProviderCatalog(t *testing.T) {
 	got := strings.Join(aiAliasesForProvider("sotamodel"), ",")
-	if got != "sota-opus,sota-opus-xhigh,sota-opus-max" {
+	if got != "opus" {
 		t.Fatalf("sotamodel aliases=%q", got)
 	}
-	if strings.Contains(strings.Join(aiAliasesForProvider("openai"), ","), "sota-opus") {
+	if strings.Contains(strings.Join(aiAliasesForProvider("openai"), ","), "opus") {
 		t.Fatal("OpenAI-compatible wire transport must not own Sota credentials")
 	}
 }
