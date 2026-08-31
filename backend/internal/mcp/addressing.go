@@ -163,9 +163,7 @@ func resolveAddressArgs(ctx context.Context, g GeneratedTool, args map[string]an
 		delete(args, "ref")
 	}
 
-	if pathSet["appName"] && argString(args, "appName") == "" && appName != "" {
-		args["appName"] = appName
-	}
+	placeName(args, appName, pathSet, "appName", querySet, "app")
 
 	needProject := pathSet["projectId"] && !isUUID(argString(args, "projectId"))
 	needEnv := pathSet["envId"] && !isUUID(argString(args, "envId"))
@@ -218,6 +216,33 @@ func resolveAddressArgs(ctx context.Context, g GeneratedTool, args map[string]an
 			projectName, strings.Join(names, ", "))
 	}
 	return ""
+}
+
+// placeName writes a resolved name into whichever parameter the tool actually
+// declares for it, path or query.
+//
+// A name has to land somewhere or it is silently lost. searchLogs takes the app
+// as a QUERY parameter, not a path one, so ref="leadgen/prod/lead-gen" parsed
+// the app, dropped it, and the backend answered `at least one of vm or app
+// query param is required` (2026-08-28) — a request that named the app being
+// told it named no app. Passing app= separately worked, which is the shape of
+// bug that reads as the surface being arbitrary.
+//
+// An explicit argument always wins: this fills a gap, it never overrides.
+func placeName(args map[string]any, name string, pathSet map[string]bool, pathParam string, querySet map[string]bool, queryParam string) {
+	if name == "" {
+		return
+	}
+	switch {
+	case pathSet[pathParam]:
+		if argString(args, pathParam) == "" {
+			args[pathParam] = name
+		}
+	case querySet[queryParam]:
+		if argString(args, queryParam) == "" {
+			args[queryParam] = name
+		}
+	}
 }
 
 // canonicalEnvNames are the names a project's main environment carries. A

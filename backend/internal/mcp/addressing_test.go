@@ -179,6 +179,62 @@ func TestResolveAddressArgs_AProjectIdAloneAddressesTheRead(t *testing.T) {
 	}
 }
 
+// searchLogsTool mirrors the one generated shape where the app is a QUERY
+// parameter rather than a path segment.
+func searchLogsTool() GeneratedTool {
+	return GeneratedTool{
+		Name:         "searchLogs",
+		Method:       http.MethodGet,
+		PathTemplate: "/projects/{projectId}/logs",
+		PathParams:   []string{"projectId"},
+		QueryParams:  []string{"vm", "app", "q", "since", "size"},
+		InputSchema: map[string]any{
+			"type":     "object",
+			"required": []string{"projectId"},
+		},
+	}
+}
+
+// TestResolveAddressArgs_ARefFillsAnAppThatLivesInTheQuery is the regression
+// for 2026-08-28: ref="leadgen/prod/lead-gen" named the app, the resolver only
+// ever wrote it into a path parameter, and the backend answered `at least one
+// of vm or app query param is required` — a call that named the app told it had
+// named none. Passing app= separately worked, which is what makes the surface
+// read as arbitrary.
+func TestResolveAddressArgs_ARefFillsAnAppThatLivesInTheQuery(t *testing.T) {
+	srv, _ := resolveStub(t, map[string]any{
+		"project":     map[string]any{"id": "11111111-1111-1111-1111-111111111111", "name": "leadgen"},
+		"environment": map[string]any{"id": "22222222-2222-2222-2222-222222222222", "name": "prod"},
+	})
+
+	args := map[string]any{"ref": "leadgen/prod/lead-gen", "q": "alert", "since": "7d"}
+	if msg := resolveAddressArgs(context.Background(), searchLogsTool(), args, srv.URL, "/api/v1"); msg != "" {
+		t.Fatalf("resolve failed: %s", msg)
+	}
+	if args["app"] != "lead-gen" {
+		t.Errorf("app = %v, want lead-gen — the ref named it and the query parameter is where this tool reads it", args["app"])
+	}
+	if _, present := args["appName"]; present {
+		t.Error("appName was invented for a tool that has no such parameter; it would be sent as a stray query argument")
+	}
+}
+
+// TestResolveAddressArgs_AnExplicitAppWinsOverTheRef keeps the fill a fill.
+func TestResolveAddressArgs_AnExplicitAppWinsOverTheRef(t *testing.T) {
+	srv, _ := resolveStub(t, map[string]any{
+		"project":     map[string]any{"id": "11111111-1111-1111-1111-111111111111", "name": "leadgen"},
+		"environment": map[string]any{"id": "22222222-2222-2222-2222-222222222222", "name": "prod"},
+	})
+
+	args := map[string]any{"ref": "leadgen/prod/lead-gen", "app": "other-app"}
+	if msg := resolveAddressArgs(context.Background(), searchLogsTool(), args, srv.URL, "/api/v1"); msg != "" {
+		t.Fatalf("resolve failed: %s", msg)
+	}
+	if args["app"] != "other-app" {
+		t.Errorf("app = %v, want the explicitly passed other-app", args["app"])
+	}
+}
+
 // TestResolveAddressArgs_ANonCanonicalEnvSetIsStillRefused keeps the guess
 // honest: defaulting is a claim about which environment the project IS, and a
 // project with no prod makes no such claim.
