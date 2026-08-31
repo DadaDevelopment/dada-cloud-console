@@ -6393,3 +6393,12 @@ ctx билда раньше, чем срабатывает пятисекунд�
 **Бизнес-замер (полный turn, конверсия и деньги):** Метрика 30д: 754 визита/361 уник -> 50 открыли /register -> 41 начали -> 6 завершили (конверсия уник->рег 1.7%!, рег-форма теряет 82% стартовавших). Из 30 новых юзеров до CreateApp дошли 9 (30%), до первого деплоя 1. 22 юзера 30д = "зашёл, посмотрел, ни одного билда". Деньги: succeeded за всё время = 1 (и то owner), metered-неоплаченного 5256₽, AI-токены дают margin 358₽/30д. ЮKassa API [live]: artem's canceled = party:yoo_money reason:expired_on_confirmation — юзер НЕ дошёл до оплаты, истекло окно подтверждения: подозрение на UX чекаута (redirect не открывался/не был замечен), а не на отказ.
 **UX-фабулы цикла:** (a) auth_callback_failed 36/30д, 100% state_entry=missing — юзеры теряют логин-сессию между табами (oidc-сташ в localStorage не доживает); (b) admin/funnel error_shown "Spread syntax requires iterable" на Safari — не воспроизведён кодом, bug-feed в backlog.
 **Owner-visible:** fonbet-silver-worker (artem) падает на rows_deduped UnboundLocalError — это его новый код после dip-фикса, предупредить владельца (юзерский код, не трогаем).
+
+## 2026-08-31 sess-0831c (верификация закрытия 0490) — ФИКС ПОДТВЕРЖДЁН ЖИВЬЁМ, панель разобрана поимённо
+Начал писать CPS-фикс сам -> M3-fetch поймал параллельную работу: maven-lib@develop уже содержит 8b1e8bd
+(локация фикса была НЕ dada-tuda-jenkins-pipelines, а shared-lib репо maven-lib, @Library dual-repo — память исправлена).
+Верификация M2: gateway-deploy Ready на develop-0.0.1-SNAPSHOT-5, 0 рестартов 30+мин, api-prod /actuator/health 200 UP;
+0490 закрыт корректно (verify-бар все 3 условия). Панель /admin/overview [live 17:03Z]: not_ready=2 — gulyaev-ai-core
+(юзерский vault-ключ, не наш) + internal gateway (исправлен этим же часом); freshness blind=false; stuck=0;
+domain_issues 2 (оба известны, stale age > 5д — 0426); failed_builds 1 (юзерский no_dockerfile, dadadev-brains).
+Доставка: прод-теги == main 5d77a151. Новых P0 нет.
