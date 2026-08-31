@@ -6376,3 +6376,11 @@ ctx билда раньше, чем срабатывает пятисекунд�
 `ViewApps`, 5 из 5 живых новых юзеров встают там и до `CreateApp` не доходят;
 16 из 27 «новых за 30д» — ботоферма волны 08-08. Оба напрашивавшихся пункта
 проверены по очереди и УЖЕ ЕСТЬ (0114 и 0025/0040/0161) — дублей не завёл.
+
+## 2026-08-31 sess-0831a — пульс: gateway CrashLoop разобран до кода, фикс отправлен, доставка заблокирована jenkins-lib
+Время: ~45 мин. Гейт: probe-prod-access ЗЕЛЁНЫЙ. Доставка: прод 8cf16820 == main.
+**Инцидент №1 (наш, P0):** gateway internal-prod CrashLoop 709 рестартов/3д5ч (13 дней даунтайма, алерт пришёл только сегодня 15:57 — детектор запоздал). Корень [live]: список PublicApi 276443B > 256KiB дефолта WebFlux -> DataBufferLimitException + сортировка List.of() (уже фиксилось 3679454, но без буфера не помогло). Отправил фикс в spring.gateway@develop 0ab09d9 (maxInMemorySize 2MB x2 места), BUILD SUCCESS в Jenkins. Доставку заблокировал ВТОРОЙ баг: springPipeline CPS NotSerializableException в deployDockerImageToNexus — все 4 spring-репо не деплоятся с 08-18. Заведены 0488 (jenkins-lib CPS, P1) + 0489 (gateway доставка, P0).
+**Инцидент №2 (юзерский, не наш):** gulyaev-ai-core CrashLoop — vault-ключ юзера не 32 байта, его код. fanvk Ready/200, nepsetelegram = известный worker=false (0476).
+**Замер:** юзеров 60 (+4/7д), активных 48ч = 3 (artempro, lifecoach, m206rv159), CreateApp 21/DeleteApp 0 за 7д, builds 24/24 success. Платежи: succeeded за всё время по-прежнему 1 и это org=dada (owner сам) — гейт «за что платить» НЕ закрыт; 4 canceled арте на 6790₽ + pending 2900₽ = желание платить есть, отваливается на стороне ЮKassa. STUDSTARTUP: 0 redemptions.
+**Честно не доведено:** стопгап-значение в argo-infra values не запушено (чужой незакоммиченный diff в дереве, M3) + jenkins-lib фикс (нужен доступ к dada-tuda-jenkins-pipelines, правка чужого пайплайна — делаю следующим циклом).
+Артефакты: state/cycle-2026-08-31.md, automator/tasks/2026-08-31-gateway-crashloop.md, automator/tasks/2026-08-31-springpipeline-cps-pom-broken.md
