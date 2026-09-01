@@ -120,7 +120,7 @@ func (h *Handler) adminKcFunnelReport(ctx context.Context, days int) adminFunnel
 	}
 
 	legs := []struct {
-		goals []int
+		goals  []int
 		stages []overviewFunnelStage
 	}{
 		{goals: []int{kcGoalLoginView, kcGoalLoginSubmit}, stages: out.Login},
