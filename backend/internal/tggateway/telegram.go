@@ -11,12 +11,16 @@ import (
 	"time"
 )
 
-// TelegramUpdate is the one field this package cares about out of a Telegram
-// Update object: a text message in a chat.
+// TelegramUpdate is the fields this package cares about out of a Telegram
+// Update object: a text message in a chat, plus the sender identity the
+// agent needs to fill in CRM/logging tool calls (Username/FirstName are
+// best-effort — Telegram lets either be empty).
 type TelegramUpdate struct {
-	UpdateID int64
-	ChatID   int64
-	Text     string
+	UpdateID  int64
+	ChatID    int64
+	Text      string
+	Username  string
+	FirstName string
 }
 
 // TelegramClient is the Bot API surface a poller needs. An interface so
@@ -118,6 +122,10 @@ type tgUpdate struct {
 		Chat struct {
 			ID int64 `json:"id"`
 		} `json:"chat"`
+		From struct {
+			Username  string `json:"username"`
+			FirstName string `json:"first_name"`
+		} `json:"from"`
 	} `json:"message"`
 }
 
@@ -136,7 +144,13 @@ func (c *httpTelegramClient) GetUpdates(ctx context.Context, token string, offse
 		if u.Message == nil || u.Message.Text == "" {
 			continue
 		}
-		out = append(out, TelegramUpdate{UpdateID: u.UpdateID, ChatID: u.Message.Chat.ID, Text: u.Message.Text})
+		out = append(out, TelegramUpdate{
+			UpdateID:  u.UpdateID,
+			ChatID:    u.Message.Chat.ID,
+			Text:      u.Message.Text,
+			Username:  u.Message.From.Username,
+			FirstName: u.Message.From.FirstName,
+		})
 	}
 	return out, nil
 }

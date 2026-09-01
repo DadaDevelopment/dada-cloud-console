@@ -183,6 +183,27 @@ func (m *Manager) liveCount() int {
 	return len(m.pollers)
 }
 
+// withTelegramIdentity prepends a bracketed metadata line carrying the
+// sender's Telegram identity ahead of their message text. The agent's system
+// prompt (tg-exchange-support-prompt) instructs the model to fall back to
+// "telegram_username" for CRM person names, but this package used to hand
+// the agent nothing but raw message text -- no username, first_name, or
+// chat_id ever reached it, so it had no real value to fall back to and
+// invented literal placeholder strings ("telegram_user") instead. This line
+// is the only identity channel the A2A message/send envelope has room for
+// (Send takes a plain text string, no separate metadata field).
+func withTelegramIdentity(u TelegramUpdate) string {
+	username := u.Username
+	if username == "" {
+		username = "unknown"
+	}
+	firstName := u.FirstName
+	if firstName == "" {
+		firstName = "unknown"
+	}
+	return fmt.Sprintf("[telegram_username: %s | first_name: %s | chat_id: %d]\n%s", username, firstName, u.ChatID, u.Text)
+}
+
 // runPoller is one binding's long-poll loop: getUpdates -> A2A -> reply.
 // Exits when ctx is cancelled (Reconcile/Unbind stopping this binding).
 func runPoller(ctx context.Context, tg TelegramClient, a2a A2AClient, b Binding) {
@@ -215,7 +236,7 @@ func runPoller(ctx context.Context, tg TelegramClient, a2a A2AClient, b Binding)
 				offset = u.UpdateID + 1
 			}
 			stopTyping := startTyping(ctx, tg, b.BotToken, u.ChatID)
-			reply, err := a2a.Send(ctx, b.AgentName, u.Text)
+			reply, err := a2a.Send(ctx, b.AgentName, withTelegramIdentity(u))
 			stopTyping()
 			if err != nil {
 				if !failing {
