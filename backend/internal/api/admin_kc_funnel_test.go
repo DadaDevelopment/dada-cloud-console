@@ -80,7 +80,7 @@ func TestFetchMetrikaGoalUsersSurfacesHTTPError(t *testing.T) {
 // fills: one goal per stage, same order. Adding a stage without a goal (or
 // the reverse) would silently report zero.
 func TestAdminKcFunnelLegsCoverEveryStage(t *testing.T) {
-	h := &Handler{}
+	h := &Handler{pool: overviewBrokenTestPool(t)}
 	report := h.adminKcFunnelReport(context.Background(), 7)
 	if report.Available {
 		t.Skip("Metrika configured in test env; leg table still checked below")
