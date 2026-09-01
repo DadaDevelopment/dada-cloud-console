@@ -32,10 +32,47 @@ export default function AdminFunnelPage() {
   useEffect(() => { const timer = window.setTimeout(() => { void load(); }, 0); return () => window.clearTimeout(timer); }, [load]);
 
   const traffic = data?.channel_funnel;
+  const kc = data?.kc_funnel;
   const acquisition = data?.acquisition;
   const lifecycle = data?.lifecycle;
+  const kcStage = (stage: { label: string; count: number }, unit?: string) => ({
+    label: stage.label,
+    value: stage.count,
+    ...(unit ? { detail: unit } : {}),
+  });
+  const kcStreamLabel = t("adminFunnel.kc.stream");
+  const kcStreamColor = "#b45309";
+  const kcRegistered = kc?.channels.reduce((sum, ch) => sum + ch.count, 0) ?? 0;
   const acquisitionStreams: DetailedFunnelStream[] = [
     ...(traffic?.available ? [{ id: "metrika", label: t("adminFunnel.acquisition.metrikaStream"), color: "#2563eb", stages: [{ label: t("adminFunnel.channel.entered"), value: traffic.totals.users, detail: t("adminFunnel.acquisition.metrikaUsers") }, { label: t("adminFunnel.channel.register"), value: traffic.totals.register_opened }, { label: t("adminFunnel.channel.started"), value: traffic.totals.signup_started }, { label: t("adminFunnel.channel.complete"), value: traffic.totals.registration_complete }] }] : []),
+    ...(kc?.available ? [{
+      id: "kc-native",
+      label: kcStreamLabel,
+      color: kcStreamColor,
+      stages: [
+        kcStage(kc.login[0], t("adminFunnel.kc.sharedEntry")),
+        kcStage(kc.native[0]),
+        kcStage(kc.native[1]),
+        kcStage(kc.native[4], t("adminFunnel.kc.legNote")),
+      ],
+    }, {
+      id: "kc-yandex",
+      label: kcStreamLabel,
+      color: kcStreamColor,
+      stages: [
+        kcStage(kc.login[0], t("adminFunnel.kc.sharedEntry")),
+        kcStage(kc.yandex[0]),
+        kcStage(kc.yandex[3], t("adminFunnel.kc.legNote")),
+      ],
+    }, {
+      id: "kc-account",
+      label: t("adminFunnel.kc.accountStream"),
+      startColumn: 4,
+      color: "#0f766e",
+      stages: [
+        { label: t("adminFunnel.kc.registered"), value: kcRegistered, detail: t("adminFunnel.kc.dbSource") },
+      ],
+    }] : []),
     ...(acquisition ? [{ id: "ux", label: t("adminFunnel.acquisition.uxStream"), color: "#7c3aed", stages: [{ label: t("adminFunnel.acquisition.landing"), value: acquisition.ux_landing_users, detail: t("adminFunnel.acquisition.uxSource") }, { label: t("adminFunnel.acquisition.started"), value: acquisition.ux_signup_started_users, detail: t("adminFunnel.acquisition.uxSource") }] }, { id: "account", label: t("adminFunnel.acquisition.accountStream"), startColumn: 3, color: "#0f766e", stages: [{ label: t("adminFunnel.acquisition.account"), value: acquisition.accounts_created, detail: t("adminFunnel.acquisition.dbSource") }, { label: t("adminFunnel.acquisition.firstEntry"), value: acquisition.first_authenticated, detail: t("adminFunnel.acquisition.auditSource") }] }] : []),
   ];
   const lifecycleStreams: DetailedFunnelStream[] = lifecycle ? [

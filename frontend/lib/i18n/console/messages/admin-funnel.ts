@@ -76,6 +76,13 @@ export const adminFunnel: Messages = {
     ru: "Единая схема содержит три точные ленты: Метрика, UX браузера и подтверждённый сервером аккаунт. Анонимные идентификаторы не склеиваются с аккаунтами: граница показана без выдуманной конверсии.",
     en: "One diagram contains three exact ribbons: Metrika, browser UX and server-confirmed accounts. Anonymous identities are not merged with accounts, so the boundary does not invent conversion.",
   },
+  "adminFunnel.kc.stream": { ru: "Вход (id.dada-tuda.ru)", en: "Sign-in (id.dada-tuda.ru)" },
+  "adminFunnel.kc.usersUnit": { ru: "уникальные пользователи Метрики", en: "unique Metrika users" },
+  "adminFunnel.kc.sharedEntry": { ru: "общий шаг обеих ног", en: "shared first step of both legs" },
+  "adminFunnel.kc.legNote": { ru: "этап одной из двух ног регистрации", en: "stage of one signup leg" },
+  "adminFunnel.kc.accountStream": { ru: "Сервер: регистрации (ground truth)", en: "Server: registrations (ground truth)" },
+  "adminFunnel.kc.registered": { ru: "Созданные аккаунты", en: "Accounts created" },
+  "adminFunnel.kc.dbSource": { ru: "user_accounts по signup_channel", en: "user_accounts by signup_channel" },
   "adminFunnel.acquisition.metrikaBoundary": {
     ru: "{visits} визитов за окно. Успешных деплоев: {deploys}; это отдельное действие авторизованных людей и не является переходом регистрации.",
     en: "{visits} visits in the window. Successful deploys: {deploys}; this is a separate authenticated action, not a registration transition.",

@@ -1478,45 +1478,6 @@ export interface AdminOverviewDayPoint {
   new_apps: number;
 }
 
-export interface AdminOverviewFunnelStage {
-  key: string;
-  label: string;
-  count: number;
-}
-
-/**
- * One signup door (users.signup_channel: "password" or a Keycloak broker
- * alias like "yandex"/"google"/"github") and how many rows landed through it
- * in the window.
- */
-export interface AdminOverviewChannelCount {
-  channel: string;
-  count: number;
-}
-
-/**
- * Keycloak-side registration funnel: goal-reach counts from the dedicated
- * id.dada-tuda.ru Metrika counter, between "opened the form" and "submitted
- * / hit an error", plus registered which is the real user_accounts count for
- * the same window. Available is false when METRIKA_OAUTH_TOKEN is unset or
- * the Stat API call failed -- Note carries the reason, Stages are still
- * present (zeroed) so the UI can render the shape without a null check.
- *
- * Stages only sees the email/password form: a brokered (identity-provider)
- * signup redirects off that form's DOM before any goal fires, so it's
- * invisible there by construction. Channels is the Postgres-side view that
- * sees every door regardless of how the row was born, closing that gap --
- * rows older than the signup_channel column are simply absent from it.
- */
-export interface AdminOverviewRegistrationFunnel {
-  available: boolean;
-  days: number;
-  registered: number;
-  stages: AdminOverviewFunnelStage[];
-  channels: AdminOverviewChannelCount[];
-  note?: string;
-}
-
 export interface AdminOverviewResponse {
   users: AdminOverviewUsers;
   projects: AdminOverviewProjects;
@@ -1644,6 +1605,45 @@ export interface AdminFunnelChannelReport {
   note?: string;
 }
 
+/**
+ * One step of the id.dada-tuda.ru (Keycloak) funnel. key is the Metrika goal
+ * name, label the human-readable stage, count the unique users who reached
+ * it in the window.
+ */
+export interface AdminFunnelKcStage {
+  key: string;
+  label: string;
+  count: number;
+}
+
+/**
+ * One signup door (users.signup_channel) with how many accounts landed
+ * through it -- the Postgres ground truth the Metrika legs must reconcile
+ * against.
+ */
+export interface AdminFunnelKcChannel {
+  channel: string;
+  count: number;
+}
+
+/**
+ * Keycloak-host registration funnel: the shared login page plus two signup
+ * legs (native email/password form, Yandex broker), all in goal*users, and
+ * the Postgres channels breakdown next to them. The legs are never summed --
+ * a visitor who tried both counts once per leg. available=false + note means
+ * Metrika was unreachable and the stage numbers are zeros.
+ */
+export interface AdminFunnelKcFunnel {
+  available: boolean;
+  days: number;
+  login: AdminFunnelKcStage[];
+  native: AdminFunnelKcStage[];
+  yandex: AdminFunnelKcStage[];
+  errors: AdminFunnelKcStage[];
+  channels: AdminFunnelKcChannel[];
+  note?: string;
+}
+
 export interface AdminFunnelAcquisition {
   ux_landing_users: number;
   ux_signup_started_users: number;
@@ -1681,6 +1681,7 @@ export interface AdminFunnelResponse {
   excluded_kinds: string[] | null;
   cohort_counts: AdminFunnelCohortCount[];
   channel_funnel: AdminFunnelChannelReport;
+  kc_funnel: AdminFunnelKcFunnel;
   acquisition: AdminFunnelAcquisition;
   lifecycle: AdminFunnelLifecycle;
 }
