@@ -1,11 +1,14 @@
 ---
 id: 0488
-status: open
+status: closed
 prio: P1
 stream: 2
 title: springPipeline-репо не деплоятся: CPS NotSerializableException в deployDockerImageToNexus
 created: 2026-08-31
 sess: sess-0831a
+closed_at: 2026-08-31
+closed_commit: ce57521e
+closed_note: НЕ ЗАКРЫТ - только заведён и разобран (tasks/2026-08-31-springpipeline-cps-pom-broken.md). Фикс нужен в dada-tuda-jenkins-pipelines@develop: @NonCPS для чтения версии из pom. Следующий цикл
 ---
 [hypothesis: platform-truth] Разбор [live Jenkins build #3 spring.gateway/develop, 16:35Z + #1 event-service/feedback-service/user-service от 08-18].
 

@@ -6402,3 +6402,50 @@ ctx билда раньше, чем срабатывает пятисекунд�
 (юзерский vault-ключ, не наш) + internal gateway (исправлен этим же часом); freshness blind=false; stuck=0;
 domain_issues 2 (оба известны, stale age > 5д — 0426); failed_builds 1 (юзерский no_dockerfile, dadadev-brains).
 Доставка: прод-теги == main 5d77a151. Новых P0 нет.
+## 2026-09-01 sess-0901 — 0484 закрыт: показ→клик баннера возврата теперь различимы; fonbet CrashLoop разобран (юзерский deploy-скрипт)
+
+Гейт: probe-prod-access ЗЕЛЁНЫЙ (apiserver/psql/console). Доставка: прод a037db8e == main → после пуша 10b71fbf Jenkins #1402 SUCCESS → фронт-деплой = 10b71fbf, Ready [live].
+
+**0484 (P0, закрыт кодом 10b71fbf):** PlatformRecoveryPromptServed = 60 строк, ВСЕ artempro2021@bk.ru
+(37 за последние 7д, последняя 08-31 09:18) — единственный чужой человек у кассы видит баннер возврата,
+а клика/игнора мы не различаем. Инструментирован ux-фаннел serve→view→click→dismiss:
+`recovery.<placement>.view` (один раз на маунт), `.click` (CTA-link onClick + data-ux), `.click` dismiss
+(data-ux был, trackUxEvent добавлен). tsc --noEmit чист; bundle-proof: `recovery.${e}.view.${d.kind}` /
+`.click.` / `.dismiss.` в прод-чанке 3mbddzlz3zt0a.js [live exec]. M2-бар из пункта достигнут: следующий
+показ даст ЛИБО строку клика, ЛИБО доказанный ноль кликов при ненулевых показах.
+
+**E92 (measure_after=09-01) — закрыт численно, знаменателя не было никогда:** SendBuildNotification
+audit-строки = 258, НО 100% actor=system@dada.local (сервисный), 0 строк от живых юзеров (последняя
+юзерская audit-активность 08-24) → return-within-24h после билд-письма ВНЕШНИМ юзерам не измеряется
+ни в baseline, ни post-fix. Вывод: письмо-канал доставки жив (app_health_alerts last_send_ok=t,
+send_failures=0), но поведенческий тест невозможен на текущей аудитории; рычаг возврата — продуктовая
+поверхность, не письмо. Статус: unmeasurable-for-lack-of-denominator (не kill — RFC-фикс остаётся).
+
+**Панель /admin/overview [live 06:04Z] — не наш:**
+- fonbet-value CrashLoop 141 рестарт/11ч. Разобран до кода [live logs]: Last State Completed exit 0 за 1с,
+  лог «APP_BRONZE_ENABLED is not set; async fonbet bronze collector exiting... intended default during
+  rollout» — это deploy-скрипт АРТЕМА завершается сразу (главный процесс = одноразовый скрипт, воркеры
+  вынесены им в отдельные деплои fonbet-bronze-collector/fonbet-silver-worker, оба Running).
+  Паттерн «СЕКЦИЯ 3: МЕРТВЫЙ ЗАПУСКАТЕЛЬ» = репа artem не платформа. Изредка отвечает 200 → приложение
+  живо, пока живы воркеры; URL 503 при рестарте-цикле деплоя. Audit artem: последний DeployImageVersion
+  08-31 18:12 (app целевой юзер), после — тишина. Действий не требую, owner-info в дайджест.
+- gulyaev-ai-core CrashLoop — юзерский vault-ключ (известно, не наш).
+- PublicApi pending x4: 2 unmaintained старых (m2-delwedge 41д, ai-gateway 9д) + 2 fresh age=9s (артефакт
+  снапшота — не баг панели).
+- domain_issues 2 (m2-delwedge-6ccb0a scratch-верификация 27д; a2a-hub.pro 15д) — оба известны (0426),
+  tech-debt, не юзер-блокеры. stuck_operations=0, freshness blind=false.
+
+**Бизнес-цифры [live overview+psql]:** юзеров 47 (+3/7д, +28/30д), active_48h=4, builds 7д 113 success /
+4 failed / 32 canceled, 42 за 24ч. projects 74, apps 109 (82 Ready / 2 CrashLoop / 22 no_signal).
+Деньги: paid_total=0, metered 5325.81₽ неоплачено, margin −5899₽/30д. succeeded от чужого за всё время
+= 0 (pending INV-2026-00002 2900₽ с 08-19 всё ещё ждёт владельца — owner-action не исполнен).
+**Метрика 14д [live Metrika API]:** Direct 237 / Search 8 / Link 4 / Internal 37 визитов; /analog-* = 1
+прямой визит за 14д (поискового 0) → SEO-канал мёртв, E1-верdict 08-20 подтверждён 3-м замером.
+
+**Фаннел-находка (free, в cycle-log как находка):** messiajit4@gmail.com (28-го, соц-SSO) — единственный
+свежий юзер прошедший полный путь SignUp→connect→8 builds→DeployImageVersion за 1ч (ЛЕГЕНДАРНЫЙ путь),
+дальше тишина 4 дня. Тот же класс «собрал и ушёл».
+
+**Инструментальное:** vpn-bypass-proxy не стартует на этой VM (macOS ipconfig) — рекогносцировка сети
+рутины в capabilities.md нуждается в Linux-версии (backlog, не сейчас). probe-main-build FAIL по
+`go: command not found` (нет тулчейна на этой VM, НЕ код — Jenkins #1402 SUCCESS на 10b71fbf).

@@ -1,11 +1,14 @@
 ---
 id: 0489
-status: open
+status: closed
 prio: P0
 stream: 2
 title: gateway internal-prod CrashLoop 13 дней: буфер WebClient 256KB vs список PublicApi 276KB
 created: 2026-08-31
 sess: sess-0831a
+closed_at: 2026-08-31
+closed_commit: ce57521e
+closed_note: Корень доказан live, фикс 0ab09d9 отправлен в spring.gateway (BUILD SUCCESS), но доставка в прод заблокирована 0488 (CPS jenkins-lib). Пункт переоткрыт смыслом в 0488: чинить jenkins-lib первым
 ---
 [platform-truth] Живой фикс отправлен в DadaDevelopment/spring.gateway 0ab09d9
 (develop, push 16:30Z): kubeClient WebClient maxInMemorySize 2MB + глобальный

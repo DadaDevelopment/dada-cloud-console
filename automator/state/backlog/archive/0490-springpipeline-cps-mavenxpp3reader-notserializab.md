@@ -1,11 +1,14 @@
 ---
 id: 0490
-status: open
+status: closed
 prio: P0
 stream: 2
 title: springPipeline CPS: MavenXpp3Reader NotSerializable ломает деплой всех spring-репо с 08-18
 created: 2026-08-31
 sess: sess-0831a
+closed_at: 2026-08-31
+closed_commit: 8b1e8bd
+closed_note: jenkins-lib CPS фикс 8b1e8bd push, gateway build #4/#5 SUCCESS, образ -5 в nexus, infraProject=internal доведён 386440c, под gateway Ready/health 200. ЗАКРЫТ live
 ---
 ПРОДОЛЖЕНИЕ 0488 (закрыт ошибочно в этом же цикле, переоткрыто как новый id).
 Разбор: automator/tasks/2026-08-31-springpipeline-cps-pom-broken.md
