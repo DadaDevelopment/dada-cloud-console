@@ -22,9 +22,12 @@ const agentTokenSourceCloudTask = "cloud_task"
 // Tenancy is never trusted from the hub: org_id/project_id/env_id are resolved
 // console-side from the correlation id (intent_id, else cloud_task_id). The
 // provider USD cost IS trusted verbatim — it is Claude Code's own
-// modelUsage[model].costUSD, the authoritative price for the run. cache_* and
-// num_turns/provider_attempt_id/occurred_at are accepted for audit parity with
-// ADR-015 but have no ledger column yet; prompt_tokens already folds cache in.
+// modelUsage[model].costUSD, already cache-aware, the authoritative price for
+// the run. cache legs are stored since migration 147 so effective-vs-list price
+// is computable per row; num_turns/provider_attempt_id/occurred_at remain
+// accepted for audit parity with ADR-015 but have no ledger column.
+// prompt_tokens still folds both cache legs in, matching what the gateway path
+// writes.
 type dadaAgentUsageCallback struct {
 	PlatformRequestID string  `json:"platform_request_id"`
 	ProviderAttemptID string  `json:"provider_attempt_id"`
@@ -55,6 +58,8 @@ type cloudTaskUsageRow struct {
 	completionTokens  int64
 	totalTokens       int64
 	costUSD           float64
+	cacheReadTokens   int64
+	cacheCreateTokens int64
 }
 
 // DadaAgentUsageWebhook ingests per-invocation token/cost usage for cloud-task
@@ -132,6 +137,12 @@ func (h *Handler) dadaAgentUsageWebhook(c *gin.Context, verifier tokenVerifier) 
 			projectID, cb.PlatformRequestID)
 	}
 
+	// Clamp the cache legs into [0, prompt_tokens] instead of rejecting: the
+	// legs are advisory pricing metadata, and a hub that sums cache slightly
+	// wrong must not lose the whole billing row to a CHECK constraint.
+	cacheRead := max64(0, min64(cb.CacheReadTokens, cb.PromptTokens))
+	cacheCreate := max64(0, min64(cb.CacheCreateTokens, cb.PromptTokens-cacheRead))
+
 	if err := h.recordCloudTaskTokenUsage(c.Request.Context(), cloudTaskUsageRow{
 		platformRequestID: cb.PlatformRequestID,
 		cloudTaskID:       taskID.String(),
@@ -143,6 +154,8 @@ func (h *Handler) dadaAgentUsageWebhook(c *gin.Context, verifier tokenVerifier) 
 		completionTokens:  cb.CompletionTokens,
 		totalTokens:       cb.TotalTokens,
 		costUSD:           cb.CostUSD,
+		cacheReadTokens:   cacheRead,
+		cacheCreateTokens: cacheCreate,
 	}); err != nil {
 		respondError(c, http.StatusInternalServerError, "ledger write failed")
 		return
@@ -177,12 +190,28 @@ func (h *Handler) recordCloudTaskTokenUsage(ctx context.Context, r cloudTaskUsag
 		`INSERT INTO agent_token_usage
 			(source, org_id, project_id, env_id, user_sub, model,
 			 prompt_tokens, completion_tokens, total_tokens, cost_usd,
+			 cache_read_tokens, cache_creation_tokens,
 			 platform_request_id, cloud_task_id)
-		 VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, $9, $10, $11)
+		 VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		 ON CONFLICT (platform_request_id) WHERE platform_request_id IS NOT NULL DO NOTHING`,
 		agentTokenSourceCloudTask, orgArg, r.projectID, r.envID, r.model,
 		r.promptTokens, r.completionTokens, r.totalTokens, r.costUSD,
+		r.cacheReadTokens, r.cacheCreateTokens,
 		r.platformRequestID, r.cloudTaskID,
 	)
 	return err
+}
+
+func min64(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func max64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
 }

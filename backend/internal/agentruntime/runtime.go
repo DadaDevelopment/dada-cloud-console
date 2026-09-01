@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-
-	"github.com/google/uuid"
 )
 
 type MessageRequest struct {

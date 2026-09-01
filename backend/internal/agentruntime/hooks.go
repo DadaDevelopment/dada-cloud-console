@@ -55,9 +55,9 @@ func (h *hookExecutor) Execute(ctx context.Context, event string, conv Conversat
 				Str("agent", conv.AgentName).
 				Str("event", event).
 				Msg("agentruntime: hook execution failed")
-			h.recordExecution(ctx, hook.ID, conv.ID, event, "failed", err.Error(), nil, nil)
+			h.recordExecution(ctx, hook.ID, conv.ID.String(), event, "failed", err.Error(), nil, nil)
 		} else {
-			h.recordExecution(ctx, hook.ID, conv.ID, event, "success", "", nil, nil)
+			h.recordExecution(ctx, hook.ID, conv.ID.String(), event, "success", "", nil, nil)
 		}
 	}
 	return nil

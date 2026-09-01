@@ -14,10 +14,12 @@ import (
 // TelegramUpdate is the fields this package cares about out of a Telegram
 // Update object: a text message in a chat, plus the sender identity the
 // agent needs to fill in CRM/logging tool calls (Username/FirstName are
-// best-effort — Telegram lets either be empty).
+// best-effort — Telegram lets either be empty). UserID is the sender's
+// Telegram account id, distinct from the chat id in groups.
 type TelegramUpdate struct {
 	UpdateID  int64
 	ChatID    int64
+	UserID    int64
 	Text      string
 	Username  string
 	FirstName string
@@ -123,6 +125,7 @@ type tgUpdate struct {
 			ID int64 `json:"id"`
 		} `json:"chat"`
 		From struct {
+			ID        int64  `json:"id"`
 			Username  string `json:"username"`
 			FirstName string `json:"first_name"`
 		} `json:"from"`
@@ -147,6 +150,7 @@ func (c *httpTelegramClient) GetUpdates(ctx context.Context, token string, offse
 		out = append(out, TelegramUpdate{
 			UpdateID:  u.UpdateID,
 			ChatID:    u.Message.Chat.ID,
+			UserID:    u.Message.From.ID,
 			Text:      u.Message.Text,
 			Username:  u.Message.From.Username,
 			FirstName: u.Message.From.FirstName,
