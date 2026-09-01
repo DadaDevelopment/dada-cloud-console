@@ -50,9 +50,10 @@ type runningPoller struct {
 // goroutine lifecycle, which is what manager_test.go exercises against fake
 // Store/TelegramClient/A2AClient implementations.
 type Manager struct {
-	store Store
-	tg    TelegramClient
-	a2a   A2AClient
+	store   Store
+	tg      TelegramClient
+	a2a     A2AClient
+	runtime RuntimeClient
 
 	mu      sync.Mutex
 	pollers map[string]*runningPoller
@@ -61,8 +62,16 @@ type Manager struct {
 // NewManager builds a Manager. Run must be called once to start the
 // reconcile loop; Bind/Unbind/Get work standalone (each also nudges the
 // poller set directly, so a caller does not have to wait for the next tick).
+// Pass nil for runtime to use direct A2A (backward compatibility).
 func NewManager(store Store, tg TelegramClient, a2a A2AClient) *Manager {
-	return &Manager{store: store, tg: tg, a2a: a2a, pollers: map[string]*runningPoller{}}
+	return &Manager{store: store, tg: tg, a2a: a2a, runtime: NewNoopRuntimeClient(), pollers: map[string]*runningPoller{}}
+}
+
+// SetRuntimeClient configures Manager to route messages through agent-runtime
+// instead of direct A2A. This enables conversation state, lifecycle hooks, and
+// domain instructions. Call before Run() to activate the full platform.
+func (m *Manager) SetRuntimeClient(runtime RuntimeClient) {
+	m.runtime = runtime
 }
 
 // Run blocks running the reconcile loop until ctx is cancelled. Callers
@@ -122,7 +131,7 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 func (m *Manager) startLocked(b Binding) {
 	pctx, cancel := context.WithCancel(context.Background())
 	m.pollers[b.AgentName] = &runningPoller{cancel: cancel, token: b.BotToken}
-	go runPoller(pctx, m.tg, m.a2a, b)
+	go runPoller(pctx, m.tg, m.a2a, m.runtime, b)
 }
 
 // Bind validates token via getMe, upserts the row, and starts (or restarts,
@@ -204,9 +213,9 @@ func withTelegramIdentity(u TelegramUpdate) string {
 	return fmt.Sprintf("[telegram_username: %s | first_name: %s | chat_id: %d]\n%s", username, firstName, u.ChatID, u.Text)
 }
 
-// runPoller is one binding's long-poll loop: getUpdates -> A2A -> reply.
+// runPoller is one binding's long-poll loop: getUpdates -> Runtime/A2A -> reply.
 // Exits when ctx is cancelled (Reconcile/Unbind stopping this binding).
-func runPoller(ctx context.Context, tg TelegramClient, a2a A2AClient, b Binding) {
+func runPoller(ctx context.Context, tg TelegramClient, a2a A2AClient, runtime RuntimeClient, b Binding) {
 	var offset int64
 	var failing bool
 	var warned bool
@@ -236,14 +245,40 @@ func runPoller(ctx context.Context, tg TelegramClient, a2a A2AClient, b Binding)
 				offset = u.UpdateID + 1
 			}
 			stopTyping := startTyping(ctx, tg, b.BotToken, u.ChatID)
-			reply, err := a2a.Send(ctx, b.AgentName, withTelegramIdentity(u))
+			
+			var reply string
+			var err error
+			
+			runtimeResp, runtimeErr := runtime.ProcessMessage(ctx, RuntimeMessageRequest{
+				AgentName:  b.AgentName,
+				Channel:    "telegram",
+				ExternalID: fmt.Sprintf("%d", u.ChatID),
+				Actor: RuntimeActor{
+					ExternalID: fmt.Sprintf("%d", u.UserID),
+					Username:   u.Username,
+					Metadata:   map[string]any{"first_name": u.FirstName},
+				},
+				Content: u.Text,
+			})
+			
+			if runtimeErr == nil {
+				reply = runtimeResp.Text
+			} else {
+				log.Debug().Err(runtimeErr).Msg("tggateway: runtime unavailable, falling back to direct A2A")
+				reply, err = a2a.Send(ctx, b.AgentName, withTelegramIdentity(u))
+				if err != nil {
+					runtimeErr = err
+				}
+			}
+			
 			stopTyping()
-			if err != nil {
+			
+			if runtimeErr != nil {
 				if !failing {
 					failing = true
 					warned = false
 				}
-				log.Warn().Err(err).Str("agent", b.AgentName).Msg("tggateway: a2a send failed")
+				log.Warn().Err(runtimeErr).Str("agent", b.AgentName).Msg("tggateway: message processing failed")
 				if !warned {
 					warned = true
 					if sendErr := tg.SendMessage(ctx, b.BotToken, u.ChatID, a2aFailureFallback); sendErr != nil {
