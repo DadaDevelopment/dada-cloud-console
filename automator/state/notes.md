@@ -2261,3 +2261,10 @@ HTTP-пробы по telegram-боту без HTTP-порта (порт 8000 д�
 актор `system@dada.local` — подтверждает уже известный мёртвый memory-autoscale
 (`project_limitrange_ceiling_equalled_the_starting_profile…`), никого пока не роняет.
 Заведено 0478 (staff-аккаунты `@dada-tuda.ru` неотличимы от внешних юзеров в метриках).
+
+## 2026-09-01 sess-0901
+- 0484 закрыт кодом 10b71fbf (ux-фаннел recovery.view/click/dismiss), prod-verified bundle+деплой.
+- E92 -> unmeasurable-zero-denominator: 258 SendBuildNotification-строк, все system@dada.local; замер реактивировать только с новой внешней когортой.
+- fonbet-value CrashLoop (141x) = юзерский deploy-скрипт (exit 0 сразу, воркеры в отдельных деплоях) — не трогать, не «наш» инцидент.
+- probe-main-build на ops-VM требует локальный go; без него red — ложный (Jenkins авторитет).
+- vpn-bypass-proxy.py macOS-only; на Linux-VM восстановление сети рутины — отдельная задача.
