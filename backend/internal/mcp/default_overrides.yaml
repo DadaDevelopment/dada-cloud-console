@@ -190,6 +190,14 @@ keep:
   - validateAgent
   - getAgentState
   - listAgentTools
+  # sendAgentMessage is the direct hello-agent -> reply loop: POST straight to
+  # the agent's A2A endpoint (internal/tggateway/a2a.go, the same client
+  # tg-gateway's Telegram poller uses) and get the reply text back
+  # synchronously, in the same call -- no Telegram bot, no bound chat. It is
+  # what lets a caller iterate: send a probe message, read the reply, fix the
+  # prompt with saveAgent, and send again. Stateless: no conversation memory
+  # carries between calls, each is a fresh Task.
+  - sendAgentMessage
   # Access grants. This is how an agent identity gets scoped access to a
   # project at all -- see the /agents Keycloak-group gate in
   # internal/auth/jwt.go and internal/api/permissions.go. createAgentGrant

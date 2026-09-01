@@ -170,6 +170,35 @@ definitions:
       count:
         type: integer
     type: object
+  api.adminFunnelKcFunnel:
+    properties:
+      available:
+        type: boolean
+      channels:
+        items:
+          $ref: '#/definitions/api.overviewChannelCount'
+        type: array
+      days:
+        type: integer
+      errors:
+        items:
+          $ref: '#/definitions/api.overviewFunnelStage'
+        type: array
+      login:
+        items:
+          $ref: '#/definitions/api.overviewFunnelStage'
+        type: array
+      native:
+        items:
+          $ref: '#/definitions/api.overviewFunnelStage'
+        type: array
+      note:
+        type: string
+      yandex:
+        items:
+          $ref: '#/definitions/api.overviewFunnelStage'
+        type: array
+    type: object
   api.adminFunnelLifecycle:
     properties:
       app_created_users:
@@ -230,6 +259,8 @@ definitions:
         items:
           type: string
         type: array
+      kc_funnel:
+        $ref: '#/definitions/api.adminFunnelKcFunnel'
       lifecycle:
         $ref: '#/definitions/api.adminFunnelLifecycle'
       window:
@@ -1205,7 +1236,6 @@ definitions:
     properties:
       metrics:
         additionalProperties:
-          format: float64
           type: number
         type: object
       source:
@@ -1280,6 +1310,22 @@ definitions:
       protocol:
         type: string
       target:
+        type: string
+    type: object
+  api.overviewChannelCount:
+    properties:
+      channel:
+        type: string
+      count:
+        type: integer
+    type: object
+  api.overviewFunnelStage:
+    properties:
+      count:
+        type: integer
+      key:
+        type: string
+      label:
         type: string
     type: object
   api.platformStatusComponent:
@@ -1483,6 +1529,11 @@ definitions:
     type: object
   api.saveDashboardRequest:
     type: object
+  api.sendAgentMessageRequest:
+    properties:
+      text:
+        type: string
+    type: object
   api.serviceChargeResponse:
     properties:
       amount:
@@ -1659,7 +1710,6 @@ definitions:
   cloudtask.StepResult:
     properties:
       durationMs:
-        format: int64
         type: integer
       error:
         type: string
@@ -3147,6 +3197,66 @@ paths:
       summary: '[service] List repos visible to a git installation'
       tags:
       - agent-git
+  /agents/{agentName}/message:
+    post:
+      consumes:
+      - application/json
+      description: 'POSTs a JSON-RPC 2.0 message/send to the agent''s cluster-internal
+        A2A endpoint and returns the reply text. Stateless: no conversation history
+        carries between calls. 400 for an unknown agent name, 502 when the agent''s
+        A2A endpoint errors or times out (it can take up to 90s), 200 with a note
+        when the agent pauses on an input-required (human-in-the-loop) tool mid-turn.'
+      operationId: sendAgentMessage
+      parameters:
+      - description: Agent name
+        in: path
+        name: agentName
+        required: true
+        type: string
+      - description: Message text
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.sendAgentMessageRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: reply
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Send one message to an agent and get its reply
+      tags:
+      - agents
   /agents/{agentName}/state:
     get:
       description: Assembles the Agent CR conditions, the pods serving it, the prompt

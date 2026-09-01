@@ -22,7 +22,7 @@ Drive the platform from Claude or any other MCP client.
 
 - [Control DADA Cloud from an AI agent (MCP)](mcp-ai-agents.md) — endpoint, auth,
   and how to connect each client.
-- [MCP tool reference](mcp-tool-reference.md) — all 60 tools, their arguments, and
+- [MCP tool reference](mcp-tool-reference.md) — all 61 tools, their arguments, and
   what is deliberately not exposed.
 - [MCP recipes: worked flows](mcp-recipes.md) — the exact tool sequences behind
   deploy, database, sandbox and diagnose.

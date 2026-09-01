@@ -2045,6 +2045,92 @@ const docTemplate = `{
                 }
             }
         },
+        "/agents/{agentName}/message": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "POSTs a JSON-RPC 2.0 message/send to the agent's cluster-internal A2A endpoint and returns the reply text. Stateless: no conversation history carries between calls. 400 for an unknown agent name, 502 when the agent's A2A endpoint errors or times out (it can take up to 90s), 200 with a note when the agent pauses on an input-required (human-in-the-loop) tool mid-turn.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agents"
+                ],
+                "summary": "Send one message to an agent and get its reply",
+                "operationId": "sendAgentMessage",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent name",
+                        "name": "agentName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Message text",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.sendAgentMessageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "reply",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/agents/{agentName}/state": {
             "get": {
                 "security": [
@@ -23006,6 +23092,50 @@ const docTemplate = `{
                 }
             }
         },
+        "api.adminFunnelKcFunnel": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean"
+                },
+                "channels": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.overviewChannelCount"
+                    }
+                },
+                "days": {
+                    "type": "integer"
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.overviewFunnelStage"
+                    }
+                },
+                "login": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.overviewFunnelStage"
+                    }
+                },
+                "native": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.overviewFunnelStage"
+                    }
+                },
+                "note": {
+                    "type": "string"
+                },
+                "yandex": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.overviewFunnelStage"
+                    }
+                }
+            }
+        },
         "api.adminFunnelLifecycle": {
             "type": "object",
             "properties": {
@@ -23096,6 +23226,9 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "kc_funnel": {
+                    "$ref": "#/definitions/api.adminFunnelKcFunnel"
                 },
                 "lifecycle": {
                     "$ref": "#/definitions/api.adminFunnelLifecycle"
@@ -24528,8 +24661,7 @@ const docTemplate = `{
                 "metrics": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "number",
-                        "format": "float64"
+                        "type": "number"
                     }
                 },
                 "source": {
@@ -24642,6 +24774,31 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "target": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.overviewChannelCount": {
+            "type": "object",
+            "properties": {
+                "channel": {
+                    "type": "string"
+                },
+                "count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.overviewFunnelStage": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "label": {
                     "type": "string"
                 }
             }
@@ -24952,6 +25109,14 @@ const docTemplate = `{
         "api.saveDashboardRequest": {
             "type": "object"
         },
+        "api.sendAgentMessageRequest": {
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string"
+                }
+            }
+        },
         "api.serviceChargeResponse": {
             "type": "object",
             "properties": {
@@ -25219,8 +25384,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "durationMs": {
-                    "type": "integer",
-                    "format": "int64"
+                    "type": "integer"
                 },
                 "error": {
                     "type": "string"

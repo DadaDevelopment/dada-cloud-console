@@ -552,6 +552,7 @@ func SetupRouterWithHandler(pool *pgxpool.Pool, cfg *config.Config) (*gin.Engine
 		api.GET("/agents/tools", h.ListAgentTools)
 		api.POST("/agents/validate", h.ValidateAgent)
 		api.GET("/agents/:agentName/state", h.GetAgentState)
+		api.POST("/agents/:agentName/message", h.SendAgentMessage)
 		api.POST("/agents/:agentName/telegram", h.BindAgentTelegram)
 		api.DELETE("/agents/:agentName/telegram", h.UnbindAgentTelegram)
 		api.GET("/agents/:agentName/telegram", h.GetAgentTelegram)

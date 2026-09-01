@@ -32,6 +32,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/portainer"
 	"github.com/dada-tuda/console/backend/internal/prometheus"
 	"github.com/dada-tuda/console/backend/internal/supporttask"
+	"github.com/dada-tuda/console/backend/internal/tggateway"
 	"github.com/dada-tuda/console/backend/internal/tggatewayclient"
 	"github.com/dada-tuda/console/backend/internal/userservice"
 	"github.com/gin-gonic/gin"
@@ -56,6 +57,7 @@ type Handler struct {
 	infraLogsearch *logsearch.Client
 	buildagent     *buildagent.Client // nil when BUILD_AGENT_URL unset
 	tgGateway      *tggatewayclient.Client
+	a2a            tggateway.A2AClient
 
 	// Monitoring read/alert/health layer (ADR-011).
 	grafana      *grafana.Client   // nil when GRAFANA_BASE_URL/GRAFANA_API_TOKEN unset
@@ -273,6 +275,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	}
 	h.buildagent = buildagent.New(cfg.BuildAgentURL)
 	h.tgGateway = tggatewayclient.New(cfg.TGGatewayURL)
+	h.a2a = tggateway.NewA2AClient()
 	// Prefer admin basic-auth (survives the emptyDir-backed Grafana's DB wipe on
 	// pod restart); fall back to the service-account token when admin creds are unset.
 	if cfg.GrafanaAdminUser != "" && cfg.GrafanaAdminPassword != "" {
