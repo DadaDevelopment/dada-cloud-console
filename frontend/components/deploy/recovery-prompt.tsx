@@ -79,7 +79,7 @@ export function RecoveryPrompt({ placement }: RecoveryPromptProps) {
   useEffect(() => {
     if (visible && prompt && !shownRef.current) {
       shownRef.current = true;
-      trackUxEvent("view", `recovery.${placement}.shown.${prompt.kind}`);
+      trackUxEvent("view", `recovery.${placement}.view.${prompt.kind}`);
     }
   }, [visible, prompt, placement]);
 
@@ -90,6 +90,7 @@ export function RecoveryPrompt({ placement }: RecoveryPromptProps) {
 
   function handleDismiss() {
     if (!prompt) return;
+    trackUxEvent("click", `recovery.${placement}.dismiss.${prompt.kind}`);
     dismissRecoveryPrompt(prompt.kind, prompt.failed_at);
     setPrompt(null);
   }
@@ -116,7 +117,10 @@ export function RecoveryPrompt({ placement }: RecoveryPromptProps) {
       <div className="mt-3">
         <Link
           href={href}
-          data-ux={`recovery.${placement}.retry.${prompt.kind}`}
+          onClick={() =>
+            trackUxEvent("click", `recovery.${placement}.click.${prompt.kind}`)
+          }
+          data-ux={`recovery.${placement}.click.${prompt.kind}`}
           className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 transition-colors"
         >
           {t(copy.cta)}
