@@ -154,7 +154,9 @@ spec:
   # 4104Mi and 3828Mi when this was measured. Build #1285 reserved 4672Mi and sat
   # Pending forever; #1286 reserved 4512Mi after a trim measured against the 15Gi
   # node (4666Mi free) — a node this fence forbids — and was Pending just the same.
-  # The container requests below now total 3840Mi. Anything that raises the pod
+  # The container requests below now total 3584Mi (node-builder shed another
+  # 256Mi after #1407 went permanently Pending against 3716Mi free on rt7fr).
+  # Anything that raises the pod
   # total must be checked against the free memory of the SMALLEST eligible node,
   # or the build stops starting rather than starts failing.
   affinity:
@@ -301,15 +303,19 @@ spec:
       resources:
         requests:
           cpu: "100m"
-          # 1792Mi (was 2Gi == limit). request == limit was chosen because at
+          # 1536Mi (was 1792Mi). request == limit was chosen because at
           # request 256Mi this container sat far over request during the build and
           # was the kubelet's first eviction victim under node MemoryPressure
-          # (#136/#139). That protection is kept in substance: NODE_OPTIONS caps
-          # the heap at 1536Mi, so 1792Mi still covers heap + runtime overhead and
-          # the container is not meaningfully over request. The 256Mi given back is
-          # part of the 672Mi the pod had to shed to fit an eligible node at all —
-          # see the pod-total note on the anti-affinity block above.
-          memory: "1792Mi"
+          # (#136/#139). NODE_OPTIONS below caps the heap at 1536Mi, and the
+          # container limit stays 2Gi, so a transient overshoot cannot OOM-kill
+          # the build -- but the RESERVATION now equals the heap cap instead of
+          # heap + overhead. Why shed the last 256Mi: the two eligible (non-
+          # postgres-fenced) nodes had 3716Mi and 2824Mi of unrequested memory
+          # when build #1407 went permanently Pending -- the pod total was 3840Mi
+          # against 3716Mi of free reservation on the biggest eligible node. The
+          # eviction protection is kept where it matters (dind at 1280/1536, this
+          # container at limit 2Gi); only the idle-time reservation shrank.
+          memory: "1536Mi"
         limits:
           cpu: "1500m"
           memory: "2Gi"
