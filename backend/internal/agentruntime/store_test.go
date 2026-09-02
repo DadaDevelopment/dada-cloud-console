@@ -100,9 +100,10 @@ func TestListIdleConversations(t *testing.T) {
 	ctx := context.Background()
 
 	agentName := "test-agent-" + uuid.NewString()[:8]
+	externalID := "chat-idle-" + uuid.NewString()[:8]
 	actor := Actor{ExternalID: "user-1", Username: "testuser"}
 
-	conv1, _, err := store.GetOrCreateConversation(ctx, agentName, "telegram", "chat-idle", actor)
+	conv1, _, err := store.GetOrCreateConversation(ctx, agentName, "telegram", externalID, actor)
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
