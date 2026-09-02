@@ -3,6 +3,7 @@ package tggateway
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -210,7 +211,29 @@ func withTelegramIdentity(u TelegramUpdate) string {
 	if firstName == "" {
 		firstName = "unknown"
 	}
-	return fmt.Sprintf("[telegram_username: %s | first_name: %s | chat_id: %d]\n%s", username, firstName, u.ChatID, u.Text)
+	text := u.Text
+	if u.HasLocation {
+		text = fmt.Sprintf("[location_shared: lat=%f, lon=%f]\n%s", u.Latitude, u.Longitude, text)
+	}
+	return fmt.Sprintf("[telegram_username: %s | first_name: %s | chat_id: %d]\n%s", username, firstName, u.ChatID, text)
+}
+
+// locationButtonMarker is a literal token the agent's system prompt is
+// instructed to append on its own line when it wants the user offered the
+// native "Send location" button. The gateway strips it before delivery and
+// sends via SendMessageWithLocationButton instead of plain SendMessage --
+// this is the only way the agent (which can only return text over A2A) can
+// ask the transport layer for a keyboard.
+const locationButtonMarker = "[[REQUEST_LOCATION_BUTTON]]"
+
+// splitLocationButtonMarker reports whether reply asked for the location
+// button and returns the reply text with the marker removed.
+func splitLocationButtonMarker(reply string) (text string, wantsButton bool) {
+	trimmed := strings.TrimRight(reply, "\n")
+	if strings.HasSuffix(trimmed, locationButtonMarker) {
+		return strings.TrimRight(strings.TrimSuffix(trimmed, locationButtonMarker), "\n 	"), true
+	}
+	return reply, false
 }
 
 // runPoller is one binding's long-poll loop: getUpdates -> Runtime/A2A -> reply.
@@ -249,6 +272,10 @@ func runPoller(ctx context.Context, tg TelegramClient, a2a A2AClient, runtime Ru
 			var reply string
 			var err error
 
+			runtimeContent := u.Text
+			if u.HasLocation {
+				runtimeContent = fmt.Sprintf("[location_shared: lat=%f, lon=%f]\n%s", u.Latitude, u.Longitude, u.Text)
+			}
 			runtimeResp, runtimeErr := runtime.ProcessMessage(ctx, RuntimeMessageRequest{
 				AgentName:  b.AgentName,
 				Channel:    "telegram",
@@ -258,7 +285,7 @@ func runPoller(ctx context.Context, tg TelegramClient, a2a A2AClient, runtime Ru
 					Username:   u.Username,
 					Metadata:   map[string]any{"first_name": u.FirstName},
 				},
-				Content: u.Text,
+				Content: runtimeContent,
 			})
 
 			if runtimeErr == nil {
@@ -288,7 +315,14 @@ func runPoller(ctx context.Context, tg TelegramClient, a2a A2AClient, runtime Ru
 				continue
 			}
 			failing = false
-			if sendErr := tg.SendMessage(ctx, b.BotToken, u.ChatID, reply); sendErr != nil {
+			sendText, wantsButton := splitLocationButtonMarker(reply)
+			var sendErr error
+			if wantsButton {
+				sendErr = tg.SendMessageWithLocationButton(ctx, b.BotToken, u.ChatID, sendText)
+			} else {
+				sendErr = tg.SendMessage(ctx, b.BotToken, u.ChatID, sendText)
+			}
+			if sendErr != nil {
 				log.Warn().Err(sendErr).Str("agent", b.AgentName).Msg("tggateway: reply send failed")
 			}
 		}

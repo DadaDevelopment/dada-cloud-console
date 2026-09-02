@@ -3,6 +3,7 @@ package tggateway
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -64,6 +65,10 @@ func (fakeTelegram) GetUpdates(ctx context.Context, _ string, _ int64, _ int) ([
 }
 
 func (fakeTelegram) SendMessage(context.Context, string, int64, string) error { return nil }
+
+func (fakeTelegram) SendMessageWithLocationButton(context.Context, string, int64, string) error {
+	return nil
+}
 
 func (fakeTelegram) SendChatAction(context.Context, string, int64, string) error { return nil }
 
@@ -312,5 +317,40 @@ func TestUnbind_StopsPollerAndRemovesRow(t *testing.T) {
 
 	if _, err := store.Get(ctx, "agent-f"); err != ErrNotFound {
 		t.Fatalf("expected ErrNotFound after unbind, got %v", err)
+	}
+}
+
+func TestSplitLocationButtonMarker_StripsMarkerAndFlags(t *testing.T) {
+	text, wantsButton := splitLocationButtonMarker("Confirm your city please\n" + locationButtonMarker)
+	if !wantsButton {
+		t.Fatalf("expected wantsButton=true")
+	}
+	if text != "Confirm your city please" {
+		t.Fatalf("expected marker stripped, got %q", text)
+	}
+}
+
+func TestSplitLocationButtonMarker_PlainReplyUnaffected(t *testing.T) {
+	text, wantsButton := splitLocationButtonMarker("just a normal reply")
+	if wantsButton {
+		t.Fatalf("expected wantsButton=false")
+	}
+	if text != "just a normal reply" {
+		t.Fatalf("expected text unchanged, got %q", text)
+	}
+}
+
+func TestWithTelegramIdentity_LocationUpdateCarriesCoordinates(t *testing.T) {
+	u := TelegramUpdate{
+		ChatID:      42,
+		Username:    "alexkekiy",
+		FirstName:   "Alex",
+		HasLocation: true,
+		Latitude:    51.169392,
+		Longitude:   71.449074,
+	}
+	got := withTelegramIdentity(u)
+	if !strings.Contains(got, "location_shared: lat=51.169392, lon=71.449074") {
+		t.Fatalf("expected coordinates in identity string, got %q", got)
 	}
 }

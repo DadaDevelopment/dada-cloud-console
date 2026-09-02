@@ -15,14 +15,19 @@ import (
 // Update object: a text message in a chat, plus the sender identity the
 // agent needs to fill in CRM/logging tool calls (Username/FirstName are
 // best-effort — Telegram lets either be empty). UserID is the sender's
-// Telegram account id, distinct from the chat id in groups.
+// Telegram account id, distinct from the chat id in groups. HasLocation/
+// Latitude/Longitude carry a native "Send location" share (Telegram's
+// message.location field) — Text is empty on a pure location message.
 type TelegramUpdate struct {
-	UpdateID  int64
-	ChatID    int64
-	UserID    int64
-	Text      string
-	Username  string
-	FirstName string
+	UpdateID    int64
+	ChatID      int64
+	UserID      int64
+	Text        string
+	Username    string
+	FirstName   string
+	HasLocation bool
+	Latitude    float64
+	Longitude   float64
 }
 
 // TelegramClient is the Bot API surface a poller needs. An interface so
@@ -30,11 +35,16 @@ type TelegramUpdate struct {
 // of api.telegram.org (design doc: "no real long-poll in CI"). GetMe
 // validates a token and returns the bot's @username. GetUpdates long-polls
 // starting at offset (the next unseen update id), passing timeoutSec through
-// as Telegram's own long-poll timeout. SendMessage posts a reply into a chat.
+// as Telegram's own long-poll timeout. SendMessage posts a plain-text reply
+// into a chat. SendMessageWithLocationButton posts a reply with a native
+// Telegram reply-keyboard button that shares the user's location in one tap
+// (KeyboardButton.request_location) — Telegram delivers that share back as
+// a message.location update, no text.
 type TelegramClient interface {
 	GetMe(ctx context.Context, token string) (username string, err error)
 	GetUpdates(ctx context.Context, token string, offset int64, timeoutSec int) ([]TelegramUpdate, error)
 	SendMessage(ctx context.Context, token string, chatID int64, text string) error
+	SendMessageWithLocationButton(ctx context.Context, token string, chatID int64, text string) error
 	SendChatAction(ctx context.Context, token string, chatID int64, action string) error
 }
 
@@ -120,7 +130,11 @@ func (c *httpTelegramClient) GetMe(ctx context.Context, token string) (string, e
 type tgUpdate struct {
 	UpdateID int64 `json:"update_id"`
 	Message  *struct {
-		Text string `json:"text"`
+		Text     string `json:"text"`
+		Location *struct {
+			Latitude  float64 `json:"latitude"`
+			Longitude float64 `json:"longitude"`
+		} `json:"location"`
 		Chat struct {
 			ID int64 `json:"id"`
 		} `json:"chat"`
@@ -144,17 +158,27 @@ func (c *httpTelegramClient) GetUpdates(ctx context.Context, token string, offse
 	}
 	out := make([]TelegramUpdate, 0, len(raw))
 	for _, u := range raw {
-		if u.Message == nil || u.Message.Text == "" {
+		if u.Message == nil {
 			continue
 		}
-		out = append(out, TelegramUpdate{
+		hasLocation := u.Message.Location != nil
+		if u.Message.Text == "" && !hasLocation {
+			continue
+		}
+		upd := TelegramUpdate{
 			UpdateID:  u.UpdateID,
 			ChatID:    u.Message.Chat.ID,
 			UserID:    u.Message.From.ID,
 			Text:      u.Message.Text,
 			Username:  u.Message.From.Username,
 			FirstName: u.Message.From.FirstName,
-		})
+		}
+		if hasLocation {
+			upd.HasLocation = true
+			upd.Latitude = u.Message.Location.Latitude
+			upd.Longitude = u.Message.Location.Longitude
+		}
+		out = append(out, upd)
 	}
 	return out, nil
 }
@@ -163,6 +187,31 @@ func (c *httpTelegramClient) SendMessage(ctx context.Context, token string, chat
 	body := map[string]any{
 		"chat_id": strconv.FormatInt(chatID, 10),
 		"text":    text,
+	}
+	return c.call(ctx, token, "sendMessage", body, nil)
+}
+
+// locationRequestKeyboard is a Telegram ReplyKeyboardMarkup with one button
+// whose request_location:true makes Telegram attach the user's device
+// location and send it back as a message.location update when tapped — no
+// permission prompt beyond Telegram's own OS-level location dialog, no text
+// the user has to type. resize_keyboard shrinks it to fit the button instead
+// of showing an oversized default keyboard.
+func locationRequestKeyboard() map[string]any {
+	return map[string]any{
+		"keyboard": [][]map[string]any{
+			{{"text": "📍 Отправить геолокацию", "request_location": true}},
+		},
+		"resize_keyboard":  true,
+		"one_time_keyboard": false,
+	}
+}
+
+func (c *httpTelegramClient) SendMessageWithLocationButton(ctx context.Context, token string, chatID int64, text string) error {
+	body := map[string]any{
+		"chat_id":      strconv.FormatInt(chatID, 10),
+		"text":         text,
+		"reply_markup": locationRequestKeyboard(),
 	}
 	return c.call(ctx, token, "sendMessage", body, nil)
 }
