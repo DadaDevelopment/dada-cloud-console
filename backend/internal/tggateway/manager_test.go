@@ -350,7 +350,7 @@ func TestWithTelegramIdentity_LocationUpdateCarriesCoordinates(t *testing.T) {
 		Longitude:   71.449074,
 	}
 	got := withTelegramIdentity(u)
-	if !strings.Contains(got, "location_shared: lat=51.169392, lon=71.449074") {
+	if !strings.Contains(got, "geo_lat: 51.169392 | geo_lon: 71.449074") {
 		t.Fatalf("expected coordinates in identity string, got %q", got)
 	}
 }

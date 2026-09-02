@@ -201,7 +201,9 @@ func (m *Manager) liveCount() int {
 // chat_id ever reached it, so it had no real value to fall back to and
 // invented literal placeholder strings ("telegram_user") instead. This line
 // is the only identity channel the A2A message/send envelope has room for
-// (Send takes a plain text string, no separate metadata field).
+// (Send takes a plain text string, no separate metadata field). geo_lat/
+// geo_lon are appended only on a native "Send location" share (the prompt's
+// contract already documents these two fields on this same line).
 func withTelegramIdentity(u TelegramUpdate) string {
 	username := u.Username
 	if username == "" {
@@ -211,11 +213,11 @@ func withTelegramIdentity(u TelegramUpdate) string {
 	if firstName == "" {
 		firstName = "unknown"
 	}
-	text := u.Text
+	meta := fmt.Sprintf("telegram_username: %s | first_name: %s | chat_id: %d", username, firstName, u.ChatID)
 	if u.HasLocation {
-		text = fmt.Sprintf("[location_shared: lat=%f, lon=%f]\n%s", u.Latitude, u.Longitude, text)
+		meta += fmt.Sprintf(" | geo_lat: %f | geo_lon: %f", u.Latitude, u.Longitude)
 	}
-	return fmt.Sprintf("[telegram_username: %s | first_name: %s | chat_id: %d]\n%s", username, firstName, u.ChatID, text)
+	return fmt.Sprintf("[%s]\n%s", meta, u.Text)
 }
 
 // locationButtonMarker is a literal token the agent's system prompt is
