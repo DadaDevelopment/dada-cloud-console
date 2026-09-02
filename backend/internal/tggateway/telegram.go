@@ -202,7 +202,7 @@ func locationRequestKeyboard() map[string]any {
 		"keyboard": [][]map[string]any{
 			{{"text": "📍 Отправить геолокацию", "request_location": true}},
 		},
-		"resize_keyboard":  true,
+		"resize_keyboard":   true,
 		"one_time_keyboard": false,
 	}
 }
