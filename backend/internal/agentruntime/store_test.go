@@ -128,7 +128,7 @@ func TestListIdleConversations(t *testing.T) {
 	err = store.Touch(ctx, conv1.ID)
 	require.NoError(t, err)
 
-	idle2, err := store.ListIdleConversations(ctx, agentName, threshold.Add(time.Second))
+	idle2, err := store.ListIdleConversations(ctx, agentName, threshold)
 	require.NoError(t, err)
 	for _, c := range idle2 {
 		require.NotEqual(t, conv1.ID, c.ID)
