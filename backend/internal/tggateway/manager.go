@@ -295,9 +295,7 @@ func runPoller(ctx context.Context, tg TelegramClient, a2a A2AClient, runtime Ru
 			} else {
 				log.Debug().Err(runtimeErr).Msg("tggateway: runtime unavailable, falling back to direct A2A")
 				reply, err = a2a.Send(ctx, b.AgentName, withTelegramIdentity(u))
-				if err != nil {
-					runtimeErr = err
-				}
+				runtimeErr = err
 			}
 
 			stopTyping()

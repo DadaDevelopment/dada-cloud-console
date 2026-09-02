@@ -300,6 +300,26 @@ func TestRunPoller_DoesNotDuplicateWarningWithinSameFailureStreak(t *testing.T) 
 	}
 }
 
+// TestRunPoller_A2AFallbackSuccessIsNotOverriddenByStaleRuntimeError guards
+// a production incident (2026-09-02): runtimeErr starts non-nil (runtime is
+// noop) and after a SUCCESSFUL a2a.Send fallback the code used to only
+// overwrite runtimeErr when err != nil, so the stale noop error survived
+// and the real reply was discarded in favor of a2aFailureFallback on every
+// single message. This must send the agent's real reply, not the fallback.
+func TestRunPoller_A2AFallbackSuccessIsNotOverriddenByStaleRuntimeError(t *testing.T) {
+	tg := &onceTelegram{updates: []TelegramUpdate{{UpdateID: 1, ChatID: 42, Text: "hi"}}}
+	a2a := &failingA2A{failures: 0}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go runPoller(ctx, tg, a2a, NewNoopRuntimeClient(), Binding{AgentName: "agent-i", BotToken: "tok-i"})
+
+	waitFor(t, func() bool { return tg.sentCount() == 1 })
+	if got := tg.sent[0]; got != "ok" {
+		t.Fatalf("expected the real a2a reply %q, got %q (fallback=%q)", "ok", got, a2aFailureFallback)
+	}
+}
+
 func TestUnbind_StopsPollerAndRemovesRow(t *testing.T) {
 	store := newFakeStore()
 	mgr := NewManager(store, fakeTelegram{}, fakeA2A{})
