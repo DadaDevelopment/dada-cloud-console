@@ -14,11 +14,11 @@ type RuntimeClient interface {
 }
 
 type RuntimeMessageRequest struct {
-	AgentName  string         `json:"agent_name"`
-	Channel    string         `json:"channel"`
-	ExternalID string         `json:"external_id"`
-	Actor      RuntimeActor   `json:"actor"`
-	Content    string         `json:"content"`
+	AgentName  string       `json:"agent_name"`
+	Channel    string       `json:"channel"`
+	ExternalID string       `json:"external_id"`
+	Actor      RuntimeActor `json:"actor"`
+	Content    string       `json:"content"`
 }
 
 type RuntimeActor struct {

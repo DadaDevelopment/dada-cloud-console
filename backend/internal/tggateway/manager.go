@@ -245,10 +245,10 @@ func runPoller(ctx context.Context, tg TelegramClient, a2a A2AClient, runtime Ru
 				offset = u.UpdateID + 1
 			}
 			stopTyping := startTyping(ctx, tg, b.BotToken, u.ChatID)
-			
+
 			var reply string
 			var err error
-			
+
 			runtimeResp, runtimeErr := runtime.ProcessMessage(ctx, RuntimeMessageRequest{
 				AgentName:  b.AgentName,
 				Channel:    "telegram",
@@ -260,7 +260,7 @@ func runPoller(ctx context.Context, tg TelegramClient, a2a A2AClient, runtime Ru
 				},
 				Content: u.Text,
 			})
-			
+
 			if runtimeErr == nil {
 				reply = runtimeResp.Text
 			} else {
@@ -270,9 +270,9 @@ func runPoller(ctx context.Context, tg TelegramClient, a2a A2AClient, runtime Ru
 					runtimeErr = err
 				}
 			}
-			
+
 			stopTyping()
-			
+
 			if runtimeErr != nil {
 				if !failing {
 					failing = true
