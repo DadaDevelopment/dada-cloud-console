@@ -31,11 +31,11 @@ func (s *Server) Handler() http.Handler {
 }
 
 type messageRequest struct {
-	AgentName  string         `json:"agent_name"`
-	Channel    string         `json:"channel"`
-	ExternalID string         `json:"external_id"`
-	Actor      actorRequest   `json:"actor"`
-	Content    string         `json:"content"`
+	AgentName  string       `json:"agent_name"`
+	Channel    string       `json:"channel"`
+	ExternalID string       `json:"external_id"`
+	Actor      actorRequest `json:"actor"`
+	Content    string       `json:"content"`
 }
 
 type actorRequest struct {
