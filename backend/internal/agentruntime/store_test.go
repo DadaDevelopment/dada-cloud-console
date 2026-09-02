@@ -2,19 +2,22 @@ package agentruntime
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
-	"github.com/dada-tuda/console/backend/internal/db"
 	"github.com/google/uuid"
-	"github.com/joho/godotenv"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 )
 
 func setupTestStore(t *testing.T) ConversationStore {
-	_ = godotenv.Load("../../.env")
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping agentruntime store test")
+	}
 	ctx := context.Background()
-	pool, err := db.Connect(ctx, "")
+	pool, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { pool.Close() })
 	return NewPGStore(pool)

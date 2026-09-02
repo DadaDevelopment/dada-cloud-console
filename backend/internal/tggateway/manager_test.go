@@ -265,7 +265,7 @@ func TestRunPoller_WarnsOnFirstFailureNotAfterDelay(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go runPoller(ctx, tg, a2a, Binding{AgentName: "agent-g", BotToken: "tok-g"})
+	go runPoller(ctx, tg, a2a, NewNoopRuntimeClient(), Binding{AgentName: "agent-g", BotToken: "tok-g"})
 
 	waitFor(t, func() bool { return tg.sentCount() == 1 })
 	if got := tg.sent[0]; got != a2aFailureFallback {
@@ -286,7 +286,7 @@ func TestRunPoller_DoesNotDuplicateWarningWithinSameFailureStreak(t *testing.T) 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go runPoller(ctx, tg, a2a, Binding{AgentName: "agent-h", BotToken: "tok-h"})
+	go runPoller(ctx, tg, a2a, NewNoopRuntimeClient(), Binding{AgentName: "agent-h", BotToken: "tok-h"})
 
 	waitFor(t, func() bool { return tg.sentCount() >= 1 })
 	time.Sleep(50 * time.Millisecond)
