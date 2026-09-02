@@ -20,7 +20,11 @@ type fakeA2AClient struct {
 	err               error
 }
 
-func (f *fakeA2AClient) Send(_ context.Context, agentName, text string) (string, error) {
+func (f *fakeA2AClient) Send(ctx context.Context, agentName, text string) (string, error) {
+	return f.SendWithContext(ctx, agentName, "", text)
+}
+
+func (f *fakeA2AClient) SendWithContext(_ context.Context, agentName, contextID, text string) (string, error) {
 	f.gotAgent, f.gotText = agentName, text
 	return f.reply, f.err
 }
