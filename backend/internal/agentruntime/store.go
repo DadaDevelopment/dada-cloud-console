@@ -12,6 +12,7 @@ import (
 )
 
 var ErrConversationNotFound = errors.New("agentruntime: conversation not found")
+var ErrMessageNotFound = errors.New("agentruntime: message not found")
 
 type Actor struct {
 	ExternalID string         `json:"external_id"`
@@ -33,13 +34,53 @@ type Conversation struct {
 	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
+// Message is one turn of conversation_messages, widened (Agent Harness v2,
+// Step 1) to carry channel-native identity: ChannelMessageID is the
+// provider's own message id (Telegram message_id as text), ThreadID is a
+// forum/topic id when the channel has one, SourceSentAt is when the sender
+// actually sent it (distinct from CreatedAt, which is when the platform
+// persisted it -- the two diverge under load or after an outage replay).
+// ReplyToMessageID is a self-FK to another Message.ID in the same
+// conversation, resolved from the provider's reply id via
+// FindMessageByChannelID before insert -- it is never the provider's own id.
+// Entities and Attachments are reserved for the link-resolver and media
+// steps; both default to an empty slice and are not populated yet.
 type Message struct {
-	ID             uuid.UUID      `json:"id"`
-	ConversationID uuid.UUID      `json:"conversation_id"`
-	Role           string         `json:"role"`
-	Content        string         `json:"content"`
-	Metadata       map[string]any `json:"metadata"`
-	CreatedAt      time.Time      `json:"created_at"`
+	ID                 uuid.UUID      `json:"id"`
+	ConversationID     uuid.UUID      `json:"conversation_id"`
+	Role               string         `json:"role"`
+	Content            string         `json:"content"`
+	Metadata           map[string]any `json:"metadata"`
+	ChannelMessageID   string         `json:"channel_message_id,omitempty"`
+	ThreadID           string         `json:"thread_id,omitempty"`
+	SourceSentAt       *time.Time     `json:"source_sent_at,omitempty"`
+	ReplyToMessageID   *uuid.UUID     `json:"reply_to_message_id,omitempty"`
+	Entities           []any          `json:"entities"`
+	Attachments        []any          `json:"attachments"`
+	EditedAt           *time.Time     `json:"edited_at,omitempty"`
+	DeletedAt          *time.Time     `json:"deleted_at,omitempty"`
+	ChannelMetadata    map[string]any `json:"channel_metadata"`
+	CreatedAt          time.Time      `json:"created_at"`
+}
+
+// SaveMessageInput is what SaveMessage accepts. Role and Content are
+// required; every other field is optional and left at its zero value for
+// callers (tests, internal system messages) that have no channel identity to
+// carry. ReplyToChannelMessageID is the *provider's* id of the message being
+// replied to -- SaveMessage resolves it to a Message.ID via
+// FindMessageByChannelID and stores that UUID in ReplyToMessageID; a
+// provider id that does not resolve is stored as no reply rather than
+// failing the whole save, since a dangling reply reference must never lose
+// the message itself.
+type SaveMessageInput struct {
+	Role                     string
+	Content                  string
+	Metadata                 map[string]any
+	ChannelMessageID         string
+	ThreadID                 string
+	SourceSentAt             *time.Time
+	ReplyToChannelMessageID  string
+	ChannelMetadata          map[string]any
 }
 
 type ConversationStore interface {
@@ -49,8 +90,9 @@ type ConversationStore interface {
 	Touch(ctx context.Context, id uuid.UUID) error
 	ListIdleConversations(ctx context.Context, agentName string, threshold time.Time) ([]Conversation, error)
 
-	SaveMessage(ctx context.Context, conversationID uuid.UUID, role, content string, metadata map[string]any) (Message, error)
+	SaveMessage(ctx context.Context, conversationID uuid.UUID, input SaveMessageInput) (Message, error)
 	GetRecentMessages(ctx context.Context, conversationID uuid.UUID, limit int) ([]Message, error)
+	FindMessageByChannelID(ctx context.Context, conversationID uuid.UUID, channelMessageID string) (Message, error)
 }
 
 type pgStore struct {
@@ -155,26 +197,92 @@ func (s *pgStore) ListIdleConversations(ctx context.Context, agentName string, t
 	return convs, rows.Err()
 }
 
-func (s *pgStore) SaveMessage(ctx context.Context, conversationID uuid.UUID, role, content string, metadata map[string]any) (Message, error) {
+// messageColumns is the shared SELECT list for every reader below, so the
+// column order and the Scan order in scanMessage never drift apart.
+const messageColumns = `id, conversation_id, role, content, metadata,
+	channel_message_id, thread_id, source_sent_at, reply_to_message_id,
+	entities, attachments, edited_at, deleted_at, channel_metadata, created_at`
+
+func scanMessage(row rowScanner) (Message, error) {
+	var msg Message
+	var channelMessageID, threadID *string
+	var entitiesJSON, attachmentsJSON []byte
+
+	err := row.Scan(
+		&msg.ID, &msg.ConversationID, &msg.Role, &msg.Content, &msg.Metadata,
+		&channelMessageID, &threadID, &msg.SourceSentAt, &msg.ReplyToMessageID,
+		&entitiesJSON, &attachmentsJSON, &msg.EditedAt, &msg.DeletedAt,
+		&msg.ChannelMetadata, &msg.CreatedAt,
+	)
+	if err != nil {
+		return Message{}, err
+	}
+	if channelMessageID != nil {
+		msg.ChannelMessageID = *channelMessageID
+	}
+	if threadID != nil {
+		msg.ThreadID = *threadID
+	}
+	_ = json.Unmarshal(entitiesJSON, &msg.Entities)
+	_ = json.Unmarshal(attachmentsJSON, &msg.Attachments)
+	if msg.Entities == nil {
+		msg.Entities = []any{}
+	}
+	if msg.Attachments == nil {
+		msg.Attachments = []any{}
+	}
+	return msg, nil
+}
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func (s *pgStore) SaveMessage(ctx context.Context, conversationID uuid.UUID, input SaveMessageInput) (Message, error) {
+	metadata := input.Metadata
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
 	metaJSON, _ := json.Marshal(metadata)
 
-	var msg Message
-	err := s.pool.QueryRow(ctx, `
-		INSERT INTO conversation_messages (conversation_id, role, content, metadata)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, conversation_id, role, content, metadata, created_at
-	`, conversationID, role, content, metaJSON).Scan(
-		&msg.ID, &msg.ConversationID, &msg.Role, &msg.Content, &msg.Metadata, &msg.CreatedAt,
+	channelMeta := input.ChannelMetadata
+	if channelMeta == nil {
+		channelMeta = map[string]any{}
+	}
+	channelMetaJSON, _ := json.Marshal(channelMeta)
+
+	var channelMessageID *string
+	if input.ChannelMessageID != "" {
+		channelMessageID = &input.ChannelMessageID
+	}
+	var threadID *string
+	if input.ThreadID != "" {
+		threadID = &input.ThreadID
+	}
+
+	var replyToID *uuid.UUID
+	if input.ReplyToChannelMessageID != "" {
+		if resolved, err := s.FindMessageByChannelID(ctx, conversationID, input.ReplyToChannelMessageID); err == nil {
+			replyToID = &resolved.ID
+		}
+	}
+
+	row := s.pool.QueryRow(ctx, `
+		INSERT INTO conversation_messages (
+			conversation_id, role, content, metadata,
+			channel_message_id, thread_id, source_sent_at, reply_to_message_id,
+			channel_metadata
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		RETURNING `+messageColumns, conversationID, input.Role, input.Content, metaJSON,
+		channelMessageID, threadID, input.SourceSentAt, replyToID, channelMetaJSON,
 	)
-	return msg, err
+	return scanMessage(row)
 }
 
 func (s *pgStore) GetRecentMessages(ctx context.Context, conversationID uuid.UUID, limit int) ([]Message, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, conversation_id, role, content, metadata, created_at
+		SELECT `+messageColumns+`
 		FROM conversation_messages
 		WHERE conversation_id = $1
 		ORDER BY created_at DESC
@@ -187,8 +295,8 @@ func (s *pgStore) GetRecentMessages(ctx context.Context, conversationID uuid.UUI
 
 	var msgs []Message
 	for rows.Next() {
-		var msg Message
-		if err := rows.Scan(&msg.ID, &msg.ConversationID, &msg.Role, &msg.Content, &msg.Metadata, &msg.CreatedAt); err != nil {
+		msg, err := scanMessage(rows)
+		if err != nil {
 			return nil, err
 		}
 		msgs = append(msgs, msg)
@@ -199,4 +307,20 @@ func (s *pgStore) GetRecentMessages(ctx context.Context, conversationID uuid.UUI
 	}
 
 	return msgs, rows.Err()
+}
+
+func (s *pgStore) FindMessageByChannelID(ctx context.Context, conversationID uuid.UUID, channelMessageID string) (Message, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT `+messageColumns+`
+		FROM conversation_messages
+		WHERE conversation_id = $1 AND channel_message_id = $2
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, conversationID, channelMessageID)
+
+	msg, err := scanMessage(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Message{}, ErrMessageNotFound
+	}
+	return msg, err
 }

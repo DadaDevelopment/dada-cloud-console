@@ -3,6 +3,7 @@ package tggateway
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -319,7 +320,11 @@ func runPoller(ctx context.Context, tg TelegramClient, a2a A2AClient, runtime Ru
 					Username:   u.Username,
 					Metadata:   map[string]any{"first_name": u.FirstName},
 				},
-				Content: runtimeContent,
+				Content:                 runtimeContent,
+				ChannelMessageID:        strconv.FormatInt(u.MessageID, 10),
+				ThreadID:                threadIDOrEmpty(u.ThreadID),
+				SourceSentAt:            sentAtOrNil(u.SentAt),
+				ReplyToChannelMessageID: replyIDOrEmpty(u.ReplyToMessageID),
 			})
 
 			if runtimeErr == nil {
@@ -402,4 +407,32 @@ func nextBackoff(cur, max time.Duration) time.Duration {
 		return max
 	}
 	return next
+}
+
+// threadIDOrEmpty/replyIDOrEmpty stringify a Telegram int64 id, treating 0
+// (the field's absent-value in TelegramUpdate) as "no id" rather than the
+// literal string "0" -- RuntimeMessageRequest's fields are empty-string
+// optional, matching agentruntime.SaveMessageInput's convention.
+func threadIDOrEmpty(id int64) string {
+	if id == 0 {
+		return ""
+	}
+	return strconv.FormatInt(id, 10)
+}
+
+func replyIDOrEmpty(id int64) string {
+	if id == 0 {
+		return ""
+	}
+	return strconv.FormatInt(id, 10)
+}
+
+// sentAtOrNil omits a zero time.Time rather than serializing Telegram's
+// unix-epoch default -- SourceSentAt is meant to be absent, not 1970-01-01,
+// when a Telegram update carried no message.date.
+func sentAtOrNil(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
 }

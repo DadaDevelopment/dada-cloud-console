@@ -13,12 +13,21 @@ type RuntimeClient interface {
 	ProcessMessage(ctx context.Context, req RuntimeMessageRequest) (RuntimeMessageResponse, error)
 }
 
+// RuntimeMessageRequest is the payload tg-gateway posts to agent-runtime.
+// ChannelMessageID/ThreadID/SourceSentAt/ReplyToChannelMessageID (Agent
+// Harness v2, Step 1) carry Telegram's own message identity through to the
+// canonical Message row; all four are optional passthroughs of
+// TelegramUpdate's corresponding fields.
 type RuntimeMessageRequest struct {
-	AgentName  string       `json:"agent_name"`
-	Channel    string       `json:"channel"`
-	ExternalID string       `json:"external_id"`
-	Actor      RuntimeActor `json:"actor"`
-	Content    string       `json:"content"`
+	AgentName               string       `json:"agent_name"`
+	Channel                 string       `json:"channel"`
+	ExternalID              string       `json:"external_id"`
+	Actor                   RuntimeActor `json:"actor"`
+	Content                 string       `json:"content"`
+	ChannelMessageID        string       `json:"channel_message_id,omitempty"`
+	ThreadID                string       `json:"thread_id,omitempty"`
+	SourceSentAt            *time.Time   `json:"source_sent_at,omitempty"`
+	ReplyToChannelMessageID string       `json:"reply_to_channel_message_id,omitempty"`
 }
 
 type RuntimeActor struct {

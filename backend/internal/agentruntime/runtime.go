@@ -4,14 +4,25 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 )
 
+// MessageRequest is one inbound turn from a channel gateway.
+// ChannelMessageID/ThreadID/SourceSentAt/ReplyToChannelMessageID carry the
+// provider's own message identity (Agent Harness v2, Step 1) so the saved
+// Message can be found again for reply-to resolution, interrupt bookkeeping,
+// and humanized-delay policies later. All four are optional: a caller with
+// no channel identity (tests, internal system messages) leaves them zero.
 type MessageRequest struct {
-	AgentName  string
-	Channel    string
-	ExternalID string
-	Actor      Actor
-	Content    string
+	AgentName               string
+	Channel                 string
+	ExternalID              string
+	Actor                   Actor
+	Content                 string
+	ChannelMessageID        string
+	ThreadID                string
+	SourceSentAt            *time.Time
+	ReplyToChannelMessageID string
 }
 
 type MessageResponse struct {
@@ -58,7 +69,14 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 		return MessageResponse{}, fmt.Errorf("message.received hook: %w", err)
 	}
 
-	if _, err := r.store.SaveMessage(ctx, conv.ID, "user", req.Content, nil); err != nil {
+	if _, err := r.store.SaveMessage(ctx, conv.ID, SaveMessageInput{
+		Role:                    "user",
+		Content:                 req.Content,
+		ChannelMessageID:        req.ChannelMessageID,
+		ThreadID:                req.ThreadID,
+		SourceSentAt:            req.SourceSentAt,
+		ReplyToChannelMessageID: req.ReplyToChannelMessageID,
+	}); err != nil {
 		return MessageResponse{}, fmt.Errorf("save user message: %w", err)
 	}
 
@@ -72,7 +90,10 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 		return MessageResponse{}, fmt.Errorf("a2a send: %w", err)
 	}
 
-	if _, err := r.store.SaveMessage(ctx, conv.ID, "assistant", reply, nil); err != nil {
+	if _, err := r.store.SaveMessage(ctx, conv.ID, SaveMessageInput{
+		Role:    "assistant",
+		Content: reply,
+	}); err != nil {
 		return MessageResponse{}, fmt.Errorf("save assistant message: %w", err)
 	}
 

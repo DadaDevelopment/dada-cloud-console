@@ -2,6 +2,7 @@ package agentruntime
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -31,11 +32,15 @@ func (s *Server) Handler() http.Handler {
 }
 
 type messageRequest struct {
-	AgentName  string       `json:"agent_name"`
-	Channel    string       `json:"channel"`
-	ExternalID string       `json:"external_id"`
-	Actor      actorRequest `json:"actor"`
-	Content    string       `json:"content"`
+	AgentName               string       `json:"agent_name"`
+	Channel                 string       `json:"channel"`
+	ExternalID              string       `json:"external_id"`
+	Actor                   actorRequest `json:"actor"`
+	Content                 string       `json:"content"`
+	ChannelMessageID        string       `json:"channel_message_id"`
+	ThreadID                string       `json:"thread_id"`
+	SourceSentAt            *time.Time   `json:"source_sent_at"`
+	ReplyToChannelMessageID string       `json:"reply_to_channel_message_id"`
 }
 
 type actorRequest struct {
@@ -64,7 +69,11 @@ func (s *Server) handleMessage(c *gin.Context) {
 			Username:   req.Actor.Username,
 			Metadata:   req.Actor.Metadata,
 		},
-		Content: req.Content,
+		Content:                 req.Content,
+		ChannelMessageID:        req.ChannelMessageID,
+		ThreadID:                req.ThreadID,
+		SourceSentAt:            req.SourceSentAt,
+		ReplyToChannelMessageID: req.ReplyToChannelMessageID,
 	})
 	if err != nil {
 		log.Error().Err(err).Msg("agentruntime: process message failed")

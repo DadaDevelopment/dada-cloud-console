@@ -18,16 +18,27 @@ import (
 // Telegram account id, distinct from the chat id in groups. HasLocation/
 // Latitude/Longitude carry a native "Send location" share (Telegram's
 // message.location field) — Text is empty on a pure location message.
+//
+// MessageID/SentAt/ReplyToMessageID/ThreadID (Agent Harness v2, Step 1) are
+// Telegram's own message identity: MessageID becomes conversation_messages'
+// channel_message_id, SentAt is message.date (when Telegram says the user
+// actually sent it, distinct from when this poller observed it),
+// ReplyToMessageID is message.reply_to_message.message_id (0 if not a
+// reply), ThreadID is message.message_thread_id (0 outside a forum topic).
 type TelegramUpdate struct {
-	UpdateID    int64
-	ChatID      int64
-	UserID      int64
-	Text        string
-	Username    string
-	FirstName   string
-	HasLocation bool
-	Latitude    float64
-	Longitude   float64
+	UpdateID          int64
+	ChatID            int64
+	UserID            int64
+	Text              string
+	Username          string
+	FirstName         string
+	HasLocation       bool
+	Latitude          float64
+	Longitude         float64
+	MessageID         int64
+	SentAt            time.Time
+	ReplyToMessageID  int64
+	ThreadID          int64
 }
 
 // TelegramClient is the Bot API surface a poller needs. An interface so
@@ -130,8 +141,10 @@ func (c *httpTelegramClient) GetMe(ctx context.Context, token string) (string, e
 type tgUpdate struct {
 	UpdateID int64 `json:"update_id"`
 	Message  *struct {
-		Text     string `json:"text"`
-		Location *struct {
+		MessageID int64  `json:"message_id"`
+		Date      int64  `json:"date"`
+		Text      string `json:"text"`
+		Location  *struct {
 			Latitude  float64 `json:"latitude"`
 			Longitude float64 `json:"longitude"`
 		} `json:"location"`
@@ -143,6 +156,10 @@ type tgUpdate struct {
 			Username  string `json:"username"`
 			FirstName string `json:"first_name"`
 		} `json:"from"`
+		ReplyToMessage *struct {
+			MessageID int64 `json:"message_id"`
+		} `json:"reply_to_message"`
+		MessageThreadID int64 `json:"message_thread_id"`
 	} `json:"message"`
 }
 
@@ -172,6 +189,14 @@ func (c *httpTelegramClient) GetUpdates(ctx context.Context, token string, offse
 			Text:      u.Message.Text,
 			Username:  u.Message.From.Username,
 			FirstName: u.Message.From.FirstName,
+			MessageID: u.Message.MessageID,
+			ThreadID:  u.Message.MessageThreadID,
+		}
+		if u.Message.Date > 0 {
+			upd.SentAt = time.Unix(u.Message.Date, 0).UTC()
+		}
+		if u.Message.ReplyToMessage != nil {
+			upd.ReplyToMessageID = u.Message.ReplyToMessage.MessageID
 		}
 		if hasLocation {
 			upd.HasLocation = true

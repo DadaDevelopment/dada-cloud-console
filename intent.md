@@ -1,74 +1,118 @@
-# Цель: воронка регистрации — детальная аналитика (kc-счётчик) + причина просевшей конверсии
+# Intent: Agent Harness Platform v2 — Human-Grade Conversation Layer
 
-Author: владелец (запрос в чате 2026-09-01). Status: in-progress (аналитика).
-Предыдущий агент: собрал фактбазу (контекст в чате), не перепроверять — ДОПОЛНЯТЬ.
+Author: owner (chat 2026-09-02/03, after tg-agent-tools demo passed successfully).
+Status: in-progress. Previous intent (registration funnel analytics) is DONE/parked —
+see chat_history_lookup if needed; this file now tracks the harness platform work.
 
-## Уточнение задачи (важно)
-Владелец: «проблемы между началом и концом регистрации за последние 7 дней».
-1) Детальная аналитика на основе Keycloak-счётчика (111697724, цели уже заведены).
-2) Найти причину просевшей конверсии.
+## Where we are
 
-## Что известно от предыдущего агента (принято как данное, не перепроверено)
-- Скриншот /admin/funnel с окном 30d: 50 → 41 → 6 (консольный счётчик 110158915).
-- За 7 дней консольные цели = 0 (окно скриншота = 30d, не 7d).
-- kc-цели 7d (у агента): kc_register_submit=3, kc_yandex_start=4.
-- Коммит argo-infra c814c1bf (23.08, owner): registrationAllowed:true + кнопка
-  «Регистрация» + kc_login_view/kc_native_registration_start цели, theme v19.
-- С 13.08 единственная дверь была Яндекс-IDP; NEXT_PUBLIC_EMAIL_SIGNUP_ENABLED=false в прода.
+Phase 1-3 of the original harness plan shipped and is code-complete + build/test
+verified (see docs/plans/agent-harness-conversation-runtime.md,
+docs/STATUS-agent-runtime.md): conversations table, conversation_messages,
+lifecycle_hooks, hook_executions, agent-runtime service, tg-gateway integration
+with A2A fallback. Verified live: go build/vet clean, agentruntime store tests
+pass against real Postgres (GetOrCreate idempotency, message history order,
+metadata update, idle listing), agent-runtime binary boots and a lifecycle hook
+(conversation.created -> metadata action) fires and is recorded in
+hook_executions. A2A call to a real kagent Agent was NOT exercised (no cluster
+DNS from the sandbox container) — that link is still unverified end-to-end.
 
-## Мой прогресс (sess-0902, дополнение)
-- [x] KC realm registrationAllowed=true ЗАПУЩЕНО В ПРОДЕ (kcadm live) — нативная форма открыта.
-- [x] KC-цели 7d/30d сняты через Stat API (goal*users): login_view 21/23,
-      native_reg_start 3/3, register_view 3/4, email_filled 3/3, password_filled 3/3,
-      submit 3/3, register_error 0/1, yandex_start 3/5, yandex_registration_view 0/0,
-      yandex_submit 0/0, login_submit 10/11.
-- [x] PG ground truth 7d: 3 customer-аккаунта (2 password + 1 yandex), 14d: 6 (7 рядов окно 08-19..08-28).
-      Zero-activity в 7d-когорте = 0 (все 3 что-то сделали).
-- [x] KC events live (kcadm): REGISTER = 4 события (08-26 m206rv159, 08-26 shrunk@waifu.club,
-      08-28 kof97zip, 08-28 messiajit4). REGISTER_ERROR = 6 (08-27 12:54..13:11, пустые details).
-      IDP_FIRST_LOGIN_ERROR = 2 (08-26 07:37). LOGIN_ERROR 70 — почти весь шум (admin-cli 29,
-      mcp/harness, dada-console 15).
-- [x] ux_events 30d: signup_started=173 (66 уник), но ПОСЛЕДНИЙ = 08-23. В окне 7 дней — НОЛЬ.
-      registration_complete 30d = 6 (6 уник) — метч скриншоту. callback_failed 30d = 36.
-- [x] Консольный счётчик: 7d ВСЕ цели = 0 (кроме callback_failed=3). 30d: 50/41/6/10.
-- [x] /login → /callback (ux pageviews, 7d): 29 уников на /login, дошли до /callback только 4,
-      при этом все 29 с user_id — то есть это ВОЗВРАЩАЮЩИЕСЯ, не новые. Анон на /login 7d = 0!
-- [x] /login pageview по дням 14d: 239→хвост 8-9/день к 08-29+, спад объёма к 09-01 (2).
-- [x] kc-счётчик посещаемость 14д: всего 89 визитов (Link 57 / Direct 32), 1 юзер 09-01.
-- [x] Деплой коммита c814c1bf в KC: theme v19 в values.yaml того же коммита,
-      keycloak-config-prod Argo Synced/Healthy; registrationAllowed=true подтверждён live.
+Demo happened, went fine, production tg-agent-tools (kagent Agent name:
+tg-exchange-support) untouched throughout. Owner's call now: platform work
+continues for real, not demo-safe placeholder — pick up the full backlog from
+their post-demo product review.
 
-## Отекшая конверсия — ЧТО ВИДИМ
-- «Начало регистрации» 30d-скриншота = signup_started (СТАРЫЙ goal, стрелял на /register-экране выбора,
-  а /register теперь 302→/login). После 23.08 цель физически не стреляет (страницы больше нет).
-- Реальный путь сейчас: лендинг → /login (KC) → Яндекс-кнопка или «Регистрация» → KC-формы → callback.
-- kc-топ: login_view 21 уник/7д, из них start native reg 3, yandex start 3, submit 3.
-  Значит ~15/21 даже не кликают «Регистрация» — это в основном СУЩЕСТВУЮЩИЕ юзеры логинятся.
-- Регистраций 7d = 3, все 3 дошли до submit и аккаунт создан → в воротах формы НЕ текут.
-- ТЕЧЁТ ВЕРХ: почти нет НОВЫХ людей на /login (анон-визиты 7d = 0 в ux_events;
-  kc 14д = 89 визитов, из них 57 линк + 32 директ — это возвраты и перелёты).
+## The ask (owner's words, condensed from the review message)
 
-## Root-cause (рабочая версия, основания выше)
-1) Главный «просевший» кусок = АРТЕФАКТ ИНСТРУМЕНТИРОВАНИЯ: signup_started (41)
-   принадлежит мёртвому экрану /register (выбор способа), убитому 302-редиректом.
-   50→41 — «начали регистрацию» не было вообще у новых юзеров после 23.08; цель не стреляет.
-2) Реальная воронка 7д = KC-счётчик: 21 открыли вход → 6 нажали хоть что-то регистрационное →
-   3 сабмита → 3 аккаунта. На шаге «вход→клик регистрация» теряется большинство —
-   потому что на /login приходят существующие юзеры, а новых почти нет (верх воронки пуст).
-3) callback_failed 30d=36 (state_entry=missing) — oidc-сташ в localStorage между табами;
-   7d=3. Мелкий, но реальный течь на возврате.
+Core architectural principle owner set: **kagent decides what to say/do.
+Conversation platform decides how and when it reaches the channel.** Typing,
+delays, batching, read receipts, stale-run cancellation, media resolving —
+none of that is prompt or skill; it is harness/runtime.
 
-## Дизайн бэклог-фикса (из контекста агента, продолжаю)
-- Backend: новый adminKcFunnelReport (admin_kc_funnel.go) + поле kc_funnel в adminFunnelResponse;
-  fetchMetrikaGoalUsers (users, не reaches); переиспользовать overviewRegisteredCount/Channels;
-  переписать admin_registration_funnel.go (мёртвый overviewRegistrationFunnel), сохранив
-  metrikaStatHTTPClient/metrikaStatTimeout (нужны admin_funnel.go + тесты).
-- Frontend: тип AdminFunnelKcFunnel, стрим «id.dada-tuda.ru (Keycloak)» в Sankey /admin/funnel,
-  i18n ru/en. Убрать AdminOverviewRegistrationFunnel из types.ts (мёртвый).
-- Цели ног: yandex 601042593..97, native 598690125..144/161, login 601095017/601095084/601095085.
+Owner's own priority table (P0 first):
 
-## Открытые вопросы
-- Зачем KC REGISTER_ERROR 08-27 (6 подряд) — details пустые; возможно кто-то долбил форму.
-  Некритично (0 в последние дни), в отчёт как шум.
-- shrunk@waifu.club зарегистрирован в KC 08-26, но в user_accounts нет → залогинился,
-  консоль-аккаунт не создан (lazy provisioning не сработал = не делал запросов). Учесть в отчёте.
+- P0 Canonical Message + Telegram IDs + source_sent_at — foundation for everything else
+- P0 inbound debounce (quiet_window aggregation of rapid-fire messages into one turn)
+- P0 interrupt/cancel a stale agent run when the user sends a new message mid-generation
+- P0 proper reply-to / quotes (native Telegram reply, not just plain text)
+- P0 image + voice inbound (attachments, not raw file_id passed to the model)
+- P0 link resolver (URL entities -> Link metadata, cheap/deterministic; deep read is agent's call)
+- P1 delayed typing policy (human-like, configurable start/duration)
+- P1 delayed read policy (human-like; capability-gated — only real for Telegram Business connections, noop for plain bot API)
+- P1 outbound voice/images/files (symmetric multimodality)
+- P1 edit/delete/reactions (inbound events + agent-issued edit_own_message/delete_own_message/react)
+- P1 idle scheduler + proactive agent invocation (already started, Phase 5 of original plan)
+- P1 quiet hours / timezone (mandatory once proactive follow-ups exist)
+- P2 segmented multi-message responses (agent-issued structured segments, not a regex splitter)
+- P2 sticker/GIF/video-note semantics
+- P2 human takeover ownership (conversation.owner: agent | human:<id>)
+
+Owner explicitly rejected: doing everything as prompt engineering, and any
+automatic "smart" heuristic that fakes intelligence the platform doesn't
+actually have (e.g. auto-splitting a long reply with a regex instead of a real
+segmented-output primitive).
+
+Full design detail (Message shape, Attachment shape, per-policy YAML sketches,
+6-module architecture diagram, Telegram API specifics for read/typing/reply/
+media-group/link-preview) is in the owner's message in this chat — treat it as
+the source spec, do not re-derive it from scratch.
+
+## Constraints carried over (still binding)
+
+- Sandbox-only live testing: agent-sandbox project, do not touch other
+  projects, do not create new projects (CLAUDE.md hard rule).
+- Trunk-based: commit/push straight to main, no feature branches.
+- No comments in source code; docstrings/doc-comments on exported symbols only,
+  matching existing repo convention (long doc comments above types/funcs).
+- Own every failure surfacing during this work; verify with real builds/tests
+  before claiming done (go-build docker container + dada-pg container are the
+  working local verification rig — go 1.25-alpine, Postgres 16-alpine, bridge
+  network, migrations applied via `cmd/migrate`).
+- Production agent (tg-exchange-support) stays on direct A2A path (noop
+  runtime client) until each new capability is verified against the sandbox
+  agent-runtime deployment first.
+
+## Open questions / risks flagged during design review
+
+1. A2A protocol has no native multi-turn/history field in what this repo's
+   client implements — history is currently injected as a text block. Canonical
+   Message + reply-to needs a real structured channel to kagent or this stays
+   a workaround. Needs a decision: extend the A2A envelope, or keep textual
+   context injection and accept its limits.
+2. Read receipts: Telegram Bot API cannot mark a message read as a human doc
+   proper feature (only implicit via reply). `readBusinessMessage` and
+   `messages.readHistory`-equivalent behavior exist only for Business
+   connections. Platform must expose read_policy as a capability the binding
+   declares support for, not assume it always works.
+3. Debounce and interrupt both need per-conversation in-memory run state
+   (active generation goroutine + cancel func, pending-message buffer) living
+   somewhere with the same single-replica constraint tg-gateway already has
+   for its Telegram long-poll (two pollers on one bot token race). Whichever
+   service owns this (agent-runtime is the natural owner) inherits that
+   constraint too.
+4. Voice/vision need real STT/vision backends wired in — this environment has
+   no confirmed credentials/endpoint for either yet. Build the Attachment
+   pipeline and interface now; the actual model call is a stub until an
+   endpoint is confirmed.
+5. media_group_id (Telegram albums) aggregation and inbound debounce are two
+   different aggregation concerns that must not fight each other (album parts
+   arrive as separate updates too).
+
+## Immediate execution order for this session
+
+1. Canonical Message schema (extend conversation_messages, do not fork a
+   parallel table) + Go types — foundation, everything else builds on this.
+2. Inbound debounce — biggest UX lever per owner, isolated enough to ship and
+   test independently.
+3. Interrupt/cancel stale run — needs the debounce/run-tracking machinery
+   from step 2, natural next step.
+4. Reply-to/quotes — schema already carries what's needed once step 1 lands;
+   mostly plumbing tg-gateway -> runtime -> outbound reply_parameters.
+5. Link resolver — cheap, deterministic, independent of the rest; can be done
+   in parallel if time allows.
+6. Media (voice/image) inbound — schema + interface + stub resolver; real
+   STT/vision wiring deferred pending credentials.
+
+Each step: real code, real go build + go vet + go test against the
+go-build/dada-pg rig, commit to main once green. No claiming "done" without a
+build/test artifact to point at.

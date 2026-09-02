@@ -61,12 +61,12 @@ func TestSaveAndGetRecentMessages(t *testing.T) {
 	conv, _, err := store.GetOrCreateConversation(ctx, agentName, "telegram", "chat-1", actor)
 	require.NoError(t, err)
 
-	msg1, err := store.SaveMessage(ctx, conv.ID, "user", "hello", nil)
+	msg1, err := store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "user", Content: "hello"})
 	require.NoError(t, err)
 	require.Equal(t, "user", msg1.Role)
 	require.Equal(t, "hello", msg1.Content)
 
-	msg2, err := store.SaveMessage(ctx, conv.ID, "assistant", "hi there", map[string]any{"tokens": 10})
+	msg2, err := store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "assistant", Content: "hi there", Metadata: map[string]any{"tokens": 10}})
 	require.NoError(t, err)
 	require.Equal(t, "assistant", msg2.Role)
 
@@ -135,4 +135,76 @@ func TestListIdleConversations(t *testing.T) {
 	for _, c := range idle2 {
 		require.NotEqual(t, conv1.ID, c.ID)
 	}
+}
+
+func TestSaveMessageCanonicalFields(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+
+	agentName := "test-agent-" + uuid.NewString()[:8]
+	actor := Actor{ExternalID: "user-1", Username: "testuser"}
+	conv, _, err := store.GetOrCreateConversation(ctx, agentName, "telegram", "chat-canon", actor)
+	require.NoError(t, err)
+
+	sentAt := time.Now().Add(-2 * time.Minute).UTC().Truncate(time.Second)
+	msg, err := store.SaveMessage(ctx, conv.ID, SaveMessageInput{
+		Role:             "user",
+		Content:          "hello",
+		ChannelMessageID: "1001",
+		ThreadID:         "55",
+		SourceSentAt:     &sentAt,
+		ChannelMetadata:  map[string]any{"chat_type": "private"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "1001", msg.ChannelMessageID)
+	require.Equal(t, "55", msg.ThreadID)
+	require.NotNil(t, msg.SourceSentAt)
+	require.WithinDuration(t, sentAt, *msg.SourceSentAt, time.Second)
+	require.Equal(t, "private", msg.ChannelMetadata["chat_type"])
+	require.Empty(t, msg.Entities)
+	require.Empty(t, msg.Attachments)
+	require.Nil(t, msg.ReplyToMessageID)
+}
+
+func TestFindMessageByChannelIDAndReplyResolution(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+
+	agentName := "test-agent-" + uuid.NewString()[:8]
+	actor := Actor{ExternalID: "user-1", Username: "testuser"}
+	conv, _, err := store.GetOrCreateConversation(ctx, agentName, "telegram", "chat-reply", actor)
+	require.NoError(t, err)
+
+	original, err := store.SaveMessage(ctx, conv.ID, SaveMessageInput{
+		Role:             "assistant",
+		Content:          "which jurisdiction are you in?",
+		ChannelMessageID: "2001",
+	})
+	require.NoError(t, err)
+
+	found, err := store.FindMessageByChannelID(ctx, conv.ID, "2001")
+	require.NoError(t, err)
+	require.Equal(t, original.ID, found.ID)
+
+	reply, err := store.SaveMessage(ctx, conv.ID, SaveMessageInput{
+		Role:                    "user",
+		Content:                 "Kazakhstan",
+		ChannelMessageID:        "2002",
+		ReplyToChannelMessageID: "2001",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, reply.ReplyToMessageID)
+	require.Equal(t, original.ID, *reply.ReplyToMessageID)
+
+	_, err = store.FindMessageByChannelID(ctx, conv.ID, "does-not-exist")
+	require.ErrorIs(t, err, ErrMessageNotFound)
+
+	danglingReply, err := store.SaveMessage(ctx, conv.ID, SaveMessageInput{
+		Role:                    "user",
+		Content:                 "orphan reply",
+		ChannelMessageID:        "2003",
+		ReplyToChannelMessageID: "9999",
+	})
+	require.NoError(t, err)
+	require.Nil(t, danglingReply.ReplyToMessageID)
 }
