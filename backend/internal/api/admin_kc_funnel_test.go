@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+
+	"github.com/dada-tuda/console/backend/internal/config"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -80,7 +82,7 @@ func TestFetchMetrikaGoalUsersSurfacesHTTPError(t *testing.T) {
 // fills: one goal per stage, same order. Adding a stage without a goal (or
 // the reverse) would silently report zero.
 func TestAdminKcFunnelLegsCoverEveryStage(t *testing.T) {
-	h := &Handler{pool: overviewBrokenTestPool(t)}
+	h := &Handler{pool: overviewBrokenTestPool(t), cfg: &config.Config{}}
 	report := h.adminKcFunnelReport(context.Background(), 7)
 	if report.Available {
 		t.Skip("Metrika configured in test env; leg table still checked below")

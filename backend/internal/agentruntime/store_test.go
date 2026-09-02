@@ -105,6 +105,10 @@ func TestListIdleConversations(t *testing.T) {
 	conv1, _, err := store.GetOrCreateConversation(ctx, agentName, "telegram", "chat-idle", actor)
 	require.NoError(t, err)
 
+	t.Cleanup(func() {
+		_, _ = store.(*pgStore).pool.Exec(ctx, `DELETE FROM conversations WHERE agent_name = $1`, agentName)
+	})
+
 	threshold := time.Now().Add(time.Hour)
 
 	idle, err := store.ListIdleConversations(ctx, agentName, threshold)
