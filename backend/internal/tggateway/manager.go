@@ -220,6 +220,38 @@ func withTelegramIdentity(u TelegramUpdate) string {
 	return fmt.Sprintf("[%s]\n%s", meta, u.Text)
 }
 
+// a2aContextFor derives a stable A2A contextId for a Telegram chat. The A2A
+// context IS the server-side conversation (kagent keeps session history per
+// contextId), so keying it on the chat id gives the model the full dialogue:
+// no repeated self-introductions, follow-ups that remember earlier turns.
+func a2aContextFor(chatID int64) string {
+	return fmt.Sprintf("tg-chat-%d", chatID)
+}
+
+// modelErrorMarkers are substrings that identify an upstream LLM/billing
+// failure leaked into the reply text (observed live: kagent surfaces the raw
+// anymodel.org HTTP 402 body, JSON with request ids, as the artifact text).
+// Such text must never reach the Telegram user.
+var modelErrorMarkers = []string{
+	"Error code: 402",
+	"billing_error",
+	"payment_required",
+	"Insufficient balance",
+	"余额不足",
+	"Run /compact",
+}
+
+// sanitizeModelReply masks upstream model/billing errors: if the reply looks
+// like a leaked API error, the user gets the generic handoff line instead.
+func sanitizeModelReply(reply string) string {
+	for _, marker := range modelErrorMarkers {
+		if strings.Contains(reply, marker) {
+			return a2aFailureFallback
+		}
+	}
+	return reply
+}
+
 // locationButtonMarker is a literal token the agent's system prompt is
 // instructed to append on its own line when it wants the user offered the
 // native "Send location" button. The gateway strips it before delivery and
@@ -294,7 +326,7 @@ func runPoller(ctx context.Context, tg TelegramClient, a2a A2AClient, runtime Ru
 				reply = runtimeResp.Text
 			} else {
 				log.Debug().Err(runtimeErr).Msg("tggateway: runtime unavailable, falling back to direct A2A")
-				reply, err = a2a.Send(ctx, b.AgentName, withTelegramIdentity(u))
+				reply, err = a2a.SendWithContext(ctx, b.AgentName, a2aContextFor(u.ChatID), withTelegramIdentity(u))
 				runtimeErr = err
 			}
 
@@ -315,7 +347,7 @@ func runPoller(ctx context.Context, tg TelegramClient, a2a A2AClient, runtime Ru
 				continue
 			}
 			failing = false
-			sendText, wantsButton := splitLocationButtonMarker(reply)
+			sendText, wantsButton := splitLocationButtonMarker(sanitizeModelReply(reply))
 			var sendErr error
 			if wantsButton {
 				sendErr = tg.SendMessageWithLocationButton(ctx, b.BotToken, u.ChatID, sendText)

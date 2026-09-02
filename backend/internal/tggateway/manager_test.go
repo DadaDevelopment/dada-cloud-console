@@ -76,6 +76,10 @@ type fakeA2A struct{}
 
 func (fakeA2A) Send(context.Context, string, string) (string, error) { return "ok", nil }
 
+func (fakeA2A) SendWithContext(_ context.Context, _ string, contextID string, _ string) (string, error) {
+	return "ctx:" + contextID, nil
+}
+
 func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -249,7 +253,11 @@ type failingA2A struct {
 	calls    int
 }
 
-func (f *failingA2A) Send(context.Context, string, string) (string, error) {
+func (f *failingA2A) Send(ctx context.Context, agentName string, text string) (string, error) {
+	return f.SendWithContext(ctx, agentName, "", text)
+}
+
+func (f *failingA2A) SendWithContext(_ context.Context, _ string, _ string, _ string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
@@ -317,6 +325,33 @@ func TestRunPoller_A2AFallbackSuccessIsNotOverriddenByStaleRuntimeError(t *testi
 	waitFor(t, func() bool { return tg.sentCount() == 1 })
 	if got := tg.sent[0]; got != "ok" {
 		t.Fatalf("expected the real a2a reply %q, got %q (fallback=%q)", "ok", got, a2aFailureFallback)
+	}
+}
+
+func TestSanitizeModelReply_MasksLeakedBillingError(t *testing.T) {
+	leaked := `Error code: 402 - {'error': {'message': 'Your balance is positive, but it is not enough for this request (available: 6676 tokens; required: 11088).', 'type': 'billing_error', 'code': 'payment_required', 'status': 402, 'request_id': 'err_68957a75'}}`
+	got := sanitizeModelReply(leaked)
+	if got != a2aFailureFallback {
+		t.Fatalf("expected fallback for leaked billing error, got %q", got)
+	}
+}
+
+func TestSanitizeModelReply_NormalReplyUntouched(t *testing.T) {
+	reply := "Hi! I'm the AI assistant of the support team. Which country are you located in?"
+	if got := sanitizeModelReply(reply); got != reply {
+		t.Fatalf("expected normal reply unchanged, got %q", got)
+	}
+}
+
+func TestA2AContextFor_IsStablePerChat(t *testing.T) {
+	if a2aContextFor(42) != "tg-chat-42" {
+		t.Fatalf("unexpected context id %q", a2aContextFor(42))
+	}
+	if a2aContextFor(42) != a2aContextFor(42) {
+		t.Fatalf("context id must be deterministic per chat")
+	}
+	if a2aContextFor(43) == a2aContextFor(42) {
+		t.Fatalf("different chats must not share a context id")
 	}
 }
 

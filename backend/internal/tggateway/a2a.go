@@ -19,6 +19,7 @@ import (
 // the A2A protocol's public spec, not confirmed against a live kagent Agent).
 type A2AClient interface {
 	Send(ctx context.Context, agentName string, text string) (reply string, err error)
+	SendWithContext(ctx context.Context, agentName string, contextID string, text string) (reply string, err error)
 }
 
 // a2aURLFor derives an agent's A2A endpoint the same way the hand-wired
@@ -49,6 +50,7 @@ type a2aPart struct {
 type a2aMessage struct {
 	Role      string    `json:"role"`
 	MessageID string    `json:"messageId"`
+	ContextID string    `json:"contextId,omitempty"`
 	Parts     []a2aPart `json:"parts"`
 }
 
@@ -71,8 +73,21 @@ type a2aResponse struct {
 }
 
 func (c *httpA2AClient) Send(ctx context.Context, agentName string, text string) (string, error) {
+	return c.SendWithContext(ctx, agentName, "", text)
+}
+
+// SendWithContext posts message/send with an explicit A2A contextId. The A2A
+// context is the server-side conversation: the agent (kagent session store)
+// keeps the history per contextId, so a stable id per Telegram chat gives the
+// model the whole dialogue instead of treating every message as a fresh
+// start. Send() (empty contextID) keeps the legacy stateless behavior --
+// each call gets a new server-generated context.
+func (c *httpA2AClient) SendWithContext(ctx context.Context, agentName string, contextID string, text string) (string, error) {
 	reqBody := a2aRequest{JSONRPC: "2.0", ID: "tg-gateway", Method: "message/send"}
 	reqBody.Params.Message = a2aMessage{Role: "user", MessageID: uuid.NewString(), Parts: []a2aPart{{Kind: "text", Text: text}}}
+	if contextID != "" {
+		reqBody.Params.Message.ContextID = contextID
+	}
 
 	payload, err := json.Marshal(reqBody)
 	if err != nil {
