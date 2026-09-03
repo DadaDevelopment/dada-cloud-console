@@ -6449,3 +6449,42 @@ send_failures=0), но поведенческий тест невозможен 
 **Инструментальное:** vpn-bypass-proxy не стартует на этой VM (macOS ipconfig) — рекогносцировка сети
 рутины в capabilities.md нуждается в Linux-версии (backlog, не сейчас). probe-main-build FAIL по
 `go: command not found` (нет тулчейна на этой VM, НЕ код — Jenkins #1402 SUCCESS на 10b71fbf).
+
+
+## 2026-09-03 sess-0903c (cron-цикл, ops-VM Linux)
+- P0 PULSE: prod=7fb4b853, main=46866605 (+2 харнесс-v2 коммита владельца) - норм
+  latency. НО Jenkins main #1427/#1428 оба FAILED AT Checkout: gofmt-гейт,
+  4 файла с таб-выравниванием структурных тегов от 9b049d97/cd65273b. Красный
+  main стоял ~6ч и никем не был замечен (владелец не в присутствии). Локального
+  go на VM нет - прогнал gofmt -l в golang:1.25-alpine (тот же тулинг, что CI,
+  пофайлово через stdin: docker-машина удалённая, бинды не монтируются).
+  Фикс 378d62ca push 06:17Z -> #1429 building. Свип всех .go дерева: других
+  неотформатированных нет. [live jenkins MCP + docker gofmt]
+- Доставка: жду зелёный #1429; арго-пин делает prod=HEAD сам (проверено ранее).
+- Замыкание измерений: E1 KILLED (Metrika 0 визитов /analog-* 14д; Webmaster:
+  64q/131imp/3clk - все 3 брендовые «dada cloud»; аналоги 8imp/0clk) - канал
+  мёртв, стоп строить лендинги этого класса. E93 KILLED (платёжный кластер
+  107 imp / 0 clk после PayNote - проблема позиция/спрос, не контент).
+  E54/E58 MEASURED SUCCESS: с 08-13 клики пошли от РЕАЛЬНЫХ юзеров
+  (success-CTA 26 кликов/9 юзеров, next-step 5/4; farm-волны нет).
+  Гипотезы: evidence-строка в H02 (post-deploy silence получил продолжение).
+  ВЕБМАСТЕР-ДОСТУП ПОЧИНЕН: эндпоинт = POST /v4/user/{uid}/hosts/{host}/query-analytics/list
+  (без search-analytics-префикса; access-metrika.md был с опечаткой, исправлено).
+- Audit-разбор окна 08-25..09-03: 6 новых юзеров; 4 «собрал и ушёл»
+  (терминалы: 3x ViewApps, 1x CreateApp; messiajit4 - легендарный путь и
+  4-дневная тишина). wgck сегодня: UploadSourceArchive -> build 65с -> CreateApp
+  за 4 МИНУТЫ от рега - поток 1 (upload без git) работает на живом незнакомце.
+  m206rv159: 7 попыток CreateServiceDatabase за 4 мин (инструментирование
+  фрикции формы БД = candidate backlog). saravanan: единственный failed build -
+  юзерский pnpm-lock. Полный разбор в audit-path-graph.md.
+- Feedback 4x artempro2021 разобраны поимённо: порт-валидация уже починена
+  владельцем 3613dc49 (совпадение текста 1:1), грейс-баннер = as designed,
+  fanclub.run.place верифицирован и работает (live DNS/TLS/200 x6 стран,
+  cert до 23.11), ingress-правило на месте. Реакция owner < 1 дня на все 4.
+- Панель /admin/overview [live pulse 05:42Z]: not_ready = fonbet (юзерский
+  deploy-скрипт, известен), gulyaev-ai-core (юзерский vault-ключ) - оба НЕ наши;
+  freshness blind=false; stuck=0; builds 122 ok/1 fail 7д; юзеров 62 (+4/7д);
+  active_48h=6; paid 0 от чужих (единственный succeeded - тест owner 07-25).
+- Бизнес: монетизация ждёт owner (P1-PAY-7 письмо-текст всё ещё не подписан;
+  INV-2026-00002 2900₽ всё ещё не оплачен). Метрика: Direct 229/14д, Search 8 -
+  органика мертва (E1-kill подтверждён 4-м замером).
