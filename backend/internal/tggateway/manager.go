@@ -326,13 +326,12 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 
 	links := NewLinkTitleFetcher()
 	media := NewMediaDownloader(tg, os.Getenv("TELEGRAM_API_BASE"), mediaCacheDir())
-	if aiCfg := mediaAIConfigFromEnv(); aiCfg != nil {
-		trans, desc := newMediaAIResolvers(aiCfg)
-		transcribeHook = trans
-		describeHook = desc
-		log.Info().Str("stt_model", aiCfg.STTModel).Str("vision_model", aiCfg.VisionModel).
-			Msg("tggateway: real media AI resolvers enabled")
-	}
+	trans, desc := newMediaAIResolvers(mediaAIConfigFromEnv())
+	transcribeHook = trans
+	describeHook = desc
+	log.Info().Str("whisper", mediaAIConfigFromEnv().WhisperBaseURL).
+		Str("vision_model", mediaAIConfigFromEnv().VisionModel).
+		Msg("tggateway: media resolvers wired")
 	runs := newInterruptState()
 	defer runs.forgetAll()
 

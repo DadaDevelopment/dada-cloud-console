@@ -20,19 +20,28 @@ func writeTempFile(t *testing.T, dir, name, content string) string {
 	return p
 }
 
-func TestAITranscribe_Success(t *testing.T) {
-	var gotModel, gotAuth string
+func TestWhisperTranscribe_Success(t *testing.T) {
+	var gotTask, gotLang, gotFile string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/v1/audio/transcriptions") {
+		if r.URL.Path != "/asr" {
 			http.NotFound(w, r)
 			return
 		}
-		gotAuth = r.Header.Get("Authorization")
-		if err := r.ParseMultipartForm(10 << 20); err != nil {
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
 			t.Errorf("multipart: %v", err)
 			return
 		}
-		gotModel = r.FormValue("model")
+		gotTask = r.FormValue("task")
+		gotLang = r.FormValue("language")
+		f, _, err := r.FormFile("audio_file")
+		if err != nil {
+			t.Errorf("audio_file field: %v", err)
+			return
+		}
+		defer f.Close()
+		buf := make([]byte, 64)
+		n, _ := f.Read(buf)
+		gotFile = string(buf[:n])
 		w.Write([]byte(`{"text": "привет, это тест"}`))
 	}))
 	defer srv.Close()
@@ -40,47 +49,49 @@ func TestAITranscribe_Success(t *testing.T) {
 	dir := t.TempDir()
 	att := &TelegramAttachment{Kind: "voice", FilePath: writeTempFile(t, dir, "1.ogg", "OggS-fake")}
 
-	cfg := &MediaAIConfig{GatewayURL: srv.URL, GatewayKey: "sk-test", STTModel: "or-whisper"}
-	got, ok := aiTranscribe(context.Background(), srv.Client(), cfg, att)
+	cfg := &MediaAIConfig{WhisperBaseURL: srv.URL}
+	got, ok := whisperTranscribe(context.Background(), cfg, att)
 	if !ok || got != "привет, это тест" {
 		t.Fatalf("transcript wrong: ok=%v %q", ok, got)
 	}
-	if gotModel != "or-whisper" {
-		t.Fatalf("model field must be forwarded, got %q", gotModel)
+	if gotTask != "transcribe" || gotLang != "ru" {
+		t.Fatalf("task/language fields wrong: task=%q lang=%q", gotTask, gotLang)
 	}
-	if gotAuth != "Bearer sk-test" {
-		t.Fatalf("auth header wrong: %q", gotAuth)
+	if gotFile != "OggS-fake" {
+		t.Fatalf("audio bytes must ride the multipart file field, got %q", gotFile)
 	}
 }
 
-func TestAITranscribe_Failures(t *testing.T) {
+func TestWhisperTranscribe_Failures(t *testing.T) {
 	dir := t.TempDir()
-	cfg := &MediaAIConfig{GatewayURL: "http://127.0.0.1:1", GatewayKey: "k", STTModel: "m"}
+	cfg := &MediaAIConfig{WhisperBaseURL: "http://127.0.0.1:1"}
 	att := &TelegramAttachment{Kind: "voice", FilePath: filepath.Join(dir, "missing.ogg")}
-	if _, ok := aiTranscribe(context.Background(), http.DefaultClient, cfg, att); ok {
-		t.Fatal("unreadable file must yield unavailable")
+	if _, ok := whisperTranscribe(context.Background(), cfg, att); ok {
+		t.Fatal("unreachable whisper must yield unavailable")
 	}
 
 	att2 := &TelegramAttachment{Kind: "voice", FilePath: writeTempFile(t, dir, "2.ogg", "x")}
 	errSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "quota", http.StatusTooManyRequests)
+		http.Error(w, "boom", http.StatusInternalServerError)
 	}))
 	defer errSrv.Close()
-	cfg2 := &MediaAIConfig{GatewayURL: errSrv.URL, GatewayKey: "k", STTModel: "m"}
-	if _, ok := aiTranscribe(context.Background(), errSrv.Client(), cfg2, att2); ok {
-		t.Fatal("gateway error must yield unavailable")
+	if _, ok := whisperTranscribe(context.Background(), &MediaAIConfig{WhisperBaseURL: errSrv.URL}, att2); ok {
+		t.Fatal("whisper 500 must yield unavailable")
+	}
+	if _, ok := whisperTranscribe(context.Background(), cfg, &TelegramAttachment{Kind: "voice"}); ok {
+		t.Fatal("empty FilePath must yield unavailable without a request")
 	}
 }
 
-func TestAIDescribe_Success(t *testing.T) {
-	var gotImage bool
+func TestGatewayDescribe_Success(t *testing.T) {
+	var gotImage, gotModel bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
-		dec := json.NewDecoder(r.Body)
-		if err := dec.Decode(&body); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("decode: %v", err)
 			return
 		}
+		gotModel = body["model"] == "vision"
 		msgs := body["messages"].([]any)
 		content := msgs[0].(map[string]any)["content"].([]any)
 		for _, part := range content {
@@ -98,23 +109,30 @@ func TestAIDescribe_Success(t *testing.T) {
 	dir := t.TempDir()
 	att := &TelegramAttachment{Kind: "image", FilePath: writeTempFile(t, dir, "3.jpg", "fakejpeg")}
 
-	cfg := &MediaAIConfig{GatewayURL: srv.URL, GatewayKey: "sk", VisionModel: "or-vision"}
-	got, ok := aiDescribe(context.Background(), srv.Client(), cfg, att)
+	cfg := &MediaAIConfig{GatewayURL: srv.URL, GatewayKey: "sk", VisionModel: "vision"}
+	got, ok := gatewayDescribe(context.Background(), cfg, att)
 	if !ok || got != "Скриншот формы регистрации." {
 		t.Fatalf("description wrong: ok=%v %q", ok, got)
 	}
-	if !gotImage {
-		t.Fatal("image_url data URI must be present in the request")
+	if !gotImage || !gotModel {
+		t.Fatalf("request shape wrong: image=%v model=%v", gotImage, gotModel)
 	}
 }
 
-func TestNewMediaAIResolvers_ZeroConfigKeepsStubs(t *testing.T) {
-	tr, de := newMediaAIResolvers(nil)
+// TestNewMediaAIResolvers_PartialConfig pins the wiring semantics: whisper is
+// always real (in-cluster default), vision degrades to the stub without a
+// gateway config.
+func TestNewMediaAIResolvers_PartialConfig(t *testing.T) {
+	cfg := &MediaAIConfig{WhisperBaseURL: "http://127.0.0.1:1"}
+	tr, de := newMediaAIResolvers(cfg)
+
 	att := &TelegramAttachment{Kind: "voice", FilePath: "/nonexistent"}
 	if _, ok := tr(context.Background(), att); ok {
-		t.Fatal("nil config must keep stub transcribe")
+		t.Fatal("unreachable whisper still yields unavailable, but it must be the REAL transcriber function in the pair")
 	}
-	if _, ok := de(context.Background(), att); ok {
-		t.Fatal("nil config must keep stub describe")
+
+	img := &TelegramAttachment{Kind: "image", FilePath: "/nonexistent"}
+	if _, ok := de(context.Background(), img); ok {
+		t.Fatal("no gateway config -> vision stub -> unavailable")
 	}
 }
