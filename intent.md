@@ -100,18 +100,28 @@ the source spec, do not re-derive it from scratch.
 
 ## Immediate execution order for this session
 
-1. Canonical Message schema (extend conversation_messages, do not fork a
-   parallel table) + Go types — foundation, everything else builds on this.
-2. Inbound debounce — biggest UX lever per owner, isolated enough to ship and
-   test independently.
-3. Interrupt/cancel stale run — needs the debounce/run-tracking machinery
-   from step 2, natural next step.
-4. Reply-to/quotes — schema already carries what's needed once step 1 lands;
-   mostly plumbing tg-gateway -> runtime -> outbound reply_parameters.
-5. Link resolver — cheap, deterministic, independent of the rest; can be done
-   in parallel if time allows.
-6. Media (voice/image) inbound — schema + interface + stub resolver; real
-   STT/vision wiring deferred pending credentials.
+1. [x] DONE (commit 9b049d97, pushed). Canonical Message schema + Telegram
+   identity plumbing. Build/vet clean, 6/6 store tests on real PG, 18/18
+   tggateway tests, migration verified via \d.
+2. [x] DONE (commit cd65273b, pushed). Inbound debounce. Debouncer
+   (quiet 2.5s default / max 8s, per-chat keying, no-drop flush) +
+   Messages[] batch contract through gateway->runtime->DB (each message
+   its own row, one A2A call per batch) + temporal rendering in the A2A
+   history block ("user [sent 22:41 UTC, 3m ago]: ..."). 5 new debounce
+   tests + all pre-existing green; E2E smoke on the rig: 2-message batch
+   -> 2 rows with own channel ids and source_sent_at. Debounce is OFF by
+   default (env TG_GATEWAY_DEBOUNCE_QUIET_MS/_MAX_MS) -- production
+   tg-exchange-support keeps the legacy immediate path until the harness
+   is deployed alongside it.
+3. [ ] NEXT. Interrupt/cancel stale run: active-run tracking per chat
+   (run id + cancel func + generation counter), new message during an
+   active run supersedes it per interrupt_policy; the per-chat mutex from
+   Step 2 is the placeholder to replace.
+4. [ ] Reply-to/quotes outbound (sendMessage with reply_parameters,
+   agent output contract for which message it answers).
+5. [ ] Link resolver (URL entities -> Link metadata, deterministic).
+6. [ ] Media (voice/image) inbound: Attachment schema + stub resolver,
+   real STT/vision pending credentials.
 
 Each step: real code, real go build + go vet + go test against the
 go-build/dada-pg rig, commit to main once green. No claiming "done" without a
