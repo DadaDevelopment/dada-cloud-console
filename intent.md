@@ -120,9 +120,12 @@ the source spec, do not re-derive it from scratch.
    streak, poller loop decoupled from agent latency (async processBatch --
    was structurally blocking interrupts before). 8 new tests + full
    suites green.
-4. [ ] NEXT. Reply-to/quotes outbound (sendMessage with reply_parameters,
-   agent output contract for which message it answers).
-5. [ ] Link resolver (URL entities -> Link metadata, deterministic).
+4. [x] DONE (commit 35e4b2d4, pushed). Reply-to outbound. Platform picks
+   the anchor deterministically: the batch's LAST user message id ->
+   sendMessage reply_parameters (allow_sending_without_reply). Structured
+   agent-output contract deferred. Location-button marker keeps
+   precedence. 2 new tests, full suites green.
+5. [ ] NEXT. Link resolver (URL entities -> Link metadata, deterministic).
 6. [ ] Media (voice/image) inbound: Attachment schema + stub resolver,
    real STT/vision pending credentials.
 
