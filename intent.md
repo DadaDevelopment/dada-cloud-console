@@ -141,10 +141,32 @@ the source spec, do not re-derive it from scratch.
    44+ tests green, E2E smoke verified row.
 
 ALL P0 ITEMS FROM THE OWNER'S REVIEW ARE NOW IMPLEMENTED AND PUSHED.
+
+## Step 7 (2026-09-03): idle scheduler + real media AI — DONE, commit 89c3a780
+
+- IdleScheduler in agent-runtime: 1-min tick, fire-once claim via
+  conversations.metadata.idle_fired_at, ClearIdleFlag on every inbound
+  user message (re-arms per idle period). Invocation = system message
+  with [invocation: cause=conversation_idle, idle=Nm] envelope (NOT a
+  fake user turn); a2a.Send accepts trailing system as invocation turn.
+- Delivery: tg-gateway POST /outbound (sanitize/location-marker path
+  reused); agent-runtime delivers via TG_GATEWAY_OUTBOUND_URL, else
+  persist-only. Hooks CRUD API: POST/GET/DELETE /hooks (no psql needed).
+- Real media resolvers: TG_MEDIA_GATEWAY_URL/KEY + STT/VISION models.
+  STT = /v1/audio/transcriptions multipart; vision = chat/completions
+  with base64 data URI. Zero config keeps stubs. resolverHooks swap
+  point in runPollerDebounced.
+- Verified: live smoke on the rig — 2h-old conversation + idle hook,
+  2s tick claimed it, wrote the invocation system message, no
+  double-fire; full suites green. Open minor: DNS-fail WRN from the
+  a2a call inside invoke() was not visible in the docker log though
+  the same failure path was proven earlier from the HTTP handler;
+  behavior verified via claim/state, log plumbing unchecked.
+
 Next candidates (owner's P1): delayed typing policy, delayed read policy
-(Business-connection-gated), outbound voice/images/files, edit/delete/
-reactions, idle scheduler + proactive invocation (Phase 5 of the
-original plan, still open), quiet hours/timezone.
+(Business-connection-gated), outbound voice/images/files (TTS),
+edit/delete/reactions, quiet hours/timezone (mandatory before enabling
+proactive in PROD).
 
 Each step: real code, real go build + go vet + go test against the
 go-build/dada-pg rig, commit to main once green. No claiming "done" without a
