@@ -46,21 +46,21 @@ type Conversation struct {
 // Entities and Attachments are reserved for the link-resolver and media
 // steps; both default to an empty slice and are not populated yet.
 type Message struct {
-	ID                 uuid.UUID      `json:"id"`
-	ConversationID     uuid.UUID      `json:"conversation_id"`
-	Role               string         `json:"role"`
-	Content            string         `json:"content"`
-	Metadata           map[string]any `json:"metadata"`
-	ChannelMessageID   string         `json:"channel_message_id,omitempty"`
-	ThreadID           string         `json:"thread_id,omitempty"`
-	SourceSentAt       *time.Time     `json:"source_sent_at,omitempty"`
-	ReplyToMessageID   *uuid.UUID     `json:"reply_to_message_id,omitempty"`
-	Entities           []any          `json:"entities"`
-	Attachments        []any          `json:"attachments"`
-	EditedAt           *time.Time     `json:"edited_at,omitempty"`
-	DeletedAt          *time.Time     `json:"deleted_at,omitempty"`
-	ChannelMetadata    map[string]any `json:"channel_metadata"`
-	CreatedAt          time.Time      `json:"created_at"`
+	ID               uuid.UUID      `json:"id"`
+	ConversationID   uuid.UUID      `json:"conversation_id"`
+	Role             string         `json:"role"`
+	Content          string         `json:"content"`
+	Metadata         map[string]any `json:"metadata"`
+	ChannelMessageID string         `json:"channel_message_id,omitempty"`
+	ThreadID         string         `json:"thread_id,omitempty"`
+	SourceSentAt     *time.Time     `json:"source_sent_at,omitempty"`
+	ReplyToMessageID *uuid.UUID     `json:"reply_to_message_id,omitempty"`
+	Entities         []any          `json:"entities"`
+	Attachments      []any          `json:"attachments"`
+	EditedAt         *time.Time     `json:"edited_at,omitempty"`
+	DeletedAt        *time.Time     `json:"deleted_at,omitempty"`
+	ChannelMetadata  map[string]any `json:"channel_metadata"`
+	CreatedAt        time.Time      `json:"created_at"`
 }
 
 // SaveMessageInput is what SaveMessage accepts. Role and Content are
@@ -73,14 +73,14 @@ type Message struct {
 // failing the whole save, since a dangling reply reference must never lose
 // the message itself.
 type SaveMessageInput struct {
-	Role                     string
-	Content                  string
-	Metadata                 map[string]any
-	ChannelMessageID         string
-	ThreadID                 string
-	SourceSentAt             *time.Time
-	ReplyToChannelMessageID  string
-	ChannelMetadata          map[string]any
+	Role                    string
+	Content                 string
+	Metadata                map[string]any
+	ChannelMessageID        string
+	ThreadID                string
+	SourceSentAt            *time.Time
+	ReplyToChannelMessageID string
+	ChannelMetadata         map[string]any
 }
 
 type ConversationStore interface {

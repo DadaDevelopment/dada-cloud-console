@@ -26,19 +26,19 @@ import (
 // ReplyToMessageID is message.reply_to_message.message_id (0 if not a
 // reply), ThreadID is message.message_thread_id (0 outside a forum topic).
 type TelegramUpdate struct {
-	UpdateID          int64
-	ChatID            int64
-	UserID            int64
-	Text              string
-	Username          string
-	FirstName         string
-	HasLocation       bool
-	Latitude          float64
-	Longitude         float64
-	MessageID         int64
-	SentAt            time.Time
-	ReplyToMessageID  int64
-	ThreadID          int64
+	UpdateID         int64
+	ChatID           int64
+	UserID           int64
+	Text             string
+	Username         string
+	FirstName        string
+	HasLocation      bool
+	Latitude         float64
+	Longitude        float64
+	MessageID        int64
+	SentAt           time.Time
+	ReplyToMessageID int64
+	ThreadID         int64
 }
 
 // TelegramClient is the Bot API surface a poller needs. An interface so

@@ -32,16 +32,16 @@ func (s *Server) Handler() http.Handler {
 }
 
 type messageRequest struct {
-	AgentName               string                `json:"agent_name"`
-	Channel                 string                `json:"channel"`
-	ExternalID              string                `json:"external_id"`
-	Actor                   actorRequest          `json:"actor"`
-	Content                 string                `json:"content"`
-	ChannelMessageID        string                `json:"channel_message_id"`
-	ThreadID                string                `json:"thread_id"`
-	SourceSentAt            *time.Time            `json:"source_sent_at"`
-	ReplyToChannelMessageID string                `json:"reply_to_channel_message_id"`
-	Messages                []inboundMessageJSON  `json:"messages"`
+	AgentName               string               `json:"agent_name"`
+	Channel                 string               `json:"channel"`
+	ExternalID              string               `json:"external_id"`
+	Actor                   actorRequest         `json:"actor"`
+	Content                 string               `json:"content"`
+	ChannelMessageID        string               `json:"channel_message_id"`
+	ThreadID                string               `json:"thread_id"`
+	SourceSentAt            *time.Time           `json:"source_sent_at"`
+	ReplyToChannelMessageID string               `json:"reply_to_channel_message_id"`
+	Messages                []inboundMessageJSON `json:"messages"`
 }
 
 type actorRequest struct {

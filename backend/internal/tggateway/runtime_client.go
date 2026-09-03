@@ -19,15 +19,15 @@ type RuntimeClient interface {
 // canonical Message row; all four are optional passthroughs of
 // TelegramUpdate's corresponding fields.
 type RuntimeMessageRequest struct {
-	AgentName               string       `json:"agent_name"`
-	Channel                 string       `json:"channel"`
-	ExternalID              string       `json:"external_id"`
-	Actor                   RuntimeActor `json:"actor"`
-	Content                 string       `json:"content,omitempty"`
-	ChannelMessageID        string       `json:"channel_message_id,omitempty"`
-	ThreadID                string       `json:"thread_id,omitempty"`
-	SourceSentAt            *time.Time   `json:"source_sent_at,omitempty"`
-	ReplyToChannelMessageID string       `json:"reply_to_channel_message_id,omitempty"`
+	AgentName               string                  `json:"agent_name"`
+	Channel                 string                  `json:"channel"`
+	ExternalID              string                  `json:"external_id"`
+	Actor                   RuntimeActor            `json:"actor"`
+	Content                 string                  `json:"content,omitempty"`
+	ChannelMessageID        string                  `json:"channel_message_id,omitempty"`
+	ThreadID                string                  `json:"thread_id,omitempty"`
+	SourceSentAt            *time.Time              `json:"source_sent_at,omitempty"`
+	ReplyToChannelMessageID string                  `json:"reply_to_channel_message_id,omitempty"`
 	Messages                []RuntimeInboundMessage `json:"messages,omitempty"`
 }
 
