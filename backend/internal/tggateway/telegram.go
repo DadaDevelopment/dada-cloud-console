@@ -55,6 +55,7 @@ type TelegramClient interface {
 	GetMe(ctx context.Context, token string) (username string, err error)
 	GetUpdates(ctx context.Context, token string, offset int64, timeoutSec int) ([]TelegramUpdate, error)
 	SendMessage(ctx context.Context, token string, chatID int64, text string) error
+	SendMessageReply(ctx context.Context, token string, chatID int64, replyToMessageID int64, text string) error
 	SendMessageWithLocationButton(ctx context.Context, token string, chatID int64, text string) error
 	SendChatAction(ctx context.Context, token string, chatID int64, action string) error
 }
@@ -212,6 +213,23 @@ func (c *httpTelegramClient) SendMessage(ctx context.Context, token string, chat
 	body := map[string]any{
 		"chat_id": strconv.FormatInt(chatID, 10),
 		"text":    text,
+	}
+	return c.call(ctx, token, "sendMessage", body, nil)
+}
+
+// SendMessageReply posts the text as a native Telegram reply to
+// replyToMessageID (reply_parameters). allow_sending_without_reply lets a
+// reply to a since-deleted message degrade to a plain message instead of
+// failing the whole send -- the reply anchor is presentation, never worth
+// losing the answer over.
+func (c *httpTelegramClient) SendMessageReply(ctx context.Context, token string, chatID int64, replyToMessageID int64, text string) error {
+	body := map[string]any{
+		"chat_id": strconv.FormatInt(chatID, 10),
+		"text":    text,
+		"reply_parameters": map[string]any{
+			"message_id":                   replyToMessageID,
+			"allow_sending_without_reply": true,
+		},
 	}
 	return c.call(ctx, token, "sendMessage", body, nil)
 }

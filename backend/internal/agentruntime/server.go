@@ -59,7 +59,8 @@ type inboundMessageJSON struct {
 }
 
 type messageResponse struct {
-	Text string `json:"text"`
+	Text                    string `json:"text"`
+	ReplyToChannelMessageID string `json:"reply_to_channel_message_id,omitempty"`
 }
 
 func (s *Server) handleMessage(c *gin.Context) {
@@ -100,7 +101,7 @@ func (s *Server) handleMessage(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, messageResponse{Text: resp.Text})
+	c.JSON(http.StatusOK, messageResponse{Text: resp.Text, ReplyToChannelMessageID: resp.ReplyToChannelMessageID})
 }
 
 func (s *Server) handleHealth(c *gin.Context) {

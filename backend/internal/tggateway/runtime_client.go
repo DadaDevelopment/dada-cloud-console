@@ -50,7 +50,8 @@ type RuntimeActor struct {
 }
 
 type RuntimeMessageResponse struct {
-	Text string `json:"text"`
+	Text                    string `json:"text"`
+	ReplyToChannelMessageID string `json:"reply_to_channel_message_id,omitempty"`
 }
 
 type httpRuntimeClient struct {

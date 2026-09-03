@@ -66,6 +66,10 @@ func (fakeTelegram) GetUpdates(ctx context.Context, _ string, _ int64, _ int) ([
 
 func (fakeTelegram) SendMessage(context.Context, string, int64, string) error { return nil }
 
+func (fakeTelegram) SendMessageReply(context.Context, string, int64, int64, string) error {
+	return nil
+}
+
 func (fakeTelegram) SendMessageWithLocationButton(context.Context, string, int64, string) error {
 	return nil
 }
@@ -214,10 +218,11 @@ func TestBind_RejectsInvalidToken(t *testing.T) {
 // actually received.
 type onceTelegram struct {
 	fakeTelegram
-	mu      sync.Mutex
-	updates []TelegramUpdate
-	served  bool
-	sent    []string
+	mu        sync.Mutex
+	updates   []TelegramUpdate
+	served    bool
+	sent      []string
+	repliedTo []int64
 }
 
 func (o *onceTelegram) GetUpdates(ctx context.Context, token string, offset int64, timeoutSec int) ([]TelegramUpdate, error) {
@@ -236,6 +241,14 @@ func (o *onceTelegram) SendMessage(_ context.Context, _ string, _ int64, text st
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.sent = append(o.sent, text)
+	return nil
+}
+
+func (o *onceTelegram) SendMessageReply(_ context.Context, _ string, _ int64, replyTo int64, text string) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.sent = append(o.sent, text)
+	o.repliedTo = append(o.repliedTo, replyTo)
 	return nil
 }
 

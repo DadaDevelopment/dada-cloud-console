@@ -31,8 +31,13 @@ type MessageRequest struct {
 	Messages   []InboundMessage
 }
 
+// MessageResponse carries the agent's reply plus the reply anchor: the
+// channel id of the LAST user message of the batch, so the gateway can send
+// the answer as a native Telegram reply to the right message. Empty when
+// the batch carried no channel ids (manual/system messages).
 type MessageResponse struct {
-	Text string
+	Text                    string
+	ReplyToChannelMessageID string
 }
 
 type A2AClient interface {
@@ -116,7 +121,15 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 		return MessageResponse{}, fmt.Errorf("touch conversation: %w", err)
 	}
 
-	return MessageResponse{Text: reply}, nil
+	anchor := ""
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		if req.Messages[i].ChannelMessageID != "" {
+			anchor = req.Messages[i].ChannelMessageID
+			break
+		}
+	}
+
+	return MessageResponse{Text: reply, ReplyToChannelMessageID: anchor}, nil
 }
 
 func (r *Runtime) buildSystemPrompt(agentName string, conv Conversation) string {

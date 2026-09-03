@@ -215,10 +215,11 @@ func TestRunPollerDebounced_InterruptCancelsStaleRun(t *testing.T) {
 // sequentialTelegram serves one batch per GetUpdates call, then blocks.
 type sequentialTelegram struct {
 	fakeTelegram
-	mu      sync.Mutex
-	batches [][]TelegramUpdate
-	i       int
-	sent    []string
+	mu        sync.Mutex
+	batches   [][]TelegramUpdate
+	i         int
+	sent      []string
+	repliedTo []int64
 }
 
 func (s *sequentialTelegram) GetUpdates(ctx context.Context, token string, offset int64, timeoutSec int) ([]TelegramUpdate, error) {
@@ -238,6 +239,20 @@ func (s *sequentialTelegram) SendMessage(_ context.Context, _ string, _ int64, t
 	defer s.mu.Unlock()
 	s.sent = append(s.sent, text)
 	return nil
+}
+
+func (s *sequentialTelegram) SendMessageReply(_ context.Context, _ string, _ int64, replyTo int64, text string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sent = append(s.sent, text)
+	s.repliedTo = append(s.repliedTo, replyTo)
+	return nil
+}
+
+func (s *sequentialTelegram) sentCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.sent)
 }
 
 func (s *sequentialTelegram) SendMessageWithLocationButton(_ context.Context, _ string, _ int64, text string) error {
@@ -346,4 +361,58 @@ func (c *countingRuntime) ProcessMessage(_ context.Context, _ RuntimeMessageRequ
 		return RuntimeMessageResponse{}, errors.New("no more replies")
 	}
 	return RuntimeMessageResponse{Text: "reply"}, nil
+}
+
+// TestRunPollerDebounced_ReplyAnchorsToLastBatchMessage verifies Step 4: a
+// batch of three messages gets ONE reply, sent as a native Telegram reply
+// to the LAST message of the batch (the natural reading anchor).
+func TestRunPollerDebounced_ReplyAnchorsToLastBatchMessage(t *testing.T) {
+	tg := &sequentialTelegram{batches: [][]TelegramUpdate{
+		{
+			{UpdateID: 1, ChatID: 11, MessageID: 101, Text: "привет"},
+			{UpdateID: 2, ChatID: 11, MessageID: 102, Text: "слушай"},
+			{UpdateID: 3, ChatID: 11, MessageID: 103, Text: "вопрос по регистрации"},
+		},
+	}}
+	rt := &recordingRuntime{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go runPollerDebounced(ctx, tg, fakeA2A{}, rt, Binding{AgentName: "agent-r", BotToken: "tok-r"}, nil)
+
+	waitFor(t, func() bool { return rt.callCount() == 1 })
+	waitFor(t, func() bool { return tg.sentCount() == 1 })
+
+	tg.mu.Lock()
+	defer tg.mu.Unlock()
+	if len(tg.repliedTo) != 1 {
+		t.Fatalf("expected 1 SendMessageReply call, got %d (sent=%v)", len(tg.repliedTo), tg.sent)
+	}
+	if tg.repliedTo[0] != 103 {
+		t.Fatalf("reply must anchor to the LAST batch message id 103, got %d", tg.repliedTo[0])
+	}
+}
+
+// TestRunPollerDebounced_NoChannelIDMeansPlainSend covers the degradation:
+// messages without Telegram ids (manual/system) produce a plain SendMessage,
+// never a reply to 0.
+func TestRunPollerDebounced_NoChannelIDMeansPlainSend(t *testing.T) {
+	tg := &sequentialTelegram{batches: [][]TelegramUpdate{
+		{{UpdateID: 1, ChatID: 12, Text: "no ids here"}},
+	}}
+	rt := &recordingRuntime{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go runPollerDebounced(ctx, tg, fakeA2A{}, rt, Binding{AgentName: "agent-p", BotToken: "tok-p"}, nil)
+
+	waitFor(t, func() bool { return tg.sentCount() == 1 })
+
+	tg.mu.Lock()
+	defer tg.mu.Unlock()
+	if len(tg.repliedTo) != 0 {
+		t.Fatalf("no SendMessageReply expected without channel ids, got %v", tg.repliedTo)
+	}
 }

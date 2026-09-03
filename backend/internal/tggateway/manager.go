@@ -275,6 +275,18 @@ func splitLocationButtonMarker(reply string) (text string, wantsButton bool) {
 	return reply, false
 }
 
+// lastBatchChannelID returns the channel message id of the batch's LAST
+// message, or "" -- the A2A-fallback path's reply anchor (the runtime path
+// gets the same anchor from resp.ReplyToChannelMessageID).
+func lastBatchChannelID(batch []TelegramUpdate) string {
+	for i := len(batch) - 1; i >= 0; i-- {
+		if batch[i].MessageID > 0 {
+			return strconv.FormatInt(batch[i].MessageID, 10)
+		}
+	}
+	return ""
+}
+
 // runPoller is one binding's long-poll loop: getUpdates -> Runtime/A2A -> reply.
 // Exits when ctx is cancelled (Reconcile/Unbind stopping this binding).
 // Debouncing is disabled; see runPollerDebounced for the batching variant.
@@ -397,10 +409,19 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 
 		sendText, wantsButton := splitLocationButtonMarker(sanitizeModelReply(reply))
 		var sendErr error
-		if wantsButton {
+		switch {
+		case wantsButton:
 			sendErr = tg.SendMessageWithLocationButton(ctx, b.BotToken, chatID, sendText)
-		} else {
-			sendErr = tg.SendMessage(ctx, b.BotToken, chatID, sendText)
+		default:
+			anchor := resp.ReplyToChannelMessageID
+			if anchor == "" {
+				anchor = lastBatchChannelID(batch)
+			}
+			if replyTo, parseErr := strconv.ParseInt(anchor, 10, 64); parseErr == nil && replyTo > 0 {
+				sendErr = tg.SendMessageReply(ctx, b.BotToken, chatID, replyTo, sendText)
+			} else {
+				sendErr = tg.SendMessage(ctx, b.BotToken, chatID, sendText)
+			}
 		}
 		if sendErr != nil {
 			log.Warn().Err(sendErr).Str("agent", b.AgentName).Msg("tggateway: reply send failed")
