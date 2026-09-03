@@ -81,6 +81,11 @@ type SaveMessageInput struct {
 	SourceSentAt            *time.Time
 	ReplyToChannelMessageID string
 	ChannelMetadata         map[string]any
+
+	// Entities carries structured link metadata (Agent Harness v2, Step 5):
+	// each entry is a {url, title} object persisted into the row's entities
+	// JSONB column. Reserved Attachments equivalent: pass nil when none.
+	Entities []any
 }
 
 type ConversationStore interface {
@@ -267,15 +272,21 @@ func (s *pgStore) SaveMessage(ctx context.Context, conversationID uuid.UUID, inp
 		}
 	}
 
+	entities := input.Entities
+	if entities == nil {
+		entities = []any{}
+	}
+	entitiesJSON, _ := json.Marshal(entities)
+
 	row := s.pool.QueryRow(ctx, `
 		INSERT INTO conversation_messages (
 			conversation_id, role, content, metadata,
 			channel_message_id, thread_id, source_sent_at, reply_to_message_id,
-			channel_metadata
+			channel_metadata, entities
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING `+messageColumns, conversationID, input.Role, input.Content, metaJSON,
-		channelMessageID, threadID, input.SourceSentAt, replyToID, channelMetaJSON,
+		channelMessageID, threadID, input.SourceSentAt, replyToID, channelMetaJSON, entitiesJSON,
 	)
 	return scanMessage(row)
 }

@@ -9,7 +9,22 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
 )
+
+// TelegramEntity is one URL-bearing message entity (Agent Harness v2,
+// Step 5): only "url" (the text itself is a URL) and "text_link" (hyperlink
+// behind styled text, URL in the entity) are kept -- other entity types
+// (mention, hashtag, ...) carry no link semantics. Offset/Length are
+// Telegram's UTF-16 code-unit positions into the message text; URL is the
+// resolved link text for "url" entities and the entity's explicit url for
+// "text_link".
+type TelegramEntity struct {
+	Type   string `json:"type"`
+	Offset int    `json:"offset"`
+	Length int    `json:"length"`
+	URL    string `json:"url,omitempty"`
+}
 
 // TelegramUpdate is the fields this package cares about out of a Telegram
 // Update object: a text message in a chat, plus the sender identity the
@@ -25,6 +40,9 @@ import (
 // actually sent it, distinct from when this poller observed it),
 // ReplyToMessageID is message.reply_to_message.message_id (0 if not a
 // reply), ThreadID is message.message_thread_id (0 outside a forum topic).
+//
+// Entities (Agent Harness v2, Step 5) carries the message's URL entities;
+// empty when the message has none.
 type TelegramUpdate struct {
 	UpdateID         int64
 	ChatID           int64
@@ -39,6 +57,7 @@ type TelegramUpdate struct {
 	SentAt           time.Time
 	ReplyToMessageID int64
 	ThreadID         int64
+	Entities         []TelegramEntity
 }
 
 // TelegramClient is the Bot API surface a poller needs. An interface so
@@ -160,8 +179,66 @@ type tgUpdate struct {
 		ReplyToMessage *struct {
 			MessageID int64 `json:"message_id"`
 		} `json:"reply_to_message"`
-		MessageThreadID int64 `json:"message_thread_id"`
+		MessageThreadID int64            `json:"message_thread_id"`
+		Entities        []TelegramEntity `json:"entities"`
 	} `json:"message"`
+}
+
+// linkEntities keeps only URL-bearing entities and resolves their URL:
+// "url" entities carry the link as the slice of text itself, "text_link"
+// entities carry it in the entity's url field. Everything else (mention,
+// hashtag, bold, ...) is link-noise. Offsets arrive as UTF-16 code units
+// and are converted to Go byte offsets so entitySlice can cut the text.
+func linkEntities(text string, raw []TelegramEntity) []TelegramEntity {
+	if len(raw) == 0 {
+		return nil
+	}
+	var out []TelegramEntity
+	for _, e := range raw {
+		switch e.Type {
+		case "url":
+			start, end, ok := utf16RangeToByteRange(text, e.Offset, e.Length)
+			if !ok {
+				continue
+			}
+			e.URL = text[start:end]
+		case "text_link":
+			if e.URL == "" {
+				continue
+			}
+		default:
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// utf16RangeToByteRange converts Telegram's UTF-16 code-unit [offset,
+// offset+length) into Go string byte offsets. UTF-16 units map to runes:
+// 1 unit for BMP runes, 2 units for supplementary-plane runes (emoji). A
+// range that does not land exactly on rune boundaries or runs past the
+// text is rejected (ok=false) rather than approximated -- a garbled URL is
+// worse than no URL.
+func utf16RangeToByteRange(s string, offset, length int) (start, end int, ok bool) {
+	if offset < 0 || length <= 0 {
+		return 0, 0, false
+	}
+
+	unitToByte := make(map[int]int, len(s))
+	unit := 0
+	for i, r := range s {
+		unitToByte[unit] = i
+		unit += utf16.RuneLen(r)
+	}
+	unitToByte[unit] = len(s)
+
+	startByte, hasStart := unitToByte[offset]
+	endByte, hasEnd := unitToByte[offset+length]
+	if !hasStart || !hasEnd {
+		return 0, 0, false
+	}
+	return startByte, endByte, true
 }
 
 func (c *httpTelegramClient) GetUpdates(ctx context.Context, token string, offset int64, timeoutSec int) ([]TelegramUpdate, error) {
@@ -204,6 +281,7 @@ func (c *httpTelegramClient) GetUpdates(ctx context.Context, token string, offse
 			upd.Latitude = u.Message.Location.Latitude
 			upd.Longitude = u.Message.Location.Longitude
 		}
+		upd.Entities = linkEntities(upd.Text, u.Message.Entities)
 		out = append(out, upd)
 	}
 	return out, nil

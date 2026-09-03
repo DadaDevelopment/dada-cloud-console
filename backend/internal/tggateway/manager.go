@@ -312,6 +312,7 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 	failing := false
 	warned := false
 
+	links := NewLinkTitleFetcher()
 	runs := newInterruptState()
 	defer runs.forgetAll()
 
@@ -352,6 +353,7 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 				ThreadID:                threadIDOrEmpty(u.ThreadID),
 				SourceSentAt:            sentAtOrNil(u.SentAt),
 				ReplyToChannelMessageID: replyIDOrEmpty(u.ReplyToMessageID),
+				Links:                   enrichEntities(runCtx, links, u.Entities),
 			})
 		}
 

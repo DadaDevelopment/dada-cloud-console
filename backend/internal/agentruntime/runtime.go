@@ -7,15 +7,25 @@ import (
 	"time"
 )
 
+// RuntimeLinkMeta mirrors tggateway.RuntimeLinkMeta: one URL found in a
+// message plus its best-effort page title.
+type RuntimeLinkMeta struct {
+	URL   string `json:"url"`
+	Title string `json:"title,omitempty"`
+}
+
 // InboundMessage is one message of a (possibly debounced) batch: each keeps
 // its own channel identity and gets its own conversation_messages row, while
-// the whole batch shares one agent run and one reply.
+// the whole batch shares one agent run and one reply. Links carries the
+// gateway-extracted URL entities (Agent Harness v2, Step 5): persisted into
+// the row's entities column and rendered into the A2A context block.
 type InboundMessage struct {
 	Content                 string
 	ChannelMessageID        string
 	ThreadID                string
 	SourceSentAt            *time.Time
 	ReplyToChannelMessageID string
+	Links                   []RuntimeLinkMeta
 }
 
 // MessageRequest is one inbound TURN from a channel gateway: one or more
@@ -91,6 +101,7 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 			ThreadID:                m.ThreadID,
 			SourceSentAt:            m.SourceSentAt,
 			ReplyToChannelMessageID: m.ReplyToChannelMessageID,
+			Entities:                linksToEntities(m.Links),
 		}); err != nil {
 			return MessageResponse{}, fmt.Errorf("save user message: %w", err)
 		}
@@ -130,6 +141,26 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 	}
 
 	return MessageResponse{Text: reply, ReplyToChannelMessageID: anchor}, nil
+}
+
+// linksToEntities converts gateway link metadata into the generic entity
+// objects the entities JSONB column stores: {"url": ..., "title": ...}.
+func linksToEntities(links []RuntimeLinkMeta) []any {
+	if len(links) == 0 {
+		return nil
+	}
+	out := make([]any, 0, len(links))
+	for _, l := range links {
+		if l.URL == "" {
+			continue
+		}
+		e := map[string]any{"url": l.URL}
+		if l.Title != "" {
+			e["title"] = l.Title
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 func (r *Runtime) buildSystemPrompt(agentName string, conv Conversation) string {

@@ -135,12 +135,35 @@ func buildContextualMessage(messages []Message) string {
 // platform generated them) and render plain. This is the temporal-awareness
 // slice of the harness: idle gaps and batched rapid-fire messages become
 // visible to the model without any prompt work.
+//
+// URL entities (Agent Harness v2, Step 5) render as [link] lines under the
+// message: the platform already extracted the URL (and its title when the
+// site answered in time), so the model sees the link's subject at a glance
+// and decides itself whether to open it.
 func renderMessage(m Message, now time.Time) string {
+	var sb strings.Builder
 	if m.Role != "user" || m.SourceSentAt == nil {
-		return fmt.Sprintf("%s: %s\n", m.Role, m.Content)
+		sb.WriteString(fmt.Sprintf("%s: %s\n", m.Role, m.Content))
+	} else {
+		sb.WriteString(fmt.Sprintf("user [sent %s, %s ago]: %s\n",
+			m.SourceSentAt.UTC().Format("15:04 MST"), humanizeDelay(now.Sub(*m.SourceSentAt)), m.Content))
 	}
-	return fmt.Sprintf("user [sent %s, %s ago]: %s\n",
-		m.SourceSentAt.UTC().Format("15:04 MST"), humanizeDelay(now.Sub(*m.SourceSentAt)), m.Content)
+	for _, e := range m.Entities {
+		em, ok := e.(map[string]any)
+		if !ok {
+			continue
+		}
+		url, _ := em["url"].(string)
+		if url == "" {
+			continue
+		}
+		if title, _ := em["title"].(string); title != "" {
+			sb.WriteString(fmt.Sprintf("[link] %s (%s)\n", url, title))
+		} else {
+			sb.WriteString(fmt.Sprintf("[link] %s\n", url))
+		}
+	}
+	return sb.String()
 }
 
 // humanizeDelay rounds an age to one coarse unit -- the model needs "3m ago"

@@ -34,13 +34,24 @@ type RuntimeMessageRequest struct {
 // RuntimeInboundMessage is one message of a debounced batch (Agent Harness
 // v2, Step 2): the gateway aggregates rapid-fire messages into one request,
 // but each keeps its own channel identity so the runtime persists every one
-// as a separate Message row.
+// as a separate Message row. Links (Step 5) carries the message's URL
+// entities with their resolved titles -- extraction/enrichment is the
+// gateway's deterministic job, the runtime just persists and renders them.
 type RuntimeInboundMessage struct {
-	Content                 string     `json:"content"`
-	ChannelMessageID        string     `json:"channel_message_id,omitempty"`
-	ThreadID                string     `json:"thread_id,omitempty"`
-	SourceSentAt            *time.Time `json:"source_sent_at,omitempty"`
-	ReplyToChannelMessageID string     `json:"reply_to_channel_message_id,omitempty"`
+	Content                 string            `json:"content"`
+	ChannelMessageID        string            `json:"channel_message_id,omitempty"`
+	ThreadID                string            `json:"thread_id,omitempty"`
+	SourceSentAt            *time.Time        `json:"source_sent_at,omitempty"`
+	ReplyToChannelMessageID string            `json:"reply_to_channel_message_id,omitempty"`
+	Links                   []RuntimeLinkMeta `json:"links,omitempty"`
+}
+
+// RuntimeLinkMeta is one URL found in a message plus its best-effort page
+// title (empty when the fetch failed or the site was slow -- the URL alone
+// still flows).
+type RuntimeLinkMeta struct {
+	URL   string `json:"url"`
+	Title string `json:"title,omitempty"`
 }
 
 type RuntimeActor struct {
