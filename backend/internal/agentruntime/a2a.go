@@ -57,8 +57,8 @@ func (c *httpA2AClient) Send(ctx context.Context, agentName string, messages []M
 	}
 
 	lastMsg := messages[len(messages)-1]
-	if lastMsg.Role != "user" {
-		return "", fmt.Errorf("last message must be from user")
+	if lastMsg.Role != "user" && lastMsg.Role != "system" {
+		return "", fmt.Errorf("last message must be user or system, got %s", lastMsg.Role)
 	}
 
 	reqBody := a2aRequest{JSONRPC: "2.0", ID: "agentruntime", Method: "message/send"}
@@ -67,7 +67,6 @@ func (c *httpA2AClient) Send(ctx context.Context, agentName string, messages []M
 		MessageID: uuid.NewString(),
 		Parts:     []a2aPart{{Kind: "text", Text: buildContextualMessage(messages)}},
 	}
-
 	payload, err := json.Marshal(reqBody)
 	if err != nil {
 		return "", err

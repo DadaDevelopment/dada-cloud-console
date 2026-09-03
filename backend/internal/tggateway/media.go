@@ -85,11 +85,10 @@ func (d *telegramMediaDownloader) Download(ctx context.Context, token string, at
 	return local, nil
 }
 
-// stubResolvers are the honest placeholder for the STT/vision backends:
-// credentials are not confirmed in this environment (intent.md risk #4), so
-// availability flags stay false and the A2A context says so explicitly
-// instead of inventing content. The pipeline shape (download -> resolve ->
-// attach) is final; only the model call inside the resolver is missing.
+// stubResolvers are the zero-config fallback: availability flags stay false
+// and the A2A context says so explicitly instead of inventing content. When
+// TG_MEDIA_GATEWAY_* env is set, runPollerDebounced swaps these for the real
+// AI resolvers (media_ai.go) -- the swap point is resolverHooks below.
 func stubTranscribe(ctx context.Context, att *TelegramAttachment) (string, bool) {
 	return "", false
 }
@@ -97,6 +96,14 @@ func stubTranscribe(ctx context.Context, att *TelegramAttachment) (string, bool)
 func stubDescribe(ctx context.Context, att *TelegramAttachment) (string, bool) {
 	return "", false
 }
+
+// resolverHooks are the active STT/vision functions. Package-level because
+// the pipeline is per-poller but the config is per-process; tests override
+// them and restore with defer.
+var (
+	transcribeHook transcribeFn = stubTranscribe
+	describeHook   describeFn   = stubDescribe
+)
 
 // resolveAttachment runs the pipeline for one message's attachment:
 // download to the cache, then STT for voice/video_note, vision for images.
@@ -112,8 +119,8 @@ func resolveAttachment(ctx context.Context, downloader MediaDownloader, token st
 
 	switch att.Kind {
 	case "voice", "video_note":
-		att.Transcript, att.TranscriptAvailable = stubTranscribe(ctx, att)
+		att.Transcript, att.TranscriptAvailable = transcribeHook(ctx, att)
 	case "image":
-		att.Description, att.DescriptionAvailable = stubDescribe(ctx, att)
+		att.Description, att.DescriptionAvailable = describeHook(ctx, att)
 	}
 }

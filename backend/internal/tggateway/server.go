@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +34,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /bindings", s.handleBind)
 	mux.HandleFunc("DELETE /bindings/{agentName}", s.handleUnbind)
 	mux.HandleFunc("GET /bindings/{agentName}", s.handleGet)
+	mux.HandleFunc("POST /outbound", s.handleOutbound)
 	return recoverAndLog(mux)
 }
 
@@ -108,6 +110,69 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"bound": true, "bot_username": b.BotUsername})
+}
+
+// outboundRequest is the internal delivery payload agent-runtime posts to
+// tg-gateway when a proactive (idle follow-up) reply must reach the chat.
+type outboundRequest struct {
+	AgentName  string `json:"agent_name"`
+	ChatID     string `json:"chat_id"`
+	Text       string `json:"text"`
+	ReplyToID  string `json:"reply_to_channel_message_id,omitempty"`
+}
+
+// handleOutbound delivers one proactive message. No auth, ClusterIP-only,
+// same trust posture as the bindings API. Reply anchor optional: a proactive
+// follow-up usually starts a fresh visual thread, so the reply anchor is
+// used only when provided.
+func (s *Server) handleOutbound(w http.ResponseWriter, r *http.Request) {
+	var req outboundRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json: " + err.Error()})
+		return
+	}
+	if req.AgentName == "" || req.ChatID == "" || req.Text == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_name, chat_id and text are required"})
+		return
+	}
+
+	binding, err := s.mgr.Get(r.Context(), req.AgentName)
+	if errors.Is(err, ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no binding for that agent"})
+		return
+	}
+	if err != nil {
+		log.Error().Err(err).Str("agent", req.AgentName).Msg("tggateway: outbound lookup failed")
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+		return
+	}
+
+	chatID, err := strconv.ParseInt(req.ChatID, 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "chat_id must be an integer"})
+		return
+	}
+
+	sendText, wantsButton := splitLocationButtonMarker(sanitizeModelReply(req.Text))
+	var sendErr error
+	switch {
+	case wantsButton:
+		sendErr = s.mgr.tg.SendMessageWithLocationButton(r.Context(), binding.BotToken, chatID, sendText)
+	case req.ReplyToID != "":
+		if replyTo, perr := strconv.ParseInt(req.ReplyToID, 10, 64); perr == nil && replyTo > 0 {
+			sendErr = s.mgr.tg.SendMessageReply(r.Context(), binding.BotToken, chatID, replyTo, sendText)
+		} else {
+			sendErr = s.mgr.tg.SendMessage(r.Context(), binding.BotToken, chatID, sendText)
+		}
+	default:
+		sendErr = s.mgr.tg.SendMessage(r.Context(), binding.BotToken, chatID, sendText)
+	}
+	if sendErr != nil {
+		log.Warn().Err(sendErr).Str("agent", req.AgentName).Msg("tggateway: outbound send failed")
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "send failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "sent"})
 }
 
 type statusRecorder struct {

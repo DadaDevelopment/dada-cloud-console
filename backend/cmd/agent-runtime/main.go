@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -50,6 +51,14 @@ func main() {
 	}
 
 	srv := agentruntime.NewServer(pool, gitopsBasePath)
+
+	idleTick := 60
+	if v := os.Getenv("AGENT_RUNTIME_IDLE_TICK_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			idleTick = n
+		}
+	}
+	srv.StartIdleScheduler(context.Background(), idleTick, os.Getenv("TG_GATEWAY_OUTBOUND_URL"))
 
 	port := os.Getenv("AGENT_RUNTIME_PORT")
 	if port == "" {

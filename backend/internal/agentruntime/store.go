@@ -103,6 +103,11 @@ type ConversationStore interface {
 	SaveMessage(ctx context.Context, conversationID uuid.UUID, input SaveMessageInput) (Message, error)
 	GetRecentMessages(ctx context.Context, conversationID uuid.UUID, limit int) ([]Message, error)
 	FindMessageByChannelID(ctx context.Context, conversationID uuid.UUID, channelMessageID string) (Message, error)
+
+	// ClearIdleFlag re-arms idle hooks for the conversation: it removes the
+	// idle_fired_at metadata key so a conversation.active->idle transition
+	// can fire again after real user activity.
+	ClearIdleFlag(ctx context.Context, conversationID uuid.UUID) error
 }
 
 type pgStore struct {
@@ -345,4 +350,17 @@ func (s *pgStore) FindMessageByChannelID(ctx context.Context, conversationID uui
 		return Message{}, ErrMessageNotFound
 	}
 	return msg, err
+}
+
+// ClearIdleFlag removes the idle_fired_at metadata key (Agent Harness v2,
+// Step 7): every real inbound user message re-arms the conversation's idle
+// hooks, so a 30-minute follow-up fires once per idle period, not once per
+// conversation lifetime.
+func (s *pgStore) ClearIdleFlag(ctx context.Context, conversationID uuid.UUID) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE conversations
+		SET metadata = metadata - 'idle_fired_at'
+		WHERE id = $1
+	`, conversationID)
+	return err
 }
