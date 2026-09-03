@@ -152,10 +152,15 @@ ALL P0 ITEMS FROM THE OWNER'S REVIEW ARE NOW IMPLEMENTED AND PUSHED.
 - Delivery: tg-gateway POST /outbound (sanitize/location-marker path
   reused); agent-runtime delivers via TG_GATEWAY_OUTBOUND_URL, else
   persist-only. Hooks CRUD API: POST/GET/DELETE /hooks (no psql needed).
-- Real media resolvers: TG_MEDIA_GATEWAY_URL/KEY + STT/VISION models.
-  STT = /v1/audio/transcriptions multipart; vision = chat/completions
-  with base64 data URI. Zero config keeps stubs. resolverHooks swap
-  point in runPollerDebounced.
+- Real media resolvers: wired to REAL backends (owner call: no stubs).
+  STT = in-cluster whisper-predictor (ml-prod Knative,
+  openai-whisper-asr-webservice, POST /asr, language=ru, 180s cap for
+  the Knative cold start; default in-cluster URL, TG_MEDIA_WHISPER_URL
+  to override). Images = AI gateway 'vision' alias (nvidia_nim) via
+  /v1/chat/completions data-URI; needs TG_MEDIA_GATEWAY_URL/KEY +
+  TG_MEDIA_VISION_MODEL=vision, degrades to stub without it. Both
+  probed live from the tg-gateway network. ocr-predictor
+  (tesseract-server) identified as future document-photo fallback.
 - Verified: live smoke on the rig — 2h-old conversation + idle hook,
   2s tick claimed it, wrote the invocation system message, no
   double-fire; full suites green. Open minor: DNS-fail WRN from the
