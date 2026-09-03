@@ -7,22 +7,28 @@ import (
 	"time"
 )
 
-// MessageRequest is one inbound turn from a channel gateway.
-// ChannelMessageID/ThreadID/SourceSentAt/ReplyToChannelMessageID carry the
-// provider's own message identity (Agent Harness v2, Step 1) so the saved
-// Message can be found again for reply-to resolution, interrupt bookkeeping,
-// and humanized-delay policies later. All four are optional: a caller with
-// no channel identity (tests, internal system messages) leaves them zero.
-type MessageRequest struct {
-	AgentName               string
-	Channel                 string
-	ExternalID              string
-	Actor                   Actor
+// InboundMessage is one message of a (possibly debounced) batch: each keeps
+// its own channel identity and gets its own conversation_messages row, while
+// the whole batch shares one agent run and one reply.
+type InboundMessage struct {
 	Content                 string
 	ChannelMessageID        string
 	ThreadID                string
 	SourceSentAt            *time.Time
 	ReplyToChannelMessageID string
+}
+
+// MessageRequest is one inbound TURN from a channel gateway: one or more
+// messages (a debounced batch), one agent invocation, one reply. Every
+// message's channel identity is preserved on its own row; the fields the
+// single-message shortcut used to carry (Content etc) are folded into
+// Messages by the server layer.
+type MessageRequest struct {
+	AgentName  string
+	Channel    string
+	ExternalID string
+	Actor      Actor
+	Messages   []InboundMessage
 }
 
 type MessageResponse struct {
@@ -54,6 +60,10 @@ func NewRuntime(store ConversationStore, hooks HookExecutor, a2a A2AClient, doma
 }
 
 func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (MessageResponse, error) {
+	if len(req.Messages) == 0 {
+		return MessageResponse{}, fmt.Errorf("process message: no messages in request")
+	}
+
 	conv, created, err := r.store.GetOrCreateConversation(ctx, req.AgentName, req.Channel, req.ExternalID, req.Actor)
 	if err != nil {
 		return MessageResponse{}, fmt.Errorf("get or create conversation: %w", err)
@@ -65,19 +75,20 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 		}
 	}
 
-	if err := r.hooks.Execute(ctx, "message.received", conv, req.Content); err != nil {
-		return MessageResponse{}, fmt.Errorf("message.received hook: %w", err)
-	}
-
-	if _, err := r.store.SaveMessage(ctx, conv.ID, SaveMessageInput{
-		Role:                    "user",
-		Content:                 req.Content,
-		ChannelMessageID:        req.ChannelMessageID,
-		ThreadID:                req.ThreadID,
-		SourceSentAt:            req.SourceSentAt,
-		ReplyToChannelMessageID: req.ReplyToChannelMessageID,
-	}); err != nil {
-		return MessageResponse{}, fmt.Errorf("save user message: %w", err)
+	for _, m := range req.Messages {
+		if err := r.hooks.Execute(ctx, "message.received", conv, m.Content); err != nil {
+			return MessageResponse{}, fmt.Errorf("message.received hook: %w", err)
+		}
+		if _, err := r.store.SaveMessage(ctx, conv.ID, SaveMessageInput{
+			Role:                    "user",
+			Content:                 m.Content,
+			ChannelMessageID:        m.ChannelMessageID,
+			ThreadID:                m.ThreadID,
+			SourceSentAt:            m.SourceSentAt,
+			ReplyToChannelMessageID: m.ReplyToChannelMessageID,
+		}); err != nil {
+			return MessageResponse{}, fmt.Errorf("save user message: %w", err)
+		}
 	}
 
 	history, err := r.store.GetRecentMessages(ctx, conv.ID, 20)

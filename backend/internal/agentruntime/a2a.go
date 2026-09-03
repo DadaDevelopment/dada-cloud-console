@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -106,20 +107,56 @@ func (c *httpA2AClient) Send(ctx context.Context, agentName string, messages []M
 
 func buildContextualMessage(messages []Message) string {
 	var buf bytes.Buffer
+	now := time.Now().UTC()
 
 	if len(messages) > 1 {
 		buf.WriteString("## Previous conversation:\n")
 		for i := 0; i < len(messages)-1; i++ {
-			msg := messages[i]
-			buf.WriteString(fmt.Sprintf("%s: %s\n", msg.Role, msg.Content))
+			buf.WriteString(renderMessage(messages[i], now))
 		}
 		buf.WriteString("\n")
 	}
 
 	buf.WriteString("## Current message:\n")
-	buf.WriteString(messages[len(messages)-1].Content)
+	last := messages[len(messages)-1]
+	buf.WriteString(strings.TrimPrefix(renderMessage(last, now), last.Role+": "))
+	// renderMessage prefixes "role: " only for history lines; the current
+	// message block already labels the section, so strip the prefix if the
+	// helper added it.
+	buf.WriteString("\n")
 
 	return buf.String()
+}
+
+// renderMessage renders one history line. User messages carry their
+// source-sent time in a semantic form ("[sent 22:41 UTC, 3m ago]") rather
+// than a bare timestamp, so the model can reason about recency the way a
+// human reads a chat backlog. Assistant messages have no source time (the
+// platform generated them) and render plain. This is the temporal-awareness
+// slice of the harness: idle gaps and batched rapid-fire messages become
+// visible to the model without any prompt work.
+func renderMessage(m Message, now time.Time) string {
+	if m.Role != "user" || m.SourceSentAt == nil {
+		return fmt.Sprintf("%s: %s\n", m.Role, m.Content)
+	}
+	return fmt.Sprintf("user [sent %s, %s ago]: %s\n",
+		m.SourceSentAt.UTC().Format("15:04 MST"), humanizeDelay(now.Sub(*m.SourceSentAt)), m.Content)
+}
+
+// humanizeDelay rounds an age to one coarse unit -- the model needs "3m ago"
+// granularity, not "3m12.4s".
+func humanizeDelay(d time.Duration) string {
+	switch {
+	case d < 0:
+		d = 0
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	default:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("%ds", int(d.Seconds()))
 }
 
 func extractText(raw json.RawMessage) string {

@@ -52,10 +52,11 @@ type runningPoller struct {
 // goroutine lifecycle, which is what manager_test.go exercises against fake
 // Store/TelegramClient/A2AClient implementations.
 type Manager struct {
-	store   Store
-	tg      TelegramClient
-	a2a     A2AClient
-	runtime RuntimeClient
+	store    Store
+	tg       TelegramClient
+	a2a      A2AClient
+	runtime  RuntimeClient
+	debounce *DebounceConfig
 
 	mu      sync.Mutex
 	pollers map[string]*runningPoller
@@ -64,9 +65,12 @@ type Manager struct {
 // NewManager builds a Manager. Run must be called once to start the
 // reconcile loop; Bind/Unbind/Get work standalone (each also nudges the
 // poller set directly, so a caller does not have to wait for the next tick).
-// Pass nil for runtime to use direct A2A (backward compatibility).
-func NewManager(store Store, tg TelegramClient, a2a A2AClient) *Manager {
-	return &Manager{store: store, tg: tg, a2a: a2a, runtime: NewNoopRuntimeClient(), pollers: map[string]*runningPoller{}}
+// Pass nil for runtime to use direct A2A (backward compatibility). A
+// non-nil debounce turns on inbound batching (Agent Harness v2, Step 2):
+// rapid-fire messages of one chat inside the quiet window become ONE agent
+// turn with one reply; nil keeps the legacy immediate-dispatch behavior.
+func NewManager(store Store, tg TelegramClient, a2a A2AClient, debounce *DebounceConfig) *Manager {
+	return &Manager{store: store, tg: tg, a2a: a2a, runtime: NewNoopRuntimeClient(), debounce: debounce, pollers: map[string]*runningPoller{}}
 }
 
 // SetRuntimeClient configures Manager to route messages through agent-runtime
@@ -133,7 +137,7 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 func (m *Manager) startLocked(b Binding) {
 	pctx, cancel := context.WithCancel(context.Background())
 	m.pollers[b.AgentName] = &runningPoller{cancel: cancel, token: b.BotToken}
-	go runPoller(pctx, m.tg, m.a2a, m.runtime, b)
+	go runPollerDebounced(pctx, m.tg, m.a2a, m.runtime, b, m.debounce)
 }
 
 // Bind validates token via getMe, upserts the row, and starts (or restarts,
@@ -273,10 +277,136 @@ func splitLocationButtonMarker(reply string) (text string, wantsButton bool) {
 
 // runPoller is one binding's long-poll loop: getUpdates -> Runtime/A2A -> reply.
 // Exits when ctx is cancelled (Reconcile/Unbind stopping this binding).
+// Debouncing is disabled; see runPollerDebounced for the batching variant.
 func runPoller(ctx context.Context, tg TelegramClient, a2a A2AClient, runtime RuntimeClient, b Binding) {
+	runPollerDebounced(ctx, tg, a2a, runtime, b, nil)
+}
+
+// runPollerDebounced is the poller core. One getUpdates poll is one batch of
+// work: every update in the poll goes to the agent as ONE runtime call with
+// the whole batch in Messages (one reply back). When cfg is non-nil a
+// Debouncer additionally merges ACROSS polls: rapid-fire messages landing in
+// consecutive polls inside the quiet window join the same batch, capped by
+// the max window so a continuous stream still gets served. Per-chat
+// serialization (never two concurrent agent calls for one chat / A2A
+// contextId) is enforced by chatLock; different chats dispatch concurrently.
+func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, runtime RuntimeClient, b Binding, cfg *DebounceConfig) {
 	var offset int64
-	var failing bool
-	var warned bool
+
+	var stateMu sync.Mutex
+	failing := false
+	warned := false
+
+	var perChatMu sync.Mutex
+	perChat := map[int64]*sync.Mutex{}
+	chatLock := func(chatID int64) *sync.Mutex {
+		perChatMu.Lock()
+		defer perChatMu.Unlock()
+		m, ok := perChat[chatID]
+		if !ok {
+			m = &sync.Mutex{}
+			perChat[chatID] = m
+		}
+		return m
+	}
+
+	processBatch := func(batch []TelegramUpdate) {
+		if len(batch) == 0 {
+			return
+		}
+		chatID := batch[0].ChatID
+
+		lock := chatLock(chatID)
+		lock.Lock()
+		defer lock.Unlock()
+
+		stopTyping := startTyping(ctx, tg, b.BotToken, chatID)
+		defer stopTyping()
+
+		req := RuntimeMessageRequest{
+			AgentName:  b.AgentName,
+			Channel:    "telegram",
+			ExternalID: fmt.Sprintf("%d", chatID),
+			Actor: RuntimeActor{
+				ExternalID: fmt.Sprintf("%d", batch[0].UserID),
+				Username:   batch[0].Username,
+				Metadata:   map[string]any{"first_name": batch[0].FirstName},
+			},
+		}
+		for _, u := range batch {
+			content := u.Text
+			if u.HasLocation {
+				content = fmt.Sprintf("[location_shared: lat=%f, lon=%f]\n%s", u.Latitude, u.Longitude, u.Text)
+			}
+			req.Messages = append(req.Messages, RuntimeInboundMessage{
+				Content:                 content,
+				ChannelMessageID:        strconv.FormatInt(u.MessageID, 10),
+				ThreadID:                threadIDOrEmpty(u.ThreadID),
+				SourceSentAt:            sentAtOrNil(u.SentAt),
+				ReplyToChannelMessageID: replyIDOrEmpty(u.ReplyToMessageID),
+			})
+		}
+
+		var reply string
+		var procErr error
+		resp, err := runtime.ProcessMessage(ctx, req)
+		if err == nil {
+			reply = resp.Text
+		} else {
+			log.Debug().Err(err).Msg("tggateway: runtime unavailable, falling back to direct A2A")
+			var texts []string
+			for _, u := range batch {
+				r, sendErr := a2a.SendWithContext(ctx, b.AgentName, a2aContextFor(chatID), withTelegramIdentity(u))
+				if sendErr != nil {
+					procErr = sendErr
+					break
+				}
+				texts = append(texts, r)
+			}
+			if procErr == nil {
+				reply = strings.Join(texts, "\n")
+			}
+		}
+
+		if procErr != nil {
+			stateMu.Lock()
+			if !failing {
+				failing = true
+				warned = false
+			}
+			log.Warn().Err(procErr).Str("agent", b.AgentName).Msg("tggateway: message processing failed")
+			if !warned {
+				warned = true
+				if sendErr := tg.SendMessage(ctx, b.BotToken, chatID, a2aFailureFallback); sendErr != nil {
+					log.Warn().Err(sendErr).Str("agent", b.AgentName).Msg("tggateway: warning send failed")
+				}
+			}
+			stateMu.Unlock()
+			return
+		}
+		stateMu.Lock()
+		failing = false
+		stateMu.Unlock()
+
+		sendText, wantsButton := splitLocationButtonMarker(sanitizeModelReply(reply))
+		var sendErr error
+		if wantsButton {
+			sendErr = tg.SendMessageWithLocationButton(ctx, b.BotToken, chatID, sendText)
+		} else {
+			sendErr = tg.SendMessage(ctx, b.BotToken, chatID, sendText)
+		}
+		if sendErr != nil {
+			log.Warn().Err(sendErr).Str("agent", b.AgentName).Msg("tggateway: reply send failed")
+		}
+	}
+
+	var deb *Debouncer
+	if cfg != nil {
+		deb = NewDebouncer(*cfg, func(key string, batch []TelegramUpdate) {
+			processBatch(batch)
+		})
+		defer deb.Close()
+	}
 
 	backoff := time.Second
 	const maxBackoff = 30 * time.Second
@@ -298,70 +428,24 @@ func runPoller(ctx context.Context, tg TelegramClient, a2a A2AClient, runtime Ru
 		}
 		backoff = time.Second
 
+		if len(updates) == 0 {
+			continue
+		}
+
+		batch := make([]TelegramUpdate, 0, len(updates))
 		for _, u := range updates {
 			if u.UpdateID >= offset {
 				offset = u.UpdateID + 1
 			}
-			stopTyping := startTyping(ctx, tg, b.BotToken, u.ChatID)
+			batch = append(batch, u)
+		}
 
-			var reply string
-			var err error
-
-			runtimeContent := u.Text
-			if u.HasLocation {
-				runtimeContent = fmt.Sprintf("[location_shared: lat=%f, lon=%f]\n%s", u.Latitude, u.Longitude, u.Text)
+		if deb != nil {
+			for _, u := range batch {
+				deb.Enqueue(fmt.Sprintf("agent=%s chat=%d", b.AgentName, u.ChatID), u)
 			}
-			runtimeResp, runtimeErr := runtime.ProcessMessage(ctx, RuntimeMessageRequest{
-				AgentName:  b.AgentName,
-				Channel:    "telegram",
-				ExternalID: fmt.Sprintf("%d", u.ChatID),
-				Actor: RuntimeActor{
-					ExternalID: fmt.Sprintf("%d", u.UserID),
-					Username:   u.Username,
-					Metadata:   map[string]any{"first_name": u.FirstName},
-				},
-				Content:                 runtimeContent,
-				ChannelMessageID:        strconv.FormatInt(u.MessageID, 10),
-				ThreadID:                threadIDOrEmpty(u.ThreadID),
-				SourceSentAt:            sentAtOrNil(u.SentAt),
-				ReplyToChannelMessageID: replyIDOrEmpty(u.ReplyToMessageID),
-			})
-
-			if runtimeErr == nil {
-				reply = runtimeResp.Text
-			} else {
-				log.Debug().Err(runtimeErr).Msg("tggateway: runtime unavailable, falling back to direct A2A")
-				reply, err = a2a.SendWithContext(ctx, b.AgentName, a2aContextFor(u.ChatID), withTelegramIdentity(u))
-				runtimeErr = err
-			}
-
-			stopTyping()
-
-			if runtimeErr != nil {
-				if !failing {
-					failing = true
-					warned = false
-				}
-				log.Warn().Err(runtimeErr).Str("agent", b.AgentName).Msg("tggateway: message processing failed")
-				if !warned {
-					warned = true
-					if sendErr := tg.SendMessage(ctx, b.BotToken, u.ChatID, a2aFailureFallback); sendErr != nil {
-						log.Warn().Err(sendErr).Str("agent", b.AgentName).Msg("tggateway: warning send failed")
-					}
-				}
-				continue
-			}
-			failing = false
-			sendText, wantsButton := splitLocationButtonMarker(sanitizeModelReply(reply))
-			var sendErr error
-			if wantsButton {
-				sendErr = tg.SendMessageWithLocationButton(ctx, b.BotToken, u.ChatID, sendText)
-			} else {
-				sendErr = tg.SendMessage(ctx, b.BotToken, u.ChatID, sendText)
-			}
-			if sendErr != nil {
-				log.Warn().Err(sendErr).Str("agent", b.AgentName).Msg("tggateway: reply send failed")
-			}
+		} else {
+			processBatch(batch)
 		}
 	}
 }

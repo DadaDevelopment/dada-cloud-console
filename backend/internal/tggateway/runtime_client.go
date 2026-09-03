@@ -23,11 +23,24 @@ type RuntimeMessageRequest struct {
 	Channel                 string       `json:"channel"`
 	ExternalID              string       `json:"external_id"`
 	Actor                   RuntimeActor `json:"actor"`
-	Content                 string       `json:"content"`
+	Content                 string       `json:"content,omitempty"`
 	ChannelMessageID        string       `json:"channel_message_id,omitempty"`
 	ThreadID                string       `json:"thread_id,omitempty"`
 	SourceSentAt            *time.Time   `json:"source_sent_at,omitempty"`
 	ReplyToChannelMessageID string       `json:"reply_to_channel_message_id,omitempty"`
+	Messages                []RuntimeInboundMessage `json:"messages,omitempty"`
+}
+
+// RuntimeInboundMessage is one message of a debounced batch (Agent Harness
+// v2, Step 2): the gateway aggregates rapid-fire messages into one request,
+// but each keeps its own channel identity so the runtime persists every one
+// as a separate Message row.
+type RuntimeInboundMessage struct {
+	Content                 string     `json:"content"`
+	ChannelMessageID        string     `json:"channel_message_id,omitempty"`
+	ThreadID                string     `json:"thread_id,omitempty"`
+	SourceSentAt            *time.Time `json:"source_sent_at,omitempty"`
+	ReplyToChannelMessageID string     `json:"reply_to_channel_message_id,omitempty"`
 }
 
 type RuntimeActor struct {

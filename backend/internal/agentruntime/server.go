@@ -32,21 +32,30 @@ func (s *Server) Handler() http.Handler {
 }
 
 type messageRequest struct {
-	AgentName               string       `json:"agent_name"`
-	Channel                 string       `json:"channel"`
-	ExternalID              string       `json:"external_id"`
-	Actor                   actorRequest `json:"actor"`
-	Content                 string       `json:"content"`
-	ChannelMessageID        string       `json:"channel_message_id"`
-	ThreadID                string       `json:"thread_id"`
-	SourceSentAt            *time.Time   `json:"source_sent_at"`
-	ReplyToChannelMessageID string       `json:"reply_to_channel_message_id"`
+	AgentName               string                `json:"agent_name"`
+	Channel                 string                `json:"channel"`
+	ExternalID              string                `json:"external_id"`
+	Actor                   actorRequest          `json:"actor"`
+	Content                 string                `json:"content"`
+	ChannelMessageID        string                `json:"channel_message_id"`
+	ThreadID                string                `json:"thread_id"`
+	SourceSentAt            *time.Time            `json:"source_sent_at"`
+	ReplyToChannelMessageID string                `json:"reply_to_channel_message_id"`
+	Messages                []inboundMessageJSON  `json:"messages"`
 }
 
 type actorRequest struct {
 	ExternalID string         `json:"external_id"`
 	Username   string         `json:"username"`
 	Metadata   map[string]any `json:"metadata"`
+}
+
+type inboundMessageJSON struct {
+	Content                 string     `json:"content"`
+	ChannelMessageID        string     `json:"channel_message_id"`
+	ThreadID                string     `json:"thread_id"`
+	SourceSentAt            *time.Time `json:"source_sent_at"`
+	ReplyToChannelMessageID string     `json:"reply_to_channel_message_id"`
 }
 
 type messageResponse struct {
@@ -60,6 +69,20 @@ func (s *Server) handleMessage(c *gin.Context) {
 		return
 	}
 
+	messages := make([]InboundMessage, 0, len(req.Messages))
+	if len(req.Messages) == 0 && req.Content != "" {
+		messages = append(messages, InboundMessage{
+			Content:                 req.Content,
+			ChannelMessageID:        req.ChannelMessageID,
+			ThreadID:                req.ThreadID,
+			SourceSentAt:            req.SourceSentAt,
+			ReplyToChannelMessageID: req.ReplyToChannelMessageID,
+		})
+	}
+	for _, m := range req.Messages {
+		messages = append(messages, InboundMessage(m))
+	}
+
 	resp, err := s.runtime.ProcessMessage(c.Request.Context(), MessageRequest{
 		AgentName:  req.AgentName,
 		Channel:    req.Channel,
@@ -69,11 +92,7 @@ func (s *Server) handleMessage(c *gin.Context) {
 			Username:   req.Actor.Username,
 			Metadata:   req.Actor.Metadata,
 		},
-		Content:                 req.Content,
-		ChannelMessageID:        req.ChannelMessageID,
-		ThreadID:                req.ThreadID,
-		SourceSentAt:            req.SourceSentAt,
-		ReplyToChannelMessageID: req.ReplyToChannelMessageID,
+		Messages: messages,
 	})
 	if err != nil {
 		log.Error().Err(err).Msg("agentruntime: process message failed")

@@ -94,7 +94,7 @@ func waitFor(t *testing.T, cond func() bool) {
 
 func TestReconcile_StartsPollerForNewRow(t *testing.T) {
 	store := newFakeStore()
-	mgr := NewManager(store, fakeTelegram{}, fakeA2A{})
+	mgr := NewManager(store, fakeTelegram{}, fakeA2A{}, nil)
 	ctx := context.Background()
 
 	if err := store.Upsert(ctx, Binding{AgentName: "agent-a", BotToken: "tok-a", Status: StatusActive}); err != nil {
@@ -109,7 +109,7 @@ func TestReconcile_StartsPollerForNewRow(t *testing.T) {
 
 func TestReconcile_StopsPollerForRemovedRow(t *testing.T) {
 	store := newFakeStore()
-	mgr := NewManager(store, fakeTelegram{}, fakeA2A{})
+	mgr := NewManager(store, fakeTelegram{}, fakeA2A{}, nil)
 	ctx := context.Background()
 
 	if err := store.Upsert(ctx, Binding{AgentName: "agent-b", BotToken: "tok-b", Status: StatusActive}); err != nil {
@@ -132,7 +132,7 @@ func TestReconcile_StopsPollerForRemovedRow(t *testing.T) {
 
 func TestReconcile_RestartsPollerOnTokenChange(t *testing.T) {
 	store := newFakeStore()
-	mgr := NewManager(store, fakeTelegram{}, fakeA2A{})
+	mgr := NewManager(store, fakeTelegram{}, fakeA2A{}, nil)
 	ctx := context.Background()
 
 	if err := store.Upsert(ctx, Binding{AgentName: "agent-c", BotToken: "tok-1", Status: StatusActive}); err != nil {
@@ -162,7 +162,7 @@ func TestReconcile_RestartsPollerOnTokenChange(t *testing.T) {
 
 func TestBind_ValidatesTokenAndStartsPoller(t *testing.T) {
 	store := newFakeStore()
-	mgr := NewManager(store, fakeTelegram{}, fakeA2A{})
+	mgr := NewManager(store, fakeTelegram{}, fakeA2A{}, nil)
 	ctx := context.Background()
 
 	b, err := mgr.Bind(ctx, "agent-d", "proj-1", "tok-d")
@@ -192,7 +192,7 @@ func (rejectingTelegram) GetMe(context.Context, string) (string, error) {
 
 func TestBind_RejectsInvalidToken(t *testing.T) {
 	store := newFakeStore()
-	mgr := NewManager(store, rejectingTelegram{}, fakeA2A{})
+	mgr := NewManager(store, rejectingTelegram{}, fakeA2A{}, nil)
 
 	_, err := mgr.Bind(context.Background(), "agent-e", "proj-1", "bad-token")
 	if err == nil {
@@ -357,7 +357,7 @@ func TestA2AContextFor_IsStablePerChat(t *testing.T) {
 
 func TestUnbind_StopsPollerAndRemovesRow(t *testing.T) {
 	store := newFakeStore()
-	mgr := NewManager(store, fakeTelegram{}, fakeA2A{})
+	mgr := NewManager(store, fakeTelegram{}, fakeA2A{}, nil)
 	ctx := context.Background()
 
 	if _, err := mgr.Bind(ctx, "agent-f", "proj-1", "tok-f"); err != nil {
