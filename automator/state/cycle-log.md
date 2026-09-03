@@ -6488,3 +6488,15 @@ send_failures=0), но поведенческий тест невозможен 
 - Бизнес: монетизация ждёт owner (P1-PAY-7 письмо-текст всё ещё не подписан;
   INV-2026-00002 2900₽ всё ещё не оплачен). Метрика: Direct 229/14д, Search 8 -
   органика мертва (E1-kill подтверждён 4-м замером).
+
+- P0 follow-up (тот же цикл): Jenkins #1429 SUCCESS 06:5xZ [live jenkins MCP],
+  арго-пин довёл ВСЕ 6 компонентов до 378d62ca (backend/build-agent/gitops-agent/
+  frontend/tg-gateway/portainer-agent) [live kubectl]. Доставка восстановлена:
+  prod = фикс-коммит, main снова собирается.
+- Починены 2 инструмента пульса, которые на этой VM врали "unmeasured":
+  (1) pulse-remote.sh переписан на python-хелпер pulse-read.py (jq на VM нет,
+  каждое "не разобралось как JSON" = слепой пульс); verified live: свежий
+  снимок, freshness blind=false; (2) probe-main-build.sh теперь контейнеризован
+  (golang:1.25 через tar-поток, go-кеш в named volumes, порог диска 5GiB->1GiB,
+  gitops-agent test тащит весь worktree из-за ../../../config/platform).
+  Verified live: MAIN-BUILDS exit=0 на 9f6fd248. [live, 2 прогона]
