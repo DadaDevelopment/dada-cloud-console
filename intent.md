@@ -113,11 +113,14 @@ the source spec, do not re-derive it from scratch.
    default (env TG_GATEWAY_DEBOUNCE_QUIET_MS/_MAX_MS) -- production
    tg-exchange-support keeps the legacy immediate path until the harness
    is deployed alongside it.
-3. [ ] NEXT. Interrupt/cancel stale run: active-run tracking per chat
-   (run id + cancel func + generation counter), new message during an
-   active run supersedes it per interrupt_policy; the per-chat mutex from
-   Step 2 is the placeholder to replace.
-4. [ ] Reply-to/quotes outbound (sendMessage with reply_parameters,
+3. [x] DONE (commit 30c372c7, pushed). Interrupt/cancel stale run.
+   interruptState per-chat generation tracking: new message cancels the
+   in-flight run (cancel_and_restart), stale reply never reaches the user
+   (claim-based reply gate), ctx.Canceled excluded from the failure
+   streak, poller loop decoupled from agent latency (async processBatch --
+   was structurally blocking interrupts before). 8 new tests + full
+   suites green.
+4. [ ] NEXT. Reply-to/quotes outbound (sendMessage with reply_parameters,
    agent output contract for which message it answers).
 5. [ ] Link resolver (URL entities -> Link metadata, deterministic).
 6. [ ] Media (voice/image) inbound: Attachment schema + stub resolver,
