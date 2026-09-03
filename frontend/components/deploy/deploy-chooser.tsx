@@ -87,9 +87,11 @@ export function DeployChooser({
   const uploadCard = { key: "upload" as const, icon: <UploadCloud className="h-5 w-5" />, title: t("apps.deploy.fromUpload.title"), desc: t("apps.deploy.fromUpload.desc") };
   const composeCard = { key: "compose" as const, icon: <Boxes className="h-5 w-5" />, title: t("apps.deploy.fromCompose.title"), desc: t("apps.deploy.fromCompose.desc") };
 
-  const cards: { key: DeployKind; icon: React.ReactNode; title: string; desc: string }[] = hasGitSourceApp
+  const hasVmEnv = environments.some((env) => env.runtime === "vm");
+  const baseCards: { key: DeployKind; icon: React.ReactNode; title: string; desc: string }[] = hasGitSourceApp
     ? [gitCard, imageCard, uploadCard, composeCard]
     : [uploadCard, gitCard, imageCard, composeCard];
+  const cards = hasVmEnv ? baseCards : baseCards.filter((c) => c.key !== "compose");
 
   return (
     <Modal isOpen={open} onClose={onClose} title={t("apps.deploy.title")}>
@@ -113,16 +115,17 @@ export function DeployChooser({
 
         <div>
           <span className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-200">{t("apps.deploy.chooseSource")}</span>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {cards.map((c) => {
               const active = kind === c.key;
               return (
                 <button
                   key={c.key}
                   type="button"
+                  title={c.desc}
                   onClick={() => setKind(c.key)}
                   data-ux={`apps_deploy_chooser:pick_${c.key}`}
-                  className={`flex flex-col gap-2 rounded-xl border p-4 text-left transition-colors ${
+                  className={`flex aspect-square flex-col items-center justify-center gap-2 rounded-xl border p-3 text-center transition-colors ${
                     active
                       ? "border-blue-500 bg-blue-50 dark:bg-blue-950/40 ring-2 ring-blue-500/30"
                       : "border-gray-300 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-600"
@@ -132,7 +135,6 @@ export function DeployChooser({
                     {c.icon}
                   </span>
                   <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">{c.title}</span>
-                  <span className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">{c.desc}</span>
                 </button>
               );
             })}
