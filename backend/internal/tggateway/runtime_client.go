@@ -31,19 +31,39 @@ type RuntimeMessageRequest struct {
 	Messages                []RuntimeInboundMessage `json:"messages,omitempty"`
 }
 
+// RuntimeAttachment mirrors TelegramAttachment across the HTTP contract:
+// media metadata plus resolver outputs (transcript/description with their
+// availability flags -- stubs keep flags false until real backends exist).
+type RuntimeAttachment struct {
+	Kind                 string `json:"kind"`
+	FileID               string `json:"file_id,omitempty"`
+	FilePath             string `json:"file_path,omitempty"`
+	MimeType             string `json:"mime_type,omitempty"`
+	FileName             string `json:"file_name,omitempty"`
+	DurationSec          int    `json:"duration_seconds,omitempty"`
+	SizeBytes            int64  `json:"size_bytes,omitempty"`
+	Transcript           string `json:"transcript,omitempty"`
+	TranscriptAvailable  bool   `json:"transcript_available"`
+	Description          string `json:"description,omitempty"`
+	DescriptionAvailable bool   `json:"description_available"`
+}
+
 // RuntimeInboundMessage is one message of a debounced batch (Agent Harness
 // v2, Step 2): the gateway aggregates rapid-fire messages into one request,
 // but each keeps its own channel identity so the runtime persists every one
 // as a separate Message row. Links (Step 5) carries the message's URL
 // entities with their resolved titles -- extraction/enrichment is the
 // gateway's deterministic job, the runtime just persists and renders them.
+// Attachment (Step 6) carries media metadata; Content is empty on a pure
+// media message.
 type RuntimeInboundMessage struct {
-	Content                 string            `json:"content"`
-	ChannelMessageID        string            `json:"channel_message_id,omitempty"`
-	ThreadID                string            `json:"thread_id,omitempty"`
-	SourceSentAt            *time.Time        `json:"source_sent_at,omitempty"`
-	ReplyToChannelMessageID string            `json:"reply_to_channel_message_id,omitempty"`
-	Links                   []RuntimeLinkMeta `json:"links,omitempty"`
+	Content                 string             `json:"content"`
+	ChannelMessageID        string             `json:"channel_message_id,omitempty"`
+	ThreadID                string             `json:"thread_id,omitempty"`
+	SourceSentAt            *time.Time         `json:"source_sent_at,omitempty"`
+	ReplyToChannelMessageID string             `json:"reply_to_channel_message_id,omitempty"`
+	Links                   []RuntimeLinkMeta  `json:"links,omitempty"`
+	Attachment              *RuntimeAttachment `json:"attachment,omitempty"`
 }
 
 // RuntimeLinkMeta is one URL found in a message plus its best-effort page

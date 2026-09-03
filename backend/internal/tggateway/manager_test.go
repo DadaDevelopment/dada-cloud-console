@@ -3,6 +3,7 @@ package tggateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -62,6 +63,10 @@ func (fakeTelegram) GetMe(context.Context, string) (string, error) { return "fak
 func (fakeTelegram) GetUpdates(ctx context.Context, _ string, _ int64, _ int) ([]TelegramUpdate, error) {
 	<-ctx.Done()
 	return nil, ctx.Err()
+}
+
+func (fakeTelegram) GetFilePath(context.Context, string, string) (string, error) {
+	return "", fmt.Errorf("not implemented")
 }
 
 func (fakeTelegram) SendMessage(context.Context, string, int64, string) error { return nil }

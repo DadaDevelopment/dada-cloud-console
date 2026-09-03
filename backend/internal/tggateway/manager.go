@@ -3,6 +3,8 @@ package tggateway
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -287,6 +289,16 @@ func lastBatchChannelID(batch []TelegramUpdate) string {
 	return ""
 }
 
+// mediaCacheDir is where downloaded media files land. Overridable via env
+// (TG_GATEWAY_MEDIA_DIR) for deployments with a real volume; the default is
+// a temp dir because a cache miss just re-downloads.
+func mediaCacheDir() string {
+	if dir := os.Getenv("TG_GATEWAY_MEDIA_DIR"); dir != "" {
+		return dir
+	}
+	return filepath.Join(os.TempDir(), "tg-media")
+}
+
 // runPoller is one binding's long-poll loop: getUpdates -> Runtime/A2A -> reply.
 // Exits when ctx is cancelled (Reconcile/Unbind stopping this binding).
 // Debouncing is disabled; see runPollerDebounced for the batching variant.
@@ -313,6 +325,7 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 	warned := false
 
 	links := NewLinkTitleFetcher()
+	media := NewMediaDownloader(tg, os.Getenv("TELEGRAM_API_BASE"), mediaCacheDir())
 	runs := newInterruptState()
 	defer runs.forgetAll()
 
@@ -347,6 +360,23 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 			if u.HasLocation {
 				content = fmt.Sprintf("[location_shared: lat=%f, lon=%f]\n%s", u.Latitude, u.Longitude, u.Text)
 			}
+			var attachment *RuntimeAttachment
+			if u.Attachment != nil {
+				resolveAttachment(runCtx, media, b.BotToken, u.Attachment, u.MessageID)
+				attachment = &RuntimeAttachment{
+					Kind:                 u.Attachment.Kind,
+					FileID:               u.Attachment.FileID,
+					FilePath:             u.Attachment.FilePath,
+					MimeType:             u.Attachment.MimeType,
+					FileName:             u.Attachment.FileName,
+					DurationSec:          u.Attachment.DurationSec,
+					SizeBytes:            u.Attachment.SizeBytes,
+					Transcript:           u.Attachment.Transcript,
+					TranscriptAvailable:  u.Attachment.TranscriptAvailable,
+					Description:          u.Attachment.Description,
+					DescriptionAvailable: u.Attachment.DescriptionAvailable,
+				}
+			}
 			req.Messages = append(req.Messages, RuntimeInboundMessage{
 				Content:                 content,
 				ChannelMessageID:        strconv.FormatInt(u.MessageID, 10),
@@ -354,6 +384,7 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 				SourceSentAt:            sentAtOrNil(u.SentAt),
 				ReplyToChannelMessageID: replyIDOrEmpty(u.ReplyToMessageID),
 				Links:                   enrichEntities(runCtx, links, u.Entities),
+				Attachment:              attachment,
 			})
 		}
 

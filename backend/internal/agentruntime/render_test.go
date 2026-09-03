@@ -57,3 +57,56 @@ func TestLinksToEntities(t *testing.T) {
 		t.Fatalf("empty title must be omitted: %v", b)
 	}
 }
+
+func TestRenderMessageAttachments(t *testing.T) {
+	m := Message{Role: "user", Content: "", Attachments: []any{
+		map[string]any{"kind": "voice", "duration_seconds": float64(34), "transcript": "ситуация такая"},
+		map[string]any{"kind": "image"},
+	}}
+	got := renderMessage(m, time.Now())
+	if !strings.Contains(got, "[voice 34s]: \"ситуация такая\"\n") {
+		t.Fatalf("voice with transcript must render, got:\n%s", got)
+	}
+	if !strings.Contains(got, "[image]: [description unavailable]\n") {
+		t.Fatalf("image without description must render unavailable, got:\n%s", got)
+	}
+}
+
+func TestAttachmentToEntity(t *testing.T) {
+	if got := attachmentToEntity(nil); got != nil {
+		t.Fatalf("nil attachment -> nil, got %v", got)
+	}
+	got := attachmentToEntity(&RuntimeAttachment{
+		Kind: "voice", FileID: "fv", DurationSec: 34, TranscriptAvailable: true, Transcript: "text",
+	})
+	if len(got) != 1 {
+		t.Fatalf("expected 1 attachment object, got %d", len(got))
+	}
+	obj := got[0].(map[string]any)
+	if obj["kind"] != "voice" || obj["duration_seconds"] != 34 || obj["transcript"] != "text" {
+		t.Fatalf("attachment object wrong: %v", obj)
+	}
+	if _, has := obj["description"]; has {
+		t.Fatalf("unavailable description must be omitted: %v", obj)
+	}
+}
+
+func TestRenderAttachmentVariants(t *testing.T) {
+	cases := []struct {
+		in   map[string]any
+		want string
+	}{
+		{map[string]any{"kind": "voice", "duration_seconds": float64(34), "transcript": "привет"}, "[voice 34s]: \"привет\"\n"},
+		{map[string]any{"kind": "voice", "duration_seconds": float64(12)}, "[voice 12s]: [transcription unavailable]\n"},
+		{map[string]any{"kind": "image", "description": "скриншот формы"}, "[image]: скриншот формы\n"},
+		{map[string]any{"kind": "image"}, "[image]: [description unavailable]\n"},
+		{map[string]any{"kind": "document", "file_name": "report.pdf"}, "[document report.pdf]\n"},
+		{map[string]any{"kind": "document"}, "[document unnamed]\n"},
+		{map[string]any{"kind": "unknown"}, ""},
+	}
+	for i, c := range cases {
+		if got := renderAttachment(c.in); got != c.want {
+			t.Fatalf("case %d: got %q, want %q", i, got, c.want)
+		}
+	}
+}

@@ -86,6 +86,11 @@ type SaveMessageInput struct {
 	// each entry is a {url, title} object persisted into the row's entities
 	// JSONB column. Reserved Attachments equivalent: pass nil when none.
 	Entities []any
+
+	// Attachments carries media descriptors (Agent Harness v2, Step 6):
+	// zero or one {kind, ...} object per message persisted into the row's
+	// attachments JSONB column.
+	Attachments []any
 }
 
 type ConversationStore interface {
@@ -278,15 +283,21 @@ func (s *pgStore) SaveMessage(ctx context.Context, conversationID uuid.UUID, inp
 	}
 	entitiesJSON, _ := json.Marshal(entities)
 
+	attachments := input.Attachments
+	if attachments == nil {
+		attachments = []any{}
+	}
+	attachmentsJSON, _ := json.Marshal(attachments)
+
 	row := s.pool.QueryRow(ctx, `
 		INSERT INTO conversation_messages (
 			conversation_id, role, content, metadata,
 			channel_message_id, thread_id, source_sent_at, reply_to_message_id,
-			channel_metadata, entities
+			channel_metadata, entities, attachments
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING `+messageColumns, conversationID, input.Role, input.Content, metaJSON,
-		channelMessageID, threadID, input.SourceSentAt, replyToID, channelMetaJSON, entitiesJSON,
+		channelMessageID, threadID, input.SourceSentAt, replyToID, channelMetaJSON, entitiesJSON, attachmentsJSON,
 	)
 	return scanMessage(row)
 }

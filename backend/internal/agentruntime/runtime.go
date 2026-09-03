@@ -14,11 +14,30 @@ type RuntimeLinkMeta struct {
 	Title string `json:"title,omitempty"`
 }
 
+// RuntimeAttachment mirrors tggateway.RuntimeAttachment across the
+// contract: media metadata plus resolver outputs (transcript/description
+// with availability flags).
+type RuntimeAttachment struct {
+	Kind                 string `json:"kind"`
+	FileID               string `json:"file_id,omitempty"`
+	FilePath             string `json:"file_path,omitempty"`
+	MimeType             string `json:"mime_type,omitempty"`
+	FileName             string `json:"file_name,omitempty"`
+	DurationSec          int    `json:"duration_seconds,omitempty"`
+	SizeBytes            int64  `json:"size_bytes,omitempty"`
+	Transcript           string `json:"transcript,omitempty"`
+	TranscriptAvailable  bool   `json:"transcript_available"`
+	Description          string `json:"description,omitempty"`
+	DescriptionAvailable bool   `json:"description_available"`
+}
+
 // InboundMessage is one message of a (possibly debounced) batch: each keeps
 // its own channel identity and gets its own conversation_messages row, while
 // the whole batch shares one agent run and one reply. Links carries the
 // gateway-extracted URL entities (Agent Harness v2, Step 5): persisted into
 // the row's entities column and rendered into the A2A context block.
+// Attachment (Step 6) carries media: persisted to the attachments JSONB and
+// rendered as a typed line (voice/image/document) in the context.
 type InboundMessage struct {
 	Content                 string
 	ChannelMessageID        string
@@ -26,6 +45,7 @@ type InboundMessage struct {
 	SourceSentAt            *time.Time
 	ReplyToChannelMessageID string
 	Links                   []RuntimeLinkMeta
+	Attachment              *RuntimeAttachment
 }
 
 // MessageRequest is one inbound TURN from a channel gateway: one or more
@@ -102,6 +122,7 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 			SourceSentAt:            m.SourceSentAt,
 			ReplyToChannelMessageID: m.ReplyToChannelMessageID,
 			Entities:                linksToEntities(m.Links),
+			Attachments:             attachmentToEntity(m.Attachment),
 		}); err != nil {
 			return MessageResponse{}, fmt.Errorf("save user message: %w", err)
 		}
@@ -161,6 +182,40 @@ func linksToEntities(links []RuntimeLinkMeta) []any {
 		out = append(out, e)
 	}
 	return out
+}
+
+// attachmentToEntity converts the attachment descriptor into the single
+// object the attachments JSONB column stores (nil when no attachment).
+func attachmentToEntity(a *RuntimeAttachment) []any {
+	if a == nil {
+		return nil
+	}
+	obj := map[string]any{"kind": a.Kind}
+	if a.FileID != "" {
+		obj["file_id"] = a.FileID
+	}
+	if a.FilePath != "" {
+		obj["file_path"] = a.FilePath
+	}
+	if a.MimeType != "" {
+		obj["mime_type"] = a.MimeType
+	}
+	if a.FileName != "" {
+		obj["file_name"] = a.FileName
+	}
+	if a.DurationSec > 0 {
+		obj["duration_seconds"] = a.DurationSec
+	}
+	if a.SizeBytes > 0 {
+		obj["size_bytes"] = a.SizeBytes
+	}
+	if a.TranscriptAvailable {
+		obj["transcript"] = a.Transcript
+	}
+	if a.DescriptionAvailable {
+		obj["description"] = a.Description
+	}
+	return []any{obj}
 }
 
 func (r *Runtime) buildSystemPrompt(agentName string, conv Conversation) string {

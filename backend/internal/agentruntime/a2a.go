@@ -163,7 +163,47 @@ func renderMessage(m Message, now time.Time) string {
 			sb.WriteString(fmt.Sprintf("[link] %s\n", url))
 		}
 	}
+	for _, a := range m.Attachments {
+		am, ok := a.(map[string]any)
+		if !ok {
+			continue
+		}
+		sb.WriteString(renderAttachment(am))
+	}
 	return sb.String()
+}
+
+// renderAttachment renders one attachment object as a typed context line.
+// The form has social meaning (owner's spec): a voice stays visibly a
+// voice, an image stays visibly an image -- with its transcript/description
+// when a resolver produced one, and an explicit "unavailable" marker when
+// not, never silently substituted text.
+func renderAttachment(a map[string]any) string {
+	kind, _ := a["kind"].(string)
+	switch kind {
+	case "voice", "video_note":
+		dur := 0
+		if d, ok := a["duration_seconds"].(float64); ok {
+			dur = int(d)
+		}
+		if tr, ok := a["transcript"].(string); ok {
+			return fmt.Sprintf("[voice %ds]: \"%s\"\n", dur, tr)
+		}
+		return fmt.Sprintf("[voice %ds]: [transcription unavailable]\n", dur)
+	case "image":
+		if desc, ok := a["description"].(string); ok {
+			return fmt.Sprintf("[image]: %s\n", desc)
+		}
+		return "[image]: [description unavailable]\n"
+	case "document":
+		name, _ := a["file_name"].(string)
+		if name == "" {
+			name = "unnamed"
+		}
+		return fmt.Sprintf("[document %s]\n", name)
+	default:
+		return ""
+	}
 }
 
 // humanizeDelay rounds an age to one coarse unit -- the model needs "3m ago"

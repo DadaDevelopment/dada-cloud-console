@@ -58,6 +58,7 @@ type TelegramUpdate struct {
 	ReplyToMessageID int64
 	ThreadID         int64
 	Entities         []TelegramEntity
+	Attachment       *TelegramAttachment
 }
 
 // TelegramClient is the Bot API surface a poller needs. An interface so
@@ -73,6 +74,7 @@ type TelegramUpdate struct {
 type TelegramClient interface {
 	GetMe(ctx context.Context, token string) (username string, err error)
 	GetUpdates(ctx context.Context, token string, offset int64, timeoutSec int) ([]TelegramUpdate, error)
+	GetFilePath(ctx context.Context, token, fileID string) (string, error)
 	SendMessage(ctx context.Context, token string, chatID int64, text string) error
 	SendMessageReply(ctx context.Context, token string, chatID int64, replyToMessageID int64, text string) error
 	SendMessageWithLocationButton(ctx context.Context, token string, chatID int64, text string) error
@@ -158,30 +160,120 @@ func (c *httpTelegramClient) GetMe(ctx context.Context, token string) (string, e
 	return out.Username, nil
 }
 
+// tgMessage mirrors one Telegram message object of an update. Named so
+// mediaAttachment can take it without restating the anonymous struct.
+type tgMessage struct {
+	MessageID int64  `json:"message_id"`
+	Date      int64  `json:"date"`
+	Text      string `json:"text"`
+	Location  *struct {
+		Latitude  float64 `json:"latitude"`
+		Longitude float64 `json:"longitude"`
+	} `json:"location"`
+	Chat struct {
+		ID int64 `json:"id"`
+	} `json:"chat"`
+	From struct {
+		ID        int64  `json:"id"`
+		Username  string `json:"username"`
+		FirstName string `json:"first_name"`
+	} `json:"from"`
+	ReplyToMessage *struct {
+		MessageID int64 `json:"message_id"`
+	} `json:"reply_to_message"`
+	MessageThreadID int64            `json:"message_thread_id"`
+	Entities        []TelegramEntity `json:"entities"`
+	Voice           *struct {
+		FileID   string `json:"file_id"`
+		Duration int    `json:"duration"`
+		MimeType string `json:"mime_type"`
+		FileSize int64  `json:"file_size"`
+	} `json:"voice"`
+	Photo []struct {
+		FileID   string `json:"file_id"`
+		Width    int    `json:"width"`
+		Height   int    `json:"height"`
+		FileSize int64  `json:"file_size"`
+	} `json:"photo"`
+	Document *struct {
+		FileID   string `json:"file_id"`
+		FileName string `json:"file_name"`
+		MimeType string `json:"mime_type"`
+		FileSize int64  `json:"file_size"`
+	} `json:"document"`
+	VideoNote *struct {
+		FileID   string `json:"file_id"`
+		Duration int    `json:"duration"`
+		FileSize int64  `json:"file_size"`
+	} `json:"video_note"`
+}
+
 type tgUpdate struct {
-	UpdateID int64 `json:"update_id"`
-	Message  *struct {
-		MessageID int64  `json:"message_id"`
-		Date      int64  `json:"date"`
-		Text      string `json:"text"`
-		Location  *struct {
-			Latitude  float64 `json:"latitude"`
-			Longitude float64 `json:"longitude"`
-		} `json:"location"`
-		Chat struct {
-			ID int64 `json:"id"`
-		} `json:"chat"`
-		From struct {
-			ID        int64  `json:"id"`
-			Username  string `json:"username"`
-			FirstName string `json:"first_name"`
-		} `json:"from"`
-		ReplyToMessage *struct {
-			MessageID int64 `json:"message_id"`
-		} `json:"reply_to_message"`
-		MessageThreadID int64            `json:"message_thread_id"`
-		Entities        []TelegramEntity `json:"entities"`
-	} `json:"message"`
+	UpdateID int64      `json:"update_id"`
+	Message  *tgMessage `json:"message"`
+}
+
+// TelegramAttachment is the platform abstraction over one inbound media
+// object (Agent Harness v2, Step 6): what the gateway knows about the file
+// itself (identity, size, duration) plus what its resolvers produced --
+// FilePath when the download succeeded, Transcript/Description when an
+// STT/vision backend was available. Fields stay zero when a stage did not
+// run or failed; availability flags make "stub produced nothing" distinct
+// from "produced empty text".
+type TelegramAttachment struct {
+	Kind                 string `json:"kind"`
+	FileID               string `json:"file_id"`
+	FilePath             string `json:"file_path,omitempty"`
+	MimeType             string `json:"mime_type,omitempty"`
+	FileName             string `json:"file_name,omitempty"`
+	DurationSec          int    `json:"duration_seconds,omitempty"`
+	SizeBytes            int64  `json:"size_bytes,omitempty"`
+	Transcript           string `json:"transcript,omitempty"`
+	TranscriptAvailable  bool   `json:"transcript_available"`
+	Description          string `json:"description,omitempty"`
+	DescriptionAvailable bool   `json:"description_available"`
+}
+
+// mediaAttachment folds the parsed media fields of a message into one
+// descriptor (Agent Harness v2, Step 6). Photo picks the largest size
+// Telegram offers (last in the array, which Bot API orders ascending) --
+// vision quality wants pixels, and the platform downscales later if ever
+// needed.
+func mediaAttachment(m *tgMessage) *TelegramAttachment {
+	switch {
+	case m.Voice != nil:
+		return &TelegramAttachment{
+			Kind:        "voice",
+			FileID:      m.Voice.FileID,
+			DurationSec: m.Voice.Duration,
+			MimeType:    m.Voice.MimeType,
+			SizeBytes:   m.Voice.FileSize,
+		}
+	case len(m.Photo) > 0:
+		photo := m.Photo[len(m.Photo)-1]
+		return &TelegramAttachment{
+			Kind:      "image",
+			FileID:    photo.FileID,
+			SizeBytes: photo.FileSize,
+		}
+	case m.Document != nil:
+		return &TelegramAttachment{
+			Kind:      "document",
+			FileID:    m.Document.FileID,
+			FileName:  m.Document.FileName,
+			MimeType:  m.Document.MimeType,
+			SizeBytes: m.Document.FileSize,
+		}
+	case m.VideoNote != nil:
+		return &TelegramAttachment{
+			Kind:        "video_note",
+			FileID:      m.VideoNote.FileID,
+			DurationSec: m.VideoNote.Duration,
+			SizeBytes:   m.VideoNote.FileSize,
+		}
+	default:
+		return nil
+	}
 }
 
 // linkEntities keeps only URL-bearing entities and resolves their URL:
@@ -256,8 +348,9 @@ func (c *httpTelegramClient) GetUpdates(ctx context.Context, token string, offse
 		if u.Message == nil {
 			continue
 		}
+		attachment := mediaAttachment(u.Message)
 		hasLocation := u.Message.Location != nil
-		if u.Message.Text == "" && !hasLocation {
+		if u.Message.Text == "" && !hasLocation && attachment == nil {
 			continue
 		}
 		upd := TelegramUpdate{
@@ -282,9 +375,26 @@ func (c *httpTelegramClient) GetUpdates(ctx context.Context, token string, offse
 			upd.Longitude = u.Message.Location.Longitude
 		}
 		upd.Entities = linkEntities(upd.Text, u.Message.Entities)
+		upd.Attachment = attachment
 		out = append(out, upd)
 	}
 	return out, nil
+}
+
+// GetFilePath resolves a file_id to its relative file_path via getFile --
+// step one of the media download flow (Step 6); the bytes themselves live
+// under /file/bot<token>/<file_path>.
+func (c *httpTelegramClient) GetFilePath(ctx context.Context, token, fileID string) (string, error) {
+	var out struct {
+		FilePath string `json:"file_path"`
+	}
+	if err := c.call(ctx, token, "getFile", map[string]any{"file_id": fileID}, &out); err != nil {
+		return "", err
+	}
+	if out.FilePath == "" {
+		return "", fmt.Errorf("telegram getFile: empty file_path")
+	}
+	return out.FilePath, nil
 }
 
 func (c *httpTelegramClient) SendMessage(ctx context.Context, token string, chatID int64, text string) error {

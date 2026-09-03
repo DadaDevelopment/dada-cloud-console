@@ -51,12 +51,13 @@ type actorRequest struct {
 }
 
 type inboundMessageJSON struct {
-	Content                 string            `json:"content"`
-	ChannelMessageID        string            `json:"channel_message_id"`
-	ThreadID                string            `json:"thread_id"`
-	SourceSentAt            *time.Time        `json:"source_sent_at"`
-	ReplyToChannelMessageID string            `json:"reply_to_channel_message_id"`
-	Links                   []RuntimeLinkMeta `json:"links"`
+	Content                 string             `json:"content"`
+	ChannelMessageID        string             `json:"channel_message_id"`
+	ThreadID                string             `json:"thread_id"`
+	SourceSentAt            *time.Time         `json:"source_sent_at"`
+	ReplyToChannelMessageID string             `json:"reply_to_channel_message_id"`
+	Links                   []RuntimeLinkMeta  `json:"links"`
+	Attachment              *RuntimeAttachment `json:"attachment"`
 }
 
 type messageResponse struct {
