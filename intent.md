@@ -131,8 +131,20 @@ the source spec, do not re-derive it from scratch.
    the contract; persisted to entities JSONB; rendered as '[link] url
    (title)' in the A2A context. 8+3 new tests, full suites green, E2E
    smoke verified row.
-6. [ ] NEXT. Media (voice/image) inbound: Attachment schema + stub
-   resolver, real STT/vision pending credentials.
+6. [x] DONE (commit 3d31466f after rebase over f251a8b1, pushed). Media
+   inbound. Voice/photo/document/video_note parsing -> TelegramAttachment;
+   MediaDownloader (getFile -> bytes -> disk cache, 20s cap); pipeline
+   download -> STT/vision with independent degradation; stubs keep
+   availability false ('[transcription unavailable]' in context -- honest
+   placeholder, real backend = one function each, pending credentials);
+   attachments JSONB live; poller no longer drops media-only messages.
+   44+ tests green, E2E smoke verified row.
+
+ALL P0 ITEMS FROM THE OWNER'S REVIEW ARE NOW IMPLEMENTED AND PUSHED.
+Next candidates (owner's P1): delayed typing policy, delayed read policy
+(Business-connection-gated), outbound voice/images/files, edit/delete/
+reactions, idle scheduler + proactive invocation (Phase 5 of the
+original plan, still open), quiet hours/timezone.
 
 Each step: real code, real go build + go vet + go test against the
 go-build/dada-pg rig, commit to main once green. No claiming "done" without a
