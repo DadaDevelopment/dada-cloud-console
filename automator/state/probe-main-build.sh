@@ -72,6 +72,16 @@ run_mod_build() {
     -e "GOMODCACHE=/go/pkg/mod" \
     golang:1.25 sh -c "mkdir -p /work && tar -xf - -C /work && cd /work && go build ./... 2>&1"
 }
+run_mod_test() {
+  local mod="$1"
+  local dir="$WT"
+  tar -C "$dir" -cf - . | docker run --rm -i \
+    -e GOFLAGS=-mod=mod \
+    -v dada-go-mod-cache:/go/pkg/mod \
+    -v dada-go-build-cache:/root/.cache/go-build \
+    -e "GOMODCACHE=/go/pkg/mod" \
+    golang:1.25 sh -c "mkdir -p /work && tar -xf - -C /work && cd /work/$1 && go test ./... -count=1 2>&1"
+}
 run_mod_vet() {
   local mod="$1"
   local dir="$WT/$mod"
@@ -114,7 +124,7 @@ done
 # ВНИМАНИЕ: локальный прогон идёт не под root, а Jenkins — под root; тест,
 # который отличает эти два случая (права на файлы), здесь всё равно зелёный.
 if [ -d "$WT/gitops-agent" ]; then
-  if out=$(cd "$WT/gitops-agent" && go test ./... -count=1 2>&1); then
+  if out=$(run_mod_test gitops-agent "gitops-agent"); then
     echo "OK   go test gitops-agent"
   else
     echo "FAIL go test gitops-agent"
