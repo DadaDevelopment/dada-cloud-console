@@ -125,9 +125,14 @@ the source spec, do not re-derive it from scratch.
    sendMessage reply_parameters (allow_sending_without_reply). Structured
    agent-output contract deferred. Location-button marker keeps
    precedence. 2 new tests, full suites green.
-5. [ ] NEXT. Link resolver (URL entities -> Link metadata, deterministic).
-6. [ ] Media (voice/image) inbound: Attachment schema + stub resolver,
-   real STT/vision pending credentials.
+5. [x] DONE (commit a0cc4489, pushed). Link resolver. Telegram entities
+   (url/text_link) parsed with exact UTF-16->byte offset conversion;
+   best-effort title fetch (3s/64KB caps, silent failure); Links[] through
+   the contract; persisted to entities JSONB; rendered as '[link] url
+   (title)' in the A2A context. 8+3 new tests, full suites green, E2E
+   smoke verified row.
+6. [ ] NEXT. Media (voice/image) inbound: Attachment schema + stub
+   resolver, real STT/vision pending credentials.
 
 Each step: real code, real go build + go vet + go test against the
 go-build/dada-pg rig, commit to main once green. No claiming "done" without a
