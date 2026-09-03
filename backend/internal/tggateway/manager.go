@@ -288,8 +288,11 @@ func runPoller(ctx context.Context, tg TelegramClient, a2a A2AClient, runtime Ru
 // Debouncer additionally merges ACROSS polls: rapid-fire messages landing in
 // consecutive polls inside the quiet window join the same batch, capped by
 // the max window so a continuous stream still gets served. Per-chat
-// serialization (never two concurrent agent calls for one chat / A2A
-// contextId) is enforced by chatLock; different chats dispatch concurrently.
+// serialization is enforced by interruptState (Agent Harness v2, Step 3,
+// cancel_and_restart): a new batch for a chat with a run in flight CANCELS
+// that run, waits for it to release, and starts fresh -- never two
+// concurrent agent calls for one chat / A2A contextId, and a stale run's
+// reply never reaches the user. Different chats dispatch concurrently.
 func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, runtime RuntimeClient, b Binding, cfg *DebounceConfig) {
 	var offset int64
 
@@ -297,18 +300,8 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 	failing := false
 	warned := false
 
-	var perChatMu sync.Mutex
-	perChat := map[int64]*sync.Mutex{}
-	chatLock := func(chatID int64) *sync.Mutex {
-		perChatMu.Lock()
-		defer perChatMu.Unlock()
-		m, ok := perChat[chatID]
-		if !ok {
-			m = &sync.Mutex{}
-			perChat[chatID] = m
-		}
-		return m
-	}
+	runs := newInterruptState()
+	defer runs.forgetAll()
 
 	processBatch := func(batch []TelegramUpdate) {
 		if len(batch) == 0 {
@@ -316,11 +309,14 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		}
 		chatID := batch[0].ChatID
 
-		lock := chatLock(chatID)
-		lock.Lock()
-		defer lock.Unlock()
+		runCtx, done, superseded := runs.begin(chatID, ctx)
+		defer done()
+		if superseded {
+			log.Debug().Str("agent", b.AgentName).Int64("chatID", chatID).
+				Msg("tggateway: superseded an in-flight run (interrupt: cancel_and_restart)")
+		}
 
-		stopTyping := startTyping(ctx, tg, b.BotToken, chatID)
+		stopTyping := startTyping(runCtx, tg, b.BotToken, chatID)
 		defer stopTyping()
 
 		req := RuntimeMessageRequest{
@@ -349,14 +345,16 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 
 		var reply string
 		var procErr error
-		resp, err := runtime.ProcessMessage(ctx, req)
+		resp, err := runtime.ProcessMessage(runCtx, req)
 		if err == nil {
 			reply = resp.Text
+		} else if runCtx.Err() != nil {
+			return
 		} else {
 			log.Debug().Err(err).Msg("tggateway: runtime unavailable, falling back to direct A2A")
 			var texts []string
 			for _, u := range batch {
-				r, sendErr := a2a.SendWithContext(ctx, b.AgentName, a2aContextFor(chatID), withTelegramIdentity(u))
+				r, sendErr := a2a.SendWithContext(runCtx, b.AgentName, a2aContextFor(chatID), withTelegramIdentity(u))
 				if sendErr != nil {
 					procErr = sendErr
 					break
@@ -369,6 +367,9 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		}
 
 		if procErr != nil {
+			if runCtx.Err() != nil {
+				return
+			}
 			stateMu.Lock()
 			if !failing {
 				failing = true
@@ -387,6 +388,12 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		stateMu.Lock()
 		failing = false
 		stateMu.Unlock()
+
+		if !runs.claimReply(chatID, runCtx) {
+			log.Debug().Str("agent", b.AgentName).Int64("chatID", chatID).
+				Msg("tggateway: run superseded before reply, dropping computed reply")
+			return
+		}
 
 		sendText, wantsButton := splitLocationButtonMarker(sanitizeModelReply(reply))
 		var sendErr error
@@ -445,7 +452,7 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 				deb.Enqueue(fmt.Sprintf("agent=%s chat=%d", b.AgentName, u.ChatID), u)
 			}
 		} else {
-			processBatch(batch)
+			go processBatch(batch)
 		}
 	}
 }
