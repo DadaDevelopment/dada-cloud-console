@@ -26,10 +26,10 @@ func NewHTTPChannelOutbound(baseURL string) ChannelOutbound {
 
 func (c *httpChannelOutbound) SendOutbound(ctx context.Context, agentName, chatExternalID, text, replyToChannelMessageID string) error {
 	payload, err := json.Marshal(map[string]string{
-		"agent_name":                    agentName,
-		"chat_id":                       chatExternalID,
-		"text":                          text,
-		"reply_to_channel_message_id":   replyToChannelMessageID,
+		"agent_name":                  agentName,
+		"chat_id":                     chatExternalID,
+		"text":                        text,
+		"reply_to_channel_message_id": replyToChannelMessageID,
 	})
 	if err != nil {
 		return err

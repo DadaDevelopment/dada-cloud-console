@@ -29,8 +29,8 @@ import (
 // blocks or loses the user's message.
 
 const (
-	whisperTimeout   = 180 * time.Second
-	visionTimeout    = 90 * time.Second
+	whisperTimeout     = 180 * time.Second
+	visionTimeout      = 90 * time.Second
 	whisperBaseDefault = "http://whisper-predictor.ml-prod.svc.cluster.local"
 )
 

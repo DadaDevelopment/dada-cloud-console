@@ -415,7 +415,7 @@ func (c *httpTelegramClient) SendMessageReply(ctx context.Context, token string,
 		"chat_id": strconv.FormatInt(chatID, 10),
 		"text":    text,
 		"reply_parameters": map[string]any{
-			"message_id":                   replyToMessageID,
+			"message_id":                  replyToMessageID,
 			"allow_sending_without_reply": true,
 		},
 	}

@@ -115,10 +115,10 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 // outboundRequest is the internal delivery payload agent-runtime posts to
 // tg-gateway when a proactive (idle follow-up) reply must reach the chat.
 type outboundRequest struct {
-	AgentName  string `json:"agent_name"`
-	ChatID     string `json:"chat_id"`
-	Text       string `json:"text"`
-	ReplyToID  string `json:"reply_to_channel_message_id,omitempty"`
+	AgentName string `json:"agent_name"`
+	ChatID    string `json:"chat_id"`
+	Text      string `json:"text"`
+	ReplyToID string `json:"reply_to_channel_message_id,omitempty"`
 }
 
 // handleOutbound delivers one proactive message. No auth, ClusterIP-only,

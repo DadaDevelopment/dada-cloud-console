@@ -40,9 +40,9 @@ type idleHookRow struct {
 // clears the key (ProcessMessage), re-arming the hook for the next idle
 // period.
 type IdleScheduler struct {
-	pool    *pgxpool.Pool
-	runtime *Runtime
-	a2a     A2AClient
+	pool     *pgxpool.Pool
+	runtime  *Runtime
+	a2a      A2AClient
 	outbound ChannelOutbound
 	interval time.Duration
 }
