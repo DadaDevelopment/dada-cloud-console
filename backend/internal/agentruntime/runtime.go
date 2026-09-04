@@ -126,6 +126,9 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 		}); err != nil {
 			return MessageResponse{}, fmt.Errorf("save user message: %w", err)
 		}
+		if err := r.store.ClearIdleFlag(ctx, conv.ID); err != nil {
+			return MessageResponse{}, fmt.Errorf("clear idle flag: %w", err)
+		}
 	}
 
 	history, err := r.store.GetRecentMessages(ctx, conv.ID, 20)
