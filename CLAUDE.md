@@ -38,3 +38,17 @@ feedback, audit, approvals). Запись в админке остаётся з�
 
 Для запуска и визуальной проверки проектов использовать Codex Preview. Не
 запрашивать отдельную IDE-конфигурацию запуска.
+
+## Гейт gofmt перед пушем в main (HARD RULE, 2026-09-04)
+
+Красный main из-за gofmt = блокированная доставка прода (инцидент 09-03/04:
+#1442-1444 FAIL, ~15ч). Jenkins гоняет `gofmt -l backend build-agent
+gitops-agent mcp-server portainer-agent tools/dbmove` из корня на
+golang:1.25-alpine — формат может отличаться от локального. Перед пушем любой
+коммиты с .go файлами:
+
+    tar -cf - <пути> | docker run --rm -i golang:1.25-alpine sh -c 'mkdir -p /w && cd /w && tar -x && gofmt -l .'
+
+Пустой вывод = зелёный. НЕ полагаться на bind mount в контейнер на этой VM —
+он молча отдаёт пустые директории (проверено: `gofmt -l` «чисто» на пустоте).
+
