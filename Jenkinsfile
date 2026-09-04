@@ -26,6 +26,7 @@ def BUILD_AGENT_IMAGE     = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console
 def GATEWAY_IMAGE         = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-gateway"
 def EMBED_GATEWAY_IMAGE   = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-grafana-embed-gateway"
 def TG_GATEWAY_IMAGE      = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-tg-gateway"
+def AGENT_RUNTIME_IMAGE   = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-agent-runtime"
 // The body a box runs as (ADR-019). Not one of the console components: it is not
 // deployed, it is PULLED by box pods in the dada-boxes namespace, and it is pinned
 // by the boxcatalog entry rather than by the ArgoCD write-back below.
@@ -551,6 +552,12 @@ spec:
                             }
                         }
 
+                        stage('Agent-Runtime build') {
+                            dir('backend') {
+                                sh 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o bin/agent-runtime ./cmd/agent-runtime'
+                            }
+                        }
+
                         // Built on EVERY build, not only when the box image is
                         // published: these two binaries are the box's init and its
                         // door, and a compile break in them must fail the build that
@@ -778,6 +785,7 @@ spec:
                             [name: 'backend', image: BACKEND_IMAGE, dockerfile: 'backend/Dockerfile', context: 'backend'],
                             [name: 'gateway', image: GATEWAY_IMAGE, dockerfile: 'backend/Dockerfile.gateway', context: 'backend'],
                             [name: 'tg-gateway', image: TG_GATEWAY_IMAGE, dockerfile: 'backend/Dockerfile.tg-gateway', context: 'backend'],
+                            [name: 'agent-runtime', image: AGENT_RUNTIME_IMAGE, dockerfile: 'backend/Dockerfile.agent-runtime', context: 'backend'],
                             [name: 'embed-gateway', image: EMBED_GATEWAY_IMAGE, dockerfile: 'backend/Dockerfile.grafana-embed-gateway', context: 'backend'],
                             [name: 'gitops-agent', image: GITOPS_AGENT_IMAGE, dockerfile: 'gitops-agent/Dockerfile', context: 'gitops-agent'],
                             [name: 'portainer-agent', image: PORTAINER_AGENT_IMAGE, dockerfile: 'portainer-agent/Dockerfile', context: 'portainer-agent'],
@@ -916,7 +924,7 @@ ${PUSH_WITH_RETRY_SH}
                                   https://\${GIT_USERNAME}:\${GIT_TOKEN}@${ARGO_REPO} /tmp/argo-infra
                                 cd /tmp/argo-infra
                                 export TAG='${resolvedTag}'
-                                yq -i '(.backend.image.tag, .frontend.image.tag, .gateway.image.tag, .tgGateway.image.tag, .gitopsAgent.image.tag, .portainerAgent.image.tag, .buildAgent.image.tag) = strenv(TAG) | (.backend.image.tag, .frontend.image.tag, .gateway.image.tag, .tgGateway.image.tag, .gitopsAgent.image.tag, .portainerAgent.image.tag, .buildAgent.image.tag) style="double"' ${ARGO_VALUES_PATH}
+                                yq -i '(.backend.image.tag, .frontend.image.tag, .gateway.image.tag, .tgGateway.image.tag, .agentRuntime.image.tag, .gitopsAgent.image.tag, .portainerAgent.image.tag, .buildAgent.image.tag) = strenv(TAG) | (.backend.image.tag, .frontend.image.tag, .gateway.image.tag, .tgGateway.image.tag, .agentRuntime.image.tag, .gitopsAgent.image.tag, .portainerAgent.image.tag, .buildAgent.image.tag) style="double"' ${ARGO_VALUES_PATH}
                                 git config user.email 'platform-bot@dada-tuda.ru'
                                 git config user.name  'DADA Platform Bot'
                                 if git diff --quiet -- ${ARGO_VALUES_PATH}; then

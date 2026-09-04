@@ -433,6 +433,39 @@ tgGateway:
   databaseUrl: ""
   existingSecret: ""
   secret: {}
+  # agent-runtime platform wiring (Agent Harness v2): when runtimeURL is
+  # set, every Telegram message goes through agent-runtime (conversation
+  # state, lifecycle hooks, idle follow-ups) with direct-A2A fallback;
+  # empty keeps the legacy stateless path.
+  runtimeURL: ""
+  debounce:
+    quietMs: 0
+    maxMs: 0
+  media:
+    # whisper STT predictor (ml-prod Knative); empty uses the in-cluster
+    # default baked into the binary
+    whisperURL: ""
+    gatewayURL: ""
+    visionModel: ""
+agentRuntime:
+  enabled: false
+  image:
+    repository: dada-cloud-console-agent-runtime
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  service:
+    port: 8083
+  # idle-scheduler tick in seconds; 0 disables proactive follow-ups
+  idleTickSeconds: 60
+  # tg-gateway internal URL for proactive reply delivery; empty = persist-only
+  outboundURL: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
   resources:
     requests:
       cpu: 50m

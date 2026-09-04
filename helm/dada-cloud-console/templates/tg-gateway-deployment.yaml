@@ -38,6 +38,30 @@ spec:
           env:
             - name: TG_GATEWAY_PORT
               value: {{ .Values.tgGateway.service.port | quote }}
+            {{- if .Values.tgGateway.runtimeURL }}
+            - name: TG_GATEWAY_RUNTIME_URL
+              value: {{ .Values.tgGateway.runtimeURL | quote }}
+            {{- end }}
+            {{- if .Values.tgGateway.debounce.quietMs }}
+            - name: TG_GATEWAY_DEBOUNCE_QUIET_MS
+              value: {{ .Values.tgGateway.debounce.quietMs | quote }}
+            {{- end }}
+            {{- if .Values.tgGateway.debounce.maxMs }}
+            - name: TG_GATEWAY_DEBOUNCE_MAX_MS
+              value: {{ .Values.tgGateway.debounce.maxMs | quote }}
+            {{- end }}
+            {{- if .Values.tgGateway.media.whisperURL }}
+            - name: TG_MEDIA_WHISPER_URL
+              value: {{ .Values.tgGateway.media.whisperURL | quote }}
+            {{- end }}
+            {{- if .Values.tgGateway.media.gatewayURL }}
+            - name: TG_MEDIA_GATEWAY_URL
+              value: {{ .Values.tgGateway.media.gatewayURL | quote }}
+            {{- end }}
+            {{- if .Values.tgGateway.media.visionModel }}
+            - name: TG_MEDIA_VISION_MODEL
+              value: {{ .Values.tgGateway.media.visionModel | quote }}
+            {{- end }}
           envFrom:
             - configMapRef:
                 name: {{ include "dada-cloud-console.fullname" . }}-config

@@ -1,0 +1,72 @@
+{{- if .Values.agentRuntime.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dada-cloud-console.fullname" . }}-agent-runtime
+  labels:
+    {{- include "dada-cloud-console.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent-runtime
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "dada-cloud-console.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: agent-runtime
+  template:
+    metadata:
+      labels:
+        {{- include "dada-cloud-console.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: agent-runtime
+    spec:
+      serviceAccountName: {{ include "dada-cloud-console.fullname" . }}
+      {{- with .Values.global.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: agent-runtime
+          image: "{{ .Values.global.imageRegistry }}/{{ .Values.agentRuntime.image.repository }}:{{ .Values.agentRuntime.image.tag }}"
+          imagePullPolicy: {{ .Values.agentRuntime.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.agentRuntime.service.port }}
+          env:
+            - name: AGENT_RUNTIME_PORT
+              value: {{ .Values.agentRuntime.service.port | quote }}
+            {{- if .Values.agentRuntime.idleTickSeconds }}
+            - name: AGENT_RUNTIME_IDLE_TICK_SECONDS
+              value: {{ .Values.agentRuntime.idleTickSeconds | quote }}
+            {{- end }}
+            {{- if .Values.agentRuntime.outboundURL }}
+            - name: TG_GATEWAY_OUTBOUND_URL
+              value: {{ .Values.agentRuntime.outboundURL | quote }}
+            {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "dada-cloud-console.fullname" . }}-config
+            - secretRef:
+                name: {{ default (printf "%s-backend" (include "dada-cloud-console.fullname" .)) .Values.backend.existingSecret }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.agentRuntime.resources | nindent 12 }}
+{{- end }}
