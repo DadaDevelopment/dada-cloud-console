@@ -1,10 +1,13 @@
 ---
 id: 0421
-status: open
+status: closed
 prio: P2
 title: Критерий kill/scale для SEO-эксперимента E1 неизмерим: у токена нет scope на Яндекс.Вебмастер
 created: 2026-08-20
 sess: sess-0820m
+closed_at: 2026-09-03
+closed_commit: d913f046
+closed_note: E1 закрыт 09-03 (sess-0903c): Webmaster API оказался доступен - 403 был НЕ скоупом токена, а неверным эндпоинтом (правильный = POST /v4/user/{uid}/hosts/{host}/query-analytics/list, без search-analytics-префикса). Критерий снят: 3 небрендовых клика за 2 недели = все клики бренда. E1 killed. Коммит с замером d913f046.
 ---
 Замер E1 (sess-0820j, [live]) взял Metrika Reporting API (ctr 110158915) и получил реальные числа: 9 визитов на /analog-* за 08-06→08-20, из них 6 органических (trafficSource=Search engine traffic), railway 6 / vercel 3.
 

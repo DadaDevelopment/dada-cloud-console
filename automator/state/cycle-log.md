@@ -6500,3 +6500,26 @@ send_failures=0), но поведенческий тест невозможен 
   (golang:1.25 через tar-поток, go-кеш в named volumes, порог диска 5GiB->1GiB,
   gitops-agent test тащит весь worktree из-за ../../../config/platform).
   Verified live: MAIN-BUILDS exit=0 на 9f6fd248. [live, 2 прогона]
+
+## 2026-09-04 06:xx UTC (cron, sess-0904a)
+- P0 ИНЦИДЕНТ: main красный #1442-44 (gofmt violations в 6 файлах Step7,
+  закоммичены 09-03) -> прод стоял на 15ca7aaf. Fix 07c76432 (gofmt -w,
+  semantically empty) -> #1445 SUCCESS -> write-back pin c90c6eff ->
+  ПРОД ВЫКАЧЕН на 07c76432 [live: image tag + pods Running + console 307].
+  M0-гейт: правило gofmt-before-push в CLAUDE.md (bind mount на VM молча
+  пустой - проверено на себе, ловушка).
+- Диск 100% (48MB free) -> чистка кэшей (go-build, npm) -> 2GB free.
+- Audit: 9/9 регов с 08-21 АКТИВИРОВАЛИСЬ (builds/apps); 2 archive-upload
+  юзера (wgck, ivakinavv) - поток 1 работает органически; ivakinavv сам
+  тыкнул TriggerAutofix (первое органическое использование H08!).
+  2 archive-деплоя, 1 CreateAppServer (zqleaders - новый тип использования).
+- Feedback: 4 строки, 2 реальных юзерских бага -> backlog 0492 (port
+  validation), 0493 (domain verification public-suffix).
+- Панель поломок разобрана: 2 CrashLoop юзерские (gulyaev: их зашифрованный
+  vault падает на старте 46ч после их же деплоя 09-02 - юзер молчит,
+  user-side fix; fonbet-value: exit 0 Completed, не крашлуп).
+- E54/E58/E1 уже замкнуты 09-03 (проверено, не дублировал).
+- Провал гейта: probe-main-build.sh FAIL на машинах (диск был 100%) - после
+  чистки перезапускать в след. цикле; авторитетный сигнал всё равно Jenkins
+  #1445 SUCCESS.
+Время: ~35 мин.
