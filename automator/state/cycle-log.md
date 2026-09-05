@@ -6523,3 +6523,48 @@ send_failures=0), но поведенческий тест невозможен 
   чистки перезапускать в след. цикле; авторитетный сигнал всё равно Jenkins
   #1445 SUCCESS.
 Время: ~35 мин.
+
+## 2026-09-05 06:xx UTC (cron, sess-0905a)
+- P0 ИНЦИДЕНТ №1: agent-runtime в проде ImagePullBackOff 15ч (арго Degraded).
+  Причина: билд #1447 образ так и не запушил + 09-04 Beget снёс ВЕСЬ флот
+  (fleet reroll) -> Longhorn потерян, jenkins-home восстановлен СОЗНАТЕЛЬНО
+  свежим (runbook: churn races) => Jenkins без джоб, CI мёртв, образ
+  собрать некому. Фикс: собрал agent-runtime локально из main d476ba53
+  (golang:1.25-alpine в docker, bind-mount ЛОВУШКА -> docker cp),
+  запушил ghcr ...-agent-runtime:d476ba53, перезапинил argo-infra
+  cloud-console values (872368d, branch console-migration) -> argo
+  подхватил, под 1/1 Running, /health 200, приложение Synced Healthy
+  [live kubectl + ghcr].
+- P0 ИНЦИДЕНТ №2 (обнаружен, эскалирован): gulyaev-ai-core (живой юзер,
+  push-flow git) ImagePullBackOff: их образы 09-04 07:26/07:28 потеряны
+  вместе с nexus-данными (пуш ПОСЛЕ точки бэкапа), деплой смотрит на
+  мёртвый digest. Новейший выживший тег = их код 09-02. Платформа
+  уведомила юзера 09-04 07:48 (last_send_ok=t). Излечится их ре-деплоем;
+  продуктовая дыра "reroll снёс образы -> апп мёртв до юзер-действия" -
+  backlog. fonbet-value Pending 17ч: nodeSelector (kubectl-patch 08-30
+  владелец) указывает на убитый рероллом узел npkxg-xnwvp; приложения
+  владельца - НЕ ТРОГАЮ, эскалация в owner-actions.
+- ГЕЙТЫ: probe-main-build.sh GREEN (RC=0: go build/vet backend+build-agent+
+  gitops-agent, frontend unit; gitops go test). probe-delivery: живой тег
+  4c29da11 vs main d476ba53 - дельта 162 строк (agent-runtime wiring);
+  agent-runtime сервис в проде РАБОТАЕТ (образ d476ba53), остальной код
+  ждёт возрождения CI.
+- CI DOWN (худший факт цикла): Jenkins home свежий после реролла = 0 джоб,
+  DADA-GH multi-branch не существует, билдить main некому. Без Jenkins
+  нет ни доставки main, ни юзерских билдов push-flow (пока не
+  переподключён). Нужен owner-seeding или пересоздание джоб - в
+  owner-actions.
+- Пульс/панель: not_ready 12 + other 7 + domain_issues 2 (m2-delwedge,
+  a2a-hub.pro серт failed) + failed_builds 4 (tg-agent-tools, fanvk,
+  jkjk, dadadev-brains - некому билдить); counters: new_users_1h/24h=0,
+  feedback=0, payments stale=0.
+- ВАЖНО-ИСПРАВЛЕНО: на этой VM консольная БД = pg-shard-0-postgresql-0
+  (DATABASE_URL из секрета dada-cloud-console-backend), а НЕ postgresql-0;
+  первый замер audit в 06:0x шёл в неверный инстанс (после реролла оба
+  живы) - перепроверено на верном: регов за 24ч=0, feedback=0,
+  audit: messiajit4 вернулся 09-05 03:43 после 4д тишины (ViewProject->
+  ViewApps->ViewApp nepsetelegram, ушёл без действий - терминал ViewApp),
+  wgck 09-05 01:08 ViewProject+ViewApps (тишина), artempro2021 23:03.
+- Snapshot-коллектор жив: max(last_synced_at)=now на pg-shard (ложная
+  тревога снята; на postgresql-0 лежит старая копия таблицы).
+Время: ~50 мин.

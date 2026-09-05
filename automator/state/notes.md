@@ -2268,3 +2268,11 @@ HTTP-пробы по telegram-боту без HTTP-порта (порт 8000 д�
 - fonbet-value CrashLoop (141x) = юзерский deploy-скрипт (exit 0 сразу, воркеры в отдельных деплоях) — не трогать, не «наш» инцидент.
 - probe-main-build на ops-VM требует локальный go; без него red — ложный (Jenkins авторитет).
 - vpn-bypass-proxy.py macOS-only; на Linux-VM восстановление сети рутины — отдельная задача.
+
+- 2026-09-05 (sess-0905a): fleet-reroll 09-04 каскад: jenkins-home сознательно
+  свежий -> CI без джоб; agent-runtime образ дособран вручную (ghcr d476ba53,
+  argo-infra 872368d). Консольная БД на этой VM = pg-shard-0-postgresql-0
+  (через секрет dada-cloud-console-backend DATABASE_URL), postgresql-0 =
+  другой (устаревшая копия cloud-console) - не путать при audit-замерах.
+  Образы юзеров, запушенные после точки бэкапа, потеряны (gulyaev класс) ->
+  backlog 0494. fonbet nodeSelector-пин на мёртвый узел - owner.
