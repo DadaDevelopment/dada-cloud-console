@@ -121,7 +121,7 @@ func TestMediaDownloader_ErrorPaths(t *testing.T) {
 
 func TestResolveAttachment_DegradesIndependently(t *testing.T) {
 	att := &TelegramAttachment{Kind: "voice", FileID: "nope"}
-	resolveAttachment(context.Background(), NewMediaDownloader(fakeTelegram{}, "http://127.0.0.1:1", t.TempDir()), "TOK", att, 9)
+	resolveAttachment(context.Background(), NewMediaDownloader(fakeTelegram{}, "http://127.0.0.1:1", t.TempDir()), "TOK", att, 9, stubTranscribe, stubDescribe)
 	if att.FilePath != "" {
 		t.Fatalf("failed download must leave FilePath empty, got %q", att.FilePath)
 	}

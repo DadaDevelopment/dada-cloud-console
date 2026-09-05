@@ -349,8 +349,6 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 	links := NewLinkTitleFetcher()
 	media := NewMediaDownloader(tg, os.Getenv("TELEGRAM_API_BASE"), mediaCacheDir())
 	trans, desc := newMediaAIResolvers(mediaAIConfigFromEnv())
-	transcribeHook = trans
-	describeHook = desc
 	log.Info().Str("whisper", mediaAIConfigFromEnv().WhisperBaseURL).
 		Str("vision_model", mediaAIConfigFromEnv().VisionModel).
 		Msg("tggateway: media resolvers wired")
@@ -394,7 +392,7 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 			}
 			var attachment *RuntimeAttachment
 			if u.Attachment != nil {
-				resolveAttachment(runCtx, media, b.BotToken, u.Attachment, u.MessageID)
+				resolveAttachment(runCtx, media, b.BotToken, u.Attachment, u.MessageID, trans, desc)
 				attachment = &RuntimeAttachment{
 					Kind:                 u.Attachment.Kind,
 					FileID:               u.Attachment.FileID,
