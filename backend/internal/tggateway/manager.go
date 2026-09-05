@@ -368,8 +368,8 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 				Msg("tggateway: superseded an in-flight run (interrupt: cancel_and_restart)")
 		}
 
-		// Only runtime knows whether a conversation is paused. Sending typing
-		// before it responds would make a suppressed turn visible in Telegram.
+		// Runtime admits a turn before announcing processing over the response
+		// stream. Paused and courtesy-only turns never start typing.
 		if !useRuntime {
 			stopTyping := startTyping(runCtx, tg, b.BotToken, chatID)
 			defer stopTyping()
@@ -422,7 +422,23 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		var procErr error
 		var resp RuntimeMessageResponse
 		if useRuntime {
-			resp, procErr = runtime.ProcessMessage(runCtx, req)
+			if progress, ok := runtime.(interface {
+				ProcessMessageWithProgress(context.Context, RuntimeMessageRequest, func()) (RuntimeMessageResponse, error)
+			}); ok {
+				var stopTyping func()
+				defer func() {
+					if stopTyping != nil {
+						stopTyping()
+					}
+				}()
+				resp, procErr = progress.ProcessMessageWithProgress(runCtx, req, func() {
+					if stopTyping == nil && runCtx.Err() == nil {
+						stopTyping = startTyping(runCtx, tg, b.BotToken, chatID)
+					}
+				})
+			} else {
+				resp, procErr = runtime.ProcessMessage(runCtx, req)
+			}
 			reply = resp.Text
 		} else {
 			var texts []string

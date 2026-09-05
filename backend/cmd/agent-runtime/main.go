@@ -60,6 +60,9 @@ func main() {
 		defer ticker.Stop()
 		for {
 			// Run once on startup so persisted failures recover after a restart.
+			if _, err := srv.ReconcileContacts(retryCtx, 5); err != nil && retryCtx.Err() == nil {
+				log.Error().Err(err).Msg("CRM contact retry failed")
+			}
 			if _, err := srv.ReconcilePaused(retryCtx, 5); err != nil && retryCtx.Err() == nil {
 				log.Error().Err(err).Msg("CRM pause retry failed")
 			}

@@ -33,6 +33,13 @@ func NewServer(pool *pgxpool.Pool, gitopsBasePath string) *Server {
 	domains := NewFileDomainProvider(gitopsBasePath)
 
 	runtime := NewRuntime(store, hooks, a2a, domains)
+	runtime.contacts = contactSyncFromEnv(store.(*pgStore))
+	runtime.courtesyAgents = map[string]bool{}
+	for _, name := range strings.Split(os.Getenv("AGENT_COURTESY_SUPPRESSION_AGENTS"), ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			runtime.courtesyAgents[name] = true
+		}
+	}
 
 	token := os.Getenv("AGENT_RUNTIME_TOKEN")
 	runtime.contextKey = []byte(token)
@@ -240,6 +247,16 @@ func (s *Server) handleMessage(c *gin.Context) {
 		messages = append(messages, InboundMessage(m))
 	}
 
+	streaming := c.GetHeader("Accept") == "application/x-ndjson"
+	emit := func(event any) {
+		c.Header("Content-Type", "application/x-ndjson")
+		_ = json.NewEncoder(c.Writer).Encode(event)
+		c.Writer.Flush()
+	}
+	var onProcessing func()
+	if streaming {
+		onProcessing = func() { emit(gin.H{"event": "processing"}) }
+	}
 	resp, err := s.runtime.ProcessMessage(c.Request.Context(), MessageRequest{
 		AgentName:  req.AgentName,
 		Channel:    req.Channel,
@@ -249,14 +266,22 @@ func (s *Server) handleMessage(c *gin.Context) {
 			Username:   req.Actor.Username,
 			Metadata:   req.Actor.Metadata,
 		},
-		Messages: messages,
+		Messages:     messages,
+		OnProcessing: onProcessing,
 	})
 	if err != nil {
 		log.Error().Err(err).Msg("agentruntime: process message failed")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		if streaming {
+			emit(gin.H{"event": "error", "error": "message processing failed"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "message processing failed"})
+		}
 		return
 	}
-
+	if streaming {
+		emit(gin.H{"event": "result", "result": messageResponse{Text: resp.Text, ReplyToChannelMessageID: resp.ReplyToChannelMessageID, Suppressed: resp.Suppressed}})
+		return
+	}
 	c.JSON(http.StatusOK, messageResponse{Text: resp.Text, ReplyToChannelMessageID: resp.ReplyToChannelMessageID, Suppressed: resp.Suppressed})
 }
 

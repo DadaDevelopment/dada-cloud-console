@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -127,6 +128,14 @@ func NewRuntimeClientFromConfig(baseURL, token string) (RuntimeClient, error) {
 }
 
 func (c *httpRuntimeClient) ProcessMessage(ctx context.Context, req RuntimeMessageRequest) (RuntimeMessageResponse, error) {
+	return c.process(ctx, req, nil)
+}
+
+func (c *httpRuntimeClient) ProcessMessageWithProgress(ctx context.Context, req RuntimeMessageRequest, processing func()) (RuntimeMessageResponse, error) {
+	return c.process(ctx, req, processing)
+}
+
+func (c *httpRuntimeClient) process(ctx context.Context, req RuntimeMessageRequest, processing func()) (RuntimeMessageResponse, error) {
 	payload, err := json.Marshal(req)
 	if err != nil {
 		return RuntimeMessageResponse{}, err
@@ -138,6 +147,9 @@ func (c *httpRuntimeClient) ProcessMessage(ctx context.Context, req RuntimeMessa
 		return RuntimeMessageResponse{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	if processing != nil {
+		httpReq.Header.Set("Accept", "application/x-ndjson")
+	}
 	if c.token != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+c.token)
 	}
@@ -154,6 +166,32 @@ func (c *httpRuntimeClient) ProcessMessage(ctx context.Context, req RuntimeMessa
 		return RuntimeMessageResponse{}, fmt.Errorf("runtime status %d: %s", resp.StatusCode, errResp["error"])
 	}
 
+	if strings.HasPrefix(resp.Header.Get("Content-Type"), "application/x-ndjson") {
+		decoder := json.NewDecoder(io.LimitReader(resp.Body, 1<<20))
+		started := false
+		for {
+			var event struct {
+				Event  string                 `json:"event"`
+				Result RuntimeMessageResponse `json:"result"`
+			}
+			if err := decoder.Decode(&event); err != nil {
+				return RuntimeMessageResponse{}, fmt.Errorf("runtime stream incomplete: %w", err)
+			}
+			switch event.Event {
+			case "processing":
+				if processing != nil && !started {
+					started = true
+					processing()
+				}
+			case "result":
+				return event.Result, nil
+			case "error":
+				return RuntimeMessageResponse{}, fmt.Errorf("runtime processing failed")
+			default:
+				return RuntimeMessageResponse{}, fmt.Errorf("unknown runtime event")
+			}
+		}
+	}
 	var result RuntimeMessageResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return RuntimeMessageResponse{}, fmt.Errorf("decode runtime response: %w", err)

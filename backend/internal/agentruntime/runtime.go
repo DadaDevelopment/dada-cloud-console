@@ -57,11 +57,12 @@ type InboundMessage struct {
 // single-message shortcut used to carry (Content etc) are folded into
 // Messages by the server layer.
 type MessageRequest struct {
-	AgentName  string
-	Channel    string
-	ExternalID string
-	Actor      Actor
-	Messages   []InboundMessage
+	AgentName    string
+	Channel      string
+	ExternalID   string
+	Actor        Actor
+	Messages     []InboundMessage
+	OnProcessing func() // transport presence; called only after reply admission
 }
 
 // MessageResponse carries the agent's reply plus the reply anchor: the
@@ -83,13 +84,15 @@ type DomainProvider interface {
 }
 
 type Runtime struct {
-	store      ConversationStore
-	hooks      HookExecutor
-	a2a        A2AClient
-	domains    DomainProvider
-	states     StateStore
-	contextKey []byte
-	runLocks   [256]sync.Mutex
+	store          ConversationStore
+	hooks          HookExecutor
+	a2a            A2AClient
+	domains        DomainProvider
+	states         StateStore
+	contextKey     []byte
+	contacts       *ContactSync
+	courtesyAgents map[string]bool
+	runLocks       [256]sync.Mutex
 }
 
 func NewRuntime(store ConversationStore, hooks HookExecutor, a2a A2AClient, domains DomainProvider) *Runtime {
@@ -144,6 +147,11 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 		}
 		fresh = append(fresh, saved)
 	}
+	if r.contacts != nil {
+		if err := r.contacts.Ensure(ctx, conv); err != nil {
+			return MessageResponse{}, err
+		}
+	}
 	if !state.AgentEnabled {
 		return MessageResponse{Suppressed: true}, nil
 	}
@@ -184,6 +192,25 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 	if len(pending) == 0 {
 		return MessageResponse{Suppressed: true}, nil
 	}
+	history, err := r.store.GetRecentMessages(ctx, conv.ID, 30)
+	if err != nil {
+		return MessageResponse{}, err
+	}
+	if r.courtesyAgents[conv.AgentName] && courtesyOnly(pending, history, state) {
+		receipts, ok := r.store.(interface {
+			MarkRuntimeHandled(context.Context, []Message) error
+		})
+		if !ok {
+			return MessageResponse{}, fmt.Errorf("runtime receipt storage is not configured")
+		}
+		if err := receipts.MarkRuntimeHandled(ctx, pending); err != nil {
+			return MessageResponse{}, err
+		}
+		if err := r.store.Touch(ctx, conv.ID); err != nil {
+			return MessageResponse{}, err
+		}
+		return MessageResponse{Suppressed: true}, nil
+	}
 	var skills []string
 	if catalog, ok := r.domains.(DomainCatalog); ok {
 		skills, err = catalog.ListDomains(ctx, conv.AgentName)
@@ -205,6 +232,9 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 	run := AgentRunRequest{AgentName: conv.AgentName, ContextID: "runtime-" + conv.ID.String(), Messages: pending,
 		ConversationContext: AgentConversationContext{ConversationID: conv.ID.String(), Channel: conv.Channel,
 			ExternalID: conv.ExternalID, Username: conv.ActorUsername, State: state, AvailableSkills: skills, ContextToken: token}}
+	if req.OnProcessing != nil {
+		req.OnProcessing()
+	}
 	reply, err := r.a2a.Send(ctx, run)
 	if err != nil {
 		return MessageResponse{}, fmt.Errorf("a2a send: %w", err)
