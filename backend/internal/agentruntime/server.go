@@ -34,6 +34,12 @@ func NewServer(pool *pgxpool.Pool, gitopsBasePath string) *Server {
 
 	runtime := NewRuntime(store, hooks, a2a, domains)
 	runtime.contacts = contactSyncFromEnv(store.(*pgStore))
+	runtime.structuredAgents = map[string]bool{}
+	for _, name := range strings.Split(os.Getenv("AGENT_STRUCTURED_REPLY_AGENTS"), ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			runtime.structuredAgents[name] = true
+		}
+	}
 	runtime.courtesyAgents = map[string]bool{}
 	for _, name := range strings.Split(os.Getenv("AGENT_COURTESY_SUPPRESSION_AGENTS"), ",") {
 		if name = strings.TrimSpace(name); name != "" {
@@ -43,7 +49,9 @@ func NewServer(pool *pgxpool.Pool, gitopsBasePath string) *Server {
 
 	token := os.Getenv("AGENT_RUNTIME_TOKEN")
 	runtime.contextKey = []byte(token)
-	return &Server{runtime: runtime, pool: pool, a2a: a2a, token: token, pauseCRM: NewHTTPPauseCRM(os.Getenv("AGENT_PAUSE_CRM_URL"), os.Getenv("AGENT_PAUSE_CRM_TOKEN"), os.Getenv("AGENT_PAUSE_CRM_STATUS"))}
+	srv := &Server{runtime: runtime, pool: pool, a2a: a2a, token: token, pauseCRM: NewHTTPPauseCRM(os.Getenv("AGENT_PAUSE_CRM_URL"), os.Getenv("AGENT_PAUSE_CRM_TOKEN"), os.Getenv("AGENT_PAUSE_CRM_STATUS"))}
+	runtime.syncPause = func(ctx context.Context, conv Conversation) error { _, err := srv.syncPausedCRM(ctx, conv); return err }
+	return srv
 }
 
 // StartIdleScheduler launches the proactive-invocation loop. idleTickSeconds

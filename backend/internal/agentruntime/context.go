@@ -13,6 +13,7 @@ import (
 )
 
 type AgentConversationContext struct {
+	ReplyFormat     string       `json:"reply_format,omitempty"`
 	ConversationID  string       `json:"conversation_id"`
 	Channel         string       `json:"channel"`
 	ExternalID      string       `json:"external_id"`

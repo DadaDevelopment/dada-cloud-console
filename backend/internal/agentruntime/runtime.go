@@ -84,15 +84,17 @@ type DomainProvider interface {
 }
 
 type Runtime struct {
-	store          ConversationStore
-	hooks          HookExecutor
-	a2a            A2AClient
-	domains        DomainProvider
-	states         StateStore
-	contextKey     []byte
-	contacts       *ContactSync
-	courtesyAgents map[string]bool
-	runLocks       [256]sync.Mutex
+	store            ConversationStore
+	hooks            HookExecutor
+	a2a              A2AClient
+	domains          DomainProvider
+	states           StateStore
+	contextKey       []byte
+	contacts         *ContactSync
+	courtesyAgents   map[string]bool
+	structuredAgents map[string]bool
+	syncPause        func(context.Context, Conversation) error
+	runLocks         [256]sync.Mutex
 }
 
 func NewRuntime(store ConversationStore, hooks HookExecutor, a2a A2AClient, domains DomainProvider) *Runtime {
@@ -151,6 +153,15 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 		if err := r.contacts.Ensure(ctx, conv); err != nil {
 			return MessageResponse{}, err
 		}
+	}
+	if state.AgentEnabled && r.courtesyAgents[conv.AgentName] && explicitStop(req.Messages) {
+		if _, err := r.states.PauseAgent(ctx, conv.ID, "customer requested no further replies"); err != nil {
+			return MessageResponse{}, err
+		}
+		if r.syncPause != nil {
+			_ = r.syncPause(ctx, conv)
+		}
+		return MessageResponse{Suppressed: true}, nil
 	}
 	if !state.AgentEnabled {
 		return MessageResponse{Suppressed: true}, nil
@@ -232,6 +243,9 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 	run := AgentRunRequest{AgentName: conv.AgentName, ContextID: "runtime-" + conv.ID.String(), Messages: pending,
 		ConversationContext: AgentConversationContext{ConversationID: conv.ID.String(), Channel: conv.Channel,
 			ExternalID: conv.ExternalID, Username: conv.ActorUsername, State: state, AvailableSkills: skills, ContextToken: token}}
+	if r.structuredAgents[conv.AgentName] {
+		run.ConversationContext.ReplyFormat = structuredReplyFormat
+	}
 	if req.OnProcessing != nil {
 		req.OnProcessing()
 	}
@@ -247,6 +261,12 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 	}
 	if !after.AgentEnabled {
 		return MessageResponse{Suppressed: true}, nil
+	}
+	if r.structuredAgents[conv.AgentName] {
+		reply, err = renderReplyPlan(reply, after)
+		if err != nil {
+			return MessageResponse{}, err
+		}
 	}
 	reply = redactContextToken(reply, token)
 	if _, err := r.store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "assistant", Content: reply}); err != nil {

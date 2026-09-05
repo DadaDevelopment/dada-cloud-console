@@ -34,3 +34,33 @@ func courtesyOnly(pending, history []Message, state RuntimeState) bool {
 	}
 	return false
 }
+
+// Explicit opt-out commands are handled before inference. Whole clauses only:
+// quoting a command, temporary delay, negation and ordinary concern don't match.
+func explicitStop(messages []InboundMessage) bool {
+	for _, m := range messages {
+		clauses := strings.FieldsFunc(strings.ToLower(m.Content), func(r rune) bool { return r == '.' || r == '!' || r == '\n' })
+		matched := false
+		for _, part := range clauses {
+			clause := strings.TrimSpace(part)
+			clause = strings.TrimPrefix(clause, "пожалуйста, ")
+			clause = strings.TrimSuffix(clause, ", пожалуйста")
+			if clause == "" {
+				continue
+			}
+			switch clause {
+			case "не пишите мне", "больше не пишите", "больше мне не пишите", "не отвечайте мне", "больше мне не отвечайте", "больше не отвечайте", "прекратите писать", "прекратите мне писать", "остановите ответы", "остановите ответы в этом чате", "stop messaging me", "do not message me again":
+				matched = true
+			default:
+				matched = false
+			}
+			if !matched {
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
