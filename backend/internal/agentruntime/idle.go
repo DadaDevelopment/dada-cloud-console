@@ -176,6 +176,11 @@ func (s *IdleScheduler) invoke(ctx context.Context, r idleHookRow) {
 	if err != nil || !state.AgentEnabled {
 		return
 	}
+	state, err = s.runtime.refreshActiveSkills(ctx, conv, state)
+	if err != nil || !state.AgentEnabled {
+		log.Warn().Err(err).Msg("agentruntime: idle active skill refresh unavailable")
+		return
+	}
 	token, err := issueContextToken(s.runtime.contextKey, conv, time.Now().Add(15*time.Minute))
 	if err != nil {
 		log.Warn().Err(err).Msg("agentruntime: idle context unavailable")

@@ -191,6 +191,13 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 			return MessageResponse{}, err
 		}
 	}
+	state, err = r.refreshActiveSkills(ctx, conv, state)
+	if err != nil {
+		return MessageResponse{}, err
+	}
+	if !state.AgentEnabled {
+		return MessageResponse{Suppressed: true}, nil
+	}
 	token, err := issueContextToken(r.contextKey, conv, time.Now().Add(15*time.Minute))
 	if err != nil {
 		return MessageResponse{}, err
