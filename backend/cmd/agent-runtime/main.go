@@ -50,6 +50,25 @@ func main() {
 	}
 
 	srv := agentruntime.NewServer(pool, gitopsBasePath)
+	retryCtx, stopRetry := context.WithCancel(context.Background())
+	defer stopRetry()
+	retryDone := make(chan struct{})
+	go func() {
+		defer close(retryDone)
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			// Run once on startup so persisted failures recover after a restart.
+			if _, err := srv.ReconcilePaused(retryCtx, 5); err != nil && retryCtx.Err() == nil {
+				log.Error().Err(err).Msg("CRM pause retry failed")
+			}
+			select {
+			case <-retryCtx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
 
 	port := os.Getenv("AGENT_RUNTIME_PORT")
 	if port == "" {
@@ -76,9 +95,15 @@ func main() {
 
 	<-quit
 	log.Info().Msg("shutting down agent-runtime")
+	stopRetry()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := httpSrv.Shutdown(ctx); err != nil {
 		log.Error().Err(err).Msg("agent-runtime forced to shutdown")
+	}
+	select {
+	case <-retryDone:
+	case <-ctx.Done():
+		log.Error().Msg("CRM pause retry shutdown timed out")
 	}
 }

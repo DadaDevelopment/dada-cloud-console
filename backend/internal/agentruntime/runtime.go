@@ -2,9 +2,12 @@ package agentruntime
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strings"
+	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // RuntimeLinkMeta mirrors tggateway.RuntimeLinkMeta: one URL found in a
@@ -48,10 +51,11 @@ type MessageRequest struct {
 type MessageResponse struct {
 	Text                    string
 	ReplyToChannelMessageID string
+	Suppressed              bool
 }
 
 type A2AClient interface {
-	Send(ctx context.Context, agentName string, messages []Message) (reply string, err error)
+	Send(ctx context.Context, run AgentRunRequest) (reply string, err error)
 }
 
 type DomainProvider interface {
@@ -59,14 +63,19 @@ type DomainProvider interface {
 }
 
 type Runtime struct {
-	store   ConversationStore
-	hooks   HookExecutor
-	a2a     A2AClient
-	domains DomainProvider
+	store      ConversationStore
+	hooks      HookExecutor
+	a2a        A2AClient
+	domains    DomainProvider
+	states     StateStore
+	contextKey []byte
+	runLocks   [256]sync.Mutex
 }
 
 func NewRuntime(store ConversationStore, hooks HookExecutor, a2a A2AClient, domains DomainProvider) *Runtime {
+	states, _ := store.(StateStore)
 	return &Runtime{
+		states:  states,
 		store:   store,
 		hooks:   hooks,
 		a2a:     a2a,
@@ -75,71 +84,129 @@ func NewRuntime(store ConversationStore, hooks HookExecutor, a2a A2AClient, doma
 }
 
 func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (MessageResponse, error) {
-	if len(req.Messages) == 0 {
-		return MessageResponse{}, fmt.Errorf("process message: no messages in request")
+	if len(req.Messages) == 0 || req.AgentName == "" || req.Channel == "" || req.ExternalID == "" {
+		return MessageResponse{}, fmt.Errorf("agent, channel, identity and messages are required")
 	}
-
+	if r.states == nil || len(r.contextKey) < 32 {
+		return MessageResponse{}, fmt.Errorf("runtime state or context signing is not configured")
+	}
 	conv, created, err := r.store.GetOrCreateConversation(ctx, req.AgentName, req.Channel, req.ExternalID, req.Actor)
 	if err != nil {
-		return MessageResponse{}, fmt.Errorf("get or create conversation: %w", err)
+		return MessageResponse{}, fmt.Errorf("get conversation: %w", err)
 	}
-
+	// The service is deployed as a single replica; serialize concurrent requests
+	// for the same conversation while tools mutate state through independent calls.
+	lock := &r.runLocks[conv.ID[0]]
+	lock.Lock()
+	defer lock.Unlock()
+	state, err := r.states.GetState(ctx, conv.ID)
+	if err != nil {
+		return MessageResponse{}, err
+	}
+	var fresh []Message
+	anchor := ""
+	for _, m := range req.Messages {
+		anchor = m.ChannelMessageID
+		if m.ChannelMessageID != "" {
+			_, err := r.store.FindMessageByChannelID(ctx, conv.ID, m.ChannelMessageID)
+			if err == nil {
+				continue
+			}
+			if !errors.Is(err, ErrMessageNotFound) {
+				return MessageResponse{}, err
+			}
+		}
+		saved, err := r.store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "user", Content: m.Content,
+			ChannelMessageID: m.ChannelMessageID, ThreadID: m.ThreadID, SourceSentAt: m.SourceSentAt,
+			ReplyToChannelMessageID: m.ReplyToChannelMessageID, Entities: linksToEntities(m.Links)})
+		if err != nil {
+			return MessageResponse{}, err
+		}
+		fresh = append(fresh, saved)
+	}
+	if !state.AgentEnabled {
+		return MessageResponse{Suppressed: true}, nil
+	}
 	if created {
 		if err := r.hooks.Execute(ctx, "conversation.created", conv, nil); err != nil {
-			return MessageResponse{}, fmt.Errorf("conversation.created hook: %w", err)
+			return r.pauseAfterHookFailure(ctx, conv, "conversation.created", err)
 		}
 	}
-
-	for _, m := range req.Messages {
+	for _, m := range fresh {
 		if err := r.hooks.Execute(ctx, "message.received", conv, m.Content); err != nil {
-			return MessageResponse{}, fmt.Errorf("message.received hook: %w", err)
-		}
-		if _, err := r.store.SaveMessage(ctx, conv.ID, SaveMessageInput{
-			Role:                    "user",
-			Content:                 m.Content,
-			ChannelMessageID:        m.ChannelMessageID,
-			ThreadID:                m.ThreadID,
-			SourceSentAt:            m.SourceSentAt,
-			ReplyToChannelMessageID: m.ReplyToChannelMessageID,
-			Entities:                linksToEntities(m.Links),
-		}); err != nil {
-			return MessageResponse{}, fmt.Errorf("save user message: %w", err)
+			return r.pauseAfterHookFailure(ctx, conv, "message.received", err)
 		}
 	}
-
-	history, err := r.store.GetRecentMessages(ctx, conv.ID, 20)
+	conv, err = r.store.GetConversation(ctx, conv.ID)
 	if err != nil {
-		return MessageResponse{}, fmt.Errorf("get recent messages: %w", err)
+		return MessageResponse{}, err
 	}
-
-	reply, err := r.a2a.Send(ctx, req.AgentName, history)
+	state, err = r.states.GetState(ctx, conv.ID)
+	if err != nil {
+		return MessageResponse{}, err
+	}
+	if !state.AgentEnabled {
+		return MessageResponse{Suppressed: true}, nil
+	}
+	inbox, ok := r.store.(interface {
+		PendingRuntimeMessages(context.Context, uuid.UUID) ([]Message, error)
+	})
+	if !ok {
+		return MessageResponse{}, fmt.Errorf("runtime pending input storage is not configured")
+	}
+	pending, err := inbox.PendingRuntimeMessages(ctx, conv.ID)
+	if err != nil {
+		return MessageResponse{}, err
+	}
+	if len(pending) == 0 {
+		return MessageResponse{Suppressed: true}, nil
+	}
+	var skills []string
+	if catalog, ok := r.domains.(DomainCatalog); ok {
+		skills, err = catalog.ListDomains(ctx, conv.AgentName)
+		if err != nil {
+			return MessageResponse{}, err
+		}
+	}
+	token, err := issueContextToken(r.contextKey, conv, time.Now().Add(15*time.Minute))
+	if err != nil {
+		return MessageResponse{}, err
+	}
+	run := AgentRunRequest{AgentName: conv.AgentName, ContextID: "runtime-" + conv.ID.String(), Messages: pending,
+		ConversationContext: AgentConversationContext{ConversationID: conv.ID.String(), Channel: conv.Channel,
+			ExternalID: conv.ExternalID, Username: conv.ActorUsername, State: state, AvailableSkills: skills, ContextToken: token}}
+	reply, err := r.a2a.Send(ctx, run)
 	if err != nil {
 		return MessageResponse{}, fmt.Errorf("a2a send: %w", err)
 	}
-
-	if _, err := r.store.SaveMessage(ctx, conv.ID, SaveMessageInput{
-		Role:    "assistant",
-		Content: reply,
-	}); err != nil {
-		return MessageResponse{}, fmt.Errorf("save assistant message: %w", err)
+	// A tool may have paused this conversation during the run. Never emit the
+	// generated answer after that transition, even when the model ignored it.
+	after, err := r.states.GetState(ctx, conv.ID)
+	if err != nil {
+		return MessageResponse{}, err
 	}
-
+	if !after.AgentEnabled {
+		return MessageResponse{Suppressed: true}, nil
+	}
+	reply = redactContextToken(reply, token)
+	if _, err := r.store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "assistant", Content: reply}); err != nil {
+		return MessageResponse{}, err
+	}
 	if err := r.hooks.Execute(ctx, "agent.run.completed", conv, nil); err != nil {
-		return MessageResponse{}, fmt.Errorf("agent.run.completed hook: %w", err)
+		return r.pauseAfterHookFailure(ctx, conv, "agent.run.completed", err)
 	}
-
 	if err := r.store.Touch(ctx, conv.ID); err != nil {
-		return MessageResponse{}, fmt.Errorf("touch conversation: %w", err)
+		return MessageResponse{}, err
 	}
-
-	anchor := ""
-	for i := len(req.Messages) - 1; i >= 0; i-- {
-		if req.Messages[i].ChannelMessageID != "" {
-			anchor = req.Messages[i].ChannelMessageID
-			break
+	if receipts, ok := r.store.(interface {
+		MarkRuntimeHandled(context.Context, []Message) error
+	}); ok {
+		if err := receipts.MarkRuntimeHandled(ctx, pending); err != nil {
+			return MessageResponse{}, err
 		}
+	} else {
+		return MessageResponse{}, fmt.Errorf("runtime receipt storage is not configured")
 	}
-
 	return MessageResponse{Text: reply, ReplyToChannelMessageID: anchor}, nil
 }
 
@@ -163,22 +230,14 @@ func linksToEntities(links []RuntimeLinkMeta) []any {
 	return out
 }
 
-func (r *Runtime) buildSystemPrompt(agentName string, conv Conversation) string {
-	var sb strings.Builder
-
-	sb.WriteString("You are a helpful assistant.\n\n")
-
-	if len(conv.Metadata) > 0 {
-		sb.WriteString("## Conversation Context\n")
-		if crmID, ok := conv.Metadata["crm_person_id"].(string); ok {
-			sb.WriteString(fmt.Sprintf("CRM Person ID: %s\n", crmID))
-		}
-		sb.WriteString("\n")
+// An external hook can have an unknown outcome after a timeout. Pause rather
+// than replay a potentially non-idempotent action or bypass it on the next turn.
+// Recovery is explicit; the simple CRM status sync is retried by the service.
+func (r *Runtime) pauseAfterHookFailure(ctx context.Context, conv Conversation, event string, cause error) (MessageResponse, error) {
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if _, err := r.states.PauseAgent(persistCtx, conv.ID, "integration hook failed: "+event); err != nil {
+		return MessageResponse{}, fmt.Errorf("hook failed and pause unavailable: %w", err)
 	}
-
-	sb.WriteString("## Available Tools\n")
-	sb.WriteString("- get_domain_instruction(domain: str) -> str\n")
-	sb.WriteString("  Available domains: jurisdiction, kyc, registration, objections, handoff\n\n")
-
-	return sb.String()
+	return MessageResponse{}, cause
 }

@@ -56,6 +56,7 @@ func (h *hookExecutor) Execute(ctx context.Context, event string, conv Conversat
 				Str("event", event).
 				Msg("agentruntime: hook execution failed")
 			h.recordExecution(ctx, hook.ID, conv.ID.String(), event, "failed", err.Error(), nil, nil)
+			return fmt.Errorf("hook %s failed: %w", hook.Name, err)
 		} else {
 			h.recordExecution(ctx, hook.ID, conv.ID.String(), event, "success", "", nil, nil)
 		}
@@ -206,12 +207,7 @@ func (h *hookExecutor) executeMetadata(ctx context.Context, hook Hook, conv Conv
 }
 
 func (h *hookExecutor) executeSchedule(ctx context.Context, hook Hook, conv Conversation, extra any) error {
-	log.Info().
-		Str("hook", hook.Name).
-		Str("agent", conv.AgentName).
-		Str("conversation", conv.ID.String()).
-		Msg("agentruntime: schedule action triggered (no-op for now, needs scheduler goroutine)")
-	return nil
+	return fmt.Errorf("scheduling is not configured")
 }
 
 func (h *hookExecutor) ListIdleHooks(ctx context.Context) ([]Hook, error) {

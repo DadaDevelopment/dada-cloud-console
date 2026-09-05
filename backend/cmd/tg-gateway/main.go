@@ -56,6 +56,10 @@ func main() {
 	if cfg.LogLevel == "debug" {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	}
+	runtimeClient, err := tggateway.NewRuntimeClientFromConfig(os.Getenv("AGENT_RUNTIME_URL"), os.Getenv("AGENT_RUNTIME_TOKEN"))
+	if err != nil {
+		log.Fatal().Err(err).Msg("invalid agent runtime configuration")
+	}
 
 	dbURL := cfg.TGGatewayDBURL
 	if dbURL == "" {
@@ -82,6 +86,12 @@ func main() {
 	}
 
 	mgr := tggateway.NewManager(store, tggateway.NewTelegramClient(""), tggateway.NewA2AClient(), debouncePtr)
+	runtimeAgents, err := tggateway.ParseRuntimeAgents(os.Getenv("AGENT_RUNTIME_AGENTS"), runtimeClient != nil)
+	if err != nil {
+		log.Fatal().Err(err).Msg("invalid runtime rollout scope")
+	}
+	mgr.SetRuntimeClient(runtimeClient)
+	mgr.SetRuntimeAgents(runtimeAgents)
 
 	runCtx, stopRun := context.WithCancel(context.Background())
 	defer stopRun()

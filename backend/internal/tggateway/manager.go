@@ -52,11 +52,12 @@ type runningPoller struct {
 // goroutine lifecycle, which is what manager_test.go exercises against fake
 // Store/TelegramClient/A2AClient implementations.
 type Manager struct {
-	store    Store
-	tg       TelegramClient
-	a2a      A2AClient
-	runtime  RuntimeClient
-	debounce *DebounceConfig
+	store         Store
+	tg            TelegramClient
+	a2a           A2AClient
+	runtime       RuntimeClient
+	runtimeAgents map[string]bool
+	debounce      *DebounceConfig
 
 	mu      sync.Mutex
 	pollers map[string]*runningPoller
@@ -65,12 +66,12 @@ type Manager struct {
 // NewManager builds a Manager. Run must be called once to start the
 // reconcile loop; Bind/Unbind/Get work standalone (each also nudges the
 // poller set directly, so a caller does not have to wait for the next tick).
-// Pass nil for runtime to use direct A2A (backward compatibility). A
+// Runtime routing is disabled until SetRuntimeClient is called. A
 // non-nil debounce turns on inbound batching (Agent Harness v2, Step 2):
 // rapid-fire messages of one chat inside the quiet window become ONE agent
 // turn with one reply; nil keeps the legacy immediate-dispatch behavior.
 func NewManager(store Store, tg TelegramClient, a2a A2AClient, debounce *DebounceConfig) *Manager {
-	return &Manager{store: store, tg: tg, a2a: a2a, runtime: NewNoopRuntimeClient(), debounce: debounce, pollers: map[string]*runningPoller{}}
+	return &Manager{store: store, tg: tg, a2a: a2a, debounce: debounce, pollers: map[string]*runningPoller{}}
 }
 
 // SetRuntimeClient configures Manager to route messages through agent-runtime
@@ -78,6 +79,23 @@ func NewManager(store Store, tg TelegramClient, a2a A2AClient, debounce *Debounc
 // domain instructions. Call before Run() to activate the full platform.
 func (m *Manager) SetRuntimeClient(runtime RuntimeClient) {
 	m.runtime = runtime
+}
+
+// SetRuntimeAgents scopes opt-in routing to selected agent bindings. An empty
+// list retains SetRuntimeClient's all-bindings behavior for legacy callers.
+// Configure once before Run; changing a live manager requires restarting it.
+func (m *Manager) SetRuntimeAgents(names []string) {
+	m.runtimeAgents = make(map[string]bool, len(names))
+	for _, name := range names {
+		m.runtimeAgents[name] = true
+	}
+}
+
+func (m *Manager) runtimeForAgent(name string) RuntimeClient {
+	if len(m.runtimeAgents) > 0 && !m.runtimeAgents[name] {
+		return nil
+	}
+	return m.runtime
 }
 
 // Run blocks running the reconcile loop until ctx is cancelled. Callers
@@ -137,7 +155,7 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 func (m *Manager) startLocked(b Binding) {
 	pctx, cancel := context.WithCancel(context.Background())
 	m.pollers[b.AgentName] = &runningPoller{cancel: cancel, token: b.BotToken}
-	go runPollerDebounced(pctx, m.tg, m.a2a, m.runtime, b, m.debounce)
+	go runPollerDebounced(pctx, m.tg, m.a2a, m.runtimeForAgent(b.AgentName), b, m.debounce)
 }
 
 // Bind validates token via getMe, upserts the row, and starts (or restarts,
@@ -307,6 +325,10 @@ func runPoller(ctx context.Context, tg TelegramClient, a2a A2AClient, runtime Ru
 // reply never reaches the user. Different chats dispatch concurrently.
 func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, runtime RuntimeClient, b Binding, cfg *DebounceConfig) {
 	var offset int64
+	// The legacy noop is an explicit disabled configuration, never a runtime
+	// failure. A configured runtime owns state and cannot be bypassed by A2A.
+	_, noop := runtime.(*noopRuntimeClient)
+	useRuntime := runtime != nil && !noop
 
 	var stateMu sync.Mutex
 	failing := false
@@ -329,8 +351,12 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 				Msg("tggateway: superseded an in-flight run (interrupt: cancel_and_restart)")
 		}
 
-		stopTyping := startTyping(runCtx, tg, b.BotToken, chatID)
-		defer stopTyping()
+		// Only runtime knows whether a conversation is paused. Sending typing
+		// before it responds would make a suppressed turn visible in Telegram.
+		if !useRuntime {
+			stopTyping := startTyping(runCtx, tg, b.BotToken, chatID)
+			defer stopTyping()
+		}
 
 		req := RuntimeMessageRequest{
 			AgentName:  b.AgentName,
@@ -359,13 +385,11 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 
 		var reply string
 		var procErr error
-		resp, err := runtime.ProcessMessage(runCtx, req)
-		if err == nil {
+		var resp RuntimeMessageResponse
+		if useRuntime {
+			resp, procErr = runtime.ProcessMessage(runCtx, req)
 			reply = resp.Text
-		} else if runCtx.Err() != nil {
-			return
 		} else {
-			log.Debug().Err(err).Msg("tggateway: runtime unavailable, falling back to direct A2A")
 			var texts []string
 			for _, u := range batch {
 				r, sendErr := a2a.SendWithContext(runCtx, b.AgentName, a2aContextFor(chatID), withTelegramIdentity(u))
@@ -382,6 +406,10 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 
 		if procErr != nil {
 			if runCtx.Err() != nil {
+				return
+			}
+			if useRuntime {
+				log.Warn().Err(procErr).Str("agent", b.AgentName).Msg("tggateway: runtime failed; conversation enablement unknown, suppressing channel output")
 				return
 			}
 			stateMu.Lock()
@@ -402,6 +430,9 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		stateMu.Lock()
 		failing = false
 		stateMu.Unlock()
+		if resp.Suppressed || strings.TrimSpace(reply) == "" {
+			return
+		}
 
 		if !runs.claimReply(chatID, runCtx) {
 			log.Debug().Str("agent", b.AgentName).Int64("chatID", chatID).
@@ -410,6 +441,9 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		}
 
 		sendText, wantsButton := splitLocationButtonMarker(sanitizeModelReply(reply))
+		if strings.TrimSpace(sendText) == "" && !wantsButton {
+			return
+		}
 		var sendErr error
 		switch {
 		case wantsButton:
@@ -475,7 +509,15 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 				deb.Enqueue(fmt.Sprintf("agent=%s chat=%d", b.AgentName, u.ChatID), u)
 			}
 		} else {
-			go processBatch(batch)
+			// One Telegram poll may contain several chats. Never mix their
+			// messages into another chat's runtime state or reply destination.
+			byChat := make(map[int64][]TelegramUpdate)
+			for _, u := range batch {
+				byChat[u.ChatID] = append(byChat[u.ChatID], u)
+			}
+			for _, chatBatch := range byChat {
+				go processBatch(chatBatch)
+			}
 		}
 	}
 }

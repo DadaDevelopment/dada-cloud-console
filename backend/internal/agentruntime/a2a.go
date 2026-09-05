@@ -28,6 +28,7 @@ type a2aPart struct {
 }
 
 type a2aMessage struct {
+	ContextID string    `json:"contextId,omitempty"`
 	Role      string    `json:"role"`
 	MessageID string    `json:"messageId"`
 	Parts     []a2aPart `json:"parts"`
@@ -51,7 +52,8 @@ type a2aResponse struct {
 	Result json.RawMessage `json:"result"`
 }
 
-func (c *httpA2AClient) Send(ctx context.Context, agentName string, messages []Message) (string, error) {
+func (c *httpA2AClient) Send(ctx context.Context, run AgentRunRequest) (string, error) {
+	agentName, messages := run.AgentName, run.Messages
 	if len(messages) == 0 {
 		return "", fmt.Errorf("no messages to send")
 	}
@@ -63,9 +65,10 @@ func (c *httpA2AClient) Send(ctx context.Context, agentName string, messages []M
 
 	reqBody := a2aRequest{JSONRPC: "2.0", ID: "agentruntime", Method: "message/send"}
 	reqBody.Params.Message = a2aMessage{
+		ContextID: run.ContextID,
 		Role:      "user",
 		MessageID: uuid.NewString(),
-		Parts:     []a2aPart{{Kind: "text", Text: buildContextualMessage(messages)}},
+		Parts:     []a2aPart{{Kind: "text", Text: renderAgentRun(run)}},
 	}
 
 	payload, err := json.Marshal(reqBody)
@@ -86,7 +89,7 @@ func (c *httpA2AClient) Send(ctx context.Context, agentName string, messages []M
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("a2a %s: status %d", agentName, resp.StatusCode)
 	}
 
@@ -98,6 +101,17 @@ func (c *httpA2AClient) Send(ctx context.Context, agentName string, messages []M
 		return "", fmt.Errorf("a2a %s: %s", agentName, parsed.Error.Message)
 	}
 
+	var task struct {
+		Status struct {
+			State string `json:"state"`
+		} `json:"status"`
+	}
+	if json.Unmarshal(parsed.Result, &task) != nil {
+		return "", fmt.Errorf("invalid a2a result")
+	}
+	if state := task.Status.State; state != "" && state != "completed" && state != "input-required" {
+		return "", fmt.Errorf("a2a task did not complete: %s", state)
+	}
 	text := extractText(parsed.Result)
 	if text == "" {
 		return "", fmt.Errorf("a2a %s: no text in response", agentName)
@@ -182,37 +196,48 @@ func humanizeDelay(d time.Duration) string {
 	return fmt.Sprintf("%ds", int(d.Seconds()))
 }
 
+// Only protocol reply parts are customer-visible. Never traverse arbitrary
+// metadata, tool results or task history, and prefer artifacts over status text.
 func extractText(raw json.RawMessage) string {
-	var v any
-	if err := json.Unmarshal(raw, &v); err != nil {
+	var result struct {
+		Role      string    `json:"role"`
+		Parts     []a2aPart `json:"parts"`
+		Artifacts []struct {
+			Parts []a2aPart `json:"parts"`
+		} `json:"artifacts"`
+		Status struct {
+			Message struct {
+				Role  string    `json:"role"`
+				Parts []a2aPart `json:"parts"`
+			} `json:"message"`
+		} `json:"status"`
+	}
+	if json.Unmarshal(raw, &result) != nil {
 		return ""
 	}
-	var out bytes.Buffer
-	collectText(v, &out)
-	return out.String()
-}
-
-func collectText(v any, out *bytes.Buffer) {
-	switch val := v.(type) {
-	case map[string]any:
-		for key, child := range val {
-			if key == "history" {
-				continue
+	textParts := func(parts []a2aPart) string {
+		var texts []string
+		for _, part := range parts {
+			if part.Kind == "text" && strings.TrimSpace(part.Text) != "" {
+				texts = append(texts, part.Text)
 			}
-			if key == "text" {
-				if s, ok := child.(string); ok {
-					if out.Len() > 0 {
-						out.WriteByte('\n')
-					}
-					out.WriteString(s)
-					continue
-				}
-			}
-			collectText(child, out)
 		}
-	case []any:
-		for _, item := range val {
-			collectText(item, out)
+		return strings.Join(texts, "\n")
+	}
+	var artifacts []string
+	for _, artifact := range result.Artifacts {
+		if text := textParts(artifact.Parts); text != "" {
+			artifacts = append(artifacts, text)
 		}
 	}
+	if len(artifacts) > 0 {
+		return strings.Join(artifacts, "\n")
+	}
+	if result.Role == "agent" {
+		return textParts(result.Parts)
+	}
+	if result.Status.Message.Role == "agent" {
+		return textParts(result.Status.Message.Parts)
+	}
+	return ""
 }
