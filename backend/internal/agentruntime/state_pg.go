@@ -99,20 +99,26 @@ func (s *pgStore) ApplyState(ctx context.Context, id uuid.UUID, version int64, p
 		if state.Version != version {
 			return false, ErrStateConflict
 		}
-		evidence := map[uuid.UUID]bool{}
+		evidence := map[uuid.UUID]string{}
 		for _, fact := range patch.ReportedFacts {
-			evidence[fact.SourceMessageID] = true
+			evidence[fact.SourceMessageID] = ""
 		}
 		for _, loop := range patch.OpenLoops {
-			evidence[loop.SourceMessageID] = true
+			evidence[loop.SourceMessageID] = ""
 		}
 		for sourceID := range evidence {
-			var source uuid.UUID
-			err := tx.QueryRow(ctx, `SELECT id FROM conversation_messages WHERE id=$1 AND conversation_id=$2 AND role='user' FOR SHARE`, sourceID, id).Scan(&source)
+			var content string
+			err := tx.QueryRow(ctx, `SELECT content FROM conversation_messages WHERE id=$1 AND conversation_id=$2 AND role='user' FOR SHARE`, sourceID, id).Scan(&content)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return false, ErrInvalidStateEvidence
 			}
 			if err != nil {
+				return false, err
+			}
+			evidence[sourceID] = content
+		}
+		for _, fact := range patch.ReportedFacts {
+			if err := validateFactQuote(fact.Value, evidence[fact.SourceMessageID]); err != nil {
 				return false, err
 			}
 		}

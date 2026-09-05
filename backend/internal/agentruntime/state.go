@@ -16,6 +16,7 @@ var (
 	ErrStateConflict        = errors.New("agentruntime: stale state version")
 	ErrInvalidStatePatch    = errors.New("agentruntime: invalid state patch")
 	ErrInvalidStateEvidence = errors.New("agentruntime: source must be a user message in this conversation")
+	ErrInvalidFactQuote     = errors.New("agentruntime: reported fact value must be a nonempty verbatim quote from its referenced user message")
 )
 
 const (
@@ -25,7 +26,7 @@ const (
 	MaxSkillContentBytes = 8192
 )
 
-// ReportedFact records what a customer said, never independent verification.
+// ReportedFact quotes what a customer said, never a paraphrase or independent verification.
 type ReportedFact struct {
 	Value           string    `json:"value"`
 	SourceMessageID uuid.UUID `json:"source_message_id"`
@@ -67,11 +68,21 @@ func boundedStateText(value string, max int) bool {
 	return strings.TrimSpace(value) != "" && len(value) <= max && utf8.ValidString(value) && !strings.ContainsRune(value, '\x00')
 }
 
+func validateFactQuote(value, sourceContent string) error {
+	if strings.TrimSpace(value) == "" || !strings.Contains(sourceContent, value) {
+		return ErrInvalidFactQuote
+	}
+	return nil
+}
+
 func validateStatePatch(p StatePatch) error {
 	if len(p.ReportedFacts) > MaxReportedFacts || len(p.OpenLoops) > MaxOpenLoops {
 		return fmt.Errorf("%w: too many entries", ErrInvalidStatePatch)
 	}
 	for key, fact := range p.ReportedFacts {
+		if strings.TrimSpace(fact.Value) == "" {
+			return ErrInvalidFactQuote
+		}
 		if !boundedStateText(key, 80) || !boundedStateText(fact.Value, 1024) {
 			return fmt.Errorf("%w: invalid fact", ErrInvalidStatePatch)
 		}

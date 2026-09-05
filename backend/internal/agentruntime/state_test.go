@@ -21,11 +21,38 @@ func TestValidateStatePatch(t *testing.T) {
 		{"missing evidence", StatePatch{ReportedFacts: map[string]ReportedFact{"a": {Value: "yes"}}}, ErrInvalidStateEvidence},
 		{"missing loop evidence", StatePatch{OpenLoops: map[string]OpenLoop{"a": {Question: "when", Status: "open"}}}, ErrInvalidStateEvidence},
 		{"empty key", StatePatch{ReportedFacts: map[string]ReportedFact{" ": {Value: "yes", SourceMessageID: source}}}, ErrInvalidStatePatch},
+		{"empty quote", StatePatch{ReportedFacts: map[string]ReportedFact{"a": {Value: " ", SourceMessageID: source}}}, ErrInvalidFactQuote},
 		{"large value", StatePatch{ReportedFacts: map[string]ReportedFact{"a": {Value: strings.Repeat("x", 1025), SourceMessageID: source}}}, ErrInvalidStatePatch},
 		{"NUL value", StatePatch{ReportedFacts: map[string]ReportedFact{"a": {Value: "x\x00y", SourceMessageID: source}}}, ErrInvalidStatePatch},
 		{"invalid status", StatePatch{OpenLoops: map[string]OpenLoop{"a": {Question: "when", Status: "verified", SourceMessageID: source}}}, ErrInvalidStatePatch},
 	} {
 		t.Run(tc.name, func(t *testing.T) { require.ErrorIs(t, validateStatePatch(tc.patch), tc.want) })
+	}
+}
+
+func TestValidateFactQuote(t *testing.T) {
+	for _, tc := range []struct {
+		name, source, value string
+		valid               bool
+	}{
+		{"exact intent", "Хорошо, напишу в поддержку завтра.", "напишу в поддержку", true},
+		{"whole message", "открывал сам", "открывал сам", true},
+		{"intent is not completion", "Напишу в поддержку", "обратился в поддержку", false},
+		{"invented negation", "открывал сам", "без реферальной привязки", false},
+		{"no case normalization", "Напишу", "напишу", false},
+		{"no whitespace normalization", "уже  пополнил", "уже пополнил", false},
+		{"empty quote", "hello", "", false},
+		{"blank quote", "hello world", " ", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateFactQuote(tc.value, tc.source)
+			if tc.valid {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, ErrInvalidFactQuote)
+				require.Contains(t, err.Error(), "verbatim quote")
+			}
+		})
 	}
 }
 func TestMergeStatePatchPreservesUnrelatedAndCapsAccumulation(t *testing.T) {

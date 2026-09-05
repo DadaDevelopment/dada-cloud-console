@@ -40,14 +40,14 @@ func TestPGStateEvidenceCASAndPause(t *testing.T) {
 		_, err = store.ApplyState(ctx, conv.ID, 0, StatePatch{ReportedFacts: map[string]ReportedFact{"deposit": {Value: "reported", SourceMessageID: id}}})
 		require.ErrorIs(t, err, ErrInvalidStateEvidence)
 	}
-	state, err = store.ApplyState(ctx, conv.ID, 0, StatePatch{ReportedFacts: map[string]ReportedFact{"deposit": {Value: "reported", SourceMessageID: user.ID}}})
+	state, err = store.ApplyState(ctx, conv.ID, 0, StatePatch{ReportedFacts: map[string]ReportedFact{"deposit": {Value: "I deposited", SourceMessageID: user.ID}}})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, state.Version)
 	_, err = store.ApplyState(ctx, conv.ID, 0, StatePatch{OpenLoops: map[string]OpenLoop{"access": {Question: "when", SourceMessageID: user.ID, Status: "open"}}})
 	require.ErrorIs(t, err, ErrStateConflict)
 	state, err = store.ApplyState(ctx, conv.ID, 1, StatePatch{OpenLoops: map[string]OpenLoop{"access": {Question: "when", SourceMessageID: user.ID, Status: "open"}}})
 	require.NoError(t, err)
-	require.Equal(t, "reported", state.ReportedFacts["deposit"].Value)
+	require.Equal(t, "I deposited", state.ReportedFacts["deposit"].Value)
 	_, err = store.MarkPauseCRMSync(ctx, conv.ID, "completed")
 	require.ErrorIs(t, err, ErrInvalidStatePatch)
 	state, err = store.PauseAgent(ctx, conv.ID, "human review")
@@ -59,7 +59,7 @@ func TestPGStateEvidenceCASAndPause(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, version, state.Version)
 	require.Equal(t, "human review", state.PauseReason)
-	state, err = store.ApplyState(ctx, conv.ID, state.Version, StatePatch{ReportedFacts: map[string]ReportedFact{"deposit": {Value: "still only reported", SourceMessageID: user.ID}}})
+	state, err = store.ApplyState(ctx, conv.ID, state.Version, StatePatch{ReportedFacts: map[string]ReportedFact{"deposit": {Value: "deposited", SourceMessageID: user.ID}}})
 	require.NoError(t, err)
 	require.False(t, state.AgentEnabled)
 	state, err = store.MarkPauseCRMSync(ctx, conv.ID, "failed")
@@ -93,7 +93,7 @@ func TestPGStateConcurrentCASAndSkillPersistence(t *testing.T) {
 		wg.Add(1)
 		go func(key string) {
 			defer wg.Done()
-			_, err := store.ApplyState(ctx, conv.ID, 0, StatePatch{ReportedFacts: map[string]ReportedFact{key: {Value: key, SourceMessageID: user.ID}}})
+			_, err := store.ApplyState(ctx, conv.ID, 0, StatePatch{ReportedFacts: map[string]ReportedFact{key: {Value: "hello", SourceMessageID: user.ID}}})
 			results <- err
 		}(key)
 	}
@@ -124,4 +124,54 @@ func TestPGStateConcurrentCASAndSkillPersistence(t *testing.T) {
 	loaded, err := store.GetState(ctx, conv.ID)
 	require.NoError(t, err)
 	require.Equal(t, ActiveSkill{Content: content, Digest: digest}, loaded.ActiveSkills["registration"])
+}
+
+func TestPGStateFactQuotesAreSourceBoundAndPatchAtomic(t *testing.T) {
+	store := setupTestStore(t).(*pgStore)
+	ctx := context.Background()
+	conv := stateTestConversation(t, store)
+	other := stateTestConversation(t, store)
+	account, err := store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "user", Content: "Счёт открывал сам"})
+	require.NoError(t, err)
+	intent, err := store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "user", Content: "Напишу в поддержку завтра"})
+	require.NoError(t, err)
+	foreign, err := store.SaveMessage(ctx, other.ID, SaveMessageInput{Role: "user", Content: "обратился в поддержку"})
+	require.NoError(t, err)
+	assistant, err := store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "assistant", Content: "обратился в поддержку"})
+	require.NoError(t, err)
+	state, err := store.ApplyState(ctx, conv.ID, 0, StatePatch{ReportedFacts: map[string]ReportedFact{
+		"account": {Value: "открывал сам", SourceMessageID: account.ID},
+	}})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name string
+		fact ReportedFact
+		want error
+	}{
+		{"intent becomes completion", ReportedFact{Value: "обратился в поддержку", SourceMessageID: intent.ID}, ErrInvalidFactQuote},
+		{"invented affiliation", ReportedFact{Value: "без реферальной привязки", SourceMessageID: account.ID}, ErrInvalidFactQuote},
+		{"quote belongs to another user message", ReportedFact{Value: "открывал сам", SourceMessageID: intent.ID}, ErrInvalidFactQuote},
+		{"quote in another conversation", ReportedFact{Value: "обратился в поддержку", SourceMessageID: foreign.ID}, ErrInvalidStateEvidence},
+		{"quote from assistant", ReportedFact{Value: "обратился в поддержку", SourceMessageID: assistant.ID}, ErrInvalidStateEvidence},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := store.ApplyState(ctx, conv.ID, state.Version, StatePatch{
+				ReportedFacts: map[string]ReportedFact{
+					"account": {Value: "Счёт открывал сам", SourceMessageID: account.ID},
+					"support": tc.fact,
+				},
+				OpenLoops: map[string]OpenLoop{"support": {Question: "Has support replied?", Status: "open", SourceMessageID: intent.ID}},
+			})
+			require.ErrorIs(t, err, tc.want)
+			reloaded, err := store.GetState(ctx, conv.ID)
+			require.NoError(t, err)
+			require.Equal(t, state, reloaded, "reject the whole patch, including valid entries and version increment")
+		})
+	}
+	state, err = store.ApplyState(ctx, conv.ID, state.Version, StatePatch{ReportedFacts: map[string]ReportedFact{
+		"support_intent": {Value: "Напишу в поддержку завтра", SourceMessageID: intent.ID},
+	}})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, state.Version)
+	require.Equal(t, "Напишу в поддержку завтра", state.ReportedFacts["support_intent"].Value)
 }
