@@ -90,6 +90,13 @@ func (s *Server) handleUpdateState(c *gin.Context) {
 	}
 	state, err := s.runtime.states.ApplyState(c.Request.Context(), conv.ID, req.ExpectedVersion, req.Patch)
 	if err != nil {
+		if errors.Is(err, ErrInvalidFactQuote) {
+			// Keep this repairable validation result visible through GTR HTTP
+			// tools, which discard non-2xx response bodies. Do not expose source
+			// content or raw storage errors.
+			c.JSON(http.StatusOK, gin.H{"updated": false, "error": ErrInvalidFactQuote.Error()})
+			return
+		}
 		code := http.StatusInternalServerError
 		if errors.Is(err, ErrStateConflict) {
 			current, readErr := s.runtime.states.GetState(c.Request.Context(), conv.ID)
