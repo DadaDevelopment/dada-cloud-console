@@ -62,6 +62,12 @@ spec:
             - name: TG_MEDIA_VISION_MODEL
               value: {{ .Values.tgGateway.media.visionModel | quote }}
             {{- end }}
+            {{- if .Values.tgGateway.runtimeSecret }}
+            - name: AGENT_RUNTIME_URL
+              value: {{ required "tgGateway.runtimeURL is required for authenticated runtime" .Values.tgGateway.runtimeURL | quote }}
+            - name: AGENT_RUNTIME_AGENTS
+              value: {{ required "tgGateway.runtimeAgents must explicitly scope authenticated runtime" .Values.tgGateway.runtimeAgents | quote }}
+            {{- end }}
           envFrom:
             - configMapRef:
                 name: {{ include "dada-cloud-console.fullname" . }}-config
@@ -69,6 +75,10 @@ spec:
                 name: {{ default (printf "%s-backend" (include "dada-cloud-console.fullname" .)) .Values.backend.existingSecret }}
             - secretRef:
                 name: {{ default (printf "%s-tg-gateway" (include "dada-cloud-console.fullname" .)) .Values.tgGateway.existingSecret }}
+            {{- with .Values.tgGateway.runtimeSecret }}
+            - secretRef:
+                name: {{ . }}
+            {{- end }}
           readinessProbe:
             httpGet:
               path: /readyz

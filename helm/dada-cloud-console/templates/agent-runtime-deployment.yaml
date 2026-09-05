@@ -38,7 +38,7 @@ spec:
           env:
             - name: AGENT_RUNTIME_PORT
               value: {{ .Values.agentRuntime.service.port | quote }}
-            {{- if .Values.agentRuntime.idleTickSeconds }}
+            {{- if hasKey .Values.agentRuntime "idleTickSeconds" }}
             - name: AGENT_RUNTIME_IDLE_TICK_SECONDS
               value: {{ .Values.agentRuntime.idleTickSeconds | quote }}
             {{- end }}
@@ -46,11 +46,26 @@ spec:
             - name: TG_GATEWAY_OUTBOUND_URL
               value: {{ .Values.agentRuntime.outboundURL | quote }}
             {{- end }}
+            {{- with .Values.agentRuntime.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           envFrom:
             - configMapRef:
                 name: {{ include "dada-cloud-console.fullname" . }}-config
             - secretRef:
                 name: {{ default (printf "%s-backend" (include "dada-cloud-console.fullname" .)) .Values.backend.existingSecret }}
+            {{- with .Values.agentRuntime.existingSecret }}
+            - secretRef:
+                name: {{ . }}
+            {{- end }}
+          {{- if .Values.agentRuntime.agentSkills }}
+          volumeMounts:
+            {{- range $agent, $files := .Values.agentRuntime.agentSkills }}
+            - name: skills-{{ $agent }}
+              mountPath: /etc/agent-runtime/agents/{{ $agent }}/domains
+              readOnly: true
+            {{- end }}
+          {{- end }}
           readinessProbe:
             httpGet:
               path: /health
@@ -69,4 +84,12 @@ spec:
             failureThreshold: 3
           resources:
             {{- toYaml .Values.agentRuntime.resources | nindent 12 }}
+      {{- if .Values.agentRuntime.agentSkills }}
+      volumes:
+        {{- range $agent, $files := .Values.agentRuntime.agentSkills }}
+        - name: skills-{{ $agent }}
+          configMap:
+            name: {{ include "dada-cloud-console.fullname" $ }}-skills-{{ $agent }}
+        {{- end }}
+      {{- end }}
 {{- end }}

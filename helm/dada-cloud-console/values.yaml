@@ -423,6 +423,8 @@ buildAgent:
       memory: 512Mi
 
 tgGateway:
+  runtimeSecret: ""
+  runtimeAgents: ""
   enabled: false
   image:
     repository: dada-cloud-console-tg-gateway
@@ -448,6 +450,10 @@ tgGateway:
     gatewayURL: ""
     visionModel: ""
 agentRuntime:
+  # Runtime controls use a separate service credential; skills contain procedures only.
+  existingSecret: ""
+  extraEnv: []
+  agentSkills: {}
   enabled: false
   image:
     repository: dada-cloud-console-agent-runtime
