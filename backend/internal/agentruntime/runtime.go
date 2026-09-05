@@ -249,24 +249,34 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 	if req.OnProcessing != nil {
 		req.OnProcessing()
 	}
-	reply, err := r.a2a.Send(ctx, run)
-	if err != nil {
-		return MessageResponse{}, fmt.Errorf("a2a send: %w", err)
-	}
-	// A tool may have paused this conversation during the run. Never emit the
-	// generated answer after that transition, even when the model ignored it.
-	after, err := r.states.GetState(ctx, conv.ID)
-	if err != nil {
-		return MessageResponse{}, err
-	}
-	if !after.AgentEnabled {
-		return MessageResponse{Suppressed: true}, nil
-	}
-	if r.structuredAgents[conv.AgentName] {
-		reply, err = renderReplyPlan(reply, after)
+	var reply string
+	for attempt := 0; attempt < 2; attempt++ {
+		reply, err = r.a2a.Send(ctx, run)
+		if err != nil {
+			return MessageResponse{}, fmt.Errorf("a2a send: %w", err)
+		}
+		after, err := r.states.GetState(ctx, conv.ID)
 		if err != nil {
 			return MessageResponse{}, err
 		}
+		if !after.AgentEnabled {
+			return MessageResponse{Suppressed: true}, nil
+		}
+		if !r.structuredAgents[conv.AgentName] {
+			break
+		}
+		rendered, contractErr := renderReplyPlan(reply, after)
+		if contractErr == nil {
+			reply = rendered
+			break
+		}
+		if attempt == 1 {
+			return MessageResponse{}, contractErr
+		}
+		// One bounded protocol repair, same agent/model/context. Never deliver the
+		// invalid draft, never restart lifecycle hooks or contact creation.
+		run.ConversationContext.State = after
+		run.ConversationContext.ReplyError = contractErr.Error()
 	}
 	reply = redactContextToken(reply, token)
 	if _, err := r.store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "assistant", Content: reply}); err != nil {

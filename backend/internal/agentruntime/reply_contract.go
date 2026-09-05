@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 )
 
 const structuredReplyFormat = "referral_reply_v1"
+
+var replyURL = regexp.MustCompile(`https?://[^\s]+`)
 
 // The model chooses the response act; runtime renders the standard question
 // from durable state. This is not a regex classifier of customer intent.
@@ -44,7 +47,7 @@ func renderReplyPlan(raw string, state RuntimeState) (string, error) {
 		}
 		for i, para := range p.Paragraphs {
 			para = strings.TrimSpace(para)
-			if para == "" || utf8.RuneCountInString(para) > 350 || strings.ContainsAny(para, "\n\r?？") {
+			if para == "" || utf8.RuneCountInString(para) > 350 || (strings.ContainsAny(para, "\n\r") || strings.ContainsAny(replyURL.ReplaceAllString(para, ""), "?？")) {
 				return "", fmt.Errorf("paragraph must be short declarative text")
 			}
 			p.Paragraphs[i] = strings.NewReplacer("—", "-", "–", "-").Replace(para)

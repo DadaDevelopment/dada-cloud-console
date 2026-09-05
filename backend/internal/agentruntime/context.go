@@ -13,6 +13,7 @@ import (
 )
 
 type AgentConversationContext struct {
+	ReplyError      string       `json:"reply_error,omitempty"`
 	ReplyFormat     string       `json:"reply_format,omitempty"`
 	ConversationID  string       `json:"conversation_id"`
 	Channel         string       `json:"channel"`

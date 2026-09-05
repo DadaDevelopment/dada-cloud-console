@@ -96,3 +96,30 @@ func TestPGStructuredContractSavesRenderedReplyAndKeepsBadInputPending(t *testin
 	require.Len(t, history, 2)
 	require.Equal(t, out.Text, history[1].Content)
 }
+
+func TestReplyPlanURLQueryIsNotAQuestion(t *testing.T) {
+	out, err := renderReplyPlan(`{"kind":"instruction","paragraphs":["Откройте https://partner.example.test/register?ref=demo ."]}`, RuntimeState{})
+	require.NoError(t, err)
+	require.Contains(t, out, "?ref=demo")
+}
+func TestPGProtocolRepairIsBounded(t *testing.T) {
+	store := setupTestStore(t).(*pgStore)
+	ctx := context.Background()
+	calls := 0
+	agent := "repair-" + uuid.NewString()
+	rt := NewRuntime(store, testHooks{}, runFunc(func(ctx context.Context, run AgentRunRequest) (string, error) {
+		calls++
+		if calls == 1 {
+			require.Empty(t, run.ConversationContext.ReplyError)
+			return "bad reply", nil
+		}
+		require.NotEmpty(t, run.ConversationContext.ReplyError)
+		return `{"kind":"qualification"}`, nil
+	}), nil)
+	rt.contextKey = []byte(testRuntimeToken)
+	rt.structuredAgents = map[string]bool{agent: true}
+	out, err := rt.ProcessMessage(ctx, MessageRequest{AgentName: agent, Channel: "telegram", ExternalID: "42", Messages: []InboundMessage{{Content: "Привет", ChannelMessageID: "1"}}})
+	require.NoError(t, err)
+	require.Equal(t, 2, calls)
+	require.Equal(t, "У вас уже есть опыт торговли на форексе?", out.Text)
+}
