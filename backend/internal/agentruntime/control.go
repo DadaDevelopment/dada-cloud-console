@@ -8,14 +8,32 @@ import (
 	"github.com/gin-gonic/gin"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
 func decodeControl(c *gin.Context, v any) bool {
 	d := json.NewDecoder(c.Request.Body)
 	d.DisallowUnknownFields()
-	if d.Decode(v) != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid control request"})
+	if err := d.Decode(v); err != nil {
+		// Decoder errors may contain rejected field names or values. Return
+		// only a fixed classification and repair instructions, never err.Error().
+		code := "invalid_request_shape"
+		var syntax *json.SyntaxError
+		var mismatch *json.UnmarshalTypeError
+		switch {
+		case errors.As(err, &syntax), errors.Is(err, io.EOF):
+			code = "invalid_json"
+		case errors.As(err, &mismatch):
+			code = "invalid_field_type"
+		case strings.HasPrefix(err.Error(), "json: unknown field "):
+			code = "unknown_field"
+		}
+		hint := "Send one JSON object with only fields defined by the tool schema; preserve each field's declared JSON type."
+		if c.FullPath() == "/tools/update-state" {
+			hint += " expected_version must be an integer. reported_facts and open_loops must be objects, not JSON strings. Each source_message_id must be the exact incoming_messages[].id UUID of a user message in this conversation, never a channel message ID."
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"updated": false, "error": "invalid control request", "error_code": code, "hint": hint})
 		return false
 	}
 	if d.Decode(new(any)) != io.EOF {
@@ -109,8 +127,15 @@ func (s *Server) handleUpdateState(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"updated": false, "error": "state version conflict", "state": current})
 			return
 		}
-		if errors.Is(err, ErrInvalidStatePatch) || errors.Is(err, ErrInvalidStateEvidence) {
-			code = http.StatusBadRequest
+		if errors.Is(err, ErrInvalidStateEvidence) {
+			c.JSON(http.StatusBadRequest, gin.H{"updated": false, "error": "invalid state evidence", "error_code": "invalid_source_message",
+				"hint": "Use the exact incoming_messages[].id UUID of a user message in this conversation as source_message_id. Do not use channel_message_id, an assistant message, or an invented UUID."})
+			return
+		}
+		if errors.Is(err, ErrInvalidStatePatch) {
+			c.JSON(http.StatusBadRequest, gin.H{"updated": false, "error": "invalid state patch", "error_code": "invalid_patch",
+				"hint": "Use at most 64 reported_facts and 32 open_loops, including existing entries. Keys must be nonempty and at most 80 bytes. Fact values and questions must be nonempty and at most 1024 bytes, without NUL characters. Each loop status must be open or resolved."})
+			return
 		}
 		c.JSON(code, gin.H{"error": "state update rejected", "refresh_context": code == http.StatusConflict})
 		return
