@@ -5,12 +5,20 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"github.com/gin-gonic/gin"
 	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
 )
+
+// All arguments are fixed runtime descriptions, never submitted values or errors.
+func rejectControl(c *gin.Context, code, message, hint string) {
+	log.Warn().Str("error_code", code).Msg("agentruntime: control request rejected")
+	c.JSON(http.StatusBadRequest, gin.H{"updated": false, "error": message, "error_code": code, "hint": hint})
+}
 
 func decodeControl(c *gin.Context, v any) bool {
 	d := json.NewDecoder(c.Request.Body)
@@ -33,11 +41,11 @@ func decodeControl(c *gin.Context, v any) bool {
 		if c.FullPath() == "/tools/update-state" {
 			hint += " expected_version must be an integer. reported_facts and open_loops must be objects, not JSON strings. Each source_message_id must be the exact incoming_messages[].id UUID of a user message in this conversation, never a channel message ID."
 		}
-		c.JSON(http.StatusBadRequest, gin.H{"updated": false, "error": "invalid control request", "error_code": code, "hint": hint})
+		rejectControl(c, code, "invalid control request", hint)
 		return false
 	}
 	if d.Decode(new(any)) != io.EOF {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "unexpected trailing data"})
+		rejectControl(c, "trailing_data", "unexpected trailing data", "Send exactly one JSON object without trailing content.")
 		return false
 	}
 	return true
@@ -128,13 +136,13 @@ func (s *Server) handleUpdateState(c *gin.Context) {
 			return
 		}
 		if errors.Is(err, ErrInvalidStateEvidence) {
-			c.JSON(http.StatusBadRequest, gin.H{"updated": false, "error": "invalid state evidence", "error_code": "invalid_source_message",
-				"hint": "Use the exact incoming_messages[].id UUID of a user message in this conversation as source_message_id. Do not use channel_message_id, an assistant message, or an invented UUID."})
+			rejectControl(c, "invalid_source_message", "invalid state evidence",
+				"Use the exact incoming_messages[].id UUID of a user message in this conversation as source_message_id. Do not use channel_message_id, an assistant message, or an invented UUID.")
 			return
 		}
 		if errors.Is(err, ErrInvalidStatePatch) {
-			c.JSON(http.StatusBadRequest, gin.H{"updated": false, "error": "invalid state patch", "error_code": "invalid_patch",
-				"hint": "Use at most 64 reported_facts and 32 open_loops, including existing entries. Keys must be nonempty and at most 80 bytes. Fact values and questions must be nonempty and at most 1024 bytes, without NUL characters. Each loop status must be open or resolved."})
+			rejectControl(c, "invalid_patch", "invalid state patch",
+				"Use at most 64 reported_facts and 32 open_loops, including existing entries. Keys must be nonempty and at most 80 bytes. Fact values and questions must be nonempty and at most 1024 bytes, without NUL characters. Each loop status must be open or resolved.")
 			return
 		}
 		c.JSON(code, gin.H{"error": "state update rejected", "refresh_context": code == http.StatusConflict})

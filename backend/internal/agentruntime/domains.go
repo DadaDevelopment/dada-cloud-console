@@ -53,7 +53,7 @@ func (p *fileDomainProvider) GetDomain(ctx context.Context, agentName, domain st
 		return "", fmt.Errorf("skill not found")
 	}
 	rel, err := filepath.Rel(root, path)
-	if err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
 		return "", fmt.Errorf("skill outside agent directory")
 	}
 	content, err := os.ReadFile(path)
