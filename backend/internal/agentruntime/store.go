@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -363,4 +364,42 @@ func (s *pgStore) ClearIdleFlag(ctx context.Context, conversationID uuid.UUID) e
 		WHERE id = $1
 	`, conversationID)
 	return err
+}
+
+// MarkRuntimeHandled records a completed runtime result, not Telegram delivery.
+// A transport delivery acknowledgement is outside this service. A retry reuses pending source messages instead of silently dropping them.
+func (s *pgStore) MarkRuntimeHandled(ctx context.Context, messages []Message) error {
+	if len(messages) == 0 {
+		return nil
+	}
+	ids := make([]uuid.UUID, 0, len(messages))
+	for _, m := range messages {
+		ids = append(ids, m.ID)
+	}
+	_, err := s.pool.Exec(ctx, `UPDATE conversation_messages SET metadata=metadata || '{"runtime_handled":true}'::jsonb WHERE conversation_id=$1 AND id=ANY($2) AND role='user'`, messages[0].ConversationID, ids)
+	return err
+}
+
+// PendingRuntimeMessages reads unhandled input independently of recent history;
+// a burst longer than the transcript window must never silently lose its start.
+func (s *pgStore) PendingRuntimeMessages(ctx context.Context, id uuid.UUID) ([]Message, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+messageColumns+` FROM conversation_messages
+		WHERE conversation_id=$1 AND role='user' AND NOT metadata @> '{"runtime_handled":true}'::jsonb
+		ORDER BY created_at, id LIMIT 101`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var messages []Message
+	for rows.Next() {
+		m, err := scanMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		messages = append(messages, m)
+	}
+	if len(messages) > 100 {
+		return nil, fmt.Errorf("pending message backlog exceeds 100; retained for recovery")
+	}
+	return messages, rows.Err()
 }

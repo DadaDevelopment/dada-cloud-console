@@ -2,8 +2,12 @@ package agentruntime
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
+	"os"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,10 +17,13 @@ import (
 )
 
 type Server struct {
-	runtime   *Runtime
-	pool      *pgxpool.Pool
-	a2a       A2AClient
-	scheduler *IdleScheduler
+	runtime        *Runtime
+	pool           *pgxpool.Pool
+	a2a            A2AClient
+	scheduler      *IdleScheduler
+	token          string
+	pauseCRM       PauseCRM
+	pauseSyncLocks [64]sync.Mutex
 }
 
 func NewServer(pool *pgxpool.Pool, gitopsBasePath string) *Server {
@@ -27,7 +34,9 @@ func NewServer(pool *pgxpool.Pool, gitopsBasePath string) *Server {
 
 	runtime := NewRuntime(store, hooks, a2a, domains)
 
-	return &Server{runtime: runtime, pool: pool, a2a: a2a}
+	token := os.Getenv("AGENT_RUNTIME_TOKEN")
+	runtime.contextKey = []byte(token)
+	return &Server{runtime: runtime, pool: pool, a2a: a2a, token: token, pauseCRM: NewHTTPPauseCRM(os.Getenv("AGENT_PAUSE_CRM_URL"), os.Getenv("AGENT_PAUSE_CRM_TOKEN"), os.Getenv("AGENT_PAUSE_CRM_STATUS"))}
 }
 
 // StartIdleScheduler launches the proactive-invocation loop. idleTickSeconds
@@ -48,12 +57,31 @@ func (s *Server) StartIdleScheduler(ctx context.Context, idleTickSeconds int, ou
 }
 
 func (s *Server) Handler() http.Handler {
-	r := gin.Default()
-	r.POST("/message", s.handleMessage)
+	r := gin.New()
+	r.Use(gin.Recovery())
 	r.GET("/health", s.handleHealth)
-	r.POST("/hooks", s.handleCreateHook)
-	r.GET("/hooks", s.handleListHooks)
-	r.DELETE("/hooks/:id", s.handleDeleteHook)
+	protected := r.Group("/")
+	protected.Use(func(c *gin.Context) {
+		supplied := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
+		if len(s.token) < 32 {
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "runtime authentication not configured"})
+			return
+		}
+		if !strings.HasPrefix(c.GetHeader("Authorization"), "Bearer ") || subtle.ConstantTimeCompare([]byte(supplied), []byte(s.token)) != 1 {
+			c.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 128<<10)
+		c.Next()
+	})
+	protected.POST("/message", s.handleMessage)
+	protected.POST("/tools/load-skill", s.handleLoadSkill)
+	protected.POST("/tools/update-state", s.handleUpdateState)
+	protected.POST("/tools/stop-agent", s.handleStopAgent)
+	protected.POST("/hooks", s.handleCreateHook)
+	protected.GET("/hooks", s.handleListHooks)
+	protected.DELETE("/hooks/:id", s.handleDeleteHook)
+
 	return r
 }
 
@@ -186,6 +214,7 @@ type inboundMessageJSON struct {
 }
 
 type messageResponse struct {
+	Suppressed              bool   `json:"suppressed,omitempty"`
 	Text                    string `json:"text"`
 	ReplyToChannelMessageID string `json:"reply_to_channel_message_id,omitempty"`
 }
@@ -228,7 +257,7 @@ func (s *Server) handleMessage(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, messageResponse{Text: resp.Text, ReplyToChannelMessageID: resp.ReplyToChannelMessageID})
+	c.JSON(http.StatusOK, messageResponse{Text: resp.Text, ReplyToChannelMessageID: resp.ReplyToChannelMessageID, Suppressed: resp.Suppressed})
 }
 
 func (s *Server) handleHealth(c *gin.Context) {

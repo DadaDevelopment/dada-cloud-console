@@ -13,7 +13,7 @@ import (
 
 type fakeA2AIdle struct{ reply string }
 
-func (f fakeA2AIdle) Send(ctx context.Context, agentName string, messages []Message) (string, error) {
+func (f fakeA2AIdle) Send(ctx context.Context, run AgentRunRequest) (string, error) {
 	return f.reply, nil
 }
 
@@ -59,6 +59,7 @@ func TestIdleScheduler_InvokesOncePerIdlePeriod(t *testing.T) {
 	}}
 
 	rt := NewRuntime(store, &noopHooks{}, fakeA2AIdle{reply: "возвращаюсь к вашему вопросу"}, nil)
+	rt.contextKey = []byte(testRuntimeToken)
 	sched := NewIdleScheduler(store.(*pgStoreAlias).pool, rt, fakeA2AIdle{reply: "возвращаюсь к вашему вопросу"}, outbound, time.Second)
 
 	if err := sched.Tick(ctx); err != nil {
@@ -115,6 +116,7 @@ func TestClearIdleFlag(t *testing.T) {
 }
 
 func TestHooksAPI_CRUD(t *testing.T) {
+	t.Setenv("AGENT_RUNTIME_TOKEN", testRuntimeToken)
 	store := setupTestStore(t)
 	ctx := context.Background()
 	agentName := "hooks-api-" + uuid.NewString()[:8]
@@ -136,6 +138,7 @@ func TestHooksAPI_CRUD(t *testing.T) {
 		"action_config": {"agent_message": "вернись к вопросу"}
 	}`))
 	rec := httptest.NewRecorder()
+	req.Header.Set("Authorization", "Bearer "+testRuntimeToken)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("create hook: status %d body %s", rec.Code, rec.Body.String())
@@ -143,6 +146,7 @@ func TestHooksAPI_CRUD(t *testing.T) {
 
 	req, _ = http.NewRequest(http.MethodGet, "/hooks?agent_name="+agentName, nil)
 	rec = httptest.NewRecorder()
+	req.Header.Set("Authorization", "Bearer "+testRuntimeToken)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "follow-up-30m") {
 		t.Fatalf("list hooks must include the created hook, got %d %s", rec.Code, rec.Body.String())
@@ -150,6 +154,7 @@ func TestHooksAPI_CRUD(t *testing.T) {
 
 	req, _ = http.NewRequest(http.MethodDelete, "/hooks/nonexistent-id", nil)
 	rec = httptest.NewRecorder()
+	req.Header.Set("Authorization", "Bearer "+testRuntimeToken)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("delete of unknown hook must 404, got %d", rec.Code)
