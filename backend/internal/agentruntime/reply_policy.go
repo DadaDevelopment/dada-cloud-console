@@ -64,3 +64,19 @@ func explicitStop(messages []InboundMessage) bool {
 	}
 	return false
 }
+
+// finishCommand is the platform-level reset: a whole message that is exactly
+// /finish, optionally addressed to a specific bot (/finish@some_bot). Text that
+// merely mentions the command, or carries anything besides it, does not match.
+func finishCommand(messages []InboundMessage) bool {
+	for _, m := range messages {
+		t := strings.ToLower(strings.TrimSpace(m.Content))
+		if t == "/finish" {
+			return true
+		}
+		if strings.HasPrefix(t, "/finish@") && !strings.ContainsAny(t, " \t\n") {
+			return true
+		}
+	}
+	return false
+}

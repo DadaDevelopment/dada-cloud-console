@@ -108,6 +108,13 @@ func NewRuntime(store ConversationStore, hooks HookExecutor, a2a A2AClient, doma
 	}
 }
 
+// finishAcknowledgement is the only reply the platform itself ever authors on
+// the message path; the agent is not consulted, since its memory is exactly
+// what /finish discards.
+const finishAcknowledgement = "Готово. Я забыл этот диалог целиком — следующее сообщение начнёт разговор с нуля."
+
+const finishAuditNote = "conversation finished by user command"
+
 func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (MessageResponse, error) {
 	if len(req.Messages) == 0 || req.AgentName == "" || req.Channel == "" || req.ExternalID == "" {
 		return MessageResponse{}, fmt.Errorf("agent, channel, identity and messages are required")
@@ -148,6 +155,18 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 			return MessageResponse{}, err
 		}
 		fresh = append(fresh, saved)
+	}
+	// The reset is checked ahead of the pause gate on purpose: a paused
+	// conversation must still be resettable by its own user, otherwise the only
+	// way out of a pause is an operator with database access.
+	if finishCommand(req.Messages) {
+		if _, err := r.store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "system", Content: finishAuditNote}); err != nil {
+			return MessageResponse{}, err
+		}
+		if err := r.store.FinishConversation(ctx, conv.ID); err != nil {
+			return MessageResponse{}, fmt.Errorf("finish conversation: %w", err)
+		}
+		return MessageResponse{Text: finishAcknowledgement, ReplyToChannelMessageID: anchor}, nil
 	}
 	if r.contacts != nil {
 		if err := r.contacts.Ensure(ctx, conv); err != nil {

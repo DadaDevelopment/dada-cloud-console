@@ -109,6 +109,11 @@ type ConversationStore interface {
 	// idle_fired_at metadata key so a conversation.active->idle transition
 	// can fire again after real user activity.
 	ClearIdleFlag(ctx context.Context, conversationID uuid.UUID) error
+
+	// FinishConversation retires a conversation without deleting it: history and
+	// state rows stay for audit, but the identity tuple is released so the next
+	// inbound message from the same user opens a fresh conversation.
+	FinishConversation(ctx context.Context, conversationID uuid.UUID) error
 }
 
 type pgStore struct {
@@ -132,7 +137,7 @@ func (s *pgStore) GetOrCreateConversation(ctx context.Context, agentName, channe
 		WITH inserted AS (
 			INSERT INTO conversations (agent_name, channel, external_id, actor_external_id, actor_username, actor_metadata)
 			VALUES ($1, $2, $3, $4, $5, $6)
-			ON CONFLICT (agent_name, channel, external_id) DO NOTHING
+			ON CONFLICT (agent_name, channel, external_id) WHERE status = 'active' DO NOTHING
 			RETURNING id, agent_name, channel, external_id, actor_external_id, actor_username, actor_metadata, metadata, status, created_at, updated_at, true AS created
 		)
 		SELECT id, agent_name, channel, external_id, actor_external_id, actor_username, actor_metadata, metadata, status, created_at, updated_at, COALESCE(created, false)
@@ -140,7 +145,7 @@ func (s *pgStore) GetOrCreateConversation(ctx context.Context, agentName, channe
 		UNION ALL
 		SELECT id, agent_name, channel, external_id, actor_external_id, actor_username, actor_metadata, metadata, status, created_at, updated_at, false
 		FROM conversations
-		WHERE agent_name = $1 AND channel = $2 AND external_id = $3
+		WHERE agent_name = $1 AND channel = $2 AND external_id = $3 AND status = 'active'
 		LIMIT 1
 	`, agentName, channel, externalID, actor.ExternalID, actor.Username, actorMeta).Scan(
 		&conv.ID, &conv.AgentName, &conv.Channel, &conv.ExternalID,
@@ -178,6 +183,11 @@ func (s *pgStore) UpdateMetadata(ctx context.Context, id uuid.UUID, metadata map
 	_, err = s.pool.Exec(ctx, `
 		UPDATE conversations SET metadata = $2, updated_at = NOW() WHERE id = $1
 	`, id, metaJSON)
+	return err
+}
+
+func (s *pgStore) FinishConversation(ctx context.Context, id uuid.UUID) error {
+	_, err := s.pool.Exec(ctx, `UPDATE conversations SET status = 'finished', updated_at = NOW() WHERE id = $1`, id)
 	return err
 }
 
