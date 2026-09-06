@@ -30,7 +30,7 @@ spec:
       {{- end }}
       containers:
         - name: agent-runtime
-          image: "{{ .Values.global.imageRegistry }}/{{ .Values.agentRuntime.image.repository }}:{{ .Values.agentRuntime.image.tag }}"
+          image: "{{ .Values.global.imageRegistry }}/{{ .Values.agentRuntime.image.repository }}:{{ default .Values.agentRuntime.image.tag .Values.agentRuntime.image.pinnedTag }}"
           imagePullPolicy: {{ .Values.agentRuntime.image.pullPolicy }}
           ports:
             - name: http

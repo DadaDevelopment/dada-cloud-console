@@ -429,6 +429,8 @@ tgGateway:
   image:
     repository: dada-cloud-console-tg-gateway
     tag: "latest"
+    # Optional component release pin; takes precedence over CI's shared tag.
+    pinnedTag: ""
     pullPolicy: IfNotPresent
   service:
     port: 8082
@@ -458,6 +460,8 @@ agentRuntime:
   image:
     repository: dada-cloud-console-agent-runtime
     tag: "latest"
+    # Optional component release pin; takes precedence over CI's shared tag.
+    pinnedTag: ""
     pullPolicy: IfNotPresent
   service:
     port: 8083

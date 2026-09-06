@@ -30,7 +30,7 @@ spec:
       {{- end }}
       containers:
         - name: tg-gateway
-          image: "{{ .Values.global.imageRegistry }}/{{ .Values.tgGateway.image.repository }}:{{ .Values.tgGateway.image.tag }}"
+          image: "{{ .Values.global.imageRegistry }}/{{ .Values.tgGateway.image.repository }}:{{ default .Values.tgGateway.image.tag .Values.tgGateway.image.pinnedTag }}"
           imagePullPolicy: {{ .Values.tgGateway.image.pullPolicy }}
           ports:
             - name: http
