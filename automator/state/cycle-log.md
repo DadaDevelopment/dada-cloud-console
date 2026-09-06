@@ -6568,3 +6568,47 @@ send_failures=0), но поведенческий тест невозможен 
 - Snapshot-коллектор жив: max(last_synced_at)=now на pg-shard (ложная
   тревога снята; на postgresql-0 лежит старая копия таблицы).
 Время: ~50 мин.
+
+## 2026-09-06 06:xx-07:1x UTC (cron, sess-0906a)
+- P0 ГЛАВНОЕ: CI ВОССТАНОВЛЕН. jenkins-home был взят свежим 09-05 (jobs/ пуст,
+  DADA-GH/dada-build не существуют) - но в Longhorn-бэкапах нашёлся
+  НЕПОВРЕЖДЁННЫЙ слепок ДО-рероллового jenkins-home: volume
+  pvc-62cbc693, последний бэкап backup-a6f9922c41d64cf0 09-04 05:01Z.
+  Восстановил во временный том (Volume CR с fromBackup -> PV/PVC -> inspect-под,
+  restore подтверждён содержимым: 534 плагина, jobs DADA-GH/dada-build/DEVOPS,
+  users, master.key), скопировал jobs+secrets+users+nodes+config+plugins в
+  живой PVC, рестарт пода. Верdict [live]: GET /api/json = 200 c jobs,
+  dada-build 200, DADA-GH индексируется, job main существует (color notbuilt).
+  Спорный момент runbook "jenkins-home taken fresh after churn races" - свежий
+  дом потерял ВСЁ; восстановление из бэкапа 09-04 (день реролла, до потери)
+  оказалось чистым. Раннбук jenkins-home-longhorn-resilience дополнить
+  веткой "fresh vs restore-from-backup".
+- P0 ИЕРАРХИЯ №1: 3 юзерских билда сгорели в platform_error во время outage
+  (fanvk/artem attempt=6 - бюджет PlatformRecoveryMaxAttempts ИСТРАЧЕН,
+  авто-recovery их больше не возьмёт; nav/yzfy; tg-agent-tools). Ручной requeue
+  по образцу RetryPlatformFailedBuilds (новейший по группе, attempt=1) ->
+  ВСЕ 3 SUCCESS [live psql + kubectl]: fanvk задеплоен (new RS, домен 200),
+  nav (юзер yzfy, рег 09-05, ни одного усп. билда до этого) Running 1/1,
+  tg-agent-tools Running. Урок: recovery-бюджет attempt<6 не переживает
+  длинный outage - нужен сброс бюджета при восстановлении платформы (backlog).
+- ГЕЙТЫ: probe-prod-access ЗЕЛЁНЫЙ, probe-main-build MAIN-BUILDS (origin/main
+  80d17218 собирается), delivery: prod 4c29da11 vs main - дельта 162 строк
+  (agent-runtime wiring работает из ручного образа d476ba53).
+- Пульс [live pulse-remote]: fresh 20 мин; not_ready 10 (наши: telemost-task-tools,
+  profi, portainer, fluent-bit, genagent, searxng - большинство инстра-собственные
+  после реролла; юзерские: gulyaev, smart-tender, fonbet, reels-task-tools);
+  failed_builds 5 (некому билдить - теперь CI снова жив); new_users_24h=1
+  (yzfy - АКТИВИРОВАЛСЯ через upload после моего requeue!), feedback 0.
+- Audit-разбор 24ч: artempro2021 6 авто-ретраев fanvk 17:09-18:00 ВСЕ platform_error
+  (403 crumb - Jenkins мёртв) - юзер смотрел логи, ушёл. yzfy:SignUp 09:07 ->
+  upload 09:08 -> 2 failure -> DeleteApp -> re-upload -> failure x6 -> DeleteApp
+  pending (терминал = удаление аппа!). wgck: 3 failure. ВСЕ failure =
+  platform_error/crumb 403, не юзерский код. После requeue yzfy получил
+  success. Пути в audit-path-graph.md.
+- ГИГИЕНА: jh-inspect том/под/PVC удалены (A5), арго-каскад refrozen->unfrozen
+  корректно (dada-root/github-appsets automated=True подтверждено), кронтаб не трогал.
+- НЕ ЗАКРЫТО: билд main в очереди - CI-под 3136Mi (трим 012631b9 запушен)
+  не влезает в кластер (юзерские аппы съели headroom после реролла) ->
+  эскалация ёмкости в owner-actions. Доставка main в прод снова ЗАВИСИТ от
+  Jenkins; agent-runtime в проде работает на ручном образе d476ba53.
+Время: ~70 мин.
