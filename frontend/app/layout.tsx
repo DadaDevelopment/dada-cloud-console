@@ -3,7 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { headers } from "next/headers";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
-import { YandexMetrika } from "@/components/yandex-metrika";
+import { CookieConsent } from "@/components/cookie-consent";
 import { UxTelemetryProvider } from "@/components/ux-telemetry-provider";
 import { describePath, SITE_NAME } from "@/lib/page-title";
 
@@ -64,7 +64,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang={lang} className={`${geist.variable} ${geistMono.variable} h-full`}>
       <body className="h-full bg-gray-50 antialiased">
-        <YandexMetrika />
+        <CookieConsent lang={lang} />
         <UxTelemetryProvider />
         <AuthProvider>{children}</AuthProvider>
       </body>

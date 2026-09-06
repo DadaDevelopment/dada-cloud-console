@@ -32,7 +32,7 @@ const CONTACT = "hello@dada-tuda.ru";
 
 const privacyRu: LegalDocData = {
   title: "Политика обработки персональных данных",
-  updated: "Обновлено: 15 июля 2026",
+  updated: "Обновлено: 6 сентября 2026",
   intro:
     "Настоящая Политика описывает, какие данные обрабатывает облачная платформа DADA Cloud (cloud.dada-tuda.ru), с какой целью и на каком основании, где они хранятся и какие права есть у пользователя. Обработка данных граждан Российской Федерации ведётся на серверах, расположенных на территории России, в соответствии с Федеральным законом № 152-ФЗ «О персональных данных».",
   sections: [
@@ -83,8 +83,12 @@ const privacyRu: LegalDocData = {
     {
       heading: "6. Cookie и трекинг",
       body: [
-        "Мы используем cookie для аутентификации, сохранения настроек и аналитики. Cookie Яндекс.Метрики и dada_uid применяются для измерения аудитории.",
-        "Вы можете отключить аналитические cookie в настройках браузера или через механизмы отказа Яндекс.Метрики. Отключение части cookie может ограничить работу отдельных функций сайта.",
+        "При первом посещении сайта мы показываем баннер с выбором категорий обрабатываемых данных. Аналитические cookie и счётчик Яндекс.Метрики не загружаются и не устанавливаются до тех пор, пока вы не дадите согласие отдельным действием — нажатием кнопки «Принять все» или сохранением выбора в настройках. Отказ от аналитических cookie не ограничивает доступ к сайту.",
+        "Технически необходимые cookie: dada_cc — хранит ваш выбор категорий, идентификатор согласия и его дату, срок 182 дня; сессионные cookie аутентификации — срок сессии или до выхода из аккаунта; dada_uid — псевдонимный идентификатор пользователя (UUID) для связывания действий на сайте, срок до 1 года.",
+        "Аналитические cookie (устанавливаются только после согласия): _ym_uid — идентификатор посетителя Яндекс.Метрики, срок до 1 года; _ym_d — дата первого визита, срок до 1 года; _ym_isad — признак блокировщика рекламы, срок до 2 суток; _ym_visorc — техническая cookie Вебвизора, срок 30 минут.",
+        "Обработка данных Яндекс.Метрики осуществляется ООО «Яндекс» по поручению оператора в соответствии с ч. 3 ст. 6 Федерального закона № 152-ФЗ на серверах, расположенных на территории Российской Федерации. Трансграничная передача персональных данных не осуществляется.",
+        "Отозвать согласие можно в любой момент через ссылку «Настройки cookie» в нижней части любой страницы сайта: снимите отметку с аналитической категории и сохраните выбор — ранее установленные cookie Яндекс.Метрики будут удалены. Дополнительно вы можете использовать «Блокировщик Яндекс.Метрики» — расширение браузера, отключающее сбор данных на всех сайтах со счётчиком: https://yandex.ru/support/metrica/general/opt-out.html",
+        "Также вы можете отключить или удалить cookie в настройках браузера. Отключение технически необходимых cookie может ограничить работу отдельных функций сайта.",
       ],
     },
     {
@@ -175,7 +179,7 @@ const termsRu: LegalDocData = {
 
 const privacyEn: LegalDocData = {
   title: "Privacy Policy",
-  updated: "Updated: 15 July 2026",
+  updated: "Updated: 6 September 2026",
   intro:
     "This Policy describes what data the DADA Cloud platform (cloud.dada-tuda.ru) processes, why, where it is stored, and what rights you have. Personal data of Russian citizens is processed on servers located in Russia in accordance with Federal Law No. 152-FZ on Personal Data.",
   sections: [
@@ -226,8 +230,12 @@ const privacyEn: LegalDocData = {
     {
       heading: "6. Cookies and tracking",
       body: [
-        "We use cookies for authentication, saving preferences, and analytics. Yandex.Metrika and dada_uid cookies are used for audience measurement.",
-        "You can disable analytics cookies in your browser settings or via Yandex.Metrika opt-out mechanisms. Disabling some cookies may limit certain site features.",
+        "On your first visit we show a banner letting you choose which categories of data may be processed. Analytics cookies and the Yandex.Metrika counter are neither loaded nor set until you consent by a separate affirmative action — clicking \"Accept all\" or saving your choice in the settings. Refusing analytics cookies does not restrict access to the site.",
+        "Strictly necessary cookies: dada_cc — stores your category choice, the consent id and its timestamp, 182 days; authentication session cookies — for the session or until you sign out; dada_uid — pseudonymous user identifier (UUID) linking actions on the site, up to 1 year.",
+        "Analytics cookies (set only after consent): _ym_uid — Yandex.Metrika visitor id, up to 1 year; _ym_d — first visit date, up to 1 year; _ym_isad — ad-blocker flag, up to 2 days; _ym_visorc — Webvisor technical cookie, 30 minutes.",
+        "Yandex.Metrika data is processed by Yandex LLC on the operator's instruction under art. 6(3) of Federal Law 152-FZ, on servers located in the Russian Federation. No cross-border transfer of personal data takes place.",
+        "You can withdraw consent at any time via the \"Cookie settings\" link in the footer of any page: clear the analytics category and save — previously set Yandex.Metrika cookies are then deleted. You can also use the Yandex Metrika blocker, a browser extension that disables collection on every site running the counter: https://yandex.ru/support/metrica/general/opt-out.html",
+        "You can also disable or delete cookies in your browser settings. Disabling strictly necessary cookies may limit certain site features.",
       ],
     },
     {

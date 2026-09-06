@@ -106,6 +106,13 @@ export function MarketingFooter() {
                 {l.label}
               </Link>
             ))}
+            <button
+              type="button"
+              data-cc="show-preferencesModal"
+              className="transition-colors hover:text-white"
+            >
+              {locale === "ru" ? "Настройки cookie" : "Cookie settings"}
+            </button>
           </div>
         </div>
       </div>

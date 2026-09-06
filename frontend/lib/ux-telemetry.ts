@@ -75,7 +75,8 @@ export type UxEventType =
   | "visibility"
   | "error_shown"
   | "goal"
-  | "view";
+  | "view"
+  | "consent";
 
 interface UxEvent {
   type: UxEventType;

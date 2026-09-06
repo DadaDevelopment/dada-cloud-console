@@ -34,6 +34,7 @@ var uxEventTypes = map[string]bool{
 	"error_shown":   true,
 	"goal":          true,
 	"view":          true,
+	"consent":       true,
 }
 
 // Field caps and batch bounds. The ingest is unauthenticated, so everything
@@ -183,7 +184,7 @@ const uxTargetPrefixMax = 16
 //
 // @ID          recordUXEvents
 // @Summary     Record client-side UX events
-// @Description Ingests a batch of browser UX events (session_start, pageview, click, input_commit, nav_leave, visibility, error_shown, view) into ux_events, the client-side half of the end-to-end path that audit_events cannot see. Unauthenticated so the pre-login part of the journey is captured; the user is resolved server-side from the dada_uid cookie, never from the payload. Rate-limited per client IP and globally, body and batch size capped, event names checked against a closed set. Carries control names and paths only -- never field values.
+// @Description Ingests a batch of browser UX events (session_start, pageview, click, input_commit, nav_leave, visibility, error_shown, view, consent) into ux_events, the client-side half of the end-to-end path that audit_events cannot see. Unauthenticated so the pre-login part of the journey is captured; the user is resolved server-side from the dada_uid cookie, never from the payload. Rate-limited per client IP and globally, body and batch size capped, event names checked against a closed set. Carries control names and paths only -- never field values.
 // @Tags        telemetry
 // @Accept      json
 // @Produce     json
