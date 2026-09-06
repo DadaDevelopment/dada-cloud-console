@@ -30,6 +30,17 @@ func TestReplyPlanUsesStateNotModelQuestion(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "Первое - факт.\n\nВторой абзац.", out)
 }
+func TestReplyPlanAcceptsOnlyExactRedundantQuestion(t *testing.T) {
+	state := RuntimeState{ReportedFacts: map[string]ReportedFact{"experience": {Value: "Новичок"}}}
+	question := "На какой доход в месяц вы ориентируетесь?"
+	out, err := renderReplyPlan(fmt.Sprintf(`{"kind":"qualification","question":%q}`, question), state)
+	require.NoError(t, err)
+	require.Equal(t, question, out)
+	for _, wrong := range []string{"У вас уже есть опыт торговли на форексе?", "Отлично. " + question} {
+		_, err = renderReplyPlan(fmt.Sprintf(`{"kind":"qualification","question":%q}`, wrong), state)
+		require.Error(t, err)
+	}
+}
 func TestExplicitStopCommandsAndCounterexamples(t *testing.T) {
 	for _, text := range []string{"Больше мне не отвечайте. Остановите ответы в этом чате.", "Пожалуйста, не пишите мне!", "Прекратите писать"} {
 		require.True(t, explicitStop([]InboundMessage{{Content: text}}), text)

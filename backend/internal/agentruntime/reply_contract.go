@@ -32,11 +32,14 @@ func renderReplyPlan(raw string, state RuntimeState) (string, error) {
 	}
 	switch p.Kind {
 	case "qualification":
-		if len(p.Paragraphs) > 0 || p.Question != "" {
+		if len(p.Paragraphs) > 0 {
 			return "", fmt.Errorf("qualification accepts no generated prose")
 		}
 		for _, row := range []struct{ key, text string }{{"experience", "У вас уже есть опыт торговли на форексе?"}, {"target", "На какой доход в месяц вы ориентируетесь?"}, {"blocker", "Что вам сейчас нужно, чтобы двигаться дальше?"}} {
 			if f, ok := state.ReportedFacts[row.key]; !ok || strings.TrimSpace(f.Value) == "" {
+				if p.Question != "" && p.Question != row.text {
+					return "", fmt.Errorf("qualification question does not match current state")
+				}
 				return row.text, nil
 			}
 		}
