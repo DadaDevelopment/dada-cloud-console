@@ -104,6 +104,19 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 		return MessageResponse{}, fmt.Errorf("get or create conversation: %w", err)
 	}
 
+	// The reset is answered by the platform itself: no hook, no history, no
+	// model call. Everything below this point works on a conversation the user
+	// has just asked to be forgotten.
+	if finishCommand(req.Messages) {
+		if _, err := r.store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "system", Content: finishAuditNote}); err != nil {
+			return MessageResponse{}, fmt.Errorf("save finish note: %w", err)
+		}
+		if err := r.store.FinishConversation(ctx, conv.ID); err != nil {
+			return MessageResponse{}, fmt.Errorf("finish conversation: %w", err)
+		}
+		return MessageResponse{Text: finishAcknowledgement, ReplyToChannelMessageID: replyAnchor(req.Messages)}, nil
+	}
+
 	if created {
 		if err := r.hooks.Execute(ctx, "conversation.created", conv, nil); err != nil {
 			return MessageResponse{}, fmt.Errorf("conversation.created hook: %w", err)
@@ -156,15 +169,18 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 		return MessageResponse{}, fmt.Errorf("touch conversation: %w", err)
 	}
 
-	anchor := ""
-	for i := len(req.Messages) - 1; i >= 0; i-- {
-		if req.Messages[i].ChannelMessageID != "" {
-			anchor = req.Messages[i].ChannelMessageID
-			break
+	return MessageResponse{Text: reply, ReplyToChannelMessageID: replyAnchor(req.Messages)}, nil
+}
+
+// replyAnchor is the channel message id a reply should thread onto: the last
+// inbound message of the batch that carries one.
+func replyAnchor(messages []InboundMessage) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].ChannelMessageID != "" {
+			return messages[i].ChannelMessageID
 		}
 	}
-
-	return MessageResponse{Text: reply, ReplyToChannelMessageID: anchor}, nil
+	return ""
 }
 
 // linksToEntities converts gateway link metadata into the generic entity
