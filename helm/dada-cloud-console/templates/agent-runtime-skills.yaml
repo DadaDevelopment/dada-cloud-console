@@ -1,0 +1,13 @@
+{{- if .Values.agentRuntime.enabled }}
+{{- range $agent, $files := .Values.agentRuntime.agentSkills }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "dada-cloud-console.fullname" $ }}-skills-{{ $agent }}
+  labels:
+    {{- include "dada-cloud-console.labels" $ | nindent 4 }}
+data:
+  {{- toYaml $files | nindent 2 }}
+{{- end }}
+{{- end }}

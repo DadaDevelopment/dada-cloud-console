@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -83,24 +86,56 @@ type RuntimeActor struct {
 type RuntimeMessageResponse struct {
 	Text                    string `json:"text"`
 	ReplyToChannelMessageID string `json:"reply_to_channel_message_id,omitempty"`
+	Suppressed              bool   `json:"suppressed,omitempty"`
 }
 
 type httpRuntimeClient struct {
 	http    *http.Client
 	baseURL string
+	token   string
 }
 
 func NewRuntimeClient(baseURL string) RuntimeClient {
+	return NewAuthenticatedRuntimeClient(baseURL, "")
+}
+
+func NewAuthenticatedRuntimeClient(baseURL, token string) RuntimeClient {
 	if baseURL == "" {
 		baseURL = "http://agent-runtime.dada-cloud.svc.cluster.local:8083"
 	}
 	return &httpRuntimeClient{
 		http:    &http.Client{Timeout: 120 * time.Second},
-		baseURL: baseURL,
+		baseURL: strings.TrimRight(baseURL, "/"),
+		token:   token,
 	}
 }
 
+// NewRuntimeClientFromConfig keeps runtime routing opt-in, but fails startup
+// for incomplete configuration rather than silently bypassing lifecycle state.
+func NewRuntimeClientFromConfig(baseURL, token string) (RuntimeClient, error) {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		return nil, nil
+	}
+	if strings.TrimSpace(token) == "" {
+		return nil, fmt.Errorf("AGENT_RUNTIME_TOKEN is required when AGENT_RUNTIME_URL is set")
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return nil, fmt.Errorf("AGENT_RUNTIME_URL must be an HTTP(S) base URL without credentials, query or fragment")
+	}
+	return NewAuthenticatedRuntimeClient(baseURL, token), nil
+}
+
 func (c *httpRuntimeClient) ProcessMessage(ctx context.Context, req RuntimeMessageRequest) (RuntimeMessageResponse, error) {
+	return c.process(ctx, req, nil)
+}
+
+func (c *httpRuntimeClient) ProcessMessageWithProgress(ctx context.Context, req RuntimeMessageRequest, processing func()) (RuntimeMessageResponse, error) {
+	return c.process(ctx, req, processing)
+}
+
+func (c *httpRuntimeClient) process(ctx context.Context, req RuntimeMessageRequest, processing func()) (RuntimeMessageResponse, error) {
 	payload, err := json.Marshal(req)
 	if err != nil {
 		return RuntimeMessageResponse{}, err
@@ -112,6 +147,12 @@ func (c *httpRuntimeClient) ProcessMessage(ctx context.Context, req RuntimeMessa
 		return RuntimeMessageResponse{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	if processing != nil {
+		httpReq.Header.Set("Accept", "application/x-ndjson")
+	}
+	if c.token != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.token)
+	}
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
@@ -119,12 +160,38 @@ func (c *httpRuntimeClient) ProcessMessage(ctx context.Context, req RuntimeMessa
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var errResp map[string]string
 		json.NewDecoder(resp.Body).Decode(&errResp)
 		return RuntimeMessageResponse{}, fmt.Errorf("runtime status %d: %s", resp.StatusCode, errResp["error"])
 	}
 
+	if strings.HasPrefix(resp.Header.Get("Content-Type"), "application/x-ndjson") {
+		decoder := json.NewDecoder(io.LimitReader(resp.Body, 1<<20))
+		started := false
+		for {
+			var event struct {
+				Event  string                 `json:"event"`
+				Result RuntimeMessageResponse `json:"result"`
+			}
+			if err := decoder.Decode(&event); err != nil {
+				return RuntimeMessageResponse{}, fmt.Errorf("runtime stream incomplete: %w", err)
+			}
+			switch event.Event {
+			case "processing":
+				if processing != nil && !started {
+					started = true
+					processing()
+				}
+			case "result":
+				return event.Result, nil
+			case "error":
+				return RuntimeMessageResponse{}, fmt.Errorf("runtime processing failed")
+			default:
+				return RuntimeMessageResponse{}, fmt.Errorf("unknown runtime event")
+			}
+		}
+	}
 	var result RuntimeMessageResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return RuntimeMessageResponse{}, fmt.Errorf("decode runtime response: %w", err)
@@ -141,4 +208,18 @@ func NewNoopRuntimeClient() RuntimeClient {
 
 func (c *noopRuntimeClient) ProcessMessage(ctx context.Context, req RuntimeMessageRequest) (RuntimeMessageResponse, error) {
 	return RuntimeMessageResponse{}, fmt.Errorf("runtime client disabled")
+}
+
+// ParseRuntimeAgents requires an explicit rollout scope when runtime is enabled.
+func ParseRuntimeAgents(value string, enabled bool) ([]string, error) {
+	var names []string
+	for _, name := range strings.Split(value, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			names = append(names, name)
+		}
+	}
+	if enabled && len(names) == 0 {
+		return nil, fmt.Errorf("AGENT_RUNTIME_AGENTS must name the bindings routed through runtime")
+	}
+	return names, nil
 }

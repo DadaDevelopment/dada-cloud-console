@@ -423,10 +423,14 @@ buildAgent:
       memory: 512Mi
 
 tgGateway:
+  runtimeSecret: ""
+  runtimeAgents: ""
   enabled: false
   image:
     repository: dada-cloud-console-tg-gateway
     tag: "latest"
+    # Optional component release pin; takes precedence over CI's shared tag.
+    pinnedTag: ""
     pullPolicy: IfNotPresent
   service:
     port: 8082
@@ -448,10 +452,16 @@ tgGateway:
     gatewayURL: ""
     visionModel: ""
 agentRuntime:
+  # Runtime controls use a separate service credential; skills contain procedures only.
+  existingSecret: ""
+  extraEnv: []
+  agentSkills: {}
   enabled: false
   image:
     repository: dada-cloud-console-agent-runtime
     tag: "latest"
+    # Optional component release pin; takes precedence over CI's shared tag.
+    pinnedTag: ""
     pullPolicy: IfNotPresent
   service:
     port: 8083
