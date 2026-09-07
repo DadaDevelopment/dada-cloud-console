@@ -6612,3 +6612,19 @@ send_failures=0), но поведенческий тест невозможен 
   эскалация ёмкости в owner-actions. Доставка main в прод снова ЗАВИСИТ от
   Jenkins; agent-runtime в проде работает на ручном образе d476ba53.
 Время: ~70 мин.
+
+## 2026-09-07 06:00Z (sess-0907a, ~85 мин)
+- ПУЛЬС: прод be0358fb = main HEAD (до моих пушей) [live kubectl]; probe-main-build MAIN-BUILDS x2; панель поломок разобрана поимённо
+  (1 CrashLoop юзерский gulyaev-ai-core = юзерский код Full Knowledge Vault, не платформа; 2 stale-записи PublicApi — unmaintained, старьё;
+  домены a2a-hub/m2-delwedge — юзерские failed-cert; jkjk framework_undetected — юзерский архив без манифеста; stuck=0; failed_builds 11/7д)
+- ЛОЖНАЯ ТРЕВОГА: api.dada-tuda.ru отдаёт fake-cert ingress — хост вообще без ingress, канонический API = console.dada-tuda.ru/api (200 ok).
+  Урок: сначала сверить хост с ingress-листом, не считать 000 падением прода.
+- ЗАМЫКАНИЕ: E72 закрыта NFE (3 метрики=0, знаменатель: единственный S3-failure за 21д = missing_name, не ReconcileError);
+  E79 measured-confirmed n=2 (yandex-IdP: lifecoachrussia+m206rv159, оба активированы; бонус: атрибуция awesome_webhosting=3).
+- РАЗБОР АУДИТА (14 новых с 08-13): активация 12/14=86%; 3 терминальные точки поимённо; ed6bc0b0 чинит вывод №1 (autofix-стена для upload).
+- ПОТОК 3+1 ФИКС: honest verdict upload_app_no_git вместо невозможного «переподключите через GitHub App» (autofix.go),
+  скрытие кнопки для source=archive, i18n. Verified: internal/api green на чистом PG в docker-риге (74s, -p 1),
+  gofmt-gate чисто, go vet, tsc --noEmit 0. ed6bc0b0+6fc08100 в origin/main.
+- ГИГИЕНА: риг dada-go-api + dadaapi0907 оставить на следующие Go-прогоны (переиспользование, не мусор); dada-pg запущен обратно.
+- НЕ ЗАКРЫТО: saravanan-CreatePublicApi-404-стена (кандидат в беклог), upload-autofix-канал (архив правит агент) — стратегический хвост потока 3.
+Время: ~85 мин.

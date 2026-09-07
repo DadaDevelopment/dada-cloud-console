@@ -1,29 +1,29 @@
-# Audit path graph (перезаписывается, не копится) — 2026-09-04 sess-0904a
+# Путь юзера, граф переходов — перезапись 2026-09-07 (sess-0907a)
 
-Окно: регы с 2026-08-21 (9 шт). Источник: audit_events (actor_id join users) + ux_events + feedback.
+## Когорта новых (08-13..09-07, 14 внешних): активация 12/14 = 86% после выката фикса доставки
+Upload-без-git работает: wgck и yzfy активировались ПОЛНОСТЬЮ через UploadSourceArchive (без единого git-действия).
 
-## Новые юзеры: все 9 активировались (первый раз в истории замера)
-| юзер | рег | событий | путь (сжато) |
-|---|---|---|---|
-| tarotreaderhimu | 08-21 | 19 | git-install -> app+DB -> builds OK |
-| dl592675334 | 08-23 | 28 | git -> app+DB -> builds -> UpdateAppStartCommand (глубоко) |
-| zqleaders | 08-25 | 19 | git -> app + AppServer (первое органич. CreateAppServer) -> builds |
-| m206rv159 | 08-26 | 32 | git -> app+DB -> RevealDatabaseCredentials -> builds |
-| messiajit4 | 08-28 | 41 | git -> app+DB -> SetEnvVar -> builds (самый глубокий путь) |
-| kof97zip | 08-28 | 15 | image-deploy путь -> SetEnvVar, БЕЗ билдов |
-| saravananofficial13 | 09-02 | 16 | git -> InstallSolution + CreatePublicApi (новый API-путь) |
-| wgck | 09-03 | 15 | archive-upload -> DeployImageVersion -> builds (поток 1!) |
-| ivakinavv23 | 09-03 | 18 | archive-upload -> TriggerAutofix (ПЕРВОЕ органич. автофикс-использование) -> builds |
+## 3 неактивированных (точные терминальные действия)
+1. **ivakinavv23@yandex.ru** (рег 09-03, signup_channel=yandex): upload jkjk → failure → TriggerAutofix x2 →
+   400 «переподключите через GitHub App» (невыполнимо для upload-аппа) → тишина.
+   = измеренная терминальная точка. ПОЧИНЕНО ed6bc0b0 (честный вердикт upload_app_no_git + скрытие кнопки).
+2. **tarotreaderhimu@gmail.com** (08-21, git-путь): ConnectGitRepo(best-marriage-astrologer-in-guwahati) → 3 build failure →
+   CreateServiceDatabase+SeedDatabaseDSN (пытался чинить БД!) → 3-й failure → ушёл. Никакого auto-fix-канала для git-юзера не сработало/не нашёл.
+3. **saravananofficial13@gmail.com** (09-02): InstallSolution it-tools → CreatePublicApi x5 подряд 404 app_not_found
+   (ввёл thunder.com / thunder.dpdns.org — не понял, что нужен СНАЧАЛА апп, PublicApi вешается на аппарат) → failure → ушёл.
 
-## Переходы
-- SignUp -> StartGitAppInstall/UploadSourceArchive: 9/9 (нулевая потеря до первого действия)
-- Из 9: 7 git-install, 2 archive-upload; app создан 9/9 (исторический leak «рег -> 0 аппов» на этом окне исчез)
-- Терминальных тупиков не видно: у каждого юзера есть BuildFinished/Deploy после настройки
-- Farm-волн в когорте нет (после 08-08 чисто)
+## Граф переходов (свёртка когорты)
+- SignUp → CreateProject(pending) → ViewProject → ViewApps: 14/14 (вход консоли здоров)
+- ПЕРВОЕ содержательное действие: UploadSourceArchive (wgck, yzfy, ivakinavv23) | InstallSolution (saravanan) |
+  ConnectGitRepo (tarotreaderhimu) | обзор/чаты (остальные)
+- ТЕРМИНАЛЬНЫЕ (где сдались): TriggerAutofix-отказ (1), CreatePublicApi-404-стена (1), build-failure-спираль (1),
+  «посмотрел и замолчал» (остальные неактивированных нет — все 12 дошли до CreateApp)
+- BuildFinished(failure) → TriggerBuild retry: yzfy x2; TriggerAutofix после failure: ivakinavv23 x2 (оба отказали)
 
-## UX-выводы
-- 4 feedback-строки за окно = юзеры ДОХОДЯТ до доменов/портов и спотыкаются: 0492 (порт-валидация врёт диапазоном + слетает порт), 0493 (верификация домена проверяет run.place вместо fanclub.run.place). Оба на пути «сделать апп публичным» — следующий вероятный cliff.
-- ivakinavv сам нажал TriggerAutofix при падении своего билда = H08 органически востребован; auto-fix flow заслуживает инструментирования события (кто/чем/исход), сейчас виден только TriggerAutofix без исхода.
-
-## Инструментирование аудита (долг)
-- audit_events не пишет исход автофикса (fixed? failed?) — добавить action AutoFixFinished c outcome.
+## Выводы в продукт
+- ed6bc0b0 закрывает вывод №1 (autofix-стена для upload).
+- Вывод №2 (backlog-кандидат): CreatePublicApi без аппа = 5 тупых 404 подряд; нужен inline-совет «сначала создайте приложение»
+  или конверсия PublicApi-заявки в создание аппа. file: backend/internal/api/*publicapi* (проверить messages при заведении).
+- Вывод №3: 3 подряд build-failure у git-юзера без единого успешного autofix-запуска = канал есть, но юзер не дошёл
+  (artemmendeleev остаётся единственным в истории). Формулировка кнопки/цена клика — следующий рычаг (см. E75 примечание).
+- Инструментирование: CreatePublicApi уже пишет reason=app_not_found в metadata — аудита достаточно.
