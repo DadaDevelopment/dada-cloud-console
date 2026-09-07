@@ -32,6 +32,15 @@ interface AppLatestBuildCardProps {
   appUrlReason?: string | null;
   appReady: boolean;
   hasGitRepo: boolean;
+  /**
+   * True when the app was deployed from an uploaded archive rather than a
+   * git repository (summary.source === "archive"). The upload flow stores a
+   * git_repos row with repo_full_name "upload/<app>" and no installation, so
+   * the PR-based auto-fix channel cannot exist for it: the button must not
+   * render, and a manual click must land on an honest verdict, not an
+   * impossible "reconnect the repo via GitHub App" instruction.
+   */
+  isUploadSource?: boolean;
   buildHref: (buildId: string) => string;
 }
 
@@ -50,7 +59,7 @@ interface AppLatestBuildCardProps {
  * guarded per build id so polling never inflates it, mirroring the pattern
  * used for `BuildViewKey` below.
  */
-export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appUrlStatus, appUrlReason, appReady, hasGitRepo, buildHref }: AppLatestBuildCardProps) {
+export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appUrlStatus, appUrlReason, appReady, hasGitRepo, isUploadSource = false, buildHref }: AppLatestBuildCardProps) {
   const { t } = useT();
   const router = useRouter();
   const { role } = useProjectContext();
@@ -197,8 +206,15 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appUrlSt
       const envQuery = envId ? `envId=${envId}&` : "";
       router.push(`/projects/${projectId}/apps/${appName}?${envQuery}justRan=autofix#agent`);
     } catch (err) {
+      const code = (err as { code?: string } | null)?.code;
       const msg = err instanceof Error ? err.message : t("apps.deployments.error.autofix");
-      setRebuildError(/no connected git repo/i.test(msg) ? t("apps.deployments.error.noRepo") : msg);
+      setRebuildError(
+        code === "upload_app_no_git"
+          ? t("apps.deployments.error.uploadApp")
+          : /no connected git repo/i.test(msg)
+            ? t("apps.deployments.error.noRepo")
+            : msg,
+      );
       setAutofixing(false);
     }
   }
@@ -329,7 +345,7 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appUrlSt
                 {t("apps.builds.fail.gitAuth.reconnect")}
               </Link>
             )}
-            {canDeploy && hasGitRepo && isRepoFixable(build.fail_reason) && (
+            {canDeploy && hasGitRepo && !isUploadSource && isRepoFixable(build.fail_reason) && (
               <button
                 type="button"
                 onClick={handleAutofix}

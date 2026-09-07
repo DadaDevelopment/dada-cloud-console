@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
+	"github.com/dada-tuda/console/backend/internal/dadagent"
 	"github.com/dada-tuda/console/backend/internal/logsearch"
 )
 
@@ -312,6 +313,25 @@ func seedAutofixGitRepo(t *testing.T, pool *pgxpool.Pool, projectID, envID uuid.
 	return gitRepoID
 }
 
+// seedAutofixUploadRepo inserts the git_repos row UploadSourceArchive mints
+// for an upload-deployed app: provider 'archive', repo_full_name
+// "upload/<app>", installation_id NULL. It is the shape resolveGitRepo turns
+// into errRepoWithoutInstallation, which used to answer the impossible
+// "reconnect the repo via the GitHub App" verdict for apps that have no repo
+// to reconnect (ivakinavv23/jkjk, 2026-09-03).
+func seedAutofixUploadRepo(t *testing.T, pool *pgxpool.Pool, projectID, envID uuid.UUID, appName string) uuid.UUID {
+	t.Helper()
+	var gitRepoID uuid.UUID
+	if err := pool.QueryRow(context.Background(),
+		`INSERT INTO git_repos (project_id, environment_id, app_name, provider, repo_full_name, clone_url, production_branch)
+		 VALUES ($1, $2, $3, 'archive', $4, $5, 'upload')
+		 RETURNING id`,
+		projectID, envID, appName, "upload/"+appName, "s3://bucket/archive-"+uuid.NewString()[:8]+".zip").Scan(&gitRepoID); err != nil {
+		t.Fatalf("seed upload git_repos: %v", err)
+	}
+	return gitRepoID
+}
+
 // seedFailedBuild inserts one failed build row with the given fail_reason.
 func seedFailedBuild(t *testing.T, pool *pgxpool.Pool, gitRepoID, envID uuid.UUID, appName, failReason string) uuid.UUID {
 	t.Helper()
@@ -379,5 +399,71 @@ func TestTriggerAutofix_RefusesWhenLatestFailedBuildIsPlatformError(t *testing.T
 	}
 	if running != 0 {
 		t.Fatalf("cloud_tasks rows=%d, want 0: a refused launch must not claim the autofix slot", running)
+	}
+}
+
+// TestTriggerAutofix_UploadAppGetsHonestVerdict pins the fix for the measured
+// ivakinavv23 funnel leak (2026-09-03): an upload-deployed app (git_repos row
+// provider='archive', repo_full_name "upload/<app>", installation NULL) that
+// hits errRepoWithoutInstallation must be refused with the honest
+// upload_app_no_git verdict -- not the impossible "reconnect the repo via the
+// GitHub App" instruction, which has no referent for an app with no repo and
+// ended that user's session for good. h.dadagent stays nil so a regression
+// past the repo gate would surface as 503 "dadagent integration not
+// configured" instead of the expected 400.
+func TestTriggerAutofix_UploadAppGetsHonestVerdict(t *testing.T) {
+	pool := autofixGuardPool(t)
+	projectID, envID, actorID := seedAutofixTarget(t, pool)
+	gitRepoID := seedAutofixUploadRepo(t, pool, projectID, envID, "web")
+	seedFailedBuild(t, pool, gitRepoID, envID, "web", "user_code")
+
+	h := &Handler{pool: pool, dadagent: dadagent.New("http://127.0.0.1:1", dadagent.NewTokenSource("http://127.0.0.1:1/token", "id", "secret"))}
+	claims := &auth.Claims{UserID: actorID, Groups: []string{"/platform-admins"}}
+
+	rec := httptest.NewRecorder()
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader("{}"))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Params = gin.Params{
+		{Key: "projectId", Value: projectID.String()},
+		{Key: "envId", Value: envID.String()},
+		{Key: "appName", Value: "web"},
+	}
+	auth.SetClaims(c, claims)
+
+	h.TriggerAutofix(c)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("code=%d body=%s want 400 (upload app must get the honest no-git verdict)", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body["code"] != "upload_app_no_git" {
+		t.Fatalf("code field = %v, want upload_app_no_git", body["code"])
+	}
+	if msg, _ := body["error"].(string); msg == "" || strings.Contains(msg, "GitHub App") {
+		t.Fatalf("error field = %q, want the connect-a-git-repo guidance without the impossible GitHub App advice", msg)
+	}
+
+	var running int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM cloud_tasks WHERE project_id=$1 AND app_name='web' AND task_type='autofix' AND status='running'`,
+		projectID).Scan(&running); err != nil {
+		t.Fatalf("count running cloud_tasks: %v", err)
+	}
+	if running != 0 {
+		t.Fatalf("running cloud_tasks rows=%d, want 0: a refused upload-app launch must release the in-flight autofix slot", running)
+	}
+	var total int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM cloud_tasks WHERE project_id=$1 AND app_name='web' AND task_type='autofix'`,
+		projectID).Scan(&total); err != nil {
+		t.Fatalf("count cloud_tasks: %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("cloud_tasks rows=%d, want 1: the claim row must exist and be marked failed by failCloudTask, not deleted", total)
 	}
 }

@@ -493,6 +493,10 @@ export const apps: Messages = {
     ru: "К этому приложению ещё не подключён репозиторий.",
     en: "No repository is connected to this app yet.",
   },
+  "apps.deployments.error.uploadApp": {
+    ru: "Это приложение развёрнуто из загруженного архива без git-репозитория, поэтому автофикс не может открыть пул-реквест. Подключите git-репозиторий в настройках приложения — после этого автофикс заработает.",
+    en: "This app was deployed from an uploaded archive without a git repository, so auto-fix cannot open a pull request. Connect a git repository in the app settings and auto-fix will work.",
+  },
   "apps.deployments.unavailable": {
     ru: "Сборка из исходного кода пока недоступна в этом окружении. Мы её настраиваем — попробуйте чуть позже.",
     en: "Building from source isn't available in this environment yet. We're setting it up — please try again shortly.",

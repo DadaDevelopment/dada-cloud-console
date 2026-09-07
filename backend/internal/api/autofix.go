@@ -254,6 +254,13 @@ func (h *Handler) launchAutofix(ctx context.Context, in autofixLaunch) (models.C
 
 	repo, instID, gitRepoID, err := h.resolveGitRepo(ctx, in.ProjectID, in.EnvID, in.AppName)
 	if errors.Is(err, errRepoWithoutInstallation) {
+		if strings.HasPrefix(repo, uploadRepoPrefix) {
+			return fail(&autofixError{
+				status:  http.StatusBadRequest,
+				message: autofixUploadAppVerdict,
+				code:    "upload_app_no_git",
+			})
+		}
 		return fail(&autofixError{
 			status:  http.StatusBadRequest,
 			message: "репозиторий подключён без доступа GitHub App: переподключите его через GitHub App, чтобы автофикс мог открыть PR",
@@ -349,6 +356,20 @@ const autofixPlatformCapacityWindow = appAutoscaleCooldown
 // running the agent would only relabel the same failure under a different
 // name. Kubernetes/LimitRange/namespace never appear in user-facing text.
 const autofixPlatformCapacityVerdict = "причина отказа не в коде приложения: платформе не хватает выделенных приложению ресурсов в рамках текущего тарифа, и пул-реквест это не изменит. Поднимите лимиты ресурсов или тариф приложения и повторите запуск"
+
+// uploadRepoPrefix marks git_repos rows minted by UploadSourceArchive
+// (uploadsource.go): repo_full_name = "upload/"+appName, installation_id NULL,
+// provider 'archive'. Such an app has NO git repository behind it, so any
+// auto-fix verdict that says "reconnect the repo via the GitHub App" is
+// unactionable for its owner -- the app has nothing to reconnect.
+const uploadRepoPrefix = "upload/"
+
+// autofixUploadAppVerdict is the honest refusal for upload-deployed apps: the
+// PR-based auto-fix channel physically does not exist for them, and the
+// actionable way in is connecting a git repository (which then routes the run
+// through the normal GitHub App path). Wording mirrors the measured
+// ivakinavv23 incident (2026-09-03): two clicks, two dead ends, user gone.
+const autofixUploadAppVerdict = "это приложение развёрнуто из загруженного архива без git-репозитория, поэтому автофикс не может открыть пул-реквест. Подключите git-репозиторий в настройках приложения -- после этого автофикс заработает"
 
 // platformCapacityRefusal looks up the freshest app-autoscale refusal audit
 // row for this exact app and reports whether it names a reason in
