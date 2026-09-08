@@ -108,14 +108,16 @@ class TestFetchRetry(unittest.TestCase):
         self.assertEqual(len(self.calls), news_ingest.FETCH_ATTEMPTS)
 
     def test_client_error_is_a_verdict_not_a_flake(self):
-        err = news_ingest.urllib.error.HTTPError("http://x/feed", 404, "Not Found", None, None)
+        err = news_ingest.urllib.error.HTTPError("http://x/feed", 404, "Not Found", None, io.BytesIO(b""))
+        self.addCleanup(err.close)
         self._install([err])
         with self.assertRaises(news_ingest.urllib.error.HTTPError):
             news_ingest.fetch("http://x/feed", 1.0)
         self.assertEqual(len(self.calls), 1)
 
     def test_server_error_is_retried(self):
-        err = news_ingest.urllib.error.HTTPError("http://x/feed", 502, "Bad Gateway", None, None)
+        err = news_ingest.urllib.error.HTTPError("http://x/feed", 502, "Bad Gateway", None, io.BytesIO(b""))
+        self.addCleanup(err.close)
         self._install([err, b"<rss/>"])
         self.assertEqual(news_ingest.fetch("http://x/feed", 1.0), b"<rss/>")
         self.assertEqual(len(self.calls), 2)
