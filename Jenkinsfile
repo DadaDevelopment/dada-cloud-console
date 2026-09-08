@@ -138,50 +138,63 @@ spec:
   # 1 hour is plenty and well under any sane runaway cap.
   activeDeadlineSeconds: 3600
   priorityClassName: ci-agent
-  # Never schedule onto a node that carries a platform postgres replica. The
-  # agent's docker-graph-storage + workspace are emptyDir, i.e. the NODE's disk,
-  # and a build holds ~9.6 GiB of it. Twice this combination ended as a P0: the
-  # node filled up and the platform postgres on it died (once taking a live
-  # user's app down for 5h11m). Build #1083 then died itself on ENOSPC inside
-  # `npm ci` while zh58h — which hosts pg-shard-0-postgresql-0 — sat at 99.8%.
-  # Scoped to the databases namespace so a user pod that happens to be labelled
-  # postgresql does not fence the agent out of a node. Today this leaves two
-  # eligible nodes; if a future postgres replica lands on both, agents go
-  # Pending (visible) instead of silently starving a database (not).
+  # NO podAntiAffinity — deliberately. There used to be a required anti-affinity
+  # fence against databases/postgresql, because the workspace and dind's
+  # /var/lib/docker were emptyDir (raw, unaccounted NODE disk) and a build holds
+  # ~9.6 GiB of it: twice a build filled the node it landed on and killed the
+  # platform postgres living there (once taking a live user's app down for
+  # 5h11m), and build #1083 died itself on ENOSPC inside `npm ci` while the node
+  # hosting pg-shard-0-postgresql-0 sat at 99.8%.
   #
-  # POD MEMORY TOTAL IS SIZED AGAINST THOSE TWO NODES, NOT THE CLUSTER'S BIGGEST.
-  # Both 15Gi nodes carry a databases/postgresql pod, so this fence removes them
-  # both; what is left are the two 12Gi nodes, whose free (unrequested) memory was
-  # 4104Mi and 3828Mi when this was measured. Build #1285 reserved 4672Mi and sat
-  # Pending forever; #1286 reserved 4512Mi after a trim measured against the 15Gi
-  # node (4666Mi free) — a node this fence forbids — and was Pending just the same.
-  # The container requests below now total 3584Mi (node-builder shed another
-  # 256Mi after #1407 went permanently Pending against 3716Mi free on rt7fr).
-  # Anything that raises the pod
-  # total must be checked against the free memory of the SMALLEST eligible node,
-  # or the build stops starting rather than starts failing.
-  affinity:
-    podAntiAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-        - topologyKey: kubernetes.io/hostname
-          namespaces: ["databases"]
-          labelSelector:
-            matchExpressions:
-              - key: app.kubernetes.io/name
-                operator: In
-                values: ["postgresql"]
+  # That fence treated the symptom and cost the pod both 15Gi nodes, leaving only
+  # the two 12Gi ones — which then had less free memory than the pod requests
+  # (2650Mi / 2324Mi against a 3136Mi pod, measured 2026-09-08), so builds sat
+  # Pending forever and every fix was another round of shaving container
+  # requests. Both scratch volumes are now generic ephemeral Longhorn PVCs (see
+  # volumes: below), so the disk a build burns is size-capped by a filesystem
+  # instead of borrowed from the node, and Longhorn's 15% minimal-available floor
+  # refuses to place a replica that would zero a node's disk. The cause is gone,
+  # so the fence is gone and all four nodes are eligible again.
+  #
+  # Do NOT re-add a node fence to fix a disk problem. If a build can outgrow its
+  # volume, raise the volume size (and check it still schedules) — that failure
+  # is contained to the build.
   securityContext:
     fsGroup: 1000
   volumes:
+    # workspace + docker graph are generic ephemeral volumes: one Longhorn PVC
+    # per agent pod, created and deleted with it (ownerRef), never shared. They
+    # were emptyDir until 2026-09-08 — see the podAntiAffinity note above for the
+    # two P0s that bought. Sizes are hard caps enforced by ext4: a build that
+    # overruns gets ENOSPC in its own volume and fails, instead of taking the
+    # node's disk (and whatever database is on it) with it.
+    # storageClassName is longhorn-ci-scratch (argo-infra jenkins chart):
+    # 1 replica, reclaimPolicy=Delete, no snapshot/backup jobs.
     - name: workspace-volume
-      emptyDir:
-        sizeLimit: 3Gi
+      ephemeral:
+        volumeClaimTemplate:
+          spec:
+            accessModes: ["ReadWriteOnce"]
+            storageClassName: longhorn-ci-scratch
+            resources:
+              requests:
+                storage: 3Gi
     - name: build-cache
       persistentVolumeClaim:
         claimName: jenkins-build-cache
+    # 12Gi, not the old 8Gi emptyDir sizeLimit: the image builds need ~8Gi of
+    # layers and the preflight below warns under 10Gi free, so a 12Gi volume
+    # (~11.1Gi usable after ext4 overhead) is the first size that is genuinely
+    # roomy rather than permanently one image away from full.
     - name: docker-graph-storage
-      emptyDir:
-        sizeLimit: 8Gi
+      ephemeral:
+        volumeClaimTemplate:
+          spec:
+            accessModes: ["ReadWriteOnce"]
+            storageClassName: longhorn-ci-scratch
+            resources:
+              requests:
+                storage: 12Gi
     - name: docker-certs
       emptyDir: {}
     - name: tools-volume
@@ -403,17 +416,19 @@ spec:
           # is by usage-over-request, and at this ratio dind is no longer the
           # cheapest victim. Part of the 672Mi the pod shed to become schedulable.
           memory: "1280Mi"
-          # ephemeral-storage: every build dies the moment dind extracts the 2nd
-          # image's base layers (#143: golang:1.25-alpine extract -> channel drop).
-          # The docker-graph-storage emptyDir counts as pod ephemeral storage; with
-          # NO request, any usage is "over request" => this pod is the kubelet's #1
-          # DiskPressure eviction victim (dind SIGTERM exit-0, others 137). Reserve
-          # it so the build survives layer extraction.
-          ephemeral-storage: "4Gi"
+          # ephemeral-storage was 4Gi/8Gi while docker-graph-storage was an
+          # emptyDir: the graph counted as pod ephemeral storage, and with NO
+          # request any usage is "over request", making this pod the kubelet's #1
+          # DiskPressure eviction victim (#143: dind SIGTERM exit-0 mid layer
+          # extraction, the other containers 137). The graph now lives on its own
+          # Longhorn PVC and no longer counts here, so this reservation covers
+          # only the container's writable layer and /tmp. Do not delete it: at
+          # zero request the same eviction-ranking trap returns.
+          ephemeral-storage: "1Gi"
         limits:
           cpu: "1500m"
           memory: "1536Mi"
-          ephemeral-storage: "8Gi"
+          ephemeral-storage: "2Gi"
       volumeMounts:
         - name: docker-graph-storage
           mountPath: /var/lib/docker
@@ -744,16 +759,16 @@ spec:
 
             // ── Docker ────────────────────────────────────────────────────
             //
-            // The image builds write into dind's /var/lib/docker, which is the
-            // docker-graph-storage emptyDir — i.e. the NODE's filesystem, shared
-            // with every other pod on that node. When the node runs out of space
-            // the failure surfaces deep inside a build step as an unrelated-looking
-            // tool error: #1083 (51225f09) died on `npm warn tar TAR_ENTRY_ERROR
-            // ENOSPC` inside `npm ci` in the frontend image, 25 minutes in, and
-            // read as "the commit broke the frontend" while the real cause was a
-            // node at 95% disk. Prod then sat one commit behind main for hours.
-            // Check the graph filesystem BEFORE burning the build, and name the
-            // cause in the failure text so nobody re-diagnoses it from the corpse.
+            // The image builds write into dind's /var/lib/docker, which is now a
+            // per-build 12Gi Longhorn volume rather than the shared node disk.
+            // The preflight stays: running out of space still surfaces deep
+            // inside a build step as an unrelated-looking tool error (#1083,
+            // 51225f09: `npm warn tar TAR_ENTRY_ERROR ENOSPC` inside `npm ci` in
+            // the frontend image, 25 minutes in, read as "the commit broke the
+            // frontend" while the real cause was disk). What changed is the
+            // remedy — a shortfall now means the images outgrew the volume, so
+            // the fix is to raise docker-graph-storage in the pod template above,
+            // not to hunt for whatever else filled the node.
             container('dind') {
                 runStage('Docker disk preflight') {
                     sh '''
@@ -762,14 +777,15 @@ spec:
                         avail_g=$((avail_kb / 1024 / 1024))
                         df -h /var/lib/docker
                         if [ "$avail_g" -lt 5 ]; then
-                            echo "CI NODE IS OUT OF DISK: ${avail_g}Gi free where the image builds need ~8Gi."
+                            echo "DOCKER GRAPH VOLUME IS OUT OF DISK: ${avail_g}Gi free where the image builds need ~8Gi."
                             echo "This is OUR infrastructure, not this commit. Do not chase the build log."
-                            echo "Free space on the node backing this agent pod, then rebuild."
+                            echo "This is a per-build 12Gi Longhorn volume, so the node is not the problem:"
+                            echo "raise docker-graph-storage in the Jenkinsfile pod template, then rebuild."
                             exit 1
                         fi
                         if [ "$avail_g" -lt 10 ]; then
-                            echo "WARNING: only ${avail_g}Gi free on the docker graph filesystem (~8Gi needed)."
-                            echo "The node this agent landed on is close to full; the next build may ENOSPC."
+                            echo "WARNING: only ${avail_g}Gi free on the docker graph volume (~8Gi needed)."
+                            echo "The image set is outgrowing the 12Gi volume; the next build may ENOSPC."
                         fi
                     '''
                 }
