@@ -9,7 +9,7 @@ new handler.
 from datetime import date
 
 import facts
-from search_sql import CHANNEL_SEARCH_SQL, FACT_SEARCH_SQL, NEWS_SEARCH_SQL
+from search_sql import CHANNEL_SEARCH_SQL, CHAT_SEARCH_SQL, FACT_SEARCH_SQL, NEWS_SEARCH_SQL
 
 SEED_TAG = "vibecoder_v1_2026_09_08"
 
@@ -60,6 +60,22 @@ DEFAULT_MANIFESTS = [
             "required": ["query"],
         },
         "config": {"query": CHANNEL_SEARCH_SQL, "param_order": ["query"]},
+    },
+    {
+        "name": "chat_search",
+        "description": (
+            "Что уже говорили в комментариях живые люди: их слова, их примеры, их споры. "
+            "Нужен, чтобы не повторять сказанное, подхватить местный сленг и увидеть, "
+            "чем чат уже занимался. bot_answered показывает, отвечал ли агент на это. "
+            "Это не источник фактов: люди в чате ошибаются."
+        ),
+        "op_type": "sql_query_v1",
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
+        "config": {"query": CHAT_SEARCH_SQL, "param_order": ["query"]},
     },
 ]
 

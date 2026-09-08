@@ -2,6 +2,7 @@ package tggateway
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
 	"strconv"
 	"strings"
@@ -26,6 +27,7 @@ const (
 	ReasonSubstantive     = "substantive_comment"
 	ReasonFromBot         = "sender_is_bot"
 	ReasonChannelPost     = "channel_post_itself"
+	ReasonPostComment     = "channel_post_worth_a_comment"
 	ReasonNoContent       = "no_text_or_media"
 	ReasonTooShort        = "reaction_not_a_question"
 	ReasonBudgetExhausted = "hourly_budget_exhausted"
@@ -50,11 +52,13 @@ type GroupPolicy struct {
 	MinChars        int
 	HourlyBudget    int
 	RequireMention  bool
+	PostCommentRate float64
 	QuestionMarkers []string
 
 	mu     sync.Mutex
 	recent map[string][]time.Time
 	now    func() time.Time
+	roll   func() float64
 }
 
 var defaultQuestionMarkers = []string{
@@ -67,21 +71,66 @@ var defaultQuestionMarkers = []string{
 // naming the bot, replying to it, or asking something that looks like a
 // question.
 func NewGroupPolicy(botUsername string) *GroupPolicy {
+	return NewGroupPolicyForAgent(botUsername, "")
+}
+
+// NewGroupPolicyForAgent is NewGroupPolicy with a per-agent override layer.
+//
+// One gateway process polls every binding, so a single TG_GROUP_* value would
+// force the support bot and the channel bot to share a temperament. Each key
+// is read first as KEY_<AGENT> (the agent name uppercased, non-alphanumerics
+// folded to underscores) and only then as the bare KEY, so a new agent starts
+// on the conservative shared defaults and opts into its own numbers.
+func NewGroupPolicyForAgent(botUsername, agentName string) *GroupPolicy {
 	return &GroupPolicy{
 		BotUsername:     strings.TrimPrefix(strings.ToLower(botUsername), "@"),
-		MinChars:        envInt("TG_GROUP_MIN_CHARS", 24),
-		HourlyBudget:    envInt("TG_GROUP_HOURLY_BUDGET", 8),
-		RequireMention:  os.Getenv("TG_GROUP_REQUIRE_MENTION") == "1",
+		MinChars:        envIntFor("TG_GROUP_MIN_CHARS", agentName, 24),
+		HourlyBudget:    envIntFor("TG_GROUP_HOURLY_BUDGET", agentName, 8),
+		RequireMention:  envStrFor("TG_GROUP_REQUIRE_MENTION", agentName) == "1",
+		PostCommentRate: envFloatFor("TG_GROUP_POST_COMMENT_RATE", agentName, 0),
 		QuestionMarkers: defaultQuestionMarkers,
 		recent:          map[string][]time.Time{},
 		now:             time.Now,
+		roll:            rand.Float64,
 	}
 }
 
-func envInt(key string, fallback int) int {
-	if raw := os.Getenv(key); raw != "" {
+// envSuffix turns an agent name into the env-key suffix that carries its
+// overrides: "tg-vibecoder" becomes "TG_VIBECODER".
+func envSuffix(agentName string) string {
+	var b strings.Builder
+	for _, r := range strings.ToUpper(strings.TrimSpace(agentName)) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			continue
+		}
+		b.WriteRune('_')
+	}
+	return b.String()
+}
+
+func envStrFor(key, agentName string) string {
+	if suffix := envSuffix(agentName); suffix != "" {
+		if raw := os.Getenv(key + "_" + suffix); raw != "" {
+			return raw
+		}
+	}
+	return os.Getenv(key)
+}
+
+func envIntFor(key, agentName string, fallback int) int {
+	if raw := envStrFor(key, agentName); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
 			return n
+		}
+	}
+	return fallback
+}
+
+func envFloatFor(key, agentName string, fallback float64) float64 {
+	if raw := envStrFor(key, agentName); raw != "" {
+		if f, err := strconv.ParseFloat(raw, 64); err == nil && f >= 0 {
+			return f
 		}
 	}
 	return fallback
@@ -123,14 +172,14 @@ func (p *GroupPolicy) looksSubstantive(text string) bool {
 // once a reply has actually been sent, so a run that ends in silence does
 // not eat the quota it did not use.
 func (p *GroupPolicy) Decide(u TelegramUpdate) EngageDecision {
+	if IsChannelPost(u) {
+		return p.decideChannelPost(u)
+	}
 	if u.FromIsBot {
 		return EngageDecision{false, ReasonFromBot}
 	}
 	if !IsGroup(u.ChatType) {
 		return EngageDecision{true, ReasonPrivate}
-	}
-	if u.IsAutomaticForward || (u.SenderChatID != 0 && u.SenderChatID != u.ChatID) {
-		return EngageDecision{false, ReasonChannelPost}
 	}
 	if strings.TrimSpace(u.Text) == "" && u.Attachment == nil && !u.HasLocation {
 		return EngageDecision{false, ReasonNoContent}
@@ -151,6 +200,44 @@ func (p *GroupPolicy) Decide(u TelegramUpdate) EngageDecision {
 		return EngageDecision{false, ReasonBudgetExhausted}
 	}
 	return EngageDecision{true, ReasonSubstantive}
+}
+
+// decideChannelPost answers the one update nobody addressed: the post itself,
+// auto-forwarded into the discussion chat, which opens an empty comment
+// thread.
+//
+// Staying quiet under every post is a bot that only ever reacts; commenting
+// under every post is the channel talking to itself. So the choice is a coin
+// weighted by TG_GROUP_POST_COMMENT_RATE and taken here, once per post, while
+// the whole post text is in hand -- a per-post decision, not a per-run one, so
+// a retried poll cannot turn one post into two comments.
+//
+// The roll is skipped entirely when the rate is zero, which is the default:
+// an agent that never set the key behaves exactly as before.
+func (p *GroupPolicy) decideChannelPost(u TelegramUpdate) EngageDecision {
+	if p.PostCommentRate <= 0 {
+		return EngageDecision{false, ReasonChannelPost}
+	}
+	if strings.TrimSpace(u.Text) == "" {
+		return EngageDecision{false, ReasonNoContent}
+	}
+	if p.roll == nil || p.roll() >= p.PostCommentRate {
+		return EngageDecision{false, ReasonChannelPost}
+	}
+	return EngageDecision{true, ReasonPostComment}
+}
+
+// IsChannelPost reports whether the update is the channel's own post landing
+// in the linked discussion chat, rather than somebody's comment under it.
+//
+// Telegram delivers it as an automatic forward whose author is a channel, so
+// it arrives with is_bot set: any check ordered after the bot filter never
+// sees one.
+func IsChannelPost(u TelegramUpdate) bool {
+	if !IsGroup(u.ChatType) {
+		return false
+	}
+	return u.IsAutomaticForward || (u.SenderChatID != 0 && u.SenderChatID != u.ChatID)
 }
 
 func (p *GroupPolicy) prune(key string, now time.Time) []time.Time {
@@ -208,6 +295,14 @@ func ConversationKey(u TelegramUpdate) string {
 // answering it is one line; the whole post would drown the actual question.
 const quotedContextLimit = 400
 
+// channelPostMarker labels the post itself when it reaches the agent.
+//
+// Without it the post arrives as a message from whoever telegram names as the
+// forwarder, and the agent answers the channel as if a person had asked it
+// something. The marker says: this is new, nobody is waiting on you, say
+// something under it or say nothing.
+const channelPostMarker = "[новый пост в канале]"
+
 // QuotedContext renders what a group message is answering, or "" when there
 // is nothing to render.
 //
@@ -251,6 +346,9 @@ func QuotedContext(u TelegramUpdate) string {
 // comment, it sees who spoke and what was quoted. The rule is pinned across both runtimes
 // by agentkit/transcript_golden.json.
 func InboundContent(u TelegramUpdate) string {
+	if IsChannelPost(u) {
+		return fmt.Sprintf("%s\n%s", channelPostMarker, u.Text)
+	}
 	content := u.Text
 	if speaker := GroupSpeaker(u); speaker != "" {
 		content = fmt.Sprintf("%s: %s", speaker, content)
@@ -262,7 +360,7 @@ func InboundContent(u TelegramUpdate) string {
 }
 
 func GroupSpeaker(u TelegramUpdate) string {
-	if !IsGroup(u.ChatType) {
+	if !IsGroup(u.ChatType) || IsChannelPost(u) {
 		return ""
 	}
 	name := u.FirstName

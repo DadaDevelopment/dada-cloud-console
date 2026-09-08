@@ -33,6 +33,12 @@ The app requires a bearer token when ``MCP_AUTH_TOKEN`` is set. Every app here
 gets a public domain by default, so this tool server answered ``/mcp`` from the
 open internet with no credential at all; the kagent side passes the same token
 as an ``Authorization`` header on the RemoteMCPServer.
+
+Besides ``/mcp`` the app serves ``POST /observe``, behind the same bearer gate.
+The telegram gateway posts every group message there, including the ones it
+never handed to the agent. Those are the majority, and they are the only
+record of how the room actually talks; the agent reads them back through the
+``chat_search`` manifest.
 """
 
 import asyncio
@@ -46,6 +52,8 @@ import uvicorn
 from fastmcp import FastMCP
 from fastmcp.tools.function_tool import FunctionTool
 from starlette.middleware import Middleware
+from starlette.responses import JSONResponse
+from starlette.routing import Route
 
 _AGENTKIT = os.environ.get("AGENTKIT_PATH") or str(Path(__file__).parent.parent / "agentkit")
 if _AGENTKIT not in sys.path:
@@ -168,6 +176,26 @@ async def today() -> dict:
     return {"date": now.date().isoformat(), "iso": now.isoformat(), "weekday": now.strftime("%A")}
 
 
+async def observe(request):
+    """Store one message the gateway saw. Never fails the caller over content.
+
+    The transport must not retry or back off because a single observation was
+    malformed: a missing message is a hole in memory, while a stuck poll loop
+    is a bot that stops answering.
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "invalid json"}, status_code=400)
+    if not isinstance(payload, dict) or not payload.get("message_id"):
+        return JSONResponse({"ok": False, "error": "no message_id"}, status_code=400)
+    try:
+        await storage.record_comment(payload)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+    return JSONResponse({"ok": True})
+
+
 async def bootstrap() -> None:
     await storage.pg_pool()
     await manifests_seed.seed(storage)
@@ -202,12 +230,18 @@ class BearerGate:
         await self.app(scope, receive, send)
 
 
+def build_app():
+    """The served ASGI app: the MCP transport plus the observation intake."""
+    middleware = [Middleware(BearerGate, token=MCP_AUTH_TOKEN)] if MCP_AUTH_TOKEN else []
+    app = mcp.http_app(path="/mcp", stateless_http=True, middleware=middleware)
+    app.router.routes.append(Route("/observe", observe, methods=["POST"]))
+    return app
+
+
 async def main() -> None:
     await bootstrap()
     asyncio.create_task(refresh_loop())
-    middleware = [Middleware(BearerGate, token=MCP_AUTH_TOKEN)] if MCP_AUTH_TOKEN else []
-    app = mcp.http_app(path="/mcp", stateless_http=True, middleware=middleware)
-    config = uvicorn.Config(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8000")), log_config=None)
+    config = uvicorn.Config(build_app(), host="0.0.0.0", port=int(os.environ.get("PORT", "8000")), log_config=None)
     await uvicorn.Server(config).serve()
 
 

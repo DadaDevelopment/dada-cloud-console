@@ -19,10 +19,16 @@ Owns five durable tables:
 ``reply_ledger``
     One row per reply decision. Backs the per-chat hourly budget and makes
     "did the agent actually answer" auditable without reading Telegram.
+``chat_comments``
+    Everything said in the discussion chat, whether or not the agent replied.
+    The agent is handed only the messages it is answering, so without this it
+    knows the questions and nothing about the room they were asked in: which
+    words the regulars use, what was already argued out, who is who.
 """
 
 import json
 import os
+from datetime import datetime
 
 import asyncpg
 
@@ -89,6 +95,25 @@ SCHEMA = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS reply_ledger_chat_time_idx ON reply_ledger (chat_id, created_at DESC)",
+    """
+    CREATE TABLE IF NOT EXISTS chat_comments (
+        chat_id BIGINT NOT NULL,
+        message_id BIGINT NOT NULL,
+        thread_id BIGINT NOT NULL DEFAULT 0,
+        author TEXT NOT NULL DEFAULT '',
+        username TEXT NOT NULL DEFAULT '',
+        text TEXT NOT NULL DEFAULT '',
+        is_channel_post BOOLEAN NOT NULL DEFAULT false,
+        reply_to_message_id BIGINT NOT NULL DEFAULT 0,
+        engaged BOOLEAN NOT NULL DEFAULT false,
+        reason TEXT NOT NULL DEFAULT '',
+        sent_at TIMESTAMPTZ,
+        observed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (chat_id, message_id)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS chat_comments_time_idx ON chat_comments (sent_at DESC NULLS LAST)",
+    "CREATE INDEX IF NOT EXISTS chat_comments_thread_idx ON chat_comments (chat_id, thread_id)",
 ]
 
 
@@ -273,3 +298,56 @@ async def replies_last_hour(chat_id: str) -> int:
             "AND created_at > now() - interval '1 hour'",
             chat_id,
         )
+
+
+def _parse_ts(value):
+    """Accept the ISO string the transport sends, or a datetime, or nothing."""
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+async def record_comment(observation: dict) -> str:
+    """Store one observed chat message, keyed by (chat, message).
+
+    Upsert rather than insert: the gateway may see the same update twice after
+    a restart, and a duplicated comment would quietly reweigh every ranking
+    built on this table.
+    """
+    pool = await pg_pool()
+    async with pool.acquire() as conn:
+        return await conn.execute(
+            """
+            INSERT INTO chat_comments (
+                chat_id, message_id, thread_id, author, username, text,
+                is_channel_post, reply_to_message_id, engaged, reason, sent_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ON CONFLICT (chat_id, message_id) DO UPDATE SET
+                text = EXCLUDED.text,
+                engaged = EXCLUDED.engaged,
+                reason = EXCLUDED.reason
+            """,
+            int(observation.get("chat_id") or 0),
+            int(observation.get("message_id") or 0),
+            int(observation.get("thread_id") or 0),
+            observation.get("first_name") or "",
+            observation.get("username") or "",
+            observation.get("text") or "",
+            bool(observation.get("is_channel_post")),
+            int(observation.get("reply_to_message_id") or 0),
+            bool(observation.get("engaged")),
+            observation.get("reason") or "",
+            _parse_ts(observation.get("sent_at")),
+        )
+
+
+async def comment_count(chat_id: int) -> int:
+    pool = await pg_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetchval("SELECT count(*) FROM chat_comments WHERE chat_id = $1", chat_id)

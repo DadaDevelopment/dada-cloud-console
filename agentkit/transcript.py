@@ -20,9 +20,18 @@ QUOTED_LIMIT = 400
 SOURCE_CHANNEL = "пост канала"
 SOURCE_DEFAULT = "сообщение"
 
+CHANNEL_POST_MARKER = "[новый пост в канале]"
 
-def speaker(first_name: str = "", username: str = "") -> str:
-    """Name the author the way the transport names them: name plus @handle when there is one."""
+
+def speaker(first_name: str = "", username: str = "", is_channel_post: bool = False) -> str:
+    """Name the author the way the transport names them: name plus @handle when there is one.
+
+    The channel's own post has no author to name: telegram delivers it as an
+    automatic forward, and prefixing it with whatever name rides along would
+    tell the model a person said it.
+    """
+    if is_channel_post:
+        return ""
     name = (first_name or "").strip() or (username or "").strip() or "аноним"
     if (username or "").strip():
         return f"{name} (@{username.strip()})"
@@ -47,8 +56,15 @@ def quoted_context(text: str, is_channel: bool = False, username: str = "") -> s
     return f"[в ответ на {source}: {_go_quote(quoted)}]"
 
 
-def inbound(text: str, speaker_line: str = "", quoted_line: str = "") -> str:
+def inbound(
+    text: str,
+    speaker_line: str = "",
+    quoted_line: str = "",
+    is_channel_post: bool = False,
+) -> str:
     """Assemble the message content exactly as the transport hands it to the runtime."""
+    if is_channel_post:
+        return f"{CHANNEL_POST_MARKER}\n{text or ''}"
     content = text or ""
     if speaker_line:
         content = f"{speaker_line}: {content}"

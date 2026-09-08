@@ -380,7 +380,8 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		Msg("tggateway: media resolvers wired")
 	runs := newInterruptState()
 	defer runs.forgetAll()
-	policy := NewGroupPolicy(b.BotUsername)
+	policy := NewGroupPolicyForAgent(b.BotUsername, b.AgentName)
+	observer := NewObserverForAgent(b.AgentName)
 
 	processBatch := func(batch []TelegramUpdate) {
 		if len(batch) == 0 {
@@ -592,11 +593,15 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 			if u.UpdateID >= offset {
 				offset = u.UpdateID + 1
 			}
-			if decision := policy.Decide(u); !decision.Engage {
-				log.Debug().Str("agent", b.AgentName).Str("conv", ConversationKey(u)).
+			decision := policy.Decide(u)
+			observer.Observe(ctx, u, decision)
+			if !decision.Engage {
+				log.Info().Str("agent", b.AgentName).Str("conv", ConversationKey(u)).
 					Str("reason", decision.Reason).Msg("tggateway: update not engaged")
 				continue
 			}
+			log.Info().Str("agent", b.AgentName).Str("conv", ConversationKey(u)).
+				Str("reason", decision.Reason).Msg("tggateway: update engaged")
 			batch = append(batch, u)
 		}
 		if len(batch) == 0 {

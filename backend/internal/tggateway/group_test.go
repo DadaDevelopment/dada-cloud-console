@@ -219,3 +219,103 @@ func TestQuotedContext_LongPostIsTruncated(t *testing.T) {
 		t.Fatalf("quote not truncated, %d runes", len([]rune(got)))
 	}
 }
+
+func channelPost(text string) TelegramUpdate {
+	return TelegramUpdate{
+		ChatID:             -100,
+		ChatType:           "supergroup",
+		ThreadID:           11,
+		MessageID:          42,
+		Text:               text,
+		FromIsBot:          true,
+		SenderChatID:       -200,
+		IsAutomaticForward: true,
+	}
+}
+
+func TestDecide_ChannelPostStaysSilentAtRateZero(t *testing.T) {
+	p := testPolicy()
+	p.roll = func() float64 { return 0 }
+	if d := p.Decide(channelPost("вышел новый пост про агентов")); d.Engage {
+		t.Fatalf("rate 0 must keep the old behaviour, got %+v", d)
+	}
+}
+
+func TestDecide_ChannelPostCommentsOnAWinningRoll(t *testing.T) {
+	p := testPolicy()
+	p.PostCommentRate = 0.5
+	p.roll = func() float64 { return 0.49 }
+	d := p.Decide(channelPost("вышел новый пост про агентов"))
+	if !d.Engage || d.Reason != ReasonPostComment {
+		t.Fatalf("winning roll must open a comment, got %+v", d)
+	}
+	p.roll = func() float64 { return 0.5 }
+	if d := p.Decide(channelPost("вышел новый пост про агентов")); d.Engage {
+		t.Fatalf("losing roll must stay silent, got %+v", d)
+	}
+}
+
+func TestDecide_EmptyChannelPostIsNeverCommented(t *testing.T) {
+	p := testPolicy()
+	p.PostCommentRate = 1
+	p.roll = func() float64 { return 0 }
+	if d := p.Decide(channelPost("   ")); d.Engage || d.Reason != ReasonNoContent {
+		t.Fatalf("a post with no text is nothing to comment on, got %+v", d)
+	}
+}
+
+func TestDecide_ChannelPostIsCheckedBeforeTheBotFilter(t *testing.T) {
+	p := testPolicy()
+	p.PostCommentRate = 1
+	p.roll = func() float64 { return 0 }
+	post := channelPost("пост канала приезжает как форвард от бота")
+	if !post.FromIsBot {
+		t.Fatal("the fixture must keep is_bot: that is exactly what hid the post")
+	}
+	if d := p.Decide(post); !d.Engage {
+		t.Fatalf("the post must survive the bot filter, got %+v", d)
+	}
+}
+
+func TestDecide_CommentUnderAPostStillEngagesNormally(t *testing.T) {
+	p := testPolicy()
+	p.PostCommentRate = 1
+	p.roll = func() float64 { return 0 }
+	comment := groupMsg("а на проде это правда держит нагрузку или только в демо?")
+	comment.ReplyToText = "вышел новый пост про агентов"
+	comment.ReplyToIsChannel = true
+	d := p.Decide(comment)
+	if !d.Engage || d.Reason != ReasonSubstantive {
+		t.Fatalf("a human comment must not be graded as a post, got %+v", d)
+	}
+}
+
+func TestInboundContent_ChannelPostDropsTheForwarder(t *testing.T) {
+	post := channelPost("Собрали агента за вечер")
+	post.FirstName = "Telegram"
+	got := InboundContent(post)
+	if !strings.HasPrefix(got, channelPostMarker) {
+		t.Fatalf("post inbound = %q, want the post marker first", got)
+	}
+	if strings.Contains(got, "Telegram") {
+		t.Fatalf("post inbound = %q, must not name a forwarder as the author", got)
+	}
+}
+
+func TestNewGroupPolicyForAgent_PerAgentOverrideWins(t *testing.T) {
+	t.Setenv("TG_GROUP_POST_COMMENT_RATE", "0")
+	t.Setenv("TG_GROUP_POST_COMMENT_RATE_TG_VIBECODER", "0.5")
+	t.Setenv("TG_GROUP_HOURLY_BUDGET", "8")
+
+	other := NewGroupPolicyForAgent("bot", "tg-exchange-support")
+	if other.PostCommentRate != 0 {
+		t.Fatalf("another agent must keep the shared value, got %v", other.PostCommentRate)
+	}
+	mine := NewGroupPolicyForAgent("bot", "tg-vibecoder")
+	if mine.PostCommentRate != 0.5 {
+		t.Fatalf("agent override ignored, got %v", mine.PostCommentRate)
+	}
+	if mine.HourlyBudget != 8 {
+		t.Fatalf("unset key must fall back to the shared value, got %d", mine.HourlyBudget)
+	}
+}

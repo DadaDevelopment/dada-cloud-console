@@ -61,6 +61,21 @@ ORDER BY score DESC, p.posted_at DESC NULLS LAST
 LIMIT 3
 """
 
+CHAT_SEARCH_SQL = """
+WITH q AS (
+  SELECT DISTINCT w FROM unnest(regexp_split_to_array(lower(trim($1)), '[^a-z0-9а-яё_.+-]+')) AS w
+  WHERE length(w) >= 3
+)
+SELECT c.author, c.username, left(c.text, 400) AS text,
+       to_char(c.sent_at, 'YYYY-MM-DD') AS said_on,
+       c.engaged AS bot_answered,
+       (SELECT count(*) FROM q WHERE position(q.w in lower(c.text)) > 0) AS score
+FROM chat_comments c
+WHERE NOT c.is_channel_post AND length(c.text) >= 12
+ORDER BY score DESC, c.sent_at DESC NULLS LAST
+LIMIT 8
+"""
+
 REPLY_BUDGET_SQL = """
 SELECT count(*) AS answered_last_hour
 FROM reply_ledger
@@ -110,3 +125,25 @@ def search_facts(facts: list[dict], query: str) -> list[dict]:
         scored.append((score, fact))
     scored.sort(key=lambda row: (-row[0], row[1]["id"]))
     return [fact for score, fact in scored[:3] if score > 0]
+
+
+def search_comments(comments: list[dict], query: str) -> list[dict]:
+    """Offline twin of CHAT_SEARCH_SQL.
+
+    The channel's own posts are excluded here on purpose: they are already
+    searchable through ``channel_search``, and letting them win this ranking
+    would answer "what did the chat say" with "what the channel said".
+    """
+    q = _words(query)
+    scored = []
+    for comment in comments:
+        if comment.get("is_channel_post"):
+            continue
+        text = comment.get("text", "")
+        if len(text) < 12:
+            continue
+        score = sum(1 for w in q if w in text.lower())
+        scored.append((score, comment))
+    scored.sort(key=lambda row: row[1].get("said_on") or "", reverse=True)
+    scored.sort(key=lambda row: -row[0])
+    return [comment for score, comment in scored[:8] if score > 0]

@@ -22,7 +22,10 @@ class TestGolden(unittest.TestCase):
         self.assertTrue(self.cases)
         for case in self.cases:
             with self.subTest(case["name"]):
-                spk = transcript.speaker(case["first_name"], case["username"])
+                is_post = case.get("is_channel_post", False)
+                spk = transcript.speaker(
+                    case["first_name"], case["username"], is_post
+                )
                 quoted = transcript.quoted_context(
                     case["quoted_text"],
                     case["quoted_is_channel"],
@@ -31,7 +34,8 @@ class TestGolden(unittest.TestCase):
                 self.assertEqual(spk, case["want_speaker"])
                 self.assertEqual(quoted, case["want_quoted"])
                 self.assertEqual(
-                    transcript.inbound(case["text"], spk, quoted), case["want_inbound"]
+                    transcript.inbound(case["text"], spk, quoted, is_post),
+                    case["want_inbound"],
                 )
 
 
@@ -40,6 +44,13 @@ class TestEdges(unittest.TestCase):
         quoted = transcript.quoted_context("а" * 500, is_channel=True)
         self.assertIn("...", quoted)
         self.assertLess(len(quoted), 460)
+
+    def test_channel_post_carries_the_marker_and_no_author(self):
+        self.assertEqual(transcript.speaker("Telegram", "", True), "")
+        self.assertEqual(
+            transcript.inbound("новый релиз", "", "", True),
+            "[новый пост в канале]\nновый релиз",
+        )
 
     def test_blank_quote_disappears_entirely(self):
         self.assertEqual(transcript.quoted_context("   \n  "), "")

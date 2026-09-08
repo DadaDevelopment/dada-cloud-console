@@ -19,6 +19,7 @@ type goldenCase struct {
 	QuotedText      string `json:"quoted_text"`
 	QuotedIsChannel bool   `json:"quoted_is_channel"`
 	QuotedUsername  string `json:"quoted_username"`
+	IsChannelPost   bool   `json:"is_channel_post"`
 	WantSpeaker     string `json:"want_speaker"`
 	WantQuoted      string `json:"want_quoted"`
 	WantInbound     string `json:"want_inbound"`
@@ -46,13 +47,15 @@ func loadGolden(t *testing.T) []goldenCase {
 func TestInboundContent_MatchesTheSharedGolden(t *testing.T) {
 	for _, c := range loadGolden(t) {
 		u := TelegramUpdate{
-			ChatType:         "supergroup",
-			Text:             c.Text,
-			FirstName:        c.FirstName,
-			Username:         c.Username,
-			ReplyToText:      c.QuotedText,
-			ReplyToIsChannel: c.QuotedIsChannel,
-			ReplyToUsername:  c.QuotedUsername,
+			ChatType:           "supergroup",
+			Text:               c.Text,
+			FirstName:          c.FirstName,
+			Username:           c.Username,
+			ReplyToText:        c.QuotedText,
+			ReplyToIsChannel:   c.QuotedIsChannel,
+			ReplyToUsername:    c.QuotedUsername,
+			IsAutomaticForward: c.IsChannelPost,
+			FromIsBot:          c.IsChannelPost,
 		}
 		if got := GroupSpeaker(u); got != c.WantSpeaker {
 			t.Errorf("%s: speaker = %q, want %q", c.Name, got, c.WantSpeaker)
