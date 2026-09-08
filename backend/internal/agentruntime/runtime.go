@@ -269,7 +269,7 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 	}
 	if playbook != nil {
 		run.ConversationContext.ReplyFormat = guidedReplyFormat
-		run.ConversationContext.GuidedPlaybook = playbook.context(state)
+		run.ConversationContext.GuidedPlaybook = playbook.context(state, history)
 	} else if r.structuredAgents[conv.AgentName] {
 		run.ConversationContext.ReplyFormat = structuredReplyFormat
 	}
@@ -310,7 +310,7 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 		// invalid draft, never restart lifecycle hooks or contact creation.
 		run.ConversationContext.State = after
 		if playbook != nil {
-			run.ConversationContext.GuidedPlaybook = playbook.context(after)
+			run.ConversationContext.GuidedPlaybook = playbook.context(after, history)
 		}
 		run.ConversationContext.ReplyError = contractErr.Error()
 	}

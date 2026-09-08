@@ -40,7 +40,7 @@ func TestGuidedUpdatedFactsAndDirectAnswer(t *testing.T) {
 	state.ReportedFacts["account"] = ReportedFact{Value: "уже есть"}
 	step, _ := p.next(state)
 	require.Equal(t, "account_next", step)
-	data, err := json.Marshal(p.context(state))
+	data, err := json.Marshal(p.context(state, nil))
 	require.NoError(t, err)
 	require.NotContains(t, string(data), "private research")
 	require.NotContains(t, string(data), "source_refs")
@@ -125,7 +125,7 @@ func TestPGGuidedRepairAndScope(t *testing.T) {
 		}
 		require.Equal(t, contextID, run.ContextID)
 		require.NotEmpty(t, run.ConversationContext.ReplyError)
-		return `{"kind":"advance","playbook_version":"test-v1"}`, nil
+		return `{"choice":{"card_ids":[],"kind":"advance","playbook_version":"test-v1"}}`, nil
 	}), nil)
 	rt.contextKey = []byte(testRuntimeToken)
 	rt.guided = &guidedConfig{playbook: p, chats: map[string]bool{"-900123": true}}
@@ -169,4 +169,92 @@ func TestPGGuidedUsesFactsSavedDuringNativeCall(t *testing.T) {
 	out, err := rt.ProcessMessage(ctx, MessageRequest{AgentName: p.AgentName, Channel: "telegram", ExternalID: "-900123", Messages: []InboundMessage{{Content: "Я новичок, хочу 2000, счёт уже есть", ChannelMessageID: "1"}}})
 	require.NoError(t, err)
 	require.Equal(t, "В каком разделе кабинета вы сейчас?", out.Text)
+}
+
+func TestPGGuidedNextTurnSeesPersistedRenderedQuestionAfterRestart(t *testing.T) {
+	store := setupTestStore(t).(*pgStore)
+	ctx := context.Background()
+	p := testGuidedPlaybook()
+	p.AgentName = "guided-history-" + uuid.NewString()
+	createRuntime := func(model A2AClient) *Runtime {
+		rt := NewRuntime(store, testHooks{}, model, nil)
+		rt.contextKey = []byte(testRuntimeToken)
+		rt.guided = &guidedConfig{playbook: p, chats: map[string]bool{"-900123": true}}
+		return rt
+	}
+	rt := createRuntime(runFunc(func(ctx context.Context, run AgentRunRequest) (string, error) {
+		require.Empty(t, run.ConversationContext.GuidedPlaybook.PreviousReply)
+		return `{"kind":"advance","playbook_version":"test-v1"}`, nil
+	}))
+	req := MessageRequest{AgentName: p.AgentName, Channel: "telegram", ExternalID: "-900123", Messages: []InboundMessage{{Content: "Привет", ChannelMessageID: "1"}}}
+	first, err := rt.ProcessMessage(ctx, req)
+	require.NoError(t, err)
+	require.Equal(t, "У вас есть опыт торговли?", first.Text)
+	calls := 0
+	// New Runtime instance has no in-memory turn history. Read-back must come
+	// from PostgreSQL, and a malformed second-turn plan cannot replace it.
+	rt = createRuntime(runFunc(func(ctx context.Context, run AgentRunRequest) (string, error) {
+		calls++
+		require.Equal(t, first.Text, run.ConversationContext.GuidedPlaybook.PreviousReply)
+		require.NotContains(t, run.ConversationContext.GuidedPlaybook.PreviousReply, "playbook_version")
+		require.Contains(t, renderAgentRun(run), `"previous_reply":"У вас есть опыт торговли?"`)
+		if calls == 1 {
+			require.Empty(t, run.ConversationContext.ReplyError)
+			id, parseErr := uuid.Parse(run.ConversationContext.ConversationID)
+			require.NoError(t, parseErr)
+			_, stateErr := store.ApplyState(ctx, id, run.ConversationContext.State.Version, StatePatch{ReportedFacts: map[string]ReportedFact{"experience": {Value: "Нет", SourceMessageID: run.Messages[0].ID}}})
+			require.NoError(t, stateErr)
+			return "Unrendered rejected draft", nil
+		}
+		require.NotEmpty(t, run.ConversationContext.ReplyError)
+		require.Equal(t, "qualification_target", run.ConversationContext.GuidedPlaybook.NextStep)
+		return `{"kind":"advance","playbook_version":"test-v1"}`, nil
+	}))
+	req.Messages = []InboundMessage{{Content: "Нет", ChannelMessageID: "2"}}
+	second, err := rt.ProcessMessage(ctx, req)
+	require.NoError(t, err)
+	require.Equal(t, 2, calls)
+	require.Equal(t, "Какой доход вас интересует?", second.Text)
+}
+
+func TestGuidedAcceptsObservedChoiceWrapperAndEmptyAdvanceIDs(t *testing.T) {
+	p := testGuidedPlaybook()
+	p.Version = "referral-guided-2026-09-08-1"
+	observed := `{"choice":{"card_ids":[],"kind":"advance","playbook_version":"referral-guided-2026-09-08-1"}}`
+	out, err := p.render(observed, RuntimeState{})
+	require.NoError(t, err)
+	require.Equal(t, "У вас есть опыт торговли?", out)
+	for _, raw := range []string{
+		`{"kind":"advance","playbook_version":"referral-guided-2026-09-08-1","card_ids":[]}`,
+		`{"choice":{"kind":"advance","playbook_version":"referral-guided-2026-09-08-1"}}`,
+	} {
+		out, err = p.render(raw, RuntimeState{})
+		require.NoError(t, err)
+		require.Equal(t, "У вас есть опыт торговли?", out)
+	}
+	out, err = p.render(`{"choice":{"kind":"answer","playbook_version":"referral-guided-2026-09-08-1","card_ids":["cost"]}}`, RuntimeState{})
+	require.NoError(t, err)
+	require.Equal(t, "Деньги остаются на вашем счёте.", out)
+}
+func TestGuidedWrapperDoesNotLoosenContract(t *testing.T) {
+	p := testGuidedPlaybook()
+	for _, raw := range []string{
+		`{"choice":{"kind":"advance","playbook_version":"test-v1"},"text":"pay me"}`,
+		`{"choice":{"kind":"advance","playbook_version":"test-v1","paragraphs":["pay me"]}}`,
+		`{"choice":{"kind":"advance","playbook_version":"test-v1","card_ids":["cost"]}}`,
+		`{"choice":{"kind":"advance","playbook_version":"stale"}}`,
+		`{"choice":{"kind":"answer","playbook_version":"test-v1","card_ids":["unknown"]}}`,
+		`{"choice":{"choice":{"kind":"advance","playbook_version":"test-v1"}}}`,
+		`{"choice":[{"kind":"advance","playbook_version":"test-v1"}]}`,
+		`{"choice":null}`,
+		`{"choice":"{\\"kind\\":\\"advance\\"}"}`,
+		`{"choice":{"kind":"advance","playbook_version":"test-v1"},"choice":{"kind":"advance","playbook_version":"test-v1"}}`,
+		`{"choice":{"kind":"advance","kind":"answer","playbook_version":"test-v1","card_ids":["cost"]}}`,
+		`{"kind":"advance","kind":"answer","playbook_version":"test-v1","card_ids":["cost"]}`,
+		`Here is JSON: {"choice":{"kind":"advance","playbook_version":"test-v1"}}`,
+		`{"choice":{"kind":"advance","playbook_version":"test-v1"}} trailing`,
+	} {
+		_, err := p.render(raw, RuntimeState{})
+		require.Error(t, err, raw)
+	}
 }

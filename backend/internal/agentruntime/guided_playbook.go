@@ -46,6 +46,9 @@ type GuidedChoice struct {
 	Paragraphs []string `json:"paragraphs"`
 }
 type GuidedContext struct {
+	// PreviousReply is the last persisted runtime assistant text, not a claim of
+	// Telegram delivery. The kagent session retains a plan, not this rendering.
+	PreviousReply  string         `json:"previous_reply,omitempty"`
 	Version        string         `json:"version"`
 	NextStep       string         `json:"next_step"`
 	AdvanceCardIDs []string       `json:"advance_card_ids"`
@@ -239,14 +242,75 @@ func (p *GuidedPlaybook) next(state RuntimeState) (string, []string) {
 	}
 	return "coverage_gap", nil
 }
-func (p *GuidedPlaybook) context(state RuntimeState) *GuidedContext {
+func (p *GuidedPlaybook) context(state RuntimeState, history []Message) *GuidedContext {
 	step, ids := p.next(state)
 	out := &GuidedContext{Version: p.Version, NextStep: step, AdvanceCardIDs: ids, AnswerChoices: []GuidedChoice{}}
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role == "assistant" {
+			out.PreviousReply = history[i].Content
+			break
+		}
+	}
 	for _, id := range p.AnswerCardIDs {
 		c, _ := p.card(id)
 		out.AnswerChoices = append(out.AnswerChoices, GuidedChoice{c.ID, c.SelectWhen, c.Paragraphs})
 	}
 	return out
+}
+
+// guidedReplyObject requires exactly one JSON object and rejects duplicate keys.
+// This is protocol normalization, never prose extraction or recursive unwrapping.
+func guidedReplyObject(raw []byte) (map[string]json.RawMessage, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	tok, err := dec.Token()
+	if err != nil || tok != json.Delim('{') {
+		return nil, fmt.Errorf("guided reply must be an object")
+	}
+	fields := map[string]json.RawMessage{}
+	for dec.More() {
+		tok, err = dec.Token()
+		if err != nil {
+			return nil, fmt.Errorf("invalid guided reply object")
+		}
+		key, ok := tok.(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid guided reply key")
+		}
+		if _, exists := fields[key]; exists {
+			return nil, fmt.Errorf("duplicate guided reply key")
+		}
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return nil, fmt.Errorf("invalid guided reply value")
+		}
+		fields[key] = value
+	}
+	if tok, err = dec.Token(); err != nil || tok != json.Delim('}') {
+		return nil, fmt.Errorf("invalid guided reply object")
+	}
+	if err := dec.Decode(new(any)); err != io.EOF {
+		return nil, fmt.Errorf("trailing guided reply content")
+	}
+	return fields, nil
+}
+func normalizeGuidedReply(raw []byte) ([]byte, error) {
+	if len(raw) > 16384 {
+		return nil, fmt.Errorf("guided reply too large")
+	}
+	fields, err := guidedReplyObject(raw)
+	if err != nil {
+		return nil, err
+	}
+	if choice, ok := fields["choice"]; ok {
+		if len(fields) != 1 {
+			return nil, fmt.Errorf("choice wrapper accepts no extra fields")
+		}
+		if _, err := guidedReplyObject(choice); err != nil {
+			return nil, err
+		}
+		return choice, nil
+	}
+	return raw, nil
 }
 func (p *GuidedPlaybook) render(raw string, state RuntimeState) (string, error) {
 	var plan struct {
@@ -254,7 +318,11 @@ func (p *GuidedPlaybook) render(raw string, state RuntimeState) (string, error) 
 		Version string   `json:"playbook_version"`
 		CardIDs []string `json:"card_ids,omitempty"`
 	}
-	if err := strictGuidedJSON([]byte(raw), &plan); err != nil {
+	normalized, err := normalizeGuidedReply([]byte(raw))
+	if err != nil {
+		return "", err
+	}
+	if err := strictGuidedJSON(normalized, &plan); err != nil {
 		return "", err
 	}
 	if plan.Version != p.Version {
@@ -262,7 +330,7 @@ func (p *GuidedPlaybook) render(raw string, state RuntimeState) (string, error) 
 	}
 	switch plan.Kind {
 	case "advance":
-		if plan.CardIDs != nil {
+		if len(plan.CardIDs) != 0 {
 			return "", fmt.Errorf("advance accepts no model card IDs")
 		}
 		_, ids := p.next(state)
