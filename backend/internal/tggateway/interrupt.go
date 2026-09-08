@@ -44,11 +44,11 @@ type chatRun struct {
 // done().
 type interruptState struct {
 	mu   sync.Mutex
-	runs map[int64]*chatRun
+	runs map[string]*chatRun
 }
 
 func newInterruptState() *interruptState {
-	return &interruptState{runs: map[int64]*chatRun{}}
+	return &interruptState{runs: map[string]*chatRun{}}
 }
 
 // begin registers a fresh run for the chat, superseding any active one: the
@@ -57,12 +57,12 @@ func newInterruptState() *interruptState {
 // bookkeeping (reply sent, or silence on cancel) is finished. superseded
 // reports whether an active run was actually canceled -- for the debug log,
 // not for control flow.
-func (s *interruptState) begin(chatID int64, parent context.Context) (runCtx context.Context, done func(), superseded bool) {
+func (s *interruptState) begin(convKey string, parent context.Context) (runCtx context.Context, done func(), superseded bool) {
 	s.mu.Lock()
-	run, ok := s.runs[chatID]
+	run, ok := s.runs[convKey]
 	if !ok {
 		run = &chatRun{}
-		s.runs[chatID] = run
+		s.runs[convKey] = run
 	}
 	s.mu.Unlock()
 
@@ -106,14 +106,14 @@ func (s *interruptState) begin(chatID int64, parent context.Context) (runCtx con
 // (done() cleared cancel). Winning the claim is final: a supersede landing
 // microseconds later cannot unsend -- the reply was fully computed before
 // the correction arrived, and the new run restarts anyway.
-func (s *interruptState) claimReply(chatID int64, runCtx context.Context) bool {
+func (s *interruptState) claimReply(convKey string, runCtx context.Context) bool {
 	gen, ok := runCtx.Value(runGenKey{}).(int)
 	if !ok {
 		return false
 	}
 
 	s.mu.Lock()
-	run, ok := s.runs[chatID]
+	run, ok := s.runs[convKey]
 	s.mu.Unlock()
 	if !ok {
 		return false
@@ -127,17 +127,17 @@ func (s *interruptState) claimReply(chatID int64, runCtx context.Context) bool {
 // forget drops the chat's run entry -- used on poller shutdown so a
 // restarted poller starts clean rather than inheriting a cancel pointing at
 // a dead goroutine's context.
-func (s *interruptState) forget(chatID int64) {
+func (s *interruptState) forget(convKey string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if run, ok := s.runs[chatID]; ok {
+	if run, ok := s.runs[convKey]; ok {
 		run.mu.Lock()
 		if run.cancel != nil {
 			run.cancel()
 			run.cancel = nil
 		}
 		run.mu.Unlock()
-		delete(s.runs, chatID)
+		delete(s.runs, convKey)
 	}
 }
 

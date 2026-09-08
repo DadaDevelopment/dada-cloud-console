@@ -249,8 +249,8 @@ func withTelegramIdentity(u TelegramUpdate) string {
 // context IS the server-side conversation (kagent keeps session history per
 // contextId), so keying it on the chat id gives the model the full dialogue:
 // no repeated self-introductions, follow-ups that remember earlier turns.
-func a2aContextFor(chatID int64) string {
-	return fmt.Sprintf("tg-chat-%d", chatID)
+func a2aContextFor(convKey string) string {
+	return "tg-chat-" + convKey
 }
 
 // modelErrorMarkers are substrings that identify an upstream LLM/billing
@@ -354,17 +354,20 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		Msg("tggateway: media resolvers wired")
 	runs := newInterruptState()
 	defer runs.forgetAll()
+	policy := NewGroupPolicy(b.BotUsername)
 
 	processBatch := func(batch []TelegramUpdate) {
 		if len(batch) == 0 {
 			return
 		}
 		chatID := batch[0].ChatID
+		convKey := ConversationKey(batch[0])
+		inGroup := IsGroup(batch[0].ChatType)
 
-		runCtx, done, superseded := runs.begin(chatID, ctx)
+		runCtx, done, superseded := runs.begin(convKey, ctx)
 		defer done()
 		if superseded {
-			log.Debug().Str("agent", b.AgentName).Int64("chatID", chatID).
+			log.Debug().Str("agent", b.AgentName).Str("conv", convKey).
 				Msg("tggateway: superseded an in-flight run (interrupt: cancel_and_restart)")
 		}
 
@@ -378,7 +381,7 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		req := RuntimeMessageRequest{
 			AgentName:  b.AgentName,
 			Channel:    "telegram",
-			ExternalID: fmt.Sprintf("%d", chatID),
+			ExternalID: convKey,
 			Actor: RuntimeActor{
 				ExternalID: fmt.Sprintf("%d", batch[0].UserID),
 				Username:   batch[0].Username,
@@ -387,6 +390,9 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		}
 		for _, u := range batch {
 			content := u.Text
+			if speaker := GroupSpeaker(u); speaker != "" {
+				content = fmt.Sprintf("%s: %s", speaker, content)
+			}
 			if u.HasLocation {
 				content = fmt.Sprintf("[location_shared: lat=%f, lon=%f]\n%s", u.Latitude, u.Longitude, u.Text)
 			}
@@ -443,7 +449,7 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		} else {
 			var texts []string
 			for _, u := range batch {
-				r, sendErr := a2a.SendWithContext(runCtx, b.AgentName, a2aContextFor(chatID), withTelegramIdentity(u))
+				r, sendErr := a2a.SendWithContext(runCtx, b.AgentName, a2aContextFor(convKey), withTelegramIdentity(u))
 				if sendErr != nil {
 					procErr = sendErr
 					break
@@ -485,14 +491,18 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 			return
 		}
 
-		if !runs.claimReply(chatID, runCtx) {
-			log.Debug().Str("agent", b.AgentName).Int64("chatID", chatID).
+		if !runs.claimReply(convKey, runCtx) {
+			log.Debug().Str("agent", b.AgentName).Str("conv", convKey).
 				Msg("tggateway: run superseded before reply, dropping computed reply")
 			return
 		}
 
 		sendText, wantsButton := splitLocationButtonMarker(sanitizeModelReply(reply))
 		if strings.TrimSpace(sendText) == "" && !wantsButton {
+			if inGroup {
+				log.Debug().Str("agent", b.AgentName).Str("conv", convKey).
+					Msg("tggateway: agent chose silence in a group, nothing sent")
+			}
 			return
 		}
 		var sendErr error
@@ -512,6 +522,10 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		}
 		if sendErr != nil {
 			log.Warn().Err(sendErr).Str("agent", b.AgentName).Msg("tggateway: reply send failed")
+			return
+		}
+		if inGroup {
+			policy.Charge(convKey)
 		}
 	}
 
@@ -552,12 +566,20 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 			if u.UpdateID >= offset {
 				offset = u.UpdateID + 1
 			}
+			if decision := policy.Decide(u); !decision.Engage {
+				log.Debug().Str("agent", b.AgentName).Str("conv", ConversationKey(u)).
+					Str("reason", decision.Reason).Msg("tggateway: update not engaged")
+				continue
+			}
 			batch = append(batch, u)
+		}
+		if len(batch) == 0 {
+			continue
 		}
 
 		if deb != nil {
 			for _, u := range batch {
-				deb.Enqueue(fmt.Sprintf("agent=%s chat=%d", b.AgentName, u.ChatID), u)
+				deb.Enqueue(fmt.Sprintf("agent=%s conv=%s", b.AgentName, ConversationKey(u)), u)
 			}
 		} else {
 			// One Telegram poll may contain several chats. Never mix their

@@ -361,15 +361,18 @@ func TestSanitizeModelReply_NormalReplyUntouched(t *testing.T) {
 	}
 }
 
-func TestA2AContextFor_IsStablePerChat(t *testing.T) {
-	if a2aContextFor(42) != "tg-chat-42" {
-		t.Fatalf("unexpected context id %q", a2aContextFor(42))
+func TestA2AContextFor_IsStablePerConversation(t *testing.T) {
+	if a2aContextFor("42") != "tg-chat-42" {
+		t.Fatalf("unexpected context id %q", a2aContextFor("42"))
 	}
-	if a2aContextFor(42) != a2aContextFor(42) {
-		t.Fatalf("context id must be deterministic per chat")
+	if a2aContextFor("42") != a2aContextFor("42") {
+		t.Fatalf("context id must be deterministic per conversation")
 	}
-	if a2aContextFor(43) == a2aContextFor(42) {
+	if a2aContextFor("43") == a2aContextFor("42") {
 		t.Fatalf("different chats must not share a context id")
+	}
+	if a2aContextFor("42:7") == a2aContextFor("42") {
+		t.Fatalf("a comment thread must not share the chat's context id")
 	}
 }
 

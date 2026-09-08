@@ -1,0 +1,26 @@
+[
+  {
+    "name": "glm-5.3-flash",
+    "base_url": "https://api.z.ai/api/coding/paas/v4",
+    "model": "glm-5.3-flash",
+    "api_key_env": "ZHIPU_API_KEY",
+    "temperature": 0.8,
+    "max_tokens": 300
+  },
+  {
+    "name": "gpt-5-mini",
+    "base_url": "https://api.openai.com/v1",
+    "model": "gpt-5-mini",
+    "api_key_env": "OPENAI_API_KEY",
+    "temperature": 0.8,
+    "max_tokens": 300
+  },
+  {
+    "name": "openrouter-qwen3-235b",
+    "base_url": "https://openrouter.ai/api/v1",
+    "model": "qwen/qwen3-235b-a22b",
+    "api_key_env": "OPENROUTER_API_KEY",
+    "temperature": 0.8,
+    "max_tokens": 300
+  }
+]

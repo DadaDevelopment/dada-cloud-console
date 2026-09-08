@@ -59,6 +59,13 @@ type TelegramUpdate struct {
 	ThreadID         int64
 	Entities         []TelegramEntity
 	Attachment       *TelegramAttachment
+
+	ChatType           string
+	FromIsBot          bool
+	SenderChatID       int64
+	IsAutomaticForward bool
+	ReplyToUsername    string
+	ReplyToIsBot       bool
 }
 
 // TelegramClient is the Bot API surface a poller needs. An interface so
@@ -171,15 +178,26 @@ type tgMessage struct {
 		Longitude float64 `json:"longitude"`
 	} `json:"location"`
 	Chat struct {
-		ID int64 `json:"id"`
+		ID   int64  `json:"id"`
+		Type string `json:"type"`
 	} `json:"chat"`
 	From struct {
 		ID        int64  `json:"id"`
 		Username  string `json:"username"`
 		FirstName string `json:"first_name"`
+		IsBot     bool   `json:"is_bot"`
 	} `json:"from"`
-	ReplyToMessage *struct {
+	SenderChat *struct {
+		ID   int64  `json:"id"`
+		Type string `json:"type"`
+	} `json:"sender_chat"`
+	IsAutomaticForward bool `json:"is_automatic_forward"`
+	ReplyToMessage     *struct {
 		MessageID int64 `json:"message_id"`
+		From      *struct {
+			Username string `json:"username"`
+			IsBot    bool   `json:"is_bot"`
+		} `json:"from"`
 	} `json:"reply_to_message"`
 	MessageThreadID int64            `json:"message_thread_id"`
 	Entities        []TelegramEntity `json:"entities"`
@@ -376,6 +394,16 @@ func (c *httpTelegramClient) GetUpdates(ctx context.Context, token string, offse
 		}
 		upd.Entities = linkEntities(upd.Text, u.Message.Entities)
 		upd.Attachment = attachment
+		upd.ChatType = u.Message.Chat.Type
+		upd.FromIsBot = u.Message.From.IsBot
+		upd.IsAutomaticForward = u.Message.IsAutomaticForward
+		if u.Message.SenderChat != nil {
+			upd.SenderChatID = u.Message.SenderChat.ID
+		}
+		if u.Message.ReplyToMessage != nil && u.Message.ReplyToMessage.From != nil {
+			upd.ReplyToUsername = u.Message.ReplyToMessage.From.Username
+			upd.ReplyToIsBot = u.Message.ReplyToMessage.From.IsBot
+		}
 		out = append(out, upd)
 	}
 	return out, nil

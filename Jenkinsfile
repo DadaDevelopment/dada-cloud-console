@@ -530,6 +530,35 @@ spec:
                             '''
                         }
 
+                        // Offline half of the eval contract: it never calls a model,
+                        // so it costs seconds and can gate every merge. The scoring
+                        // half needs an API key and lives in scripts/bakeoff.py, run
+                        // on the holdout split before a release.
+                        //
+                        // It runs unconditionally rather than behind a changed-files
+                        // guard: the golden set also rots when nobody touches it, and
+                        // a gate that only fires on the diff you remembered to make is
+                        // the gate that was green the day it mattered.
+                        stage('Agent eval gate') {
+                            sh '''
+                                set -eu
+                                for attempt in 1 2 3; do
+                                    apk add --no-cache python3 && break
+                                    echo "apk add python3 failed (attempt $attempt)"
+                                    [ "$attempt" = 3 ] && exit 1
+                                    sleep 5
+                                done
+
+                                cd agentkit
+                                python3 -m unittest discover -s tests -q
+
+                                python3 gate.py \
+                                    --agents-root ../tg-vibecoder \
+                                    --agent vibecoder \
+                                    --cases ../tg-vibecoder/evals/persona/cases.jsonl
+                            '''
+                        }
+
                         // Backend tests moved out of this lane: they now run AFTER
                         // GitOps write-back, non-blocking to the deploy (see the
                         // standalone "Backend tests" stage near the bottom of this
