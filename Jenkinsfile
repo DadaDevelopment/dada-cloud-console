@@ -110,6 +110,19 @@ podTemplate(
         label: podLabel,
         namespace: 'devops-tools',
         serviceAccount: 'jenkins-admin',
+        // workspaceVolume MUST be set here, not in the yaml below. The k8s plugin
+        // owns the volume named `workspace-volume` and overwrites whatever the
+        // yaml declares for it with this field (default: an emptyDir with no
+        // sizeLimit). That is why the yaml's `sizeLimit: 3Gi` never applied — the
+        // live pod carried a plain `emptyDir: {}`, i.e. uncapped node disk, for as
+        // long as that comment claimed otherwise. dynamicPVC provisions one PVC
+        // per agent pod and deletes it with the pod, same lifecycle as the
+        // ephemeral docker-graph-storage volume below.
+        workspaceVolume: dynamicPVC(
+                requestsSize: '3Gi',
+                accessModes: 'ReadWriteOnce',
+                storageClassName: 'longhorn-ci-scratch'
+        ),
         yaml: """
 apiVersion: v1
 kind: Pod
@@ -162,23 +175,17 @@ spec:
   securityContext:
     fsGroup: 1000
   volumes:
-    # workspace + docker graph are generic ephemeral volumes: one Longhorn PVC
-    # per agent pod, created and deleted with it (ownerRef), never shared. They
-    # were emptyDir until 2026-09-08 — see the podAntiAffinity note above for the
-    # two P0s that bought. Sizes are hard caps enforced by ext4: a build that
-    # overruns gets ENOSPC in its own volume and fails, instead of taking the
-    # node's disk (and whatever database is on it) with it.
+    # The docker graph is a generic ephemeral volume: one Longhorn PVC per agent
+    # pod, created and deleted with it (ownerRef), never shared. The workspace is
+    # the same idea via the plugin's own workspaceVolume field above. Both were
+    # emptyDir until 2026-09-08 — see the podAntiAffinity note for the two P0s
+    # that bought. The size is a hard cap enforced by ext4: a build that overruns
+    # gets ENOSPC in its own volume and fails, instead of taking the node's disk
+    # (and whatever database is on it) with it.
     # storageClassName is longhorn-ci-scratch (argo-infra jenkins chart):
     # 1 replica, reclaimPolicy=Delete, no snapshot/backup jobs.
-    - name: workspace-volume
-      ephemeral:
-        volumeClaimTemplate:
-          spec:
-            accessModes: ["ReadWriteOnce"]
-            storageClassName: longhorn-ci-scratch
-            resources:
-              requests:
-                storage: 3Gi
+    # NOTE: workspace-volume is deliberately absent here — the plugin injects it
+    # from the workspaceVolume field above and ignores any yaml definition of it.
     - name: build-cache
       persistentVolumeClaim:
         claimName: jenkins-build-cache
