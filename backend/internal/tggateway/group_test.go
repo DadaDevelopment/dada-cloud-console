@@ -1,6 +1,7 @@
 package tggateway
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -176,5 +177,45 @@ func TestGroupSpeaker(t *testing.T) {
 	private := TelegramUpdate{ChatType: "private", FirstName: "Петя"}
 	if got := GroupSpeaker(private); got != "" {
 		t.Fatalf("private chat must carry no speaker prefix, got %q", got)
+	}
+}
+
+func TestQuotedContext_ChannelPostAndUser(t *testing.T) {
+	u := groupMsg("а это точно быстрее?")
+	u.ReplyToText = "Выкатили новый рантайм, холодный старт 5 секунд"
+	u.ReplyToIsChannel = true
+	got := QuotedContext(u)
+	want := `[в ответ на пост канала: "Выкатили новый рантайм, холодный старт 5 секунд"]`
+	if got != want {
+		t.Fatalf("channel quote %q, want %q", got, want)
+	}
+
+	u.ReplyToIsChannel = false
+	u.ReplyToUsername = "petya"
+	if got := QuotedContext(u); got != `[в ответ на @petya: "Выкатили новый рантайм, холодный старт 5 секунд"]` {
+		t.Fatalf("user quote %q", got)
+	}
+}
+
+func TestQuotedContext_AbsentWhenNothingToQuote(t *testing.T) {
+	if got := QuotedContext(groupMsg("просто реплика")); got != "" {
+		t.Fatalf("expected no quote, got %q", got)
+	}
+	private := TelegramUpdate{ChatType: "private", Text: "привет", ReplyToText: "прошлое сообщение"}
+	if got := QuotedContext(private); got != "" {
+		t.Fatalf("private chat needs no quote, got %q", got)
+	}
+}
+
+func TestQuotedContext_LongPostIsTruncated(t *testing.T) {
+	u := groupMsg("и что?")
+	u.ReplyToIsChannel = true
+	u.ReplyToText = strings.Repeat("я", quotedContextLimit+50)
+	got := QuotedContext(u)
+	if !strings.HasSuffix(got, `..."]`) {
+		t.Fatalf("expected an ellipsis on a long post, got tail %q", got[len(got)-20:])
+	}
+	if len([]rune(got)) > quotedContextLimit+60 {
+		t.Fatalf("quote not truncated, %d runes", len([]rune(got)))
 	}
 }

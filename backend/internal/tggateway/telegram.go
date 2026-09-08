@@ -66,6 +66,8 @@ type TelegramUpdate struct {
 	IsAutomaticForward bool
 	ReplyToUsername    string
 	ReplyToIsBot       bool
+	ReplyToText        string
+	ReplyToIsChannel   bool
 }
 
 // TelegramClient is the Bot API surface a poller needs. An interface so
@@ -198,6 +200,12 @@ type tgMessage struct {
 			Username string `json:"username"`
 			IsBot    bool   `json:"is_bot"`
 		} `json:"from"`
+		SenderChat *struct {
+			ID   int64  `json:"id"`
+			Type string `json:"type"`
+		} `json:"sender_chat"`
+		Text    string `json:"text"`
+		Caption string `json:"caption"`
 	} `json:"reply_to_message"`
 	MessageThreadID int64            `json:"message_thread_id"`
 	Entities        []TelegramEntity `json:"entities"`
@@ -363,50 +371,72 @@ func (c *httpTelegramClient) GetUpdates(ctx context.Context, token string, offse
 	}
 	out := make([]TelegramUpdate, 0, len(raw))
 	for _, u := range raw {
-		if u.Message == nil {
+		upd, ok := updateFromRaw(u)
+		if !ok {
 			continue
-		}
-		attachment := mediaAttachment(u.Message)
-		hasLocation := u.Message.Location != nil
-		if u.Message.Text == "" && !hasLocation && attachment == nil {
-			continue
-		}
-		upd := TelegramUpdate{
-			UpdateID:  u.UpdateID,
-			ChatID:    u.Message.Chat.ID,
-			UserID:    u.Message.From.ID,
-			Text:      u.Message.Text,
-			Username:  u.Message.From.Username,
-			FirstName: u.Message.From.FirstName,
-			MessageID: u.Message.MessageID,
-			ThreadID:  u.Message.MessageThreadID,
-		}
-		if u.Message.Date > 0 {
-			upd.SentAt = time.Unix(u.Message.Date, 0).UTC()
-		}
-		if u.Message.ReplyToMessage != nil {
-			upd.ReplyToMessageID = u.Message.ReplyToMessage.MessageID
-		}
-		if hasLocation {
-			upd.HasLocation = true
-			upd.Latitude = u.Message.Location.Latitude
-			upd.Longitude = u.Message.Location.Longitude
-		}
-		upd.Entities = linkEntities(upd.Text, u.Message.Entities)
-		upd.Attachment = attachment
-		upd.ChatType = u.Message.Chat.Type
-		upd.FromIsBot = u.Message.From.IsBot
-		upd.IsAutomaticForward = u.Message.IsAutomaticForward
-		if u.Message.SenderChat != nil {
-			upd.SenderChatID = u.Message.SenderChat.ID
-		}
-		if u.Message.ReplyToMessage != nil && u.Message.ReplyToMessage.From != nil {
-			upd.ReplyToUsername = u.Message.ReplyToMessage.From.Username
-			upd.ReplyToIsBot = u.Message.ReplyToMessage.From.IsBot
 		}
 		out = append(out, upd)
 	}
 	return out, nil
+}
+
+// updateFromRaw maps one getUpdates entry onto the gateway's own update
+// shape, reporting false for anything with no content worth an agent turn.
+// Split out of GetUpdates so the mapping is testable without an HTTP stub:
+// the fields that matter in a channel comment section (who is quoted, and
+// what they said) are decided here, and a mapping bug looks exactly like an
+// agent that ignored the thread.
+func updateFromRaw(u tgUpdate) (TelegramUpdate, bool) {
+	if u.Message == nil {
+		return TelegramUpdate{}, false
+	}
+	attachment := mediaAttachment(u.Message)
+	hasLocation := u.Message.Location != nil
+	if u.Message.Text == "" && !hasLocation && attachment == nil {
+		return TelegramUpdate{}, false
+	}
+	upd := TelegramUpdate{
+		UpdateID:  u.UpdateID,
+		ChatID:    u.Message.Chat.ID,
+		UserID:    u.Message.From.ID,
+		Text:      u.Message.Text,
+		Username:  u.Message.From.Username,
+		FirstName: u.Message.From.FirstName,
+		MessageID: u.Message.MessageID,
+		ThreadID:  u.Message.MessageThreadID,
+	}
+	if u.Message.Date > 0 {
+		upd.SentAt = time.Unix(u.Message.Date, 0).UTC()
+	}
+	if u.Message.ReplyToMessage != nil {
+		upd.ReplyToMessageID = u.Message.ReplyToMessage.MessageID
+	}
+	if hasLocation {
+		upd.HasLocation = true
+		upd.Latitude = u.Message.Location.Latitude
+		upd.Longitude = u.Message.Location.Longitude
+	}
+	upd.Entities = linkEntities(upd.Text, u.Message.Entities)
+	upd.Attachment = attachment
+	upd.ChatType = u.Message.Chat.Type
+	upd.FromIsBot = u.Message.From.IsBot
+	upd.IsAutomaticForward = u.Message.IsAutomaticForward
+	if u.Message.SenderChat != nil {
+		upd.SenderChatID = u.Message.SenderChat.ID
+	}
+	if u.Message.ReplyToMessage != nil {
+		upd.ReplyToText = u.Message.ReplyToMessage.Text
+		if upd.ReplyToText == "" {
+			upd.ReplyToText = u.Message.ReplyToMessage.Caption
+		}
+		upd.ReplyToIsChannel = u.Message.ReplyToMessage.SenderChat != nil &&
+			u.Message.ReplyToMessage.SenderChat.Type == "channel"
+	}
+	if u.Message.ReplyToMessage != nil && u.Message.ReplyToMessage.From != nil {
+		upd.ReplyToUsername = u.Message.ReplyToMessage.From.Username
+		upd.ReplyToIsBot = u.Message.ReplyToMessage.From.IsBot
+	}
+	return upd, true
 }
 
 // GetFilePath resolves a file_id to its relative file_path via getFile --

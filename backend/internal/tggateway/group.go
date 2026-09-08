@@ -203,6 +203,44 @@ func ConversationKey(u TelegramUpdate) string {
 	return strconv.FormatInt(u.ChatID, 10)
 }
 
+// quotedContextLimit caps how much of the quoted message travels with the
+// comment. A channel post can be several thousand characters and the comment
+// answering it is one line; the whole post would drown the actual question.
+const quotedContextLimit = 400
+
+// QuotedContext renders what a group message is answering, or "" when there
+// is nothing to render.
+//
+// A comment under a channel post is unreadable on its own: "а это точно
+// быстрее?" means nothing without the post it hangs under, and telegram
+// delivers that post only inside reply_to_message. Without this the agent
+// answers a question it cannot see, which reads to a human as a bot that did
+// not read the thread.
+//
+// Private chats are excluded: there the previous message is already in the
+// conversation the runtime keeps.
+func QuotedContext(u TelegramUpdate) string {
+	if !IsGroup(u.ChatType) {
+		return ""
+	}
+	quoted := strings.TrimSpace(u.ReplyToText)
+	if quoted == "" {
+		return ""
+	}
+	if len([]rune(quoted)) > quotedContextLimit {
+		quoted = string([]rune(quoted)[:quotedContextLimit]) + "..."
+	}
+	quoted = strings.Join(strings.Fields(quoted), " ")
+	source := "сообщение"
+	switch {
+	case u.ReplyToIsChannel:
+		source = "пост канала"
+	case u.ReplyToUsername != "":
+		source = "@" + u.ReplyToUsername
+	}
+	return fmt.Sprintf("[в ответ на %s: %q]", source, quoted)
+}
+
 // GroupSpeaker renders the author prefix for a group message.
 //
 // All comments in one thread share a single conversation, so without a
