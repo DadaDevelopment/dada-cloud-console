@@ -556,10 +556,7 @@ spec:
                                 python3 -m unittest discover -s tests -q
 
                                 cd ../agentkit
-                                python3 gate.py \
-                                    --agents-root ../tg-vibecoder \
-                                    --agent vibecoder \
-                                    --cases ../tg-vibecoder/evals/persona/cases.jsonl
+                                python3 repospec.py --repo ..
                             '''
                         }
 

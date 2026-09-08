@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "agents": [
+    {
+      "name": "vibecoder",
+      "agents_root": "tg-vibecoder",
+      "cases": "tg-vibecoder/evals/persona/cases.jsonl",
+      "holdout_threshold": 0.75
+    }
+  ]
+}
