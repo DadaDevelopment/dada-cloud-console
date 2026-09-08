@@ -26,6 +26,7 @@
 | `evals/persona/` | 32 кейса золотого набора, 20 dev / 12 holdout; вход рендерится `agentkit.transcript`, ровно как его шлёт гейтвей |
 | `scripts/persona_lint.py` | Механический анти-слоп гейт |
 | `scripts/bakeoff.py` | Прогон золотого набора по кандидатам-моделям |
+| `scripts/live_eval.py` | Тот же набор через отгруженного агента: рантайм, тулы, промпт оператора |
 | `k8s/` | ModelConfig победителя, кроны ingest и `apply-cronjobs.sh` |
 | `scripts/sync_deploy_repo.sh` | Регенерация деплой-репозитория `DadaDevelopment/tg-vibecoder` из монорепы |
 
@@ -54,6 +55,18 @@ python3 scripts/bakeoff.py --candidates scripts/candidates.json --split dev
 ```bash
 python3 scripts/bakeoff.py --candidates scripts/candidates.json --split holdout --threshold 0.75
 ```
+
+Отгруженного агента меряет отдельный прогон: бейкофф знает только модель, а
+до чата доезжает рантайм с тулами и промптом, собранным оператором.
+
+```bash
+TOKEN=$(bash ../automator/state/get-mcp-token.sh) \
+python3 scripts/live_eval.py --agent tg-vibecoder --split holdout
+```
+
+Последний прогон (2026-09-08): модель 10/12 = 0.833, живой агент 11/12 = 0.917
+при p50 17.8s. Единственный провал живого - `vc-26`, где агент ответил там, где
+рубрика ждёт молчания; кейс не правился, потому что он из `holdout`.
 
 Проверить одну реплику руками:
 
