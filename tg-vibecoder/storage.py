@@ -28,9 +28,17 @@ Owns five durable tables:
 
 import json
 import os
+import sys
 from datetime import datetime
+from pathlib import Path
 
 import asyncpg
+
+_AGENTKIT = os.environ.get("AGENTKIT_PATH") or str(Path(__file__).parent.parent / "agentkit")
+if _AGENTKIT not in sys.path:
+    sys.path.insert(0, _AGENTKIT)
+
+import transcript
 
 _pg_pool: asyncpg.Pool | None = None
 
@@ -112,6 +120,7 @@ SCHEMA = [
         PRIMARY KEY (chat_id, message_id)
     )
     """,
+    "ALTER TABLE chat_comments ADD COLUMN IF NOT EXISTS media TEXT NOT NULL DEFAULT ''",
     "CREATE INDEX IF NOT EXISTS chat_comments_time_idx ON chat_comments (sent_at DESC NULLS LAST)",
     "CREATE INDEX IF NOT EXISTS chat_comments_thread_idx ON chat_comments (chat_id, thread_id)",
 ]
@@ -318,6 +327,10 @@ async def record_comment(observation: dict) -> str:
     Upsert rather than insert: the gateway may see the same update twice after
     a restart, and a duplicated comment would quietly reweigh every ranking
     built on this table.
+
+    ``media`` holds the same bracketed line the agent reads in a live turn, so
+    a comment that was only a screenshot stops entering the corpus as a blank
+    row nobody can search.
     """
     pool = await pg_pool()
     async with pool.acquire() as conn:
@@ -325,13 +338,14 @@ async def record_comment(observation: dict) -> str:
             """
             INSERT INTO chat_comments (
                 chat_id, message_id, thread_id, author, username, text,
-                is_channel_post, reply_to_message_id, engaged, reason, sent_at
+                is_channel_post, reply_to_message_id, engaged, reason, sent_at, media
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             ON CONFLICT (chat_id, message_id) DO UPDATE SET
                 text = EXCLUDED.text,
                 engaged = EXCLUDED.engaged,
-                reason = EXCLUDED.reason
+                reason = EXCLUDED.reason,
+                media = EXCLUDED.media
             """,
             int(observation.get("chat_id") or 0),
             int(observation.get("message_id") or 0),
@@ -344,6 +358,12 @@ async def record_comment(observation: dict) -> str:
             bool(observation.get("engaged")),
             observation.get("reason") or "",
             _parse_ts(observation.get("sent_at")),
+            transcript.media_context(
+                observation.get("media_kind") or "",
+                observation.get("media_description") or "",
+                observation.get("media_transcript") or "",
+                observation.get("media_file_name") or "",
+            ),
         )
 
 

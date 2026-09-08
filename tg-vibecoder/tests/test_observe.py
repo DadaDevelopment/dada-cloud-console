@@ -14,8 +14,11 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "agentkit"))
+
 import intake
 import search_sql
+import transcript
 
 
 class TestObserveIntake(unittest.TestCase):
@@ -116,5 +119,40 @@ class TestChatSearchRanking(unittest.TestCase):
         self.assertEqual(search_sql.search_comments(self.COMMENTS, "квантовая криптография"), [])
 
 
+class TestObservedMedia(unittest.TestCase):
+    """A comment that was only a screenshot must not enter the corpus blank."""
+
+    def test_gateway_media_fields_survive_intake(self):
+        seen = []
+
+        async def record(observation):
+            seen.append(observation)
+            return "INSERT 0 1"
+
+        async def read_json():
+            return {
+                "chat_id": -1002171703932,
+                "message_id": 77,
+                "username": "igor_dev",
+                "text": "",
+                "media_kind": "image",
+                "media_description": "скриншот терминала: ImportError cannot import name embed",
+            }
+
+        status, body = asyncio.run(intake.handle_observation(read_json, record))
+        self.assertEqual((status, body["ok"]), (200, True))
+        self.assertEqual(seen[0]["media_kind"], "image")
+
+    def test_the_stored_line_clears_the_chat_search_floor(self):
+        line = transcript.media_context("image", "скриншот терминала с ImportError")
+        self.assertTrue(line.startswith("[изображение:"))
+        self.assertGreaterEqual(len(line), 12)
+
+    def test_an_unreadable_picture_still_leaves_a_searchable_line(self):
+        line = transcript.media_context("image")
+        self.assertEqual(line, "[изображение: описание недоступно]")
+
+    def test_chat_search_reads_the_media_column(self):
+        self.assertIn("c.media", search_sql.CHAT_SEARCH_SQL)
 if __name__ == "__main__":
     unittest.main()

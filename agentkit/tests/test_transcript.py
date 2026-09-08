@@ -31,10 +31,17 @@ class TestGolden(unittest.TestCase):
                     case["quoted_is_channel"],
                     case["quoted_username"],
                 )
+                media = transcript.media_context(
+                    case.get("media_kind", ""),
+                    case.get("media_description", ""),
+                    case.get("media_transcript", ""),
+                    case.get("media_file_name", ""),
+                )
                 self.assertEqual(spk, case["want_speaker"])
                 self.assertEqual(quoted, case["want_quoted"])
+                self.assertEqual(media, case.get("want_media", ""))
                 self.assertEqual(
-                    transcript.inbound(case["text"], spk, quoted, is_post),
+                    transcript.inbound(case["text"], spk, quoted, is_post, media),
                     case["want_inbound"],
                 )
 
@@ -50,6 +57,19 @@ class TestEdges(unittest.TestCase):
         self.assertEqual(
             transcript.inbound("новый релиз", "", "", True),
             "[новый пост в канале]\nновый релиз",
+        )
+
+    def test_message_without_attachment_carries_no_media_line(self):
+        self.assertEqual(transcript.media_context(""), "")
+
+    def test_long_description_is_cut_and_marked(self):
+        line = transcript.media_context("image", "б" * 900)
+        self.assertIn("...", line)
+        self.assertLess(len(line), 640)
+
+    def test_unreadable_picture_still_announces_itself(self):
+        self.assertEqual(
+            transcript.media_context("image"), "[изображение: описание недоступно]"
         )
 
     def test_blank_quote_disappears_entirely(self):

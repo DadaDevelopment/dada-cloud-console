@@ -229,7 +229,16 @@ func (m *Manager) liveCount() int {
 // (Send takes a plain text string, no separate metadata field). geo_lat/
 // geo_lon are appended only on a native "Send location" share (the prompt's
 // contract already documents these two fields on this same line).
-func withTelegramIdentity(u TelegramUpdate) string {
+//
+// The content is passed in rather than read off the update: everything the
+// group transcript adds -- who spoke, what the comment quotes, what a picture
+// or a voice message actually contains, the marker that says this is a fresh
+// channel post -- is assembled by InboundContent (agentkit/transcript.py,
+// pinned by transcript_golden.json). This function used to inline u.Text, so
+// an agent reached over A2A got a bare comment while an agent reached over the
+// runtime got the full transcript: the same chat, two different inputs, and
+// the eval only ever graded the second one.
+func withTelegramIdentity(u TelegramUpdate, content string) string {
 	username := u.Username
 	if username == "" {
 		username = "unknown"
@@ -242,7 +251,7 @@ func withTelegramIdentity(u TelegramUpdate) string {
 	if u.HasLocation {
 		meta += fmt.Sprintf(" | geo_lat: %f | geo_lon: %f", u.Latitude, u.Longitude)
 	}
-	return fmt.Sprintf("[%s]\n%s", meta, u.Text)
+	return fmt.Sprintf("[%s]\n%s", meta, content)
 }
 
 // a2aContextFor derives a stable A2A contextId for a Telegram chat. The A2A
@@ -415,11 +424,8 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 				Metadata:   map[string]any{"first_name": batch[0].FirstName},
 			},
 		}
+		a2aTexts := make([]string, 0, len(batch))
 		for _, u := range batch {
-			content := InboundContent(u)
-			if u.HasLocation {
-				content = fmt.Sprintf("[location_shared: lat=%f, lon=%f]\n%s", u.Latitude, u.Longitude, u.Text)
-			}
 			var attachment *RuntimeAttachment
 			if u.Attachment != nil {
 				resolveAttachment(runCtx, media, b.BotToken, u.Attachment, u.MessageID, trans, desc)
@@ -437,6 +443,11 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 					DescriptionAvailable: u.Attachment.DescriptionAvailable,
 				}
 			}
+			content := InboundContent(u)
+			if u.HasLocation {
+				content = fmt.Sprintf("[location_shared: lat=%f, lon=%f]\n%s", u.Latitude, u.Longitude, content)
+			}
+			a2aTexts = append(a2aTexts, withTelegramIdentity(u, content))
 			req.Messages = append(req.Messages, RuntimeInboundMessage{
 				Content:                 content,
 				ChannelMessageID:        strconv.FormatInt(u.MessageID, 10),
@@ -472,8 +483,8 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 			reply = resp.Text
 		} else {
 			var texts []string
-			for _, u := range batch {
-				r, sendErr := a2a.SendWithContext(runCtx, b.AgentName, a2aContextFor(convKey), withTelegramIdentity(u))
+			for _, text := range a2aTexts {
+				r, sendErr := a2a.SendWithContext(runCtx, b.AgentName, a2aContextFor(convKey), text)
 				if sendErr != nil {
 					procErr = sendErr
 					break

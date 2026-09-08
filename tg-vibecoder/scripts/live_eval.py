@@ -51,9 +51,17 @@ FRESHNESS_RULES = ("unsourced_version", "unsourced_price", "unsourced_limit", "u
 
 def render_case(case: dict) -> str:
     """The envelope the gateway builds, byte for byte."""
+    media = transcript.media_context(
+        case.get("media_kind", ""),
+        case.get("media_description", ""),
+        case.get("media_transcript", ""),
+        case.get("media_file_name", ""),
+    )
+    if case.get("is_channel_post"):
+        return transcript.inbound(case["incoming"], is_channel_post=True, media_line=media)
     speaker = transcript.speaker(case.get("speaker", ""), case.get("speaker_username", ""))
     quoted = transcript.quoted_context(case.get("post", ""), is_channel=True)
-    return transcript.inbound(case["incoming"], speaker, quoted)
+    return transcript.inbound(case["incoming"], speaker, quoted, media_line=media)
 
 
 def send(base: str, token: str, agent: str, text: str, timeout: float) -> str:

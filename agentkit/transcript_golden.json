@@ -12,7 +12,12 @@
       "want_speaker": "Игорь (@igor_dev)",
       "want_quoted": "[в ответ на пост канала: \"Выкатили агента в комменты канала\"]",
       "want_inbound": "[в ответ на пост канала: \"Выкатили агента в комменты канала\"]\nИгорь (@igor_dev): а это правда работает на проде?",
-      "is_channel_post": false
+      "is_channel_post": false,
+      "media_kind": "",
+      "media_description": "",
+      "media_transcript": "",
+      "media_file_name": "",
+      "want_media": ""
     },
     {
       "name": "ответ другому человеку",
@@ -25,7 +30,12 @@
       "want_speaker": "Аня",
       "want_quoted": "[в ответ на @petya: \"у кого-нибудь падает сборка на этом шаге?\"]",
       "want_inbound": "[в ответ на @petya: \"у кого-нибудь падает сборка на этом шаге?\"]\nАня: не, у меня та же ошибка была из-за прокси",
-      "is_channel_post": false
+      "is_channel_post": false,
+      "media_kind": "",
+      "media_description": "",
+      "media_transcript": "",
+      "media_file_name": "",
+      "want_media": ""
     },
     {
       "name": "без имени и без цитаты",
@@ -38,7 +48,12 @@
       "want_speaker": "аноним",
       "want_quoted": "",
       "want_inbound": "аноним: го обсудим",
-      "is_channel_post": false
+      "is_channel_post": false,
+      "media_kind": "",
+      "media_description": "",
+      "media_transcript": "",
+      "media_file_name": "",
+      "want_media": ""
     },
     {
       "name": "цитата с переносами и кавычками схлопывается",
@@ -51,7 +66,12 @@
       "want_speaker": "Лев (@lev)",
       "want_quoted": "[в ответ на пост канала: \"первая строка вторая \\\"строка\\\"\"]",
       "want_inbound": "[в ответ на пост канала: \"первая строка вторая \\\"строка\\\"\"]\nЛев (@lev): это же про MCP?",
-      "is_channel_post": false
+      "is_channel_post": false,
+      "media_kind": "",
+      "media_description": "",
+      "media_transcript": "",
+      "media_file_name": "",
+      "want_media": ""
     },
     {
       "name": "цитата без автора",
@@ -64,7 +84,12 @@
       "want_speaker": "Рома",
       "want_quoted": "[в ответ на сообщение: \"эвалы важнее промпта\"]",
       "want_inbound": "[в ответ на сообщение: \"эвалы важнее промпта\"]\nРома: плюсую",
-      "is_channel_post": false
+      "is_channel_post": false,
+      "media_kind": "",
+      "media_description": "",
+      "media_transcript": "",
+      "media_file_name": "",
+      "want_media": ""
     },
     {
       "name": "сам пост канала, под ним ещё нет комментариев",
@@ -77,7 +102,84 @@
       "is_channel_post": true,
       "want_speaker": "",
       "want_quoted": "",
-      "want_inbound": "[новый пост в канале]\nСобрали агента в комменты канала за вечер. Разбор внутри."
+      "want_inbound": "[новый пост в канале]\nСобрали агента в комменты канала за вечер. Разбор внутри.",
+      "media_kind": "",
+      "media_description": "",
+      "media_transcript": "",
+      "media_file_name": "",
+      "want_media": ""
+    },
+    {
+      "name": "пост канала со скриншотом",
+      "text": "Клод переезжает на новую память, вот что показывают в настройках",
+      "first_name": "Telegram",
+      "username": "",
+      "quoted_text": "",
+      "quoted_is_channel": false,
+      "quoted_username": "",
+      "media_kind": "image",
+      "media_description": "скриншот настроек Claude: внизу баннер про миграцию памяти и ссылка export legacy memory, пять дней на экспорт",
+      "media_transcript": "",
+      "media_file_name": "",
+      "want_speaker": "",
+      "want_quoted": "",
+      "want_media": "[изображение: скриншот настроек Claude: внизу баннер про миграцию памяти и ссылка export legacy memory, пять дней на экспорт]",
+      "want_inbound": "[новый пост в канале]\n[изображение: скриншот настроек Claude: внизу баннер про миграцию памяти и ссылка export legacy memory, пять дней на экспорт]\nКлод переезжает на новую память, вот что показывают в настройках",
+      "is_channel_post": true
+    },
+    {
+      "name": "комментарий со скриншотом ошибки",
+      "text": "а вот это что значит",
+      "first_name": "Игорь",
+      "username": "igor_dev",
+      "quoted_text": "Выкатили агента в комменты канала",
+      "quoted_is_channel": true,
+      "quoted_username": "",
+      "media_kind": "image",
+      "media_description": "скриншот терминала: ImportError: cannot import name embed from openai",
+      "media_transcript": "",
+      "media_file_name": "",
+      "want_speaker": "Игорь (@igor_dev)",
+      "want_quoted": "[в ответ на пост канала: \"Выкатили агента в комменты канала\"]",
+      "want_media": "[изображение: скриншот терминала: ImportError: cannot import name embed from openai]",
+      "want_inbound": "[в ответ на пост канала: \"Выкатили агента в комменты канала\"]\n[изображение: скриншот терминала: ImportError: cannot import name embed from openai]\nИгорь (@igor_dev): а вот это что значит",
+      "is_channel_post": false
+    },
+    {
+      "name": "картинка без текста и без описания",
+      "text": "",
+      "first_name": "Аня",
+      "username": "",
+      "quoted_text": "",
+      "quoted_is_channel": false,
+      "quoted_username": "",
+      "media_kind": "image",
+      "media_description": "",
+      "media_transcript": "",
+      "media_file_name": "",
+      "want_speaker": "Аня",
+      "want_quoted": "",
+      "want_media": "[изображение: описание недоступно]",
+      "want_inbound": "[изображение: описание недоступно]\nАня:",
+      "is_channel_post": false
+    },
+    {
+      "name": "голосовое с расшифровкой",
+      "text": "",
+      "first_name": "Слава",
+      "username": "slavik",
+      "quoted_text": "",
+      "quoted_is_channel": false,
+      "quoted_username": "",
+      "media_kind": "voice",
+      "media_description": "",
+      "media_transcript": "слушай, а эвалы ты как гоняешь, руками или в си-ай",
+      "media_file_name": "",
+      "want_speaker": "Слава (@slavik)",
+      "want_quoted": "",
+      "want_media": "[голосовое: слушай, а эвалы ты как гоняешь, руками или в си-ай]",
+      "want_inbound": "[голосовое: слушай, а эвалы ты как гоняешь, руками или в си-ай]\nСлава (@slavik):",
+      "is_channel_post": false
     }
   ]
 }

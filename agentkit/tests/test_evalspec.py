@@ -38,6 +38,20 @@ class TestValidate(unittest.TestCase):
         with self.assertRaises(evalspec.CaseError):
             evalspec.load_cases(path)
 
+    def test_unknown_media_kind_rejected(self):
+        path = _write([{**BASE, "media_kind": "screenshot"}])
+        with self.assertRaises(evalspec.CaseError):
+            evalspec.load_cases(path)
+
+    def test_media_payload_without_a_kind_rejected(self):
+        path = _write([{**BASE, "media_description": "скриншот терминала"}])
+        with self.assertRaises(evalspec.CaseError):
+            evalspec.load_cases(path)
+
+    def test_known_media_kind_accepted(self):
+        path = _write([{**BASE, "media_kind": "image", "media_description": "скриншот"}])
+        self.assertEqual(len(evalspec.load_cases(path)), 1)
+
     def test_split_filter(self):
         path = _write([BASE, {**BASE, "id": "b", "split": "holdout"}])
         self.assertEqual([c["id"] for c in evalspec.load_cases(path, "holdout")], ["b"])

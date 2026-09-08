@@ -68,9 +68,17 @@ def render_case(case: dict) -> str:
     live comment. Grading a different input than production delivers grades a
     different agent.
     """
+    media = transcript.media_context(
+        case.get("media_kind", ""),
+        case.get("media_description", ""),
+        case.get("media_transcript", ""),
+        case.get("media_file_name", ""),
+    )
+    if case.get("is_channel_post"):
+        return transcript.inbound(case["incoming"], is_channel_post=True, media_line=media)
     speaker = transcript.speaker(case.get("speaker", ""), case.get("speaker_username", ""))
     quoted = transcript.quoted_context(case.get("post", ""), is_channel=True)
-    return transcript.inbound(case["incoming"], speaker, quoted)
+    return transcript.inbound(case["incoming"], speaker, quoted, media_line=media)
 
 
 def call_model(candidate: dict, system: str, user: str, timeout: float) -> str:

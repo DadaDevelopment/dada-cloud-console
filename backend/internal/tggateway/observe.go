@@ -19,6 +19,13 @@ const observeTimeout = 5 * time.Second
 // Engaged carries the same decision the poll loop acted on, so the agent's
 // store keeps the messages it never answered too -- those are the majority,
 // and they are the only record of how the room actually talks.
+//
+// The media fields keep a picture-only comment from entering that record as
+// an empty row. They carry what Telegram already said about the attachment;
+// description and transcript are filled only when the resolvers happened to
+// run, which is the reply path. Observation deliberately does not trigger
+// them: describing every screenshot nobody asked about would bill a vision
+// call per passing image.
 type ObservedUpdate struct {
 	Agent            string     `json:"agent"`
 	ChatID           int64      `json:"chat_id"`
@@ -29,6 +36,11 @@ type ObservedUpdate struct {
 	Username         string     `json:"username"`
 	FirstName        string     `json:"first_name"`
 	Text             string     `json:"text"`
+	MediaKind        string     `json:"media_kind,omitempty"`
+	MediaFileName    string     `json:"media_file_name,omitempty"`
+	MediaDurationSec int        `json:"media_duration_seconds,omitempty"`
+	MediaDescription string     `json:"media_description,omitempty"`
+	MediaTranscript  string     `json:"media_transcript,omitempty"`
 	IsChannelPost    bool       `json:"is_channel_post"`
 	ReplyToMessageID int64      `json:"reply_to_message_id"`
 	ReplyToText      string     `json:"reply_to_text"`
@@ -91,6 +103,13 @@ func (o *Observer) Observe(ctx context.Context, u TelegramUpdate, decision Engag
 		ReplyToText:      u.ReplyToText,
 		Engaged:          decision.Engage,
 		Reason:           decision.Reason,
+	}
+	if u.Attachment != nil {
+		payload.MediaKind = u.Attachment.Kind
+		payload.MediaFileName = u.Attachment.FileName
+		payload.MediaDurationSec = u.Attachment.DurationSec
+		payload.MediaDescription = u.Attachment.Description
+		payload.MediaTranscript = u.Attachment.Transcript
 	}
 	if !u.SentAt.IsZero() {
 		sent := u.SentAt.UTC()

@@ -10,6 +10,13 @@ Case schema (``validate_case`` is the authority):
     split         "dev" | "holdout"
     incoming      the user message the agent sees
     post          optional surrounding context (the channel post, a ticket)
+    is_channel_post  optional bool: the case IS the post, not a comment on it
+    media_kind    optional attachment kind ("image", "voice", ...) -- half of
+                  this audience asks by screenshot, so the case set has to be
+                  able to hand the agent one
+    media_description / media_transcript / media_file_name
+                  what the resolver returned for that attachment; empty means
+                  it stayed unreadable, which is itself a case worth grading
     expect.should_reply   bool, whether silence is the correct outcome
     expect.domain         optional skill/domain the agent should have loaded
     expect.must_not_contain  list of substrings that fail the case outright
@@ -29,6 +36,7 @@ import json
 from collections.abc import Callable, Iterable
 
 import ledger
+import transcript
 
 REQUIRED_TOP = ("id", "split", "incoming", "expect")
 SPLITS = ("dev", "holdout")
@@ -68,6 +76,15 @@ def validate_case(case: dict, seen_ids: set[str] | None = None) -> None:
             raise CaseError(
                 f"case {case['id']}: allow_reply is meaningless when should_reply is true"
             )
+    kind = case.get("media_kind", "")
+    if kind and kind not in transcript.MEDIA_LABELS:
+        raise CaseError(
+            f"case {case['id']}: media_kind {kind!r} is not one of {tuple(transcript.MEDIA_LABELS)}"
+        )
+    if not kind:
+        for field in ("media_description", "media_transcript", "media_file_name"):
+            if case.get(field):
+                raise CaseError(f"case {case['id']}: {field} without media_kind never reaches the agent")
     if seen_ids is not None:
         if case["id"] in seen_ids:
             raise CaseError(f"duplicate case id: {case['id']}")

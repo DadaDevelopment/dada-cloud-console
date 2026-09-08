@@ -20,9 +20,16 @@ type goldenCase struct {
 	QuotedIsChannel bool   `json:"quoted_is_channel"`
 	QuotedUsername  string `json:"quoted_username"`
 	IsChannelPost   bool   `json:"is_channel_post"`
-	WantSpeaker     string `json:"want_speaker"`
-	WantQuoted      string `json:"want_quoted"`
-	WantInbound     string `json:"want_inbound"`
+
+	MediaKind        string `json:"media_kind"`
+	MediaDescription string `json:"media_description"`
+	MediaTranscript  string `json:"media_transcript"`
+	MediaFileName    string `json:"media_file_name"`
+
+	WantSpeaker string `json:"want_speaker"`
+	WantQuoted  string `json:"want_quoted"`
+	WantMedia   string `json:"want_media"`
+	WantInbound string `json:"want_inbound"`
 }
 
 func loadGolden(t *testing.T) []goldenCase {
@@ -57,11 +64,22 @@ func TestInboundContent_MatchesTheSharedGolden(t *testing.T) {
 			IsAutomaticForward: c.IsChannelPost,
 			FromIsBot:          c.IsChannelPost,
 		}
+		if c.MediaKind != "" {
+			u.Attachment = &TelegramAttachment{
+				Kind:        c.MediaKind,
+				Description: c.MediaDescription,
+				Transcript:  c.MediaTranscript,
+				FileName:    c.MediaFileName,
+			}
+		}
 		if got := GroupSpeaker(u); got != c.WantSpeaker {
 			t.Errorf("%s: speaker = %q, want %q", c.Name, got, c.WantSpeaker)
 		}
 		if got := QuotedContext(u); got != c.WantQuoted {
 			t.Errorf("%s: quoted = %q, want %q", c.Name, got, c.WantQuoted)
+		}
+		if got := MediaContext(u.Attachment); got != c.WantMedia {
+			t.Errorf("%s: media = %q, want %q", c.Name, got, c.WantMedia)
 		}
 		if got := InboundContent(u); got != c.WantInbound {
 			t.Errorf("%s: inbound = %q, want %q", c.Name, got, c.WantInbound)

@@ -66,12 +66,15 @@ WITH q AS (
   SELECT DISTINCT w FROM unnest(regexp_split_to_array(lower(trim($1)), '[^a-z0-9а-яё_.+-]+')) AS w
   WHERE length(w) >= 3
 )
-SELECT c.author, c.username, left(c.text, 400) AS text,
+SELECT c.author, c.username,
+       left(trim(concat_ws(' ', nullif(c.media, ''), c.text)), 400) AS text,
        to_char(c.sent_at, 'YYYY-MM-DD') AS said_on,
        c.engaged AS bot_answered,
-       (SELECT count(*) FROM q WHERE position(q.w in lower(c.text)) > 0) AS score
+       (SELECT count(*) FROM q
+        WHERE position(q.w in lower(concat_ws(' ', c.media, c.text))) > 0) AS score
 FROM chat_comments c
-WHERE NOT c.is_channel_post AND length(c.text) >= 12
+WHERE NOT c.is_channel_post
+  AND length(concat_ws(' ', nullif(c.media, ''), c.text)) >= 12
 ORDER BY score DESC, c.sent_at DESC NULLS LAST
 LIMIT 8
 """

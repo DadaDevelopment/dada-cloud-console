@@ -77,3 +77,31 @@ func TestObserver_IgnoresPrivateChats(t *testing.T) {
 	case <-time.After(300 * time.Millisecond):
 	}
 }
+
+func TestObserver_PictureOnlyCommentIsNotABlankRow(t *testing.T) {
+	got := make(chan ObservedUpdate, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload ObservedUpdate
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode: %v", err)
+		}
+		got <- payload
+	}))
+	defer srv.Close()
+
+	t.Setenv("TG_OBSERVE_URL_TG_VIBECODER", srv.URL)
+	o := NewObserverForAgent("tg-vibecoder")
+
+	u := groupMsg("")
+	u.Attachment = &TelegramAttachment{Kind: "image", FileID: "photo-9"}
+	o.Observe(context.Background(), u, EngageDecision{false, ReasonNoContent})
+
+	select {
+	case payload := <-got:
+		if payload.MediaKind != "image" {
+			t.Fatalf("a picture-only comment entered the corpus blank: %+v", payload)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("observation never arrived")
+	}
+}

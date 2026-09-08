@@ -303,6 +303,78 @@ const quotedContextLimit = 400
 // something under it or say nothing.
 const channelPostMarker = "[новый пост в канале]"
 
+// mediaLimit caps how much resolved media text travels with the message: a
+// vision description of a busy screenshot runs long, and the comment under it
+// is one line.
+const mediaLimit = 600
+
+// mediaLabels name the attachment in the language the chat speaks, and
+// mediaUnavailable says what is missing when the content could not be
+// resolved.
+var (
+	mediaLabels = map[string]string{
+		"image":      "изображение",
+		"voice":      "голосовое",
+		"video_note": "кружок",
+		"document":   "файл",
+		"video":      "видео",
+	}
+	mediaUnavailable = map[string]string{
+		"image":      "описание недоступно",
+		"voice":      "расшифровка недоступна",
+		"video_note": "расшифровка недоступна",
+	}
+)
+
+// MediaContext renders the bracketed line that carries an attachment, or ""
+// when the message has none.
+//
+// A screenshot is how this audience asks half its questions: the post is a
+// picture of a settings screen and the comment under it is "а что там внизу
+// написано". Text alone drops the question entirely. The line carries what
+// the media pipeline resolved -- vision for a picture, whisper for a voice
+// message.
+//
+// An attachment that could not be resolved still gets a line: "there was a
+// picture and I did not see it" is a different answer than an empty message,
+// and the model can say so instead of guessing.
+func MediaContext(att *TelegramAttachment) string {
+	if att == nil {
+		return ""
+	}
+	kind := strings.TrimSpace(att.Kind)
+	if kind == "" {
+		return ""
+	}
+	label, ok := mediaLabels[kind]
+	if !ok {
+		label = kind
+	}
+	body := strings.TrimSpace(att.Description)
+	if body == "" {
+		body = strings.TrimSpace(att.Transcript)
+	}
+	switch {
+	case body != "":
+		if len([]rune(body)) > mediaLimit {
+			body = string([]rune(body)[:mediaLimit]) + "..."
+		}
+		body = strings.Join(strings.Fields(body), " ")
+	case kind == "document":
+		body = strings.TrimSpace(att.FileName)
+	default:
+		if unavailable, known := mediaUnavailable[kind]; known {
+			body = unavailable
+		} else {
+			body = "содержимое недоступно"
+		}
+	}
+	if body == "" {
+		return fmt.Sprintf("[%s]", label)
+	}
+	return fmt.Sprintf("[%s: %s]", label, body)
+}
+
 // QuotedContext renders what a group message is answering, or "" when there
 // is nothing to render.
 //
@@ -346,17 +418,25 @@ func QuotedContext(u TelegramUpdate) string {
 // comment, it sees who spoke and what was quoted. The rule is pinned across both runtimes
 // by agentkit/transcript_golden.json.
 func InboundContent(u TelegramUpdate) string {
+	media := MediaContext(u.Attachment)
 	if IsChannelPost(u) {
-		return fmt.Sprintf("%s\n%s", channelPostMarker, u.Text)
+		head := channelPostMarker
+		if media != "" {
+			head = fmt.Sprintf("%s\n%s", head, media)
+		}
+		return strings.TrimRight(fmt.Sprintf("%s\n%s", head, u.Text), " \t\r\n")
 	}
 	content := u.Text
 	if speaker := GroupSpeaker(u); speaker != "" {
 		content = fmt.Sprintf("%s: %s", speaker, content)
 	}
+	if media != "" {
+		content = fmt.Sprintf("%s\n%s", media, content)
+	}
 	if quoted := QuotedContext(u); quoted != "" {
 		content = fmt.Sprintf("%s\n%s", quoted, content)
 	}
-	return content
+	return strings.TrimRight(content, " \t\r\n")
 }
 
 func GroupSpeaker(u TelegramUpdate) string {
