@@ -115,6 +115,21 @@ _STATUS_ONLY_RE = re.compile(
 )
 
 
+_TOOL_OUTPUT_RE = re.compile(r'^\s*[\[{].*[\]}]\s*$', re.S)
+_TOOL_KEYS_RE = re.compile(r'"(?:ok|error|id|found|domain|used_last_hour|remaining|rows|items)"\s*:', re.I)
+
+
+def _tool_output(prose: str) -> bool:
+    """True when the reply is a serialized tool result rather than a sentence.
+
+    Same root as ``_status_only``: the model stops writing after its last tool
+    call, and the runtime hands the caller that call's JSON. It reads as a
+    reply to every layer that only checks for a non-empty string.
+    """
+    stripped = prose.strip()
+    return bool(_TOOL_OUTPUT_RE.match(stripped) and _TOOL_KEYS_RE.search(stripped))
+
+
 def _status_only(prose: str) -> bool:
     """True when the whole reply is a report about replying instead of the reply.
 
@@ -138,6 +153,8 @@ def inspect(text: str, max_chars: int = 700, max_sentences: int = 5) -> list[Fin
 
     if _status_only(prose):
         findings.append(Finding("status_instead_of_reply", "critical", prose.strip()))
+    if _tool_output(prose):
+        findings.append(Finding("tool_output_as_reply", "critical", prose.strip()[:80]))
 
     for phrase in BANNED_PHRASES_CRITICAL:
         if phrase in low:

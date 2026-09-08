@@ -82,6 +82,25 @@ class TestStrip(unittest.TestCase):
         self.assertTrue(humanize.is_clean(humanize.strip_forbidden_unicode(dirty)))
 
 
+class TestToolOutputAsReply(unittest.TestCase):
+    """A2A has no empty turn: the runtime hands the caller the last tool result.
+
+    Live probe: a turn that decided to stay silent returned the literal text
+    {"ok":true,"id":3}. Every layer that only checks for a non-empty string
+    read that as a reply.
+    """
+
+    def test_serialized_tool_result_is_critical(self):
+        for text in ('{"ok":true,"id":3}', '{"ok": false, "error": "no"}', '[{"id":1,"title":"x"}]'):
+            with self.subTest(text=text):
+                rules = [f.rule for f in humanize.inspect(text) if f.severity == "critical"]
+                self.assertIn("tool_output_as_reply", rules)
+
+    def test_prose_mentioning_braces_is_clean(self):
+        rules = [f.rule for f in humanize.inspect("код в {} скобках это норм, если ok")]
+        self.assertNotIn("tool_output_as_reply", rules)
+
+
 if __name__ == "__main__":
     unittest.main()
 

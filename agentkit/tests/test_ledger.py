@@ -26,6 +26,16 @@ class TestValidateDecision(unittest.TestCase):
     def test_unknown_decision_is_refused(self):
         self.assertIsNotNone(ledger.validate_decision("maybe", "текст"))
 
+class TestSilenceSentinel(unittest.TestCase):
+    def test_sentinel_recognised(self):
+        for text in ("SKIP", " skip ", "Skip\n"):
+            with self.subTest(text=text):
+                self.assertTrue(ledger.is_silence(text))
+
+    def test_real_reply_is_not_silence(self):
+        self.assertFalse(ledger.is_silence("skip connection pooling, оно тут не поможет"))
+        self.assertFalse(ledger.is_silence(""))
+
 
 if __name__ == "__main__":
     unittest.main()

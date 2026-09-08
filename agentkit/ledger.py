@@ -11,6 +11,8 @@ claimed a reply that no human ever saw, and the hourly budget was spent on
 nothing. Refusing that write is cheaper than auditing Telegram to find out.
 """
 
+SILENCE_SENTINEL = "SKIP"
+
 DECISION_ANSWERED = "answered"
 DECISION_SKIPPED = "skipped"
 DECISIONS = (DECISION_ANSWERED, DECISION_SKIPPED)
@@ -23,3 +25,14 @@ def validate_decision(decision: str, reply: str) -> str | None:
     if decision == DECISION_ANSWERED and not (reply or "").strip():
         return "decision=answered требует текст в поле reply: журнал без текста не отличить от молчания"
     return None
+
+
+def is_silence(text: str) -> bool:
+    """True when the turn means "say nothing in the chat".
+
+    A2A has no empty turn: whatever the model does not write itself, the
+    runtime fills in with the last tool result, and a raw ``{"ok":true}`` then
+    lands in the chat as if it were a reply. So silence is spelled out, and
+    the thing that posts messages drops the sentinel instead of posting it.
+    """
+    return text.strip().upper() == SILENCE_SENTINEL
