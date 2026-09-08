@@ -34,6 +34,7 @@ func NewServer(pool *pgxpool.Pool, gitopsBasePath string) *Server {
 
 	runtime := NewRuntime(store, hooks, a2a, domains)
 	runtime.contacts = contactSyncFromEnv(store.(*pgStore))
+	runtime.guided = guidedConfigFromEnv()
 	runtime.structuredAgents = map[string]bool{}
 	for _, name := range strings.Split(os.Getenv("AGENT_STRUCTURED_REPLY_AGENTS"), ",") {
 		if name = strings.TrimSpace(name); name != "" {

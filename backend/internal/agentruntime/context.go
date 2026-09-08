@@ -13,15 +13,16 @@ import (
 )
 
 type AgentConversationContext struct {
-	ReplyError      string       `json:"reply_error,omitempty"`
-	ReplyFormat     string       `json:"reply_format,omitempty"`
-	ConversationID  string       `json:"conversation_id"`
-	Channel         string       `json:"channel"`
-	ExternalID      string       `json:"external_id"`
-	Username        string       `json:"username,omitempty"`
-	State           RuntimeState `json:"state"`
-	AvailableSkills []string     `json:"available_skills"`
-	ContextToken    string       `json:"context_token"`
+	GuidedPlaybook  *GuidedContext `json:"guided_playbook,omitempty"`
+	ReplyError      string         `json:"reply_error,omitempty"`
+	ReplyFormat     string         `json:"reply_format,omitempty"`
+	ConversationID  string         `json:"conversation_id"`
+	Channel         string         `json:"channel"`
+	ExternalID      string         `json:"external_id"`
+	Username        string         `json:"username,omitempty"`
+	State           RuntimeState   `json:"state"`
+	AvailableSkills []string       `json:"available_skills"`
+	ContextToken    string         `json:"context_token"`
 }
 type AgentRunRequest struct {
 	AgentName           string

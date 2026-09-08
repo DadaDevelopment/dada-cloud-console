@@ -93,6 +93,7 @@ type Runtime struct {
 	contacts         *ContactSync
 	courtesyAgents   map[string]bool
 	structuredAgents map[string]bool
+	guided           *guidedConfig
 	syncPause        func(context.Context, Conversation) error
 	runLocks         [256]sync.Mutex
 }
@@ -262,7 +263,14 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 	run := AgentRunRequest{AgentName: conv.AgentName, ContextID: "runtime-" + conv.ID.String(), Messages: pending,
 		ConversationContext: AgentConversationContext{ConversationID: conv.ID.String(), Channel: conv.Channel,
 			ExternalID: conv.ExternalID, Username: conv.ActorUsername, State: state, AvailableSkills: skills, ContextToken: token}}
-	if r.structuredAgents[conv.AgentName] {
+	playbook, err := r.guidedFor(conv)
+	if err != nil {
+		return MessageResponse{}, err
+	}
+	if playbook != nil {
+		run.ConversationContext.ReplyFormat = guidedReplyFormat
+		run.ConversationContext.GuidedPlaybook = playbook.context(state)
+	} else if r.structuredAgents[conv.AgentName] {
 		run.ConversationContext.ReplyFormat = structuredReplyFormat
 	}
 	if req.OnProcessing != nil {
@@ -281,10 +289,16 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 		if !after.AgentEnabled {
 			return MessageResponse{Suppressed: true}, nil
 		}
-		if !r.structuredAgents[conv.AgentName] {
+		if playbook == nil && !r.structuredAgents[conv.AgentName] {
 			break
 		}
-		rendered, contractErr := renderReplyPlan(reply, after)
+		var rendered string
+		var contractErr error
+		if playbook != nil {
+			rendered, contractErr = playbook.render(reply, after)
+		} else {
+			rendered, contractErr = renderReplyPlan(reply, after)
+		}
 		if contractErr == nil {
 			reply = rendered
 			break
@@ -295,6 +309,9 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 		// One bounded protocol repair, same agent/model/context. Never deliver the
 		// invalid draft, never restart lifecycle hooks or contact creation.
 		run.ConversationContext.State = after
+		if playbook != nil {
+			run.ConversationContext.GuidedPlaybook = playbook.context(after)
+		}
 		run.ConversationContext.ReplyError = contractErr.Error()
 	}
 	reply = redactContextToken(reply, token)
