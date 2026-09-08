@@ -1,40 +1,38 @@
-"""The intake that turns other people's comments into the agent's memory."""
+"""The intake that turns other people's comments into the agent's memory.
 
+Nothing here imports ``server``: CI runs a bare apk ``python3`` with no
+starlette, so a test that needed the framework could only be skipped, and the
+skip is what let build #18 ship a red main. The route is a two-line adapter
+over ``intake``; the decisions it delegates are all asserted below.
+"""
+
+import asyncio
 import os
 import sys
-import types
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-sys.modules.setdefault("asyncpg", types.ModuleType("asyncpg"))
-sys.modules["asyncpg"].Pool = object
-
-os.environ.setdefault("MCP_AUTH_TOKEN", "test-token")
-
-from starlette.testclient import TestClient
-
+import intake
 import search_sql
-import server
-import storage
 
 
-class TestObserveRoute(unittest.TestCase):
+class TestObserveIntake(unittest.TestCase):
     def setUp(self):
         self.seen = []
 
-        async def fake_record(observation):
-            self.seen.append(observation)
-            return "INSERT 0 1"
+    async def record(self, observation):
+        self.seen.append(observation)
+        return "INSERT 0 1"
 
-        self.original = storage.record_comment
-        storage.record_comment = fake_record
-        self.client = TestClient(server.build_app())
-        self.auth = {"Authorization": "Bearer test-token"}
+    def post(self, payload, record=None):
+        async def read_json():
+            if isinstance(payload, Exception):
+                raise payload
+            return payload
 
-    def tearDown(self):
-        storage.record_comment = self.original
+        return asyncio.run(intake.handle_observation(read_json, record or self.record))
 
     def test_a_skipped_comment_is_still_stored(self):
         body = {
@@ -48,31 +46,45 @@ class TestObserveRoute(unittest.TestCase):
             "engaged": False,
             "reason": "reaction_not_a_question",
         }
-        resp = self.client.post("/observe", json=body, headers=self.auth)
-        self.assertEqual(resp.status_code, 200, resp.text)
-        self.assertTrue(resp.json()["ok"])
+        status, answer = self.post(body)
+        self.assertEqual(status, 200)
+        self.assertTrue(answer["ok"])
         self.assertEqual(len(self.seen), 1)
         self.assertEqual(self.seen[0]["text"], body["text"])
         self.assertFalse(self.seen[0]["engaged"])
 
-    def test_the_intake_is_behind_the_same_bearer_gate_as_mcp(self):
-        resp = self.client.post("/observe", json={"message_id": 1})
-        self.assertEqual(resp.status_code, 401)
+    def test_a_message_without_an_id_is_refused_not_stored(self):
+        status, answer = self.post({"text": "без id"})
+        self.assertEqual(status, 400)
+        self.assertEqual(answer["error"], "no message_id")
         self.assertEqual(self.seen, [])
 
-    def test_a_message_without_an_id_is_refused_not_stored(self):
-        resp = self.client.post("/observe", json={"text": "без id"}, headers=self.auth)
-        self.assertEqual(resp.status_code, 400)
+    def test_a_body_that_is_not_json_is_refused_not_stored(self):
+        status, _ = self.post(ValueError("not json"))
+        self.assertEqual(status, 400)
         self.assertEqual(self.seen, [])
 
     def test_a_storage_failure_never_looks_like_success(self):
         async def boom(observation):
             raise RuntimeError("db down")
 
-        storage.record_comment = boom
-        resp = self.client.post("/observe", json={"message_id": 5}, headers=self.auth)
-        self.assertEqual(resp.status_code, 500)
-        self.assertFalse(resp.json()["ok"])
+        status, answer = self.post({"message_id": 5}, record=boom)
+        self.assertEqual(status, 500)
+        self.assertFalse(answer["ok"])
+        self.assertIn("db down", answer["error"])
+
+
+class TestBearerGate(unittest.TestCase):
+    """The intake sits behind the same token as /mcp, and every app here gets
+    a public domain by default."""
+
+    def test_the_configured_token_passes(self):
+        self.assertTrue(intake.authorized({"authorization": "Bearer t"}, "Bearer t"))
+
+    def test_a_missing_or_wrong_token_is_refused(self):
+        self.assertFalse(intake.authorized({}, "Bearer t"))
+        self.assertFalse(intake.authorized({"authorization": "Bearer other"}, "Bearer t"))
+        self.assertFalse(intake.authorized({"authorization": "t"}, "Bearer t"))
 
 
 class TestChatSearchRanking(unittest.TestCase):

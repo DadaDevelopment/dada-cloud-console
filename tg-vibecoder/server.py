@@ -59,6 +59,7 @@ _AGENTKIT = os.environ.get("AGENTKIT_PATH") or str(Path(__file__).parent.parent 
 if _AGENTKIT not in sys.path:
     sys.path.insert(0, _AGENTKIT)
 
+import intake
 import ledger
 import manifests_seed
 import ops
@@ -179,21 +180,11 @@ async def today() -> dict:
 async def observe(request):
     """Store one message the gateway saw. Never fails the caller over content.
 
-    The transport must not retry or back off because a single observation was
-    malformed: a missing message is a hole in memory, while a stuck poll loop
-    is a bot that stops answering.
+    The verdict lives in ``intake`` so it can be tested without the web
+    framework; this function is only the adapter between a Request and it.
     """
-    try:
-        payload = await request.json()
-    except Exception:
-        return JSONResponse({"ok": False, "error": "invalid json"}, status_code=400)
-    if not isinstance(payload, dict) or not payload.get("message_id"):
-        return JSONResponse({"ok": False, "error": "no message_id"}, status_code=400)
-    try:
-        await storage.record_comment(payload)
-    except Exception as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
-    return JSONResponse({"ok": True})
+    status, body = await intake.handle_observation(request.json, storage.record_comment)
+    return JSONResponse(body, status_code=status)
 
 
 async def bootstrap() -> None:
@@ -222,7 +213,7 @@ class BearerGate:
             await self.app(scope, receive, send)
             return
         headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
-        if headers.get("authorization") != self.expected:
+        if not intake.authorized(headers, self.expected):
             await send({"type": "http.response.start", "status": 401,
                         "headers": [(b"content-type", b"text/plain; charset=utf-8")]})
             await send({"type": "http.response.body", "body": b"unauthorized"})
