@@ -27,7 +27,7 @@
 | `scripts/persona_lint.py` | Механический анти-слоп гейт |
 | `scripts/bakeoff.py` | Прогон золотого набора по кандидатам-моделям |
 | `scripts/live_eval.py` | Тот же набор через отгруженного агента: рантайм, тулы, промпт оператора |
-| `k8s/` | ModelConfig победителя, кроны ingest и `apply-cronjobs.sh` |
+| `k8s/` | ModelConfig победителя |
 | `scripts/sync_deploy_repo.sh` | Регенерация деплой-репозитория `DadaDevelopment/tg-vibecoder` из монорепы |
 
 ## Почему свежесть разделена надвое
@@ -81,7 +81,7 @@ python3 news_ingest.py --dry-run
 python3 channel_ingest.py --channel <slug> --pages 3 --dry-run
 ```
 
-В кластере оба ходят по расписанию, манифесты в `k8s/`.
+В кластере оба ходят по расписанию: два CronJob в `manifests` приложения (см. «Деплой»).
 
 ## Деплой
 
@@ -99,14 +99,23 @@ scripts/sync_deploy_repo.sh --push   # публикация
 которое случилось у `tg-agent-tools` (деплой-репо застрял на старом коммите),
 здесь не накапливается молча.
 
-Кроны ingest пинятся образом, который реально крутится в приложении:
+Кроны ingest и ConfigMap `vibecoder-config` живут в gitops, а не в
+`kubectl apply` с ноутбука. Лежат они там, куда клиент платформы может их
+положить, не сочиняя своего чарта: в `manifests` собственного приложения —
+`argo-infra`, ветка `console-migration`,
+`clusters/beget-prod/projects/agent-sandbox/environments/prod/apps/tg-vibecoder/resources.values.yaml`.
+Этот список общий: gitops-агент апсертит записи по паре (kind, name), поэтому
+консольные манифесты и дописанные руками уживаются, а git-watcher читает их
+обратно в `resource_snapshots` — консоль их видит.
 
-```bash
-k8s/apply-cronjobs.sh
-```
+Раньше кроны накатывал скрипт, который читал образ с живого Deployment: объект
+в кластере существовал, а в git его не было ни в каком виде.
 
-Крон канала выключен (`suspend: true`), пока владелец не назовёт канал:
-ему нужен `channel_slug` в ConfigMap `vibecoder-config`.
+Цена переезда одна: образ крона пинится тут же в `resources.values.yaml`
+руками и не едет за образом, который в `values.yaml` пишет консоль. Это дыра
+продукта, а не решение — у консоли нет рычага ни на периодическую задачу, ни
+на ConfigMap приложения; записано в `docs/PLATFORM-DOGFOODING.md` и в
+`argo-infra/docs/guides/dada-mcp-gaps.md`.
 
 ## Транспорт
 
