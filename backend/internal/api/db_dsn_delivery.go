@@ -113,7 +113,7 @@ func (h *Handler) attemptDatabaseDSNDelivery(ctx context.Context, projectID, env
 	if port == "" {
 		port = "5432"
 	}
-	dsn := postgresDSN(creds.Username, creds.Password, host, port, datname)
+	dsn := h.managedDBDSN(ctx, creds.Username, creds.Password, host, port, datname)
 	if dsn == "" {
 		return false, errors.New("resolved credentials but could not assemble a DSN (missing database name)")
 	}

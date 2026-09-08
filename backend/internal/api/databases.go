@@ -839,6 +839,7 @@ func (h *Handler) GetDatabaseCredentials(c *gin.Context) {
 		port = "5432"
 	}
 
+	host = h.managedDBClientHost(c.Request.Context(), host, database)
 	dsn := postgresDSN(creds.Username, creds.Password, host, port, database)
 	host = managedDBEffectiveHost(host)
 

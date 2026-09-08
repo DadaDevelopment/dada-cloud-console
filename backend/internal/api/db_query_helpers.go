@@ -116,7 +116,7 @@ func (h *Handler) connectTenantRole(ctx context.Context, target dbQueryTenantTar
 	if host == "" {
 		return nil, "", fmt.Errorf("%w: no connection endpoint in secret", errDBCredentialsUnavailable)
 	}
-	dsn := postgresDSN(creds.Username, creds.Password, host, creds.Port, target.Datname)
+	dsn := h.managedDBDSN(ctx, creds.Username, creds.Password, host, creds.Port, target.Datname)
 	if dsn == "" {
 		return nil, "", fmt.Errorf("%w: could not build a connection string", errDBCredentialsUnavailable)
 	}
