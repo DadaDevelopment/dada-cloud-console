@@ -415,13 +415,7 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 			},
 		}
 		for _, u := range batch {
-			content := u.Text
-			if speaker := GroupSpeaker(u); speaker != "" {
-				content = fmt.Sprintf("%s: %s", speaker, content)
-			}
-			if quoted := QuotedContext(u); quoted != "" {
-				content = fmt.Sprintf("%s\n%s", quoted, content)
-			}
+			content := InboundContent(u)
 			if u.HasLocation {
 				content = fmt.Sprintf("[location_shared: lat=%f, lon=%f]\n%s", u.Latitude, u.Longitude, u.Text)
 			}

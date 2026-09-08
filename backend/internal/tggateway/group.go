@@ -247,6 +247,20 @@ func QuotedContext(u TelegramUpdate) string {
 // per-message author the agent sees a merged monologue and answers the wrong
 // person. Private chats keep the raw text: there the sender is already the
 // conversation.
+// InboundContent is documented in agentkit/transcript.py: the runtime never sees a bare
+// comment, it sees who spoke and what was quoted. The rule is pinned across both runtimes
+// by agentkit/transcript_golden.json.
+func InboundContent(u TelegramUpdate) string {
+	content := u.Text
+	if speaker := GroupSpeaker(u); speaker != "" {
+		content = fmt.Sprintf("%s: %s", speaker, content)
+	}
+	if quoted := QuotedContext(u); quoted != "" {
+		content = fmt.Sprintf("%s\n%s", quoted, content)
+	}
+	return content
+}
+
 func GroupSpeaker(u TelegramUpdate) string {
 	if !IsGroup(u.ChatType) {
 		return ""

@@ -32,6 +32,7 @@ sys.path.insert(0, HERE)
 
 import evalspec
 import skills
+import transcript
 import persona_lint
 
 DEFAULT_CASES = os.path.join(PROJECT, "evals", "persona", "cases.jsonl")
@@ -61,10 +62,15 @@ def build_system_prompt(base_path: str) -> str:
 
 
 def render_case(case: dict) -> str:
-    post = case.get("post")
-    if post:
-        return f"Пост канала: {post}\n\nКомментарий: {case['incoming']}"
-    return f"Комментарий: {case['incoming']}"
+    """Feed the model the shape the transport actually sends, not a prettier one.
+
+    agentkit.transcript is the same rule backend/internal/tggateway applies to a
+    live comment. Grading a different input than production delivers grades a
+    different agent.
+    """
+    speaker = transcript.speaker(case.get("speaker", ""), case.get("speaker_username", ""))
+    quoted = transcript.quoted_context(case.get("post", ""), is_channel=True)
+    return transcript.inbound(case["incoming"], speaker, quoted)
 
 
 def call_model(candidate: dict, system: str, user: str, timeout: float) -> str:
