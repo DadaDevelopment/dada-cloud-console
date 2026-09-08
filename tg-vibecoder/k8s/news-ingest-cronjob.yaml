@@ -14,16 +14,26 @@ spec:
       template:
         spec:
           restartPolicy: Never
+          imagePullSecrets:
+            - name: nexus-cred
           containers:
             - name: ingest
-              image: REPLACED_BY_CI
+              image: IMAGE_PINNED_BY_APPLY_SCRIPT
               command: ["python", "news_ingest.py", "--max-age-days", "14"]
               env:
                 - name: DATABASE_URL
                   valueFrom:
                     secretKeyRef:
-                      name: vibecoder-db
-                      key: dsn
+                      name: tg-vibecoder-env
+                      key: DATABASE_URL
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 1000
+                capabilities:
+                  drop: ["ALL"]
+                seccompProfile:
+                  type: RuntimeDefault
               resources:
                 requests:
                   cpu: 50m

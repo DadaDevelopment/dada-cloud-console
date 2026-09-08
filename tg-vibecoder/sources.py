@@ -11,7 +11,7 @@ title, so keep them the words a person would actually type.
 
 FEEDS = [
     {"name": "openai", "url": "https://openai.com/news/rss.xml", "tags": ["openai", "gpt", "модели"]},
-    {"name": "anthropic", "url": "https://www.anthropic.com/rss.xml", "tags": ["anthropic", "claude", "модели"]},
+    {"name": "anthropic-hn", "url": "https://hnrss.org/newest?q=Anthropic+OR+Claude&points=50", "tags": ["anthropic", "claude", "модели"]},
     {"name": "google-ai", "url": "https://blog.google/technology/ai/rss/", "tags": ["google", "gemini", "модели"]},
     {"name": "simonwillison", "url": "https://simonwillison.net/atom/everything/", "tags": ["llm", "тулинг", "практика"]},
     {"name": "github-changelog", "url": "https://github.blog/changelog/feed/", "tags": ["github", "copilot", "тулинг"]},
@@ -19,7 +19,8 @@ FEEDS = [
     {"name": "vercel", "url": "https://vercel.com/atom", "tags": ["vercel", "деплой", "фронтенд"]},
     {"name": "arxiv-cs-ai", "url": "http://export.arxiv.org/rss/cs.AI", "tags": ["arxiv", "research", "llm"]},
     {"name": "hn-ai", "url": "https://hnrss.org/newest?q=LLM+OR+%22AI+agent%22&points=100", "tags": ["hackernews", "llm", "агенты"]},
-    {"name": "habr-ai", "url": "https://habr.com/ru/rss/hub/artificial_intelligence/?fl=ru", "tags": ["habr", "ии", "русский"]},
+    {"name": "huggingface", "url": "https://huggingface.co/blog/feed.xml", "tags": ["huggingface", "модели", "опенсорс"]},
+    {"name": "habr-ai", "url": "https://habr.com/ru/rss/hubs/artificial_intelligence/articles/?fl=ru", "tags": ["habr", "ии", "русский"]},
 ]
 
 KEYWORD_TAGS = {

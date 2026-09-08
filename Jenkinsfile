@@ -552,6 +552,10 @@ spec:
                                 cd agentkit
                                 python3 -m unittest discover -s tests -q
 
+                                cd ../tg-vibecoder
+                                python3 -m unittest discover -s tests -q
+
+                                cd ../agentkit
                                 python3 gate.py \
                                     --agents-root ../tg-vibecoder \
                                     --agent vibecoder \

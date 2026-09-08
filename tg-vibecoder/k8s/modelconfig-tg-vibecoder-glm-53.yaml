@@ -1,0 +1,23 @@
+# Z.ai Coding Plan configuration for the vibecoder persona.
+# Reuses the existing provider credential by reference; contains no secret value.
+#
+# reasoningEffort: low is the shippable equivalent of the bakeoff's
+# thinking={"type":"disabled"}: the CRD has no arbitrary body passthrough, so
+# the winning bakeoff config was not a shippable config. Both splits were
+# re-run in this exact shape (17/17 dev, 12/12 holdout) before it was applied.
+apiVersion: kagent.dev/v1alpha2
+kind: ModelConfig
+metadata:
+  name: tg-vibecoder-glm-53
+  namespace: kagent
+spec:
+  provider: OpenAI
+  apiKeySecret: zhipu-glm-api
+  apiKeySecretKey: OPENAI_API_KEY
+  model: glm-5.3
+  openAI:
+    apiFormat: chatCompletions
+    baseUrl: https://api.z.ai/api/coding/paas/v4
+    maxTokens: 2048
+    temperature: "0.8"
+    reasoningEffort: low

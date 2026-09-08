@@ -13,7 +13,10 @@ Static here, and deliberately not manifests:
 ``record_reply`` / ``reply_budget``
     The anti-spam ledger. A channel comment section punishes an agent that
     answers everything, so the budget is a first-class tool the persona is
-    told to consult, not a hidden runtime filter.
+    told to consult, not a hidden runtime filter. ``answered`` without reply
+    text is refused: a first live run logged ``answered`` with an empty reply
+    and returned the word "Ответил." to the caller, so the ledger claimed a
+    reply that no human ever saw.
 ``today``
     The model has no clock. Without it, "свежее" silently means "whatever the
     training data called recent", which is the exact failure this agent must
@@ -34,6 +37,7 @@ _AGENTKIT = os.environ.get("AGENTKIT_PATH") or str(Path(__file__).parent.parent 
 if _AGENTKIT not in sys.path:
     sys.path.insert(0, _AGENTKIT)
 
+import ledger
 import manifests_seed
 import ops
 import skills
@@ -136,8 +140,9 @@ async def record_reply(
     reply: str = "",
 ) -> dict:
     """Записать решение по комментарию. decision: answered или skipped. skipped не тратит бюджет."""
-    if decision not in ("answered", "skipped"):
-        return {"ok": False, "error": "decision должен быть answered или skipped"}
+    problem = ledger.validate_decision(decision, reply)
+    if problem:
+        return {"ok": False, "error": problem}
     row_id = await storage.log_reply(chat_id, thread_id, message_id, author, incoming, reply, decision)
     return {"ok": True, "id": row_id}
 

@@ -108,6 +108,24 @@ def _strip_code(text: str) -> str:
     return _CODE_FENCE_RE.sub(" ", text)
 
 
+_STATUS_ONLY_RE = re.compile(
+    r"^\W*(?:ок|окей|готово|сделано|сделал|ответил|ответила|отправил|отправила|записал|записала|"
+    r"выполнено|принял|принято|done|ok|okay)\W*$",
+    re.I,
+)
+
+
+def _status_only(prose: str) -> bool:
+    """True when the whole reply is a report about replying instead of the reply.
+
+    A model that is given a logging tool sometimes decides the tool is the
+    delivery channel and answers its caller with "Ответил." The transport is
+    green, the ledger has a row, and the human got nothing. Cheap to catch on
+    the text, so it is caught here rather than in a postmortem.
+    """
+    return bool(_STATUS_ONLY_RE.match(prose.strip()))
+
+
 def inspect(text: str, max_chars: int = 700, max_sentences: int = 5) -> list[Finding]:
     """Return every rule hit in ``text``, critical ones first.
 
@@ -117,6 +135,9 @@ def inspect(text: str, max_chars: int = 700, max_sentences: int = 5) -> list[Fin
     findings: list[Finding] = []
     prose = _strip_code(text)
     low = prose.lower()
+
+    if _status_only(prose):
+        findings.append(Finding("status_instead_of_reply", "critical", prose.strip()))
 
     for phrase in BANNED_PHRASES_CRITICAL:
         if phrase in low:

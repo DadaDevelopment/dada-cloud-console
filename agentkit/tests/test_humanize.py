@@ -84,3 +84,15 @@ class TestStrip(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestStatusInsteadOfReply(unittest.TestCase):
+    def test_bare_status_word_is_critical(self):
+        for text in ("Ответил.", "готово", "Отправил", "done", "ok"):
+            with self.subTest(text=text):
+                rules = [f["rule"] for f in humanize.report(text)["critical"]]
+                self.assertIn("status_instead_of_reply", rules)
+
+    def test_real_reply_starting_with_ok_passes(self):
+        rules = [f["rule"] for f in humanize.report("ok, но retries тут не помогут: падает не сеть, а парсер")["critical"]]
+        self.assertNotIn("status_instead_of_reply", rules)
