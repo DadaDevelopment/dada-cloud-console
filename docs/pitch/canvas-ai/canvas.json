@@ -1,0 +1,87 @@
+{
+  "artboards": [
+    {
+      "file": "Main.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S02-Problema.dc.html",
+      "x": 1720,
+      "y": 0,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S03-Reshenie.dc.html",
+      "x": 3440,
+      "y": 0,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S04-Tehnologiya.dc.html",
+      "x": 5160,
+      "y": 0,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S05-Rynok.dc.html",
+      "x": 0,
+      "y": 1080,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S06-Konkurenty.dc.html",
+      "x": 1720,
+      "y": 1080,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S07-Biznes-model.dc.html",
+      "x": 3440,
+      "y": 1080,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S08-Dinamika.dc.html",
+      "x": 5160,
+      "y": 1080,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S09-Komanda.dc.html",
+      "x": 0,
+      "y": 2160,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S10-Zapros.dc.html",
+      "x": 1720,
+      "y": 2160,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    }
+  ],
+  "launch": {
+    "view": "canvas"
+  }
+}

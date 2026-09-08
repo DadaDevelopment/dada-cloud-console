@@ -1,0 +1,34 @@
+<meta charset="utf-8">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{width:1920px;height:1080px;overflow:hidden;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+background:linear-gradient(135deg,#0b1220 0%,#152449 45%,#1e3a8a 100%);color:#fff;position:relative}
+.glow{position:absolute;border-radius:50%;filter:blur(120px)}
+.g1{width:760px;height:760px;left:-180px;top:-260px;background:rgba(37,99,235,.55)}
+.g2{width:640px;height:640px;right:-160px;bottom:-220px;background:rgba(8,145,178,.42)}
+.g3{width:420px;height:420px;right:340px;top:-140px;background:rgba(79,70,229,.35)}
+.grid{position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.045) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.045) 1px,transparent 1px);background-size:80px 80px}
+.wrap{position:relative;height:100%;display:flex;flex-direction:column;justify-content:center;padding:0 140px}
+.brand{display:flex;align-items:center;gap:36px}
+.mark{width:132px;height:132px;border-radius:30px;background:#2563eb;display:flex;align-items:center;justify-content:center;box-shadow:0 24px 70px rgba(37,99,235,.55)}
+h1{font-size:112px;font-weight:800;letter-spacing:-3.5px;line-height:1}
+.tag{margin-top:44px;font-size:46px;font-weight:600;line-height:1.25;letter-spacing:-1px;max-width:1240px;color:#e2e8f0}
+.sub{margin-top:26px;font-size:30px;line-height:1.4;max-width:1120px;color:#93a4c2}
+.pills{margin-top:60px;display:flex;gap:20px}
+.pill{padding:18px 34px;border-radius:999px;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.07);font-size:27px;font-weight:600;color:#e8eefc}
+.foot{position:absolute;left:140px;bottom:74px;font-size:28px;font-weight:600;color:#7f94b8;letter-spacing:.5px}
+</style>
+<div class="glow g1"></div><div class="glow g2"></div><div class="glow g3"></div>
+<div class="grid"></div>
+<div class="wrap">
+  <div class="brand">
+    <div class="mark">
+      <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
+    </div>
+    <h1>DADA Cloud</h1>
+  </div>
+  <div class="tag">Приложение в интернете за три шага,<br>без отдельного инженера.</div>
+  <div class="sub">Российская платформа, которая сама собирает принесённый код, поднимает его по своему адресу и держит живым. Встроенный ИИ-агент разбирает сбои и чинит их.</div>
+  <div class="pills"><div class="pill">Работает в проде</div><div class="pill">109 приложений</div><div class="pill">47 пользователей</div></div>
+</div>
+<div class="foot">dada-tuda.ru</div>

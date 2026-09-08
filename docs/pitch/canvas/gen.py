@@ -1,0 +1,313 @@
+import os, json
+
+CSS = """
+*{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,"Segoe UI",Inter,Roboto,Arial,sans-serif}
+.slide{width:1600px;height:900px;padding:56px 72px;display:flex;flex-direction:column;position:relative;color:#fff;overflow:hidden}
+.brandrow{display:flex;align-items:center;gap:14px;flex:0 0 auto}
+.logo{width:46px;height:46px;border-radius:12px;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.3);display:flex;align-items:center;justify-content:center}
+.logo svg{width:28px;height:28px}
+.brandname{font-size:24px;font-weight:800;letter-spacing:-.4px}
+.num{margin-left:auto;font-size:20px;font-weight:700;opacity:.55;letter-spacing:.5px}
+.kicker{font-size:20px;font-weight:800;letter-spacing:2px;text-transform:uppercase;opacity:.65;margin-top:34px}
+.title{font-size:62px;line-height:1.06;font-weight:800;letter-spacing:-1.6px;margin-top:14px;max-width:1180px}
+.title.big{font-size:88px;letter-spacing:-2.4px}
+.subtitle{font-size:28px;line-height:1.38;font-weight:500;opacity:.9;margin-top:22px;max-width:1150px}
+.content{margin-top:36px;flex:1 1 auto;min-height:0}
+.foot{position:absolute;bottom:34px;left:72px;right:72px;display:flex;justify-content:space-between;font-size:19px;opacity:.6;font-weight:600}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:28px}
+.cols3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px}
+.cols4{display:grid;grid-template-columns:repeat(4,1fr);gap:22px}
+.card{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);border-radius:22px;padding:30px 32px}
+.card.solid{background:#fff;color:#0f172a;border-color:#e5e7eb;box-shadow:0 24px 60px rgba(0,0,0,.22)}
+.card h3{font-size:30px;font-weight:800;letter-spacing:-.5px;margin-bottom:14px}
+.card p{font-size:23px;line-height:1.42;opacity:.88}
+.card p+p{margin-top:12px}
+.card .lead{font-size:19px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase;opacity:.6;margin-bottom:10px}
+.metric{font-size:72px;font-weight:800;letter-spacing:-2px;line-height:1}
+.metric small{display:block;font-size:21px;font-weight:600;letter-spacing:0;opacity:.75;margin-top:12px;line-height:1.3}
+.pills{display:flex;flex-wrap:wrap;gap:14px;margin-top:26px}
+.pill{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.28);border-radius:999px;padding:12px 24px;font-size:22px;font-weight:600}
+.list{list-style:none}
+.list li{display:flex;gap:18px;align-items:flex-start;font-size:26px;line-height:1.35;padding:14px 0}
+.list li .n{flex:0 0 44px;height:44px;border-radius:50%;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.3);display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:800}
+.list li b{font-weight:800}
+.funnel{display:flex;flex-direction:column;gap:16px;margin-top:6px}
+.fbar{height:74px;border-radius:16px;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.26);display:flex;align-items:center;padding:0 30px;font-size:25px;font-weight:700;justify-content:space-between}
+.fbar span.v{font-size:30px;font-weight:800}
+.goal{display:flex;align-items:center;gap:22px;font-size:26px;padding:16px 0;border-bottom:1px solid rgba(255,255,255,.16)}
+.goal .now{opacity:.6}
+.goal .arrow{opacity:.5}
+.goal .tgt{font-weight:800}
+.goal .txt{flex:1 1 auto}
+.hl{color:#7dd3fc}
+.note{font-size:19px;opacity:.6;margin-top:18px}
+.center{align-items:center;justify-content:center;text-align:center}
+.frames{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;margin-top:6px}
+.frame{background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.28);height:300px;display:flex;flex-direction:column}
+.frame .bar{height:34px;background:#f1f3f6;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:6px;padding:0 12px}
+.frame .dot{width:9px;height:9px;border-radius:50%}
+.frame .ph{flex:1 1 auto;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:19px;font-weight:700;text-align:center;padding:14px;background:repeating-linear-gradient(135deg,#f8fafc 0 12px,#f1f5f9 12px 24px)}
+.frame img{flex:1 1 auto;width:100%;height:100%;min-height:0;object-fit:cover;object-position:top left;display:block}
+.fcap{margin-top:12px;font-size:20px;font-weight:700;opacity:.8;text-align:center}
+.ftime{font-size:18px;opacity:.55;text-align:center;margin-top:4px}
+.venn{display:flex;gap:26px;margin-top:10px}
+.venn .card{flex:1 1 0}
+.cmp{width:100%;border-collapse:collapse}
+.cmp td{padding:18px 0;font-size:25px;border-bottom:1px solid rgba(255,255,255,.14)}
+.cmp td.k{opacity:.6;width:46%}
+.hero-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:22px;margin-top:10px}
+.bigline{font-size:36px;line-height:1.35;font-weight:700;letter-spacing:-.6px}
+.cap{display:flex;flex-direction:column;gap:14px}
+.capbar{height:56px;border-radius:14px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.26);position:relative;overflow:hidden}
+.capbar i{display:block;height:100%;background:#38bdf8}
+.capbar em{position:absolute;left:20px;top:0;height:100%;display:flex;align-items:center;font-style:normal;font-weight:800;font-size:22px;color:#0f172a}
+.team{display:flex;align-items:center;gap:28px;margin-top:10px}
+.hub{width:210px;height:210px;border-radius:50%;background:rgba(255,255,255,.16);border:2px solid rgba(255,255,255,.4);display:flex;flex-direction:column;align-items:center;justify-content:center;flex:0 0 210px;text-align:center;font-size:22px;font-weight:800;line-height:1.25}
+.nodes{display:grid;grid-template-columns:1fr 1fr;gap:18px;flex:1 1 auto}
+.node{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);border-radius:18px;padding:20px 24px;font-size:24px;font-weight:700}
+.node small{display:block;font-size:19px;font-weight:500;opacity:.7;margin-top:6px}
+"""
+
+LOGO = '<span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg></span>'
+
+BG = {
+  "blue": "linear-gradient(160deg,#1e3a8a 0%,#2563eb 100%)",
+  "indigo": "linear-gradient(160deg,#312e81 0%,#4f46e5 100%)",
+  "teal": "linear-gradient(160deg,#0f766e 0%,#0891b2 100%)",
+  "slate": "linear-gradient(160deg,#0b1220 0%,#1e293b 100%)",
+}
+
+def slide(name, bg, num, body, foot_right="dada-tuda.ru"):
+    head = '<div class="brandrow">%s<span class="brandname">DADA Cloud</span><span class="num">%s</span></div>' % (LOGO, num)
+    foot = '<div class="foot"><span>Академия инноваторов · 10 поток</span><span>%s</span></div>' % foot_right
+    html = """<script src="./support.js"></script>
+<x-dc>
+<helmet>
+<style>
+%s
+.slide{background:%s}
+</style>
+</helmet>
+<div class="slide">
+%s
+%s
+%s
+</div>
+</x-dc>
+""" % (CSS, BG[bg], head, body, foot)
+    open(name, "w").write(html)
+
+S = []
+
+slide("Main.dc.html", "blue", "01", """
+<div class="content center" style="display:flex;flex-direction:column">
+  <div class="title big">Облако, где приложение<br>запускает автор,<br>а не инженер.</div>
+  <div class="subtitle" style="margin-top:34px;font-size:32px">dada-tuda.ru — работающий продукт, а не презентация идеи</div>
+</div>""")
+
+slide("S02-Nablyudenie.dc.html", "indigo", "02", """
+<div class="kicker">Наблюдение</div>
+<div class="title">Написать программу — вечер.<br>Запустить её в интернет — неделя.</div>
+<div class="content cols">
+  <div class="card"><div class="lead">Написать</div><h3>Час. Один человек.</h3><p>Помощник-ИИ пишет код за автора. Цена написания упала почти до нуля.</p></div>
+  <div class="card solid"><div class="lead">Запустить</div><h3>Неделя. Отдельный специалист.</h3><p>Настройка, адрес, база, защищённое соединение, поддержка. Счёт на десятки тысяч в месяц.</p></div>
+</div>
+<div class="note">Между «у меня готово» и «этим можно пользоваться» лежит неделя чужой работы, которую автор не умеет и не хочет делать.</div>""")
+
+slide("S03-Stena-v-cifrah.dc.html", "slate", "03", """
+<div class="kicker">Стена в цифрах</div>
+<div class="title">Люди упираются в настройку,<br>а не в свою идею.</div>
+<div class="content">
+  <div class="funnel">
+    <div class="fbar" style="width:100%"><span>Зашли на сайт</span><span class="v">361</span></div>
+    <div class="fbar" style="width:78%"><span>Открыли регистрацию</span><span class="v">50</span></div>
+    <div class="fbar" style="width:52%"><span>Зарегистрировались</span><span class="v">12 из 100</span></div>
+    <div class="fbar" style="width:34%;background:rgba(56,189,248,.28);border-color:rgba(56,189,248,.5)"><span>Запустили приложение</span><span class="v">каждый третий</span></div>
+  </div>
+  <div class="note">Это не гипотеза: мы считаем эти числа на своих пользователях каждую неделю. Срез 30 дней, 1 сентября 2026.</div>
+</div>""")
+
+slide("S04-Chto-my-delaem.dc.html", "blue", "04", """
+<div class="kicker">Что мы делаем</div>
+<div class="title">Три шага вместо недели настройки</div>
+<div class="content">
+  <ul class="list" style="margin-top:10px">
+    <li><span class="n">1</span><div><b>Принесли код</b> — папкой, архивом или ссылкой на репозиторий.</div></li>
+    <li><span class="n">2</span><div><b>Получили живой адрес</b> в интернете. Минуты, не дни.</div></li>
+    <li><span class="n">3</span><div><b>Дальше платформа держит его живым сама:</b> база данных, домен, защищённое соединение, откат на прошлую версию.</div></li>
+  </ul>
+  <div class="pills"><span class="pill">и дальше без вас</span><span class="pill">без настроек</span><span class="pill">без звонка в поддержку</span></div>
+</div>""")
+
+def frame(cap, t, shot):
+    return ('<div><div class="frame"><div class="bar"><span class="dot" style="background:#ff5f57"></span>'
+            '<span class="dot" style="background:#febc2e"></span><span class="dot" style="background:#28c840"></span></div>'
+            '<img src="%s" alt=""></div><div class="fcap">%s</div><div class="ftime">%s</div></div>') % (shot, cap, t)
+
+slide("S05-Demonstraciya.dc.html", "slate", "05", """
+<div class="kicker">Демонстрация</div>
+<div class="title">Целиком в браузере. Пара минут.</div>
+<div class="content">
+  <div class="frames">%s%s%s%s</div>
+  <div class="note">Кадры сняты с экрана во время реального прогона на продукте.</div>
+</div>""" % (
+    frame("Принесли код", "0:00", "shot1.jpg"),
+    frame("Идёт сборка", "0:40", "shot3.jpg"),
+    frame("Собралось", "2:10", "shot2.jpg"),
+    frame("Живой адрес", "2:15", "shot4.jpg"),
+))
+
+slide("S06-Chem-otlichaemsya.dc.html", "indigo", "06", """
+<div class="kicker">Чем мы отличаемся</div>
+<div class="title">Создать сервер умеет каждый.<br>Мы отвечаем за то, что дальше.</div>
+<div class="content cols">
+  <div class="card"><div class="lead">Создать</div><h3>Умеют все, стоит ноль</h3><p>Поднять сервер сегодня может кто угодно, включая ИИ-помощника.</p></div>
+  <div class="card solid"><div class="lead">Владеть</div><h3>Не решил никто, стоит дорого</h3>
+    <table class="cmp" style="color:#0f172a">
+      <tr><td class="k">Счёт</td><td>понятный, по факту</td></tr>
+      <tr><td class="k">Поломка</td><td>внятная причина</td></tr>
+      <tr><td class="k">Ошибка</td><td>откат на прошлую версию</td></tr>
+      <tr><td class="k">Тишина</td><td>платформа сама сообщит</td></tr>
+    </table></div>
+</div>""")
+
+slide("S07-AI-vnutri.dc.html", "blue", "07", """
+<div class="kicker">ИИ внутри продукта</div>
+<div class="title">Агент не советует, а чинит</div>
+<div class="content cols">
+  <div class="card"><div class="lead">Самопочинка</div><h3>Приложение упало —<br>агент разобрался</h3><p>Он смотрит журнал, находит причину и применяет исправление или предлагает его. Не подсказка в чате, а действие.</p><p>Чужой помощник этого не может: он не видит, что происходит с приложением клиента, а мы видим.</p></div>
+  <div class="card"><div class="lead">Среда для агентов</div><h3>Одноразовое рабочее место<br>за секунды</h3><p>В нём агент может ломать что угодно. Прототип выжил — становится настоящим сервисом без переезда.</p><p>Агентам нужно место для работы, и ноутбук разработчика для этого не годится. У нас такое место уже есть.</p></div>
+</div>""")
+
+slide("S08-Komu.dc.html", "teal", "08", """
+<div class="kicker">Кому это нужно</div>
+<div class="title">Тем, у кого нет и не появится<br>инженерной службы</div>
+<div class="content cols3">
+  <div class="card"><h3>Автор-одиночка</h3><p>Написал сервис с помощью ИИ. Хочет показать людям, а не изучать администрирование.</p></div>
+  <div class="card"><h3>Маленькая команда</h3><p>2-10 человек. Нет и не будет отдельного специалиста по серверам.</p></div>
+  <div class="card"><h3>Студия на подряде</h3><p>Десятки клиентских проектов. Нужен один пульт и предсказуемый счёт.</p></div>
+</div>
+<div class="note">В крупные компании не идём намеренно: там своя инженерная служба, и наша ценность обнуляется.</div>""")
+
+slide("S09-Rynok.dc.html", "teal", "09", """
+<div class="kicker">Рынок и почему сейчас</div>
+<div class="title">Три условия совпали именно сейчас</div>
+<div class="content">
+  <div class="venn">
+    <div class="card"><h3>ИИ сделал авторов массовыми</h3><p>Людей, пишущих код с помощником, стало на порядок больше.</p></div>
+    <div class="card"><h3>Платформ для них нет</h3><p>Российские хостинги остались на модели «дадим сервер, дальше сами».</p></div>
+    <div class="card"><h3>Инфраструктура должна стать российской</h3><p>Западные площадки такого класса ушли или недоступны для оплаты.</p></div>
+  </div>
+  <div class="note">Рынок предлагает автору либо голый сервер, либо западный сервис, который больше нельзя оплатить.</div>
+</div>""")
+
+slide("S10-Chto-rabotaet.dc.html", "blue", "10", """
+<div class="kicker">Что уже работает</div>
+<div class="title">Работающий продукт, а не прототип</div>
+<div class="content">
+  <div class="hero-metrics">
+    <div class="card"><div class="metric">47<small>зарегистрированных пользователей</small></div></div>
+    <div class="card"><div class="metric">74<small>проекта</small></div></div>
+    <div class="card"><div class="metric">109<small>приложений создано</small></div></div>
+    <div class="card"><div class="metric">82<small>живут прямо сейчас</small></div></div>
+  </div>
+  <div class="bigline" style="margin-top:34px">113 успешных запусков за последнюю неделю,<br>и всё это без выделенной дежурной смены.</div>
+  <div class="note">Данные на 1 сентября 2026. На платформе живут чужие приложения, которые пережили не один наш сбой и восстановление.</div>
+</div>""")
+
+slide("S11-Zhivye-istorii.dc.html", "slate", "11", """
+<div class="kicker">Живые истории</div>
+<div class="title">Все пришли сами, за руку<br>мы не вели никого</div>
+<div class="content cols3">
+  <div class="card"><h3>Аналитик спортивных данных</h3><p>Пришёл с шаблона, за час собрал сервис с базой данных. Сейчас у него связка из трёх приложений, работающих непрерывно.</p></div>
+  <div class="card"><h3>Автор телеграм-ботов</h3><p>Держит четыре приложения, обновляет их по несколько раз в день.</p></div>
+  <div class="card"><h3>Новый пользователь</h3><p>Зарегистрировался и запустил рабочее приложение за один час, ни разу не обратившись в поддержку.</p></div>
+</div>
+<div class="note">Путь работает без нас, но таких пользователей пока десятки, а не тысячи. Это и есть наша главная задача.</div>""")
+
+slide("S12-Za-chto-platyat.dc.html", "indigo", "12", """
+<div class="kicker">За что платят</div>
+<div class="title">Счёт идёт поминутно<br>и только за то, что работает</div>
+<div class="content cols3">
+  <div class="card"><h3>Ничего не запущено</h3><p>Счёт не растёт. Совсем.</p></div>
+  <div class="card"><h3>Бесплатный уровень</h3><p>Одно приложение. Засыпает, когда нет посетителей.</p></div>
+  <div class="card"><h3>Дальше — по факту</h3><p>Память, вычисления и диск по факту. Минимальный счёт засчитывается в потребление, а не сверху.</p></div>
+</div>
+<div class="note">Тарифов-коробок, в которые никто не попадает, не делаем. Счётчик считает поминутно, приём платежей подключён и проверен целиком.</div>""")
+
+slide("S13-Ekonomika.dc.html", "teal", "13", """
+<div class="kicker">Экономика</div>
+<div class="title">Каждый следующий клиент<br>почти целиком идёт в маржу</div>
+<div class="content">
+  <div class="cap">
+    <div class="capbar"><i style="width:15%"></i><em>занято сейчас</em></div>
+  </div>
+  <div class="cols" style="margin-top:34px">
+    <div class="card"><h3>Расходы почти постоянны</h3><p>Держать платформу стоит фиксированную сумму в месяц — она почти не растёт от новых клиентов.</p></div>
+    <div class="card"><h3>Мощности с запасом</h3><p>Свободного ресурса хватает на порядок больше пользователей, чем есть сегодня.</p></div>
+  </div>
+  <div class="note">Точка безубыточности — десятки платящих клиентов, а не тысячи. Задача не в мощностях, а в том, чтобы дойти до клиентов.</div>
+</div>""")
+
+slide("S14-Komanda.dc.html", "indigo", "14", """
+<div class="kicker">Команда</div>
+<div class="title">Один основатель<br>и команда ИИ-агентов</div>
+<div class="content">
+  <div class="team">
+    <div class="hub">1 человек<br>+ агенты</div>
+    <div class="nodes">
+      <div class="node">Разработка<small>пишут и выкатывают код</small></div>
+      <div class="node">Дежурство<small>круглосуточно, в моё отсутствие</small></div>
+      <div class="node">Разбор сбоев<small>причина и письменный след</small></div>
+      <div class="node">Аналитика и тексты<small>метрики, лендинги, письма</small></div>
+    </div>
+  </div>
+  <div class="bigline" style="margin-top:26px">Платформа на 100+ приложений держится без штата инженеров:<br>мы сами живём внутри того, что продаём.</div>
+</div>""")
+
+def goal(txt, now, tgt):
+    return '<div class="goal"><span class="txt">%s</span><span class="now">%s</span><span class="arrow">→</span><span class="tgt">%s</span></div>' % (txt, now, tgt)
+
+slide("S15-Zadachi.dc.html", "blue", "15", """
+<div class="kicker">Задачи на 6 месяцев</div>
+<div class="title">Измеримые числа, а не список функций</div>
+<div class="content" style="margin-top:26px">
+%s%s%s%s
+  <div class="note">Все четыре числа мы умеем считать уже сегодня, поэтому через полгода отчёт будет цифрой, а не ощущением.</div>
+</div>""" % (
+    goal("Зарегистрировался → работающее приложение", "каждый третий", "половина"),
+    goal("Платящие клиенты и повторные оплаты", "0", "первые"),
+    goal("Сбои закрываются без участия человека", "единичные", "большинство"),
+    goal("Корпоративные пилоты: студии и продуктовые команды", "0", "первые"),
+))
+
+slide("S16-Zachem-akselerator.dc.html", "teal", "16", """
+<div class="kicker">Зачем нам акселератор</div>
+<div class="title">Строить умеем.<br>Продавать пока нет.</div>
+<div class="content cols3">
+  <div class="card"><h3>Доступ к заказчикам</h3><p>Студии, продуктовые команды, корпоративные подразделения. У нас нет к ним двери, у программы она есть.</p></div>
+  <div class="card"><h3>Трекер по деньгам</h3><p>Продукт есть, выручки нет. Нужен человек, который снимет с нас инженерную оптику и спросит про деньги.</p></div>
+  <div class="card"><h3>Первые пилоты и партнёры</h3><p>Дистрибуция через тех, у кого уже есть аудитория авторов.</p></div>
+</div>
+<div class="note">Именно эту половину мы и хотим закрыть в программе.</div>""")
+
+slide("S17-Kontakty.dc.html", "blue", "17", """
+<div class="content center" style="display:flex;flex-direction:column">
+  <div class="title big" style="font-size:72px">dada-tuda.ru</div>
+  <div class="subtitle" style="margin-top:26px;font-size:30px">Ссылка ведёт не на лендинг, а на работающий продукт.<br>Зарегистрируйтесь и запустите что-нибудь: это займёт меньше времени,<br>чем дочитать эту презентацию.</div>
+  <div class="pills" style="justify-content:center;margin-top:40px"><span class="pill">Марков-Бутырский Алекс Андреевич, основатель</span><span class="pill">lexagri200430@gmail.com</span><span class="pill">+7 931 305-11-30</span><span class="pill">@java_er</span></div>
+</div>""")
+
+order = ["Main.dc.html","S02-Nablyudenie.dc.html","S03-Stena-v-cifrah.dc.html","S04-Chto-my-delaem.dc.html",
+"S05-Demonstraciya.dc.html","S06-Chem-otlichaemsya.dc.html","S07-AI-vnutri.dc.html","S08-Komu.dc.html",
+"S09-Rynok.dc.html","S10-Chto-rabotaet.dc.html","S11-Zhivye-istorii.dc.html","S12-Za-chto-platyat.dc.html",
+"S13-Ekonomika.dc.html","S14-Komanda.dc.html","S15-Zadachi.dc.html","S16-Zachem-akselerator.dc.html",
+"S17-Kontakty.dc.html"]
+
+W,H=1600,900
+GX,GY=W+120,H+180
+boards=[]
+for i,f in enumerate(order):
+    boards.append({"file":f,"x":(i%4)*GX,"y":(i//4)*GY,"w":W,"h":H,"print":"fixed"})
+json.dump({"artboards":boards,"launch":{"view":"canvas"}},open("canvas.json","w"),ensure_ascii=False,indent=2)
+print("wrote", len(order), "artboards")

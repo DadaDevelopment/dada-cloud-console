@@ -21,6 +21,18 @@ Static here, and deliberately not manifests:
     The model has no clock. Without it, "свежее" silently means "whatever the
     training data called recent", which is the exact failure this agent must
     not have.
+
+Transport notes, both learned live:
+
+The HTTP app is stateless. A streamable-http session lives in the memory of
+the pod that created it, and the platform runs this app with two replicas, so
+a session opened on one pod and used on the other dies as "Session terminated"
+roughly half the time.
+
+The app requires a bearer token when ``MCP_AUTH_TOKEN`` is set. Every app here
+gets a public domain by default, so this tool server answered ``/mcp`` from the
+open internet with no credential at all; the kagent side passes the same token
+as an ``Authorization`` header on the RemoteMCPServer.
 """
 
 import asyncio
@@ -30,8 +42,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import uvicorn
 from fastmcp import FastMCP
 from fastmcp.tools.function_tool import FunctionTool
+from starlette.middleware import Middleware
 
 _AGENTKIT = os.environ.get("AGENTKIT_PATH") or str(Path(__file__).parent.parent / "agentkit")
 if _AGENTKIT not in sys.path:
@@ -160,10 +174,41 @@ async def bootstrap() -> None:
     await sync_manifests()
 
 
+MCP_AUTH_TOKEN = os.environ.get("MCP_AUTH_TOKEN", "")
+
+
+class BearerGate:
+    """Reject unauthenticated calls when a token is configured.
+
+    Written as raw ASGI rather than as a fastmcp auth provider because the
+    check has to sit in front of the transport: an unauthenticated caller must
+    not get as far as opening a session.
+    """
+
+    def __init__(self, app, token: str):
+        self.app = app
+        self.expected = f"Bearer {token}"
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
+        if headers.get("authorization") != self.expected:
+            await send({"type": "http.response.start", "status": 401,
+                        "headers": [(b"content-type", b"text/plain; charset=utf-8")]})
+            await send({"type": "http.response.body", "body": b"unauthorized"})
+            return
+        await self.app(scope, receive, send)
+
+
 async def main() -> None:
     await bootstrap()
     asyncio.create_task(refresh_loop())
-    await mcp.run_async(transport="http", host="0.0.0.0", port=int(os.environ.get("PORT", "8000")))
+    middleware = [Middleware(BearerGate, token=MCP_AUTH_TOKEN)] if MCP_AUTH_TOKEN else []
+    app = mcp.http_app(path="/mcp", stateless_http=True, middleware=middleware)
+    config = uvicorn.Config(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8000")), log_config=None)
+    await uvicorn.Server(config).serve()
 
 
 if __name__ == "__main__":

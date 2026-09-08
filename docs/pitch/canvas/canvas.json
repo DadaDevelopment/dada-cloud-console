@@ -1,0 +1,143 @@
+{
+  "artboards": [
+    {
+      "file": "Main.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S02-Nablyudenie.dc.html",
+      "x": 1720,
+      "y": 0,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S03-Stena-v-cifrah.dc.html",
+      "x": 3440,
+      "y": 0,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S04-Chto-my-delaem.dc.html",
+      "x": 5160,
+      "y": 0,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S05-Demonstraciya.dc.html",
+      "x": 0,
+      "y": 1080,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S06-Chem-otlichaemsya.dc.html",
+      "x": 1720,
+      "y": 1080,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S07-AI-vnutri.dc.html",
+      "x": 3440,
+      "y": 1080,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S08-Komu.dc.html",
+      "x": 5160,
+      "y": 1080,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S09-Rynok.dc.html",
+      "x": 0,
+      "y": 2160,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S10-Chto-rabotaet.dc.html",
+      "x": 1720,
+      "y": 2160,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S11-Zhivye-istorii.dc.html",
+      "x": 3440,
+      "y": 2160,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S12-Za-chto-platyat.dc.html",
+      "x": 5160,
+      "y": 2160,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S13-Ekonomika.dc.html",
+      "x": 0,
+      "y": 3240,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S14-Komanda.dc.html",
+      "x": 1720,
+      "y": 3240,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S15-Zadachi.dc.html",
+      "x": 3440,
+      "y": 3240,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S16-Zachem-akselerator.dc.html",
+      "x": 5160,
+      "y": 3240,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    },
+    {
+      "file": "S17-Kontakty.dc.html",
+      "x": 0,
+      "y": 4320,
+      "w": 1600,
+      "h": 900,
+      "print": "fixed"
+    }
+  ],
+  "launch": {
+    "view": "canvas"
+  }
+}

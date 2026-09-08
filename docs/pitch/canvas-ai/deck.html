@@ -1,0 +1,279 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Dada Cloud</title><style>
+
+
+*{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,"Segoe UI",Inter,Roboto,Arial,sans-serif}
+.slide{width:1600px;height:900px;padding:56px 72px;display:flex;flex-direction:column;position:relative;color:#fff;overflow:hidden}
+.brandrow{display:flex;align-items:center;gap:14px;flex:0 0 auto}
+.logo{width:46px;height:46px;border-radius:12px;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.3);display:flex;align-items:center;justify-content:center}
+.logo svg{width:28px;height:28px}
+.brandname{font-size:24px;font-weight:800;letter-spacing:-.4px}
+.num{margin-left:auto;font-size:20px;font-weight:700;opacity:.55;letter-spacing:.5px}
+.kicker{font-size:20px;font-weight:800;letter-spacing:2px;text-transform:uppercase;opacity:.65;margin-top:34px}
+.title{font-size:62px;line-height:1.06;font-weight:800;letter-spacing:-1.6px;margin-top:14px;max-width:1180px}
+.title.big{font-size:88px;letter-spacing:-2.4px}
+.subtitle{font-size:28px;line-height:1.38;font-weight:500;opacity:.9;margin-top:22px;max-width:1150px}
+.content{margin-top:36px;flex:1 1 auto;min-height:0}
+.foot{position:absolute;bottom:34px;left:72px;right:72px;display:flex;justify-content:space-between;font-size:19px;opacity:.6;font-weight:600}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:28px}
+.cols3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px}
+.cols4{display:grid;grid-template-columns:repeat(4,1fr);gap:22px}
+.card{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);border-radius:22px;padding:30px 32px}
+.card.solid{background:#fff;color:#0f172a;border-color:#e5e7eb;box-shadow:0 24px 60px rgba(0,0,0,.22)}
+.card h3{font-size:30px;font-weight:800;letter-spacing:-.5px;margin-bottom:14px}
+.card p{font-size:23px;line-height:1.42;opacity:.88}
+.card p+p{margin-top:12px}
+.card .lead{font-size:19px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase;opacity:.6;margin-bottom:10px}
+.metric{font-size:72px;font-weight:800;letter-spacing:-2px;line-height:1}
+.metric small{display:block;font-size:21px;font-weight:600;letter-spacing:0;opacity:.75;margin-top:12px;line-height:1.3}
+.pills{display:flex;flex-wrap:wrap;gap:14px;margin-top:26px}
+.pill{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.28);border-radius:999px;padding:12px 24px;font-size:22px;font-weight:600}
+.list{list-style:none}
+.list li{display:flex;gap:18px;align-items:flex-start;font-size:26px;line-height:1.3;padding:10px 0}
+.list li .n{flex:0 0 44px;height:44px;border-radius:50%;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.3);display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:800}
+.list li b{font-weight:800}
+.funnel{display:flex;flex-direction:column;gap:16px;margin-top:6px}
+.fbar{height:74px;border-radius:16px;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.26);display:flex;align-items:center;padding:0 30px;font-size:25px;font-weight:700;justify-content:space-between}
+.fbar span.v{font-size:30px;font-weight:800}
+.goal{display:flex;align-items:center;gap:22px;font-size:26px;padding:16px 0;border-bottom:1px solid rgba(255,255,255,.16)}
+.goal .now{opacity:.6}
+.goal .arrow{opacity:.5}
+.goal .tgt{font-weight:800}
+.goal .txt{flex:1 1 auto}
+.hl{color:#7dd3fc}
+.note{font-size:19px;opacity:.6;margin-top:18px}
+.center{align-items:center;justify-content:center;text-align:center}
+.frames{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;margin-top:6px}
+.frame{background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.28);height:300px;display:flex;flex-direction:column}
+.frame .bar{height:34px;background:#f1f3f6;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:6px;padding:0 12px}
+.frame .dot{width:9px;height:9px;border-radius:50%}
+.frame .ph{flex:1 1 auto;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:19px;font-weight:700;text-align:center;padding:14px;background:repeating-linear-gradient(135deg,#f8fafc 0 12px,#f1f5f9 12px 24px)}
+.frame img{flex:1 1 auto;width:100%;height:100%;min-height:0;object-fit:cover;object-position:top left;display:block}
+.fcap{margin-top:12px;font-size:20px;font-weight:700;opacity:.8;text-align:center}
+.ftime{font-size:18px;opacity:.55;text-align:center;margin-top:4px}
+.venn{display:flex;gap:26px;margin-top:10px}
+.venn .card{flex:1 1 0}
+.cmp{width:100%;border-collapse:collapse}
+.cmp td{padding:18px 0;font-size:25px;border-bottom:1px solid rgba(255,255,255,.14)}
+.cmp td.k{opacity:.6;width:46%}
+.hero-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:22px;margin-top:10px}
+.bigline{font-size:36px;line-height:1.35;font-weight:700;letter-spacing:-.6px}
+.cap{display:flex;flex-direction:column;gap:14px}
+.capbar{height:56px;border-radius:14px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.26);position:relative;overflow:hidden}
+.capbar i{display:block;height:100%;background:#38bdf8}
+.capbar em{position:absolute;left:20px;top:0;height:100%;display:flex;align-items:center;font-style:normal;font-weight:800;font-size:22px;color:#0f172a}
+.team{display:flex;align-items:center;gap:28px;margin-top:10px}
+.hub{width:210px;height:210px;border-radius:50%;background:rgba(255,255,255,.16);border:2px solid rgba(255,255,255,.4);display:flex;flex-direction:column;align-items:center;justify-content:center;flex:0 0 210px;text-align:center;font-size:22px;font-weight:800;line-height:1.25}
+.nodes{display:grid;grid-template-columns:1fr 1fr;gap:18px;flex:1 1 auto}
+.node{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);border-radius:18px;padding:20px 24px;font-size:24px;font-weight:700}
+.node small{display:block;font-size:19px;font-weight:500;opacity:.7;margin-top:6px}
+
+.tsam{display:flex;align-items:center;gap:40px;margin-top:4px}
+.rings{position:relative;width:420px;height:420px;flex:0 0 420px}
+.ring{position:absolute;border-radius:50%;border:2px solid rgba(255,255,255,.45);display:flex;align-items:flex-start;justify-content:center;padding-top:14px;font-size:22px;font-weight:800}
+.r1{width:420px;height:420px;left:0;top:0;background:rgba(255,255,255,.07)}
+.r2{width:290px;height:290px;left:65px;top:110px;background:rgba(255,255,255,.13)}
+.r3{width:165px;height:165px;left:127px;top:225px;background:rgba(56,189,248,.35);border-color:rgba(56,189,248,.7)}
+.mkey{flex:1 1 auto;display:flex;flex-direction:column;gap:18px}
+.mrow{border-left:4px solid rgba(255,255,255,.35);padding-left:20px}
+.mrow b{display:block;font-size:34px;font-weight:800;letter-spacing:-.6px}
+.mrow span{font-size:21px;opacity:.8;line-height:1.35;display:block;margin-top:6px}
+.mrow.sel{border-left-color:#38bdf8}
+.tl{display:flex;gap:0;margin-top:30px}
+.tlc{flex:1 1 0;position:relative;padding-top:44px}
+.tlc:before{content:"";position:absolute;left:0;right:0;top:16px;height:3px;background:rgba(255,255,255,.28)}
+.tlc:after{content:"";position:absolute;left:0;top:8px;width:20px;height:20px;border-radius:50%;background:#38bdf8}
+.tlc.past:after{background:rgba(255,255,255,.6)}
+.tlc h4{font-size:26px;font-weight:800;margin-bottom:8px}
+.tlc p{font-size:20px;line-height:1.35;opacity:.82;padding-right:22px}
+.ctab{width:100%;border-collapse:collapse;margin-top:10px}
+.ctab th{text-align:left;font-size:21px;font-weight:800;padding:14px 16px;opacity:.75;border-bottom:2px solid rgba(255,255,255,.3)}
+.ctab td{font-size:22px;padding:16px;border-bottom:1px solid rgba(255,255,255,.16);line-height:1.3}
+.ctab td.k{font-weight:800;width:24%}
+.ctab .us{background:rgba(56,189,248,.16)}
+.ctab th.us{background:rgba(56,189,248,.16);opacity:1}
+.src{font-size:16px;opacity:.5;margin-top:14px;line-height:1.4}
+
+
+
+html,body{background:#0b1220}
+@page{size:1600px 900px;margin:0}
+.slide{page-break-after:always;break-after:page}
+.slide:last-child{page-break-after:auto}
+</style></head><body>
+<div class="slide" style="background:linear-gradient(160deg,#1e3a8a 0%,#2563eb 100%)">
+<div class="brandrow"><span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg></span><span class="brandname">DADA Cloud</span><span class="num">01</span></div>
+
+<div class="content center" style="display:flex;flex-direction:column">
+  <div class="title big">Облако, где приложение<br>запускает автор,<br>а не инженер.</div>
+  <div class="subtitle" style="margin-top:30px;font-size:30px">dada-tuda.ru — работающий продукт, а не презентация идеи</div>
+  <div class="pills" style="justify-content:center;margin-top:36px">
+    <span class="pill">Марков-Бутырский Алекс Андреевич, основатель</span>
+    <span class="pill">@java_er</span>
+    <span class="pill">+7 931 305-11-30</span>
+  </div>
+</div>
+<div class="foot"><span>Академия инноваторов · 10 поток</span><span>dada-tuda.ru</span></div>
+</div>
+<div class="slide" style="background:linear-gradient(160deg,#312e81 0%,#4f46e5 100%)">
+<div class="brandrow"><span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg></span><span class="brandname">DADA Cloud</span><span class="num">02</span></div>
+
+<div class="kicker">Проблема</div>
+<div class="title">Написать программу — вечер.<br>Запустить её в интернет — неделя.</div>
+<div class="content cols" style="margin-top:26px">
+  <div class="card"><div class="lead">Написать</div><h3>Час. Один человек.</h3><p>Помощник-ИИ пишет код за автора. Цена написания упала почти до нуля.</p></div>
+  <div class="card solid"><div class="lead">Запустить</div><h3>Неделя. Отдельный специалист.</h3><p>Настройка, адрес, база, защищённое соединение, поддержка. Счёт на десятки тысяч в месяц.</p></div>
+</div>
+<div class="content" style="margin-top:22px">
+  <div class="funnel">
+    <div class="fbar" style="width:100%;height:60px"><span>Зашли на сайт</span><span class="v">361</span></div>
+    <div class="fbar" style="width:70%;height:60px"><span>Зарегистрировались</span><span class="v">12 из 100</span></div>
+    <div class="fbar" style="width:52%;height:60px;background:rgba(56,189,248,.28);border-color:rgba(56,189,248,.5)"><span>Дошли до приложения</span><span class="v">каждый третий</span></div>
+  </div>
+  <div class="note">Мы считаем эти числа на своих пользователях каждую неделю. Срез 30 дней, 1 сентября 2026.</div>
+</div>
+<div class="foot"><span>Академия инноваторов · 10 поток</span><span>dada-tuda.ru</span></div>
+</div>
+<div class="slide" style="background:linear-gradient(160deg,#1e3a8a 0%,#2563eb 100%)">
+<div class="brandrow"><span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg></span><span class="brandname">DADA Cloud</span><span class="num">03</span></div>
+
+<div class="kicker">Решение</div>
+<div class="title">Три шага вместо недели настройки</div>
+<div class="content" style="margin-top:22px">
+  <ul class="list" style="margin-top:0;font-size:.94em">
+    <li><span class="n">1</span><div><b>Принесли код</b> — папкой, архивом или ссылкой на репозиторий.</div></li>
+    <li><span class="n">2</span><div><b>Получили живой адрес</b> в интернете. Минуты, не дни.</div></li>
+    <li><span class="n">3</span><div><b>Дальше платформа держит его живым сама:</b> база данных, домен, защищённое соединение, откат на прошлую версию.</div></li>
+  </ul>
+  <div class="frames" style="margin-top:18px"><div><div class="frame" style="height:212px"><div class="bar"><span class="dot" style="background:#ff5f57"></span><span class="dot" style="background:#febc2e"></span><span class="dot" style="background:#28c840"></span></div><img src="shot1.jpg" alt=""></div><div class="fcap">Принесли код</div><div class="ftime">0:00</div></div><div><div class="frame" style="height:212px"><div class="bar"><span class="dot" style="background:#ff5f57"></span><span class="dot" style="background:#febc2e"></span><span class="dot" style="background:#28c840"></span></div><img src="shot3.jpg" alt=""></div><div class="fcap">Идёт сборка</div><div class="ftime">0:40</div></div><div><div class="frame" style="height:212px"><div class="bar"><span class="dot" style="background:#ff5f57"></span><span class="dot" style="background:#febc2e"></span><span class="dot" style="background:#28c840"></span></div><img src="shot2.jpg" alt=""></div><div class="fcap">Собралось</div><div class="ftime">2:10</div></div><div><div class="frame" style="height:212px"><div class="bar"><span class="dot" style="background:#ff5f57"></span><span class="dot" style="background:#febc2e"></span><span class="dot" style="background:#28c840"></span></div><img src="shot4.jpg" alt=""></div><div class="fcap">Живой адрес</div><div class="ftime">2:15</div></div></div>
+  <div class="note">Кадры сняты с экрана во время реального прогона на продукте.</div>
+</div>
+<div class="foot"><span>Академия инноваторов · 10 поток</span><span>dada-tuda.ru</span></div>
+</div>
+<div class="slide" style="background:linear-gradient(160deg,#0b1220 0%,#1e293b 100%)">
+<div class="brandrow"><span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg></span><span class="brandname">DADA Cloud</span><span class="num">04</span></div>
+
+<div class="kicker">Технология</div>
+<div class="title">Внутри работает агент,<br>который не советует, а чинит</div>
+<div class="content cols3" style="margin-top:26px">
+  <div class="card"><div class="lead">Самопочинка</div><h3>Приложение упало — агент разобрался</h3><p>Он смотрит журнал, находит причину и применяет исправление или предлагает его. Не подсказка в чате, а действие.</p></div>
+  <div class="card"><div class="lead">Среда для агентов</div><h3>Одноразовое рабочее место за секунды</h3><p>В нём агент может ломать что угодно. Прототип выжил — становится настоящим сервисом без переезда.</p></div>
+  <div class="card"><div class="lead">Владение</div><h3>Понятный счёт и внятная причина сбоя</h3><p>Ошиблись — откат на прошлую версию. Стало тихо — платформа сообщит сама, а не клиент нам.</p></div>
+</div>
+<div class="note">Наше преимущество — доступ к тому, что происходит с приложением клиента. Чужой помощник этого не видит и починить не может.</div>
+<div class="foot"><span>Академия инноваторов · 10 поток</span><span>dada-tuda.ru</span></div>
+</div>
+<div class="slide" style="background:linear-gradient(160deg,#0f766e 0%,#0891b2 100%)">
+<div class="brandrow"><span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg></span><span class="brandname">DADA Cloud</span><span class="num">05</span></div>
+
+<div class="kicker">Объём рынка</div>
+<div class="title">Растущий рынок,<br>в котором нашего класса решений нет</div>
+<div class="content tsam">
+  <div class="rings">
+    <div class="ring r1">TAM</div>
+    <div class="ring r2">SAM</div>
+    <div class="ring r3">SOM</div>
+  </div>
+  <div class="mkey">
+    <div class="mrow"><b>235 млрд ₽ / год — TAM</b><span>Российский рынок аренды вычислений и платформ для размещения приложений, 2025 год. Рост за год — 40%.</span></div>
+    <div class="mrow"><b>96 млрд ₽ / год — SAM</b><span>Публичные инфраструктурные сервисы самообслуживания: те, что берут картой и без договора.</span></div>
+    <div class="mrow sel"><b>≈1 млрд ₽ / год — SOM</b><span>Наша цель на горизонте трёх лет: около 1% SAM. Это порядка 10 000 платящих команд по 8 000 ₽ в месяц.</span></div>
+  </div>
+</div>
+<div class="src">Источники: TAdviser «PaaS (рынок России)», iKS-Consulting «Российский рынок облачных инфраструктурных сервисов 2025». SOM — наша оценка, не отраслевая цифра.</div>
+<div class="foot"><span>Академия инноваторов · 10 поток</span><span>dada-tuda.ru</span></div>
+</div>
+<div class="slide" style="background:linear-gradient(160deg,#312e81 0%,#4f46e5 100%)">
+<div class="brandrow"><span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg></span><span class="brandname">DADA Cloud</span><span class="num">06</span></div>
+
+<div class="kicker">Конкуренты</div>
+<div class="title">Создать сервер умеет каждый.<br>Отвечать за то, что дальше, — никто.</div>
+<div class="content">
+  <table class="ctab">
+    <tr><th></th><th>Классические хостинги</th><th>Большие облака</th><th class="us">DADA Cloud</th></tr>
+    <tr><td class="k">Кому продают</td><td>всем подряд</td><td>инженерным службам</td><td class="us">авторам и командам без инженеров</td></tr>
+    <tr><td class="k">Что отдают</td><td>сервер, дальше сами</td><td>конструктор из сотни кнопок</td><td class="us">работающий адрес в интернете</td></tr>
+    <tr><td class="k">Порог входа</td><td>нужен свой специалист</td><td>нужна своя команда</td><td class="us">нужен только код</td></tr>
+    <tr><td class="k">Когда сломалось</td><td>пишите в поддержку</td><td>разбирайтесь сами</td><td class="us">агент чинит или называет причину</td></tr>
+    <tr><td class="k">Счёт</td><td>тариф-коробка</td><td>непредсказуемый</td><td class="us">поминутно и только за живое</td></tr>
+  </table>
+  <div class="note">Отдельные компании не называем: разница проходит по классу решения, а не по конкретному имени.</div>
+</div>
+<div class="foot"><span>Академия инноваторов · 10 поток</span><span>dada-tuda.ru</span></div>
+</div>
+<div class="slide" style="background:linear-gradient(160deg,#1e3a8a 0%,#2563eb 100%)">
+<div class="brandrow"><span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg></span><span class="brandname">DADA Cloud</span><span class="num">07</span></div>
+
+<div class="kicker">Бизнес-модель</div>
+<div class="title">Счёт идёт поминутно<br>и только за то, что работает</div>
+<div class="content cols3" style="margin-top:24px">
+  <div class="card"><h3>Ничего не запущено</h3><p>Счёт не растёт. Совсем.</p></div>
+  <div class="card"><h3>Бесплатный уровень</h3><p>Одно приложение. Засыпает, когда нет посетителей.</p></div>
+  <div class="card"><h3>Дальше — по факту</h3><p>Память, вычисления и диск по факту. Минимальный счёт засчитывается в потребление, а не сверху.</p></div>
+</div>
+<div class="content cols" style="margin-top:24px">
+  <div class="card"><h3>Расходы почти постоянны</h3><p>Держать платформу стоит фиксированную сумму в месяц, и она почти не растёт от новых клиентов. Каждый следующий клиент идёт в маржу.</p></div>
+  <div class="card"><h3>Мощности заняты на 15%</h3><p>Свободного ресурса хватает на порядок больше пользователей, чем есть сегодня. Точка безубыточности — десятки платящих клиентов, а не тысячи.</p></div>
+</div>
+<div class="note">Приём платежей подключён и проверен целиком. Тарифов-коробок, в которые никто не попадает, не делаем.</div>
+<div class="foot"><span>Академия инноваторов · 10 поток</span><span>dada-tuda.ru</span></div>
+</div>
+<div class="slide" style="background:linear-gradient(160deg,#0b1220 0%,#1e293b 100%)">
+<div class="brandrow"><span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg></span><span class="brandname">DADA Cloud</span><span class="num">08</span></div>
+
+<div class="kicker">Динамика развития</div>
+<div class="title">Работающий продукт, а не прототип</div>
+<div class="content">
+  <div class="hero-metrics">
+    <div class="card"><div class="metric">47<small>зарегистрированных пользователей</small></div></div>
+    <div class="card"><div class="metric">74<small>проекта</small></div></div>
+    <div class="card"><div class="metric">109<small>приложений создано</small></div></div>
+    <div class="card"><div class="metric">82<small>живут прямо сейчас</small></div></div>
+  </div>
+  <div class="tl">
+    <div class="tlc past"><h4>2025</h4><p>Начали платформу. Первый запуск чужого приложения.</p></div>
+    <div class="tlc past"><h4>Начало 2026</h4><p>Открыли вход, появились первые пользователи со стороны.</p></div>
+    <div class="tlc"><h4>Сегодня</h4><p>82 живых приложения, 113 успешных запусков за неделю, приём платежей включён.</p></div>
+    <div class="tlc"><h4>Через 6 месяцев</h4><p>Первые платящие клиенты и повторные оплаты, первые пилоты со студиями.</p></div>
+    <div class="tlc"><h4>Через 3 года</h4><p>Около 1% адресуемого рынка: порядка 10 000 платящих команд.</p></div>
+  </div>
+  <div class="note">Данные на 1 сентября 2026. На платформе живут чужие приложения, которые пережили не один наш сбой и восстановление.</div>
+</div>
+<div class="foot"><span>Академия инноваторов · 10 поток</span><span>dada-tuda.ru</span></div>
+</div>
+<div class="slide" style="background:linear-gradient(160deg,#312e81 0%,#4f46e5 100%)">
+<div class="brandrow"><span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg></span><span class="brandname">DADA Cloud</span><span class="num">09</span></div>
+
+<div class="kicker">Команда</div>
+<div class="title">Один основатель<br>и команда ИИ-агентов</div>
+<div class="content">
+  <div class="team">
+    <div class="hub">Марков-Бутырский<br>Алекс<br>основатель</div>
+    <div class="nodes">
+      <div class="node">Разработка<small>агенты пишут и выкатывают код</small></div>
+      <div class="node">Дежурство<small>круглосуточно, в моё отсутствие</small></div>
+      <div class="node">Разбор сбоев<small>причина и письменный след</small></div>
+      <div class="node">Аналитика и тексты<small>метрики, лендинги, письма</small></div>
+    </div>
+  </div>
+  <div class="bigline" style="margin-top:24px">Платформа на 100+ приложений держится без штата инженеров:<br>мы сами живём внутри того, что продаём.</div>
+  <div class="note">Сильная сторона — инженерная. Слабая — продажи и выход на заказчиков. Именно её закрываем в программе.</div>
+</div>
+<div class="foot"><span>Академия инноваторов · 10 поток</span><span>dada-tuda.ru</span></div>
+</div>
+<div class="slide" style="background:linear-gradient(160deg,#0f766e 0%,#0891b2 100%)">
+<div class="brandrow"><span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg></span><span class="brandname">DADA Cloud</span><span class="num">10</span></div>
+
+<div class="kicker">Запрос</div>
+<div class="title">Строить умеем. Продавать пока нет.</div>
+<div class="content cols3" style="margin-top:22px">
+  <div class="card"><h3>Доступ к заказчикам</h3><p>Студии, продуктовые команды, корпоративные подразделения. У нас нет к ним двери, у программы она есть.</p></div>
+  <div class="card"><h3>Трекер по деньгам</h3><p>Продукт есть, выручки нет. Нужен человек, который снимет с нас инженерную оптику и спросит про деньги.</p></div>
+  <div class="card"><h3>Первые пилоты и партнёры</h3><p>Дистрибуция через тех, у кого уже есть аудитория авторов.</p></div>
+</div>
+<div class="content" style="margin-top:20px">
+<div class="goal"><span class="txt">Зарегистрировался → работающее приложение</span><span class="now">каждый третий</span><span class="arrow">→</span><span class="tgt">половина</span></div><div class="goal"><span class="txt">Платящие клиенты и повторные оплаты</span><span class="now">0</span><span class="arrow">→</span><span class="tgt">первые</span></div><div class="goal"><span class="txt">Корпоративные пилоты: студии и продуктовые команды</span><span class="now">0</span><span class="arrow">→</span><span class="tgt">первые</span></div>
+  <div class="pills" style="margin-top:20px"><span class="pill">lexagri200430@gmail.com</span><span class="pill">+7 931 305-11-30</span><span class="pill">@java_er</span><span class="pill">dada-tuda.ru</span></div>
+</div>
+<div class="foot"><span>Академия инноваторов · 10 поток</span><span>dada-tuda.ru</span></div>
+</div>
+</body></html>

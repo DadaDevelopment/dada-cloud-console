@@ -1,0 +1,84 @@
+<script src="./support.js"></script>
+<x-dc>
+<helmet>
+<style>
+
+*{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,"Segoe UI",Inter,Roboto,Arial,sans-serif}
+.slide{width:1600px;height:900px;padding:56px 72px;display:flex;flex-direction:column;position:relative;color:#fff;overflow:hidden}
+.brandrow{display:flex;align-items:center;gap:14px;flex:0 0 auto}
+.logo{width:46px;height:46px;border-radius:12px;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.3);display:flex;align-items:center;justify-content:center}
+.logo svg{width:28px;height:28px}
+.brandname{font-size:24px;font-weight:800;letter-spacing:-.4px}
+.num{margin-left:auto;font-size:20px;font-weight:700;opacity:.55;letter-spacing:.5px}
+.kicker{font-size:20px;font-weight:800;letter-spacing:2px;text-transform:uppercase;opacity:.65;margin-top:34px}
+.title{font-size:62px;line-height:1.06;font-weight:800;letter-spacing:-1.6px;margin-top:14px;max-width:1180px}
+.title.big{font-size:88px;letter-spacing:-2.4px}
+.subtitle{font-size:28px;line-height:1.38;font-weight:500;opacity:.9;margin-top:22px;max-width:1150px}
+.content{margin-top:36px;flex:1 1 auto;min-height:0}
+.foot{position:absolute;bottom:34px;left:72px;right:72px;display:flex;justify-content:space-between;font-size:19px;opacity:.6;font-weight:600}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:28px}
+.cols3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px}
+.cols4{display:grid;grid-template-columns:repeat(4,1fr);gap:22px}
+.card{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);border-radius:22px;padding:30px 32px}
+.card.solid{background:#fff;color:#0f172a;border-color:#e5e7eb;box-shadow:0 24px 60px rgba(0,0,0,.22)}
+.card h3{font-size:30px;font-weight:800;letter-spacing:-.5px;margin-bottom:14px}
+.card p{font-size:23px;line-height:1.42;opacity:.88}
+.card p+p{margin-top:12px}
+.card .lead{font-size:19px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase;opacity:.6;margin-bottom:10px}
+.metric{font-size:72px;font-weight:800;letter-spacing:-2px;line-height:1}
+.metric small{display:block;font-size:21px;font-weight:600;letter-spacing:0;opacity:.75;margin-top:12px;line-height:1.3}
+.pills{display:flex;flex-wrap:wrap;gap:14px;margin-top:26px}
+.pill{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.28);border-radius:999px;padding:12px 24px;font-size:22px;font-weight:600}
+.list{list-style:none}
+.list li{display:flex;gap:18px;align-items:flex-start;font-size:26px;line-height:1.35;padding:14px 0}
+.list li .n{flex:0 0 44px;height:44px;border-radius:50%;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.3);display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:800}
+.list li b{font-weight:800}
+.funnel{display:flex;flex-direction:column;gap:16px;margin-top:6px}
+.fbar{height:74px;border-radius:16px;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.26);display:flex;align-items:center;padding:0 30px;font-size:25px;font-weight:700;justify-content:space-between}
+.fbar span.v{font-size:30px;font-weight:800}
+.goal{display:flex;align-items:center;gap:22px;font-size:26px;padding:16px 0;border-bottom:1px solid rgba(255,255,255,.16)}
+.goal .now{opacity:.6}
+.goal .arrow{opacity:.5}
+.goal .tgt{font-weight:800}
+.goal .txt{flex:1 1 auto}
+.hl{color:#7dd3fc}
+.note{font-size:19px;opacity:.6;margin-top:18px}
+.center{align-items:center;justify-content:center;text-align:center}
+.frames{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;margin-top:6px}
+.frame{background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.28);height:300px;display:flex;flex-direction:column}
+.frame .bar{height:34px;background:#f1f3f6;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:6px;padding:0 12px}
+.frame .dot{width:9px;height:9px;border-radius:50%}
+.frame .ph{flex:1 1 auto;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:19px;font-weight:700;text-align:center;padding:14px;background:repeating-linear-gradient(135deg,#f8fafc 0 12px,#f1f5f9 12px 24px)}
+.frame img{flex:1 1 auto;width:100%;height:100%;min-height:0;object-fit:cover;object-position:top left;display:block}
+.fcap{margin-top:12px;font-size:20px;font-weight:700;opacity:.8;text-align:center}
+.ftime{font-size:18px;opacity:.55;text-align:center;margin-top:4px}
+.venn{display:flex;gap:26px;margin-top:10px}
+.venn .card{flex:1 1 0}
+.cmp{width:100%;border-collapse:collapse}
+.cmp td{padding:18px 0;font-size:25px;border-bottom:1px solid rgba(255,255,255,.14)}
+.cmp td.k{opacity:.6;width:46%}
+.hero-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:22px;margin-top:10px}
+.bigline{font-size:36px;line-height:1.35;font-weight:700;letter-spacing:-.6px}
+.cap{display:flex;flex-direction:column;gap:14px}
+.capbar{height:56px;border-radius:14px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.26);position:relative;overflow:hidden}
+.capbar i{display:block;height:100%;background:#38bdf8}
+.capbar em{position:absolute;left:20px;top:0;height:100%;display:flex;align-items:center;font-style:normal;font-weight:800;font-size:22px;color:#0f172a}
+.team{display:flex;align-items:center;gap:28px;margin-top:10px}
+.hub{width:210px;height:210px;border-radius:50%;background:rgba(255,255,255,.16);border:2px solid rgba(255,255,255,.4);display:flex;flex-direction:column;align-items:center;justify-content:center;flex:0 0 210px;text-align:center;font-size:22px;font-weight:800;line-height:1.25}
+.nodes{display:grid;grid-template-columns:1fr 1fr;gap:18px;flex:1 1 auto}
+.node{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);border-radius:18px;padding:20px 24px;font-size:24px;font-weight:700}
+.node small{display:block;font-size:19px;font-weight:500;opacity:.7;margin-top:6px}
+
+.slide{background:linear-gradient(160deg,#1e3a8a 0%,#2563eb 100%)}
+</style>
+</helmet>
+<div class="slide">
+<div class="brandrow"><span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg></span><span class="brandname">DADA Cloud</span><span class="num">01</span></div>
+
+<div class="content center" style="display:flex;flex-direction:column">
+  <div class="title big">Облако, где приложение<br>запускает автор,<br>а не инженер.</div>
+  <div class="subtitle" style="margin-top:34px;font-size:32px">dada-tuda.ru — работающий продукт, а не презентация идеи</div>
+</div>
+<div class="foot"><span>Академия инноваторов · 10 поток</span><span>dada-tuda.ru</span></div>
+</div>
+</x-dc>
