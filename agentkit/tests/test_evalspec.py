@@ -177,3 +177,38 @@ class TestAllowReply(unittest.TestCase):
     def test_flag_must_be_a_bool(self):
         with self.assertRaises(evalspec.CaseError):
             evalspec.validate_case(self._case(allow_reply="yes"))
+
+
+class TestLiveSilenceSentinel(unittest.TestCase):
+    """The eval reads silence with the same rule the gateway uses to send it.
+
+    A live agent never writes ``<skip>``: it writes the SKIP sentinel that
+    agentkit.ledger owns and the gateway strips. Keeping a second rule here
+    meant a legitimate "SKIP." scored as a reply, and the eval would have
+    reported a silence bug that only the eval had.
+    """
+
+    def _quiet_case(self):
+        return {"id": "t-1", "split": "dev", "incoming": "спасибо!",
+                "expect": {"should_reply": False}}
+
+    def _talk_case(self):
+        return {"id": "t-2", "split": "dev", "incoming": "а зачем эвалы?",
+                "expect": {"should_reply": True}}
+
+    def test_bare_sentinel_is_silence(self):
+        self.assertEqual(evalspec.score_case(self._quiet_case(), "SKIP").failures, [])
+
+    def test_sentinel_with_a_full_stop_is_silence(self):
+        self.assertEqual(evalspec.score_case(self._quiet_case(), "SKIP.").failures, [])
+
+    def test_sentinel_is_missing_silence_on_a_reply_case(self):
+        result = evalspec.score_case(self._talk_case(), "skip…")
+        self.assertIn("expected a reply, got silence", result.failures)
+
+    def test_the_word_inside_a_sentence_is_still_a_reply(self):
+        result = evalspec.score_case(self._quiet_case(), "skip connection тут ни при чём")
+        self.assertIn("expected silence, got a reply", result.failures)
+
+    def test_offline_runner_token_still_reads_as_silence(self):
+        self.assertEqual(evalspec.score_case(self._quiet_case(), "<skip>").failures, [])

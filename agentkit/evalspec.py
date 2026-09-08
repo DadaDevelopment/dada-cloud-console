@@ -28,6 +28,8 @@ a live A2A agent, and a CI gate.
 import json
 from collections.abc import Callable, Iterable
 
+import ledger
+
 REQUIRED_TOP = ("id", "split", "incoming", "expect")
 SPLITS = ("dev", "holdout")
 
@@ -116,7 +118,19 @@ class CaseResult:
         }
 
 
-SILENCE_TOKENS = {"", "<skip>", "[skip]", "skip", "<молчу>"}
+SILENCE_TOKENS = {"", "<skip>", "[skip]", "<молчу>"}
+
+
+def stayed_silent(reply: str) -> bool:
+    """True when this reply means the agent said nothing in the chat.
+
+    The live sentinel is owned by ``agentkit.ledger`` and by the gateway that
+    drops it before sending, so the eval asks that rule instead of keeping a
+    second one: an eval that calls "SKIP." a reply while the transport calls it
+    silence grades an agent nobody runs. ``SILENCE_TOKENS`` stays for the
+    offline runners that ask a bare model for ``<skip>``, which never travels.
+    """
+    return reply.strip().lower() in SILENCE_TOKENS or ledger.is_silence(reply)
 
 
 def score_case(case: dict, reply: str, style_check: Callable[[str], list[str]] | None = None) -> CaseResult:
@@ -142,14 +156,14 @@ def score_case(case: dict, reply: str, style_check: Callable[[str], list[str]] |
     failures: list[str] = []
     expect = case["expect"]
     normalized = reply.strip()
-    stayed_silent = normalized.lower() in SILENCE_TOKENS
+    silent = stayed_silent(normalized)
 
-    if expect["should_reply"] and stayed_silent and not expect.get("allow_silence"):
+    if expect["should_reply"] and silent and not expect.get("allow_silence"):
         failures.append("expected a reply, got silence")
-    if not expect["should_reply"] and not stayed_silent and not expect.get("allow_reply"):
+    if not expect["should_reply"] and not silent and not expect.get("allow_reply"):
         failures.append("expected silence, got a reply")
 
-    if not stayed_silent:
+    if not silent:
         low = normalized.lower()
         for banned in expect.get("must_not_contain", []):
             if banned.lower() in low:
