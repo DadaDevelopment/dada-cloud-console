@@ -383,14 +383,30 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 
 	links := NewLinkTitleFetcher()
 	media := NewMediaDownloader(tg, os.Getenv("TELEGRAM_API_BASE"), mediaCacheDir())
-	trans, desc := newMediaAIResolvers(mediaAIConfigFromEnv())
-	log.Info().Str("whisper", mediaAIConfigFromEnv().WhisperBaseURL).
-		Str("vision_model", mediaAIConfigFromEnv().VisionModel).
-		Msg("tggateway: media resolvers wired")
+	mediaCfg := mediaAIConfigFromEnv()
+	trans, desc := newMediaAIResolvers(mediaCfg)
 	runs := newInterruptState()
 	defer runs.forgetAll()
 	policy := NewGroupPolicyForAgent(b.BotUsername, b.AgentName)
 	observer := NewObserverForAgent(b.AgentName)
+
+	// One line per poller, naming the agent and the settings that decide what
+	// it will do. Without it a bot that never speaks is indistinguishable from
+	// a poller that never started: the only way left to tell them apart is a
+	// getUpdates call from outside, which steals an update from the very
+	// poller it is checking on. The rate and the observer sink are here
+	// because they are per-agent env keys -- reading them off the running
+	// process is otherwise a guess.
+	log.Info().
+		Str("agent", b.AgentName).
+		Str("bot", b.BotUsername).
+		Bool("runtime", useRuntime).
+		Float64("post_comment_rate", policy.PostCommentRate).
+		Int("hourly_budget", policy.HourlyBudget).
+		Bool("observer", observer != nil).
+		Str("vision_model", mediaCfg.VisionModel).
+		Str("whisper", mediaCfg.WhisperBaseURL).
+		Msg("tggateway: poller started")
 
 	processBatch := func(batch []TelegramUpdate) {
 		if len(batch) == 0 {
