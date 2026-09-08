@@ -565,8 +565,23 @@ spec:
                             sh '''
                                 set -eu
                                 for attempt in 1 2 3; do
-                                    apk add --no-cache python3 && break
+                                    apk add --no-cache python3 py3-pip && break
                                     echo "apk add python3 failed (attempt $attempt)"
+                                    [ "$attempt" = 3 ] && exit 1
+                                    sleep 5
+                                done
+
+                                # tg-vibecoder's route tests build the real ASGI app
+                                # (server.build_app() -> mcp.http_app()) and drive it
+                                # through starlette's TestClient, so this lane stopped
+                                # being stdlib-only. fastmcp is the only install:
+                                # it pulls starlette, uvicorn and the httpx TestClient
+                                # transport with it. asyncpg -- the one dependency that
+                                # would need a C toolchain on musl -- stays out, the
+                                # tests stub it through sys.modules.
+                                for attempt in 1 2 3; do
+                                    pip install --no-cache-dir --break-system-packages -q 'fastmcp>=2.0' && break
+                                    echo "pip install fastmcp failed (attempt $attempt)"
                                     [ "$attempt" = 3 ] && exit 1
                                     sleep 5
                                 done
