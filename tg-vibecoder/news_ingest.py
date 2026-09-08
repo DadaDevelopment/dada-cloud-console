@@ -14,6 +14,7 @@ import hashlib
 import html
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -117,10 +118,33 @@ def parse_feed(raw: bytes, source_name: str, base_tags: list[str]) -> list[dict]
     return out
 
 
-def fetch(url: str, timeout: float) -> bytes:
+FETCH_ATTEMPTS = 3
+
+
+def fetch(url: str, timeout: float, attempts: int = FETCH_ATTEMPTS) -> bytes:
+    """Fetch one feed, retrying a timeout or a 5xx.
+
+    A read timeout is not evidence that a source is dead: habr answered fine
+    from a laptop and timed out from the cluster in the same hour. Without a
+    retry that single flake silently costs the run a whole source until the
+    next cron tick three hours later. A 4xx is a verdict, not a flake, so it
+    is not retried.
+    """
     request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
-    with urllib.request.urlopen(request, timeout=timeout) as resp:
-        return resp.read()
+    last: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as resp:
+                return resp.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code < 500:
+                raise
+            last = exc
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            last = exc
+        if attempt + 1 < attempts:
+            time.sleep(2 ** attempt)
+    raise last
 
 
 def collect(feeds: list[dict], timeout: float, max_age_days: int) -> tuple[list[dict], list[dict]]:

@@ -1,5 +1,7 @@
 """Parsers must survive both feed dialects and a dead source."""
 
+import contextlib
+import io
 import os
 import sys
 import unittest
@@ -73,6 +75,50 @@ class TestChannel(unittest.TestCase):
 
     def test_empty_page_yields_nothing(self):
         self.assertEqual(channel_ingest.parse_page("<html></html>"), [])
+
+
+class TestFetchRetry(unittest.TestCase):
+    def setUp(self):
+        self.calls = []
+        self.slept = []
+        self.real_urlopen = news_ingest.urllib.request.urlopen
+        self.real_sleep = news_ingest.time.sleep
+        news_ingest.time.sleep = lambda s: self.slept.append(s)
+        self.addCleanup(setattr, news_ingest.time, "sleep", self.real_sleep)
+        self.addCleanup(setattr, news_ingest.urllib.request, "urlopen", self.real_urlopen)
+
+    def _install(self, outcomes):
+        def fake(request, timeout=None):
+            self.calls.append(request.full_url)
+            outcome = outcomes[len(self.calls) - 1]
+            if isinstance(outcome, Exception):
+                raise outcome
+            return contextlib.closing(io.BytesIO(outcome))
+        news_ingest.urllib.request.urlopen = fake
+
+    def test_timeout_is_retried_and_can_succeed(self):
+        self._install([TimeoutError("slow"), b"<rss/>"])
+        self.assertEqual(news_ingest.fetch("http://x/feed", 1.0), b"<rss/>")
+        self.assertEqual(len(self.calls), 2)
+
+    def test_gives_up_after_the_last_attempt(self):
+        self._install([TimeoutError("slow")] * news_ingest.FETCH_ATTEMPTS)
+        with self.assertRaises(TimeoutError):
+            news_ingest.fetch("http://x/feed", 1.0)
+        self.assertEqual(len(self.calls), news_ingest.FETCH_ATTEMPTS)
+
+    def test_client_error_is_a_verdict_not_a_flake(self):
+        err = news_ingest.urllib.error.HTTPError("http://x/feed", 404, "Not Found", None, None)
+        self._install([err])
+        with self.assertRaises(news_ingest.urllib.error.HTTPError):
+            news_ingest.fetch("http://x/feed", 1.0)
+        self.assertEqual(len(self.calls), 1)
+
+    def test_server_error_is_retried(self):
+        err = news_ingest.urllib.error.HTTPError("http://x/feed", 502, "Bad Gateway", None, None)
+        self._install([err, b"<rss/>"])
+        self.assertEqual(news_ingest.fetch("http://x/feed", 1.0), b"<rss/>")
+        self.assertEqual(len(self.calls), 2)
 
 
 if __name__ == "__main__":
