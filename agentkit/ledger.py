@@ -35,4 +35,4 @@ def is_silence(text: str) -> bool:
     lands in the chat as if it were a reply. So silence is spelled out, and
     the thing that posts messages drops the sentinel instead of posting it.
     """
-    return text.strip().upper() == SILENCE_SENTINEL
+    return text.strip().strip(".!\u2026").strip().upper() == SILENCE_SENTINEL

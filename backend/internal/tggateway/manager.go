@@ -277,6 +277,32 @@ func sanitizeModelReply(reply string) string {
 	return reply
 }
 
+// silenceSentinel is the word an agent returns instead of a reply when it
+// decided to stay quiet. It exists because A2A has no empty turn: whatever
+// the model does not write itself, the runtime fills in with the result of
+// the last tool call, so an agent that "says nothing" delivers
+// {"ok":true,"id":3} into the chat. Observed live on 2026-09-08.
+//
+// The gateway is the only component that can honour it, because the gateway
+// is what sends. A python-side helper guards the agent's own ledger call and
+// nothing else.
+const silenceSentinel = "SKIP"
+
+// isSilence reports whether the whole reply is the silence sentinel. Only a
+// whole-message match counts: a reply that merely mentions the word is a
+// reply, and swallowing it would turn a real answer into silence, which is
+// the failure this file already logs as indistinguishable from a bug.
+//
+// Case and a trailing full stop are ignored deliberately, and the agentkit
+// helper agentkit/ledger.py:is_silence matches this rule: a model that writes
+// "Skip." meant to stay quiet, and the two sides disagreeing about which
+// spellings count is the same defect twice.
+func isSilence(reply string) bool {
+	trimmed := strings.TrimSpace(reply)
+	trimmed = strings.TrimRight(trimmed, ".!\u2026")
+	return strings.EqualFold(strings.TrimSpace(trimmed), silenceSentinel)
+}
+
 // locationButtonMarker is a literal token the agent's system prompt is
 // instructed to append on its own line when it wants the user offered the
 // native "Send location" button. The gateway strips it before delivery and
@@ -393,6 +419,9 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 			if speaker := GroupSpeaker(u); speaker != "" {
 				content = fmt.Sprintf("%s: %s", speaker, content)
 			}
+			if quoted := QuotedContext(u); quoted != "" {
+				content = fmt.Sprintf("%s\n%s", quoted, content)
+			}
 			if u.HasLocation {
 				content = fmt.Sprintf("[location_shared: lat=%f, lon=%f]\n%s", u.Latitude, u.Longitude, u.Text)
 			}
@@ -498,6 +527,9 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		}
 
 		sendText, wantsButton := splitLocationButtonMarker(sanitizeModelReply(reply))
+		if isSilence(sendText) {
+			sendText = ""
+		}
 		if strings.TrimSpace(sendText) == "" && !wantsButton {
 			if inGroup {
 				log.Debug().Str("agent", b.AgentName).Str("conv", convKey).

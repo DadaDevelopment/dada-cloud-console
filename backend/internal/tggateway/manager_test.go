@@ -416,6 +416,26 @@ func TestSplitLocationButtonMarker_PlainReplyUnaffected(t *testing.T) {
 	}
 }
 
+func TestIsSilence_WholeMessageSentinelOnly(t *testing.T) {
+	silent := []string{"SKIP", " SKIP ", "SKIP.", "SKIP\n", "skip", "Skip."}
+	for _, reply := range silent {
+		if !isSilence(reply) {
+			t.Fatalf("expected %q to count as silence", reply)
+		}
+	}
+	loud := []string{
+		"",
+		"SKIP the migration, run it by hand",
+		"я бы SKIP не жал",
+		"Ответил.",
+	}
+	for _, reply := range loud {
+		if isSilence(reply) {
+			t.Fatalf("expected %q to be delivered, not swallowed", reply)
+		}
+	}
+}
+
 func TestWithTelegramIdentity_LocationUpdateCarriesCoordinates(t *testing.T) {
 	u := TelegramUpdate{
 		ChatID:      42,

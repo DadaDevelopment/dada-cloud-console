@@ -28,7 +28,7 @@ class TestValidateDecision(unittest.TestCase):
 
 class TestSilenceSentinel(unittest.TestCase):
     def test_sentinel_recognised(self):
-        for text in ("SKIP", " skip ", "Skip\n"):
+        for text in ("SKIP", " skip ", "Skip\n", "SKIP.", "Skip!"):
             with self.subTest(text=text):
                 self.assertTrue(ledger.is_silence(text))
 

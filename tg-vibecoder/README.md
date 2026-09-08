@@ -110,8 +110,9 @@ k8s/apply-cronjobs.sh
 
 Молчание это исход, а не отсутствие исхода. Агент пишет его в `reply_ledger`
 как `decision=skipped`, а своим сообщением возвращает ровно `SKIP`
-(`agentkit.ledger.SILENCE_SENTINEL`). Тот, кто отправляет сообщение в
-телеграм, обязан проверить `ledger.is_silence(text)` и не отправлять ничего.
+(`agentkit.ledger.SILENCE_SENTINEL`). Снимает сентинел тот, кто отправляет:
+в телеграм это `backend/internal/tggateway` (`isSilence` в `manager.go`),
+в python-коде — `ledger.is_silence(text)`.
 
 Слово, а не пустая строка, потому что у A2A нет пустого хода: то, чего модель
 не написала сама, рантайм добирает результатом последнего вызова, и в чат
