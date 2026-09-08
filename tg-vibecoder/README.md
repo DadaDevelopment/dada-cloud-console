@@ -23,7 +23,7 @@
 | `facts.py` | Долгоживущие факты, проставленные руками с датой проверки |
 | `manifests_seed.py` | Сид манифестов `news_search`, `fact_lookup`, `channel_search` |
 | `agents/vibecoder/` | `core.md` плюс домены `debug`, `takes`, `news`, `banter`, `boundaries` |
-| `evals/persona/` | 29 кейсов золотого набора, 17 dev / 12 holdout |
+| `evals/persona/` | 32 кейса золотого набора, 20 dev / 12 holdout; вход рендерится `agentkit.transcript`, ровно как его шлёт гейтвей |
 | `scripts/persona_lint.py` | Механический анти-слоп гейт |
 | `scripts/bakeoff.py` | Прогон золотого набора по кандидатам-моделям |
 | `k8s/` | ModelConfig победителя, кроны ingest и `apply-cronjobs.sh` |

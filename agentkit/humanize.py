@@ -130,6 +130,44 @@ def _tool_output(prose: str) -> bool:
     return bool(_TOOL_OUTPUT_RE.match(stripped) and _TOOL_KEYS_RE.search(stripped))
 
 
+_TRANSPORT_QUOTE_RE = re.compile(r"\[в ответ на [^\]]{0,60}:")
+_SPEAKER_PREFIX_RE = re.compile(r"^\s*(?:аноним|[^\n:]{1,40}\s\(@[A-Za-z0-9_]{3,32}\))\s*:", re.I)
+
+
+_FOREIGN_SCRIPT_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]")
+
+
+def _foreign_script(prose: str) -> str:
+    """Return the character where another writing system leaked into the reply.
+
+    Multilingual models drop a token from their strongest language into the
+    middle of a Russian sentence: the live dev run of glm-5.3 wrote
+    "латентность растут ... и模型 всё равно ловит". A human never does that,
+    and in a public chat it is the loudest possible machine tell, so it fails
+    the gate rather than counting as a style nit.
+    """
+    hit = _FOREIGN_SCRIPT_RE.search(prose)
+    return hit.group(0) if hit else ""
+
+
+def _transport_leak(prose: str) -> str:
+    """Name the transport marker the model copied back into its own reply, if any.
+
+    The runtime does not hand the model a bare comment: it prepends who spoke
+    and, when the comment answers something, a bracketed quote of it. Both are
+    scaffolding built by ``agentkit.transcript`` and its Go twin, and both read
+    as a chat message, so a model that pattern-matches its input writes
+    "Игорь (@igor): ..." back into the channel. Nobody in a real chat prefixes
+    their own name, and the bracket is naked machinery.
+    """
+    stripped = prose.strip()
+    if _TRANSPORT_QUOTE_RE.search(stripped):
+        return "цитата-скобка из входящего"
+    if _SPEAKER_PREFIX_RE.match(stripped):
+        return "префикс говорящего из входящего"
+    return ""
+
+
 def _status_only(prose: str) -> bool:
     """True when the whole reply is a report about replying instead of the reply.
 
@@ -155,6 +193,10 @@ def inspect(text: str, max_chars: int = 700, max_sentences: int = 5) -> list[Fin
         findings.append(Finding("status_instead_of_reply", "critical", prose.strip()))
     if _tool_output(prose):
         findings.append(Finding("tool_output_as_reply", "critical", prose.strip()[:80]))
+    if leak := _transport_leak(prose):
+        findings.append(Finding("transport_leak", "critical", leak))
+    if glyph := _foreign_script(prose):
+        findings.append(Finding("foreign_script", "critical", f"чужой алфавит в тексте: {glyph}"))
 
     for phrase in BANNED_PHRASES_CRITICAL:
         if phrase in low:

@@ -115,3 +115,37 @@ class TestStatusInsteadOfReply(unittest.TestCase):
     def test_real_reply_starting_with_ok_passes(self):
         rules = [f["rule"] for f in humanize.report("ok, но retries тут не помогут: падает не сеть, а парсер")["critical"]]
         self.assertNotIn("status_instead_of_reply", rules)
+
+
+class TestTransportLeak(unittest.TestCase):
+    """The scaffolding the runtime prepends must never come back out."""
+
+    def test_bracketed_quote_is_critical(self):
+        reply = '[в ответ на пост канала: "агенты в комментах"] да, работает'
+        rules = [f.rule for f in humanize.inspect(reply)]
+        self.assertIn("transport_leak", rules)
+
+    def test_speaker_prefix_is_critical(self):
+        rules = [f.rule for f in humanize.inspect("Игорь (@igor_dev): да, работает")]
+        self.assertIn("transport_leak", rules)
+
+    def test_anon_prefix_is_critical(self):
+        self.assertIn("transport_leak", [f.rule for f in humanize.inspect("аноним: работает")])
+
+    def test_ordinary_reply_and_a_colon_survive(self):
+        for reply in ("да, работает", "смотри так: сначала эвал, потом промпт", "у Игоря так же было"):
+            with self.subTest(reply):
+                self.assertNotIn("transport_leak", [f.rule for f in humanize.inspect(reply)])
+
+
+class TestForeignScript(unittest.TestCase):
+    """A token from the model's other language is the loudest machine tell there is."""
+
+    def test_live_glm_bleed_is_critical(self):
+        reply = 'платишь за каждый запрос заново и模型 всё равно ловит lost in the middle'
+        self.assertIn("foreign_script", [f.rule for f in humanize.inspect(reply)])
+
+    def test_plain_russian_and_english_survive(self):
+        for reply in ("rag оставляет только релевантные куски", "смотри логи, там ECONNREFUSED"):
+            with self.subTest(reply):
+                self.assertNotIn("foreign_script", [f.rule for f in humanize.inspect(reply)])
