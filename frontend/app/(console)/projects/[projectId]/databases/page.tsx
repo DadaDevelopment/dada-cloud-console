@@ -19,15 +19,9 @@ import { useT } from "@/lib/i18n/console/context";
 import { isSettling } from "@/lib/phase";
 import { UpgradeDialog } from "@/components/billing/upgrade-dialog";
 import { trackUxEvent } from "@/lib/ux-telemetry";
+import { dbFormValidationTarget, validateDbForm, type DbFormShape } from "@/lib/db-form-validation";
 
-interface CreateDbForm {
-  name: string;
-  database: string;
-  app_ref: string;
-  backup_enabled: boolean;
-  backup_schedule: string;
-  backup_retention: string;
-}
+interface CreateDbForm extends DbFormShape {}
 
 /**
  * Generates a unique-enough resource name + derived PostgreSQL identifier so
@@ -136,6 +130,23 @@ export default function DatabasesPage() {
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSubmitError(null);
+    const issues = validateDbForm(form);
+    if (issues.length > 0) {
+      for (const issue of issues) {
+        trackUxEvent("error_shown", dbFormValidationTarget([issue]));
+      }
+      const names = {
+        name: t("databases.modal.name.label"),
+        database: t("databases.modal.pgName.label"),
+      } as Record<string, string>;
+      setSubmitError(
+        issues
+          .map((i) => `${names[i.field] ?? i.field}: ${t("databases.modal.name.validation")}`)
+          .join(" "),
+      );
+      setIsSubmitting(false);
+      return;
+    }
     setIsSubmitting(true);
     try {
       await databasesApi.create(projectId, selectedEnvId, {
