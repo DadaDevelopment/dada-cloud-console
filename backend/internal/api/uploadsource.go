@@ -51,6 +51,36 @@ func isWorkerUpload(detectedPort int) bool {
 	return detectedPort <= 0
 }
 
+// wrapStaticUpload rewrites an archive that detection judged to be a site
+// rather than a project, so the bytes that get stored and built carry a
+// Dockerfile the platform wrote on the user's behalf.
+//
+// It is done here, before the object is stored, because the framework name
+// resolved at upload time never reaches the step that decides how to build:
+// the control plane passes Jenkins only a coarse build family and the pipeline
+// re-detects the stack itself after unpacking. A Dockerfile inside the build
+// context is the only signal that survives the trip. Without it, an upload of
+// plain html failed with framework_undetected, which is what a user who had
+// signed up 76 seconds earlier got as the platform's whole answer to their
+// first action on 2026-09-09.
+//
+// A failed rewrite downgrades the verdict to the old behaviour instead of
+// refusing the upload: the build then fails the way it did before, which is
+// worse than a static deploy and better than rejecting bytes the platform has
+// already accepted.
+func wrapStaticUpload(data []byte, detected sourcedetect.Result) ([]byte, sourcedetect.Result) {
+	if detected.Framework != "static" {
+		return data, detected
+	}
+	rewritten, err := sourcedetect.InjectDockerfile(data, detected.Format, detected.StaticRoot, sourcedetect.StaticDockerfile())
+	if err != nil {
+		detected.Framework = ""
+		detected.Port = 0
+		return data, detected
+	}
+	return rewritten, detected
+}
+
 // UploadSourceArchive accepts a multipart archive (zip or tar.gz, max 100MB)
 // of an app's source, detects its framework and port from manifest files
 // (Dockerfile, package.json, requirements.txt, pyproject.toml), stores the
@@ -183,6 +213,7 @@ func (h *Handler) UploadSourceArchive(c *gin.Context) {
 		reject(http.StatusBadRequest, "archive_unrecognized", fmt.Sprintf("unrecognized archive: %v", err))
 		return
 	}
+	data, detected = wrapStaticUpload(data, detected)
 
 	ext, contentType := ".zip", "application/zip"
 	if detected.Format == sourcedetect.FormatTarGz {

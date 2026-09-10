@@ -42,10 +42,17 @@ const (
 // (build-agent/internal/server/server.go), or the pipeline finds no template
 // and the build fails with no_dockerfile. Port is 0 when unresolved, which
 // lets the template pick its own default.
+//
+// The extra name "static" is not a pipeline template but a verdict the control
+// plane acts on itself: an archive of html with no manifest at all gets a
+// generated Dockerfile written into it before the build is queued, and
+// StaticRoot names the directory inside the archive that becomes the web root.
+// StaticRoot is empty for every other framework.
 type Result struct {
-	Format    Format
-	Framework string
-	Port      int
+	Format     Format
+	Framework  string
+	Port       int
+	StaticRoot string
 }
 
 // maxEntries caps how many table-of-contents entries Detect walks, so a
@@ -189,6 +196,13 @@ func Detect(data []byte) (Result, error) {
 	if rootLevelPythonSources(names) || singleDirPythonSources(names) {
 		result.Framework = "python"
 		result.Port = resolvePort(0, platform, compose, hasCompose)
+		return result, nil
+	}
+
+	if staticRoot, ok := StaticSiteRoot(names); ok {
+		result.Framework = "static"
+		result.StaticRoot = staticRoot
+		result.Port = 80
 		return result, nil
 	}
 
