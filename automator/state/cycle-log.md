@@ -6652,3 +6652,14 @@ send_failures=0), но поведенческий тест невозможен 
 - AUDIT-ПУТЬ: новый юзер danila: SignUp -> автопроект 0.3с -> UploadSourceArchive через 76с (поток 1 жив!) -> build FAIL framework_undetected. Вывод: bl add 0498 (auto-detect -> предложить статик/шаблон вместо отказа). Хвост пути не дочитан: MCP queryDatabase хрупок на nullable-колонках (bind message 2 result formats) - бэклог на починку инструмента.
 - ГИГИЕНА: песочницы не создавал; чужие незакоммиченные файлы в дереве не тронут (staged только свой .tsx).
 - Время: ~64 мин.
+
+## sess-0910b · 2026-09-10 · PRODUCT-ONLY (гейт: ship 29%/цель 50%, tax 69%/потолок 35%)
+- ЗАДАЧА: 0498 (bl next, поток 1, H11) - framework_undetected на upload-пути у danila. Анти-як пройден: это измеренный leak ПЕРВОГО действия нового юзера, не инфра.
+- ГРАУНДИНГ [code]: Jenkins получает только грубое framework=web|android|auto (runner.go:1307-1320) и сам передетектит стек после распаковки -> ярлык "static" на upload-е НИЧЕГО не меняет. Единственный сигнал, переживающий дорогу, - реальный Dockerfile внутри build-контекста. sourcedetect не знал ни index.html, ни статики вообще.
+- СДЕЛАНО 86d64424: StaticSiteRoot (static.go) + InjectDockerfile (inject.go) + ветка в Detect + wrapStaticUpload в UploadSourceArchive. Архив переписывается ДО укладки в S3: web-root становится корнем контекста, рядом ложится nginx:1.27-alpine/EXPOSE 80.
+- ПОЛЮС (не маскировать честную ошибку): статика - ПОСЛЕДНИЙ резорт в Detect; index.html рядом с package.json по-прежнему собирается как Node; свой Dockerfile юзера не перезаписывается (bytes.Equal-тест); два кандидата dist/+public/ = отказ без догадки; zip-slip и __MACOSX отсеиваются; провал перезаписи откатывает вердикт, а не отвергает загрузку.
+- M2 [live]: docker build отгруженного архива -> Successfully built; docker run + curl -> HTTP/1.1 200, тело ровно юзерский index.html, style.css 200. Тесты: 21 новое утверждение PASS, старый сьют пакета зелёный, go build ./... = 0, go vet internal/api = 0.
+- ГЕЙТ GOFMT (обязательный перед пушем): первый прогон нашёл static.go - gofmt хотел переписать '' в смарт-кавычку (non-ASCII, запрещено); переформулировал текст доккоммента, повторный прогон из корня по всем 6 модулям чист.
+- САБАГЕНТЫ: 3 задачи разосланы одним сообщением, ВСЕ упали мгновенно (Unknown Model 1211 - пин модели детей мёртв в этом окружении). Сделал сам инлайном. Строка в owner-actions.
+- ГИГИЕНА: проверочный образ/контейнер/cmd-скрипт и /opt/data/cache/staticproof снесены в том же цикле.
+- Время: ~55 мин.

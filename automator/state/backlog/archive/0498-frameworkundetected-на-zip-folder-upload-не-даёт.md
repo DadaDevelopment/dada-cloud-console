@@ -1,12 +1,15 @@
 ---
 id: 0498
-status: open
+status: closed
 prio: P1
 stream: 1
 hypothesis: H11
 title: framework_undetected на zip/folder-upload не даёт пути вперёд новичку-вайбкодеру
 created: 2026-09-10
 sess: sess-0910a
+closed_at: 2026-09-10
+closed_commit: 86d64424
+closed_note: static-детект + генерация Dockerfile на upload-пути: архив с index.html и без манифеста теперь собирается и отдаётся nginx (live: docker build + curl 200), а не падает framework_undetected
 ---
 Наблюдение [live]: юзер y4ndex.danila@yandex.ru (рег 09-09 12:03) первым действием загрузил архив (UploadSourceArchive, app smirad) - билд упал framework_undetected: нет package.json/requirements.txt/pyproject.toml/go.mod/pom.xml/build.gradle и нет Dockerfile. Единственный путь сейчас = юзер сам угадывает, что добавить.
 
