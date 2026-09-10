@@ -17,13 +17,18 @@ CODE_PATHS=(backend frontend helm gitops-agent build-agent gateway)
 
 git fetch origin main -q 2>/dev/null
 
+# The label is instance=cloud-console (the Argo application's name), not
+# instance=dada-cloud-console (the chart's). The wrong selector matched nothing
+# and fell through to the hardcoded list below, which silently omitted
+# agent-runtime - so a component running a commit that is not even an ancestor
+# of main was reported as "delivered in full" (caught live 2026-09-10).
 tags=$(kubectl get deploy -n "$NS" \
-  -l app.kubernetes.io/instance=dada-cloud-console \
+  -l app.kubernetes.io/instance=cloud-console,app.kubernetes.io/name=dada-cloud-console \
   -o jsonpath='{range .items[*]}{.spec.template.spec.containers[0].image}{"\n"}{end}' 2>/dev/null \
-  | sed 's/.*://' | sort -u)
+  | grep 'dada-cloud-console-' | sed 's/.*://' | sort -u)
 
 if [ -z "$tags" ]; then
-  tags=$(for d in backend frontend gitops-agent build-agent gateway portainer-agent; do
+  tags=$(for d in backend frontend gitops-agent build-agent gateway portainer-agent agent-runtime; do
     kubectl get deploy -n "$NS" "dada-cloud-console-$d" \
       -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null | sed 's/.*://'
     echo
