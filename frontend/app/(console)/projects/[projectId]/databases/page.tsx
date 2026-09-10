@@ -21,7 +21,7 @@ import { UpgradeDialog } from "@/components/billing/upgrade-dialog";
 import { trackUxEvent } from "@/lib/ux-telemetry";
 import { dbFormValidationTarget, validateDbForm, type DbFormShape } from "@/lib/db-form-validation";
 
-interface CreateDbForm extends DbFormShape {}
+type CreateDbForm = DbFormShape;
 
 /**
  * Generates a unique-enough resource name + derived PostgreSQL identifier so
