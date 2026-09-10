@@ -230,6 +230,13 @@ if [ -d "$WT/frontend" ]; then
       echo "$out" | grep -E '^not ok|^# (tests|pass|fail) |^ *(error|expected|actual|code):' | head -20
       rc=1
     fi
+    if out=$(cd "$WT/frontend" && timeout 300 npm run lint 2>&1); then
+      echo "OK   frontend lint"
+    else
+      echo "FAIL frontend lint (Jenkins валит main ровно на этом — 09-09 databases/page.tsx empty-interface сутки держали прод на старом образе)"
+      echo "$out" | grep -E "error" | head -10
+      rc=1
+    fi
   fi
 fi
 

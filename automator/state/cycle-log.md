@@ -6641,3 +6641,14 @@ send_failures=0), но поведенческий тест невозможен 
 - ГИГИЕНА: риг переиспользован; stash восстановлен; новых песочниц не создавал.
 - НЕ ЗАКРЫТО: 0495 (recovery-бюджет, P1), 0492/0493 (port/domain валидация), instrumentирование форм project/app (продолжение 0491), batch env-edit (новый кандидат из графа).
 Время: ~55 мин.
+
+## 2026-09-10 06:01-07:05 UTC (sess-0910a) - red main чинен, прод доставлен, E156 полюс 1 закрыт
+- ПУЛЬС: панель 09-10 05:56 - not_ready: gulyaev-ai-core (юзерский CrashLoop, их код: RuntimeError Full Knowledge Vault could not be opened, 3d15h - юзерское, не трогаем); not_ready_other 3 = unmaintained PublicApi-хвосты (известно); failed_builds 3 (2 = framework_undetected юзеров, 1 dadadev-brains). counters: new_users_24h=1, active_48h=6.
+- ГЕЙТ MAIN: origin/main 10ed5493 - локально собирается, НО Jenkins #27/#28 FAILURE с 09-09 06:34 - frontend eslint error databases/page.tsx:24 no-empty-object-type (мой вчерашний d2728dfc); backend-бранч = коллатеральный failFast-обрыв. Красный main стоял ~23.5ч незамеченным (вчерашний цикл прошёл до падения #28).
+- ФИКС: type CreateDbForm = DbFormShape (78b7caa7), push 06:52; Jenkins #29 SUCCESS [live: build.xml].
+- МЕХАНИЗМ (M0): probe-main-build.sh НЕ гонял lint - добавлена стадия npm run lint (гейт краснеет на том же классе до пуша).
+- ДОСТАВКА: прод стоял на 17c1eeec (~29ч). Пин 17c1eeec->78b7caa7 в argo-infra console-migration (c2e2a656, values.yaml 8 тегов). Argo подкатил: все 6 компонентов 78b7caa7 ready 1/1; probe-delivery: ДОСТАВЛЕНО ПОЛНОСТЬЮ; console.dada-tuda.ru 307 [live].
+- E156 ПОЛЮС 1 [live psql dada-cloud MCP]: actor_type user=6415 system=3485 - оба ведра ненулевые. E156 = success по полюсу 1 (полюс 2 применён в разборах).
+- AUDIT-ПУТЬ: новый юзер danila: SignUp -> автопроект 0.3с -> UploadSourceArchive через 76с (поток 1 жив!) -> build FAIL framework_undetected. Вывод: bl add 0498 (auto-detect -> предложить статик/шаблон вместо отказа). Хвост пути не дочитан: MCP queryDatabase хрупок на nullable-колонках (bind message 2 result formats) - бэклог на починку инструмента.
+- ГИГИЕНА: песочницы не создавал; чужие незакоммиченные файлы в дереве не тронут (staged только свой .tsx).
+- Время: ~64 мин.
