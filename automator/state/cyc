@@ -1,0 +1,340 @@
+#!/usr/bin/env python3
+"""cyc - cycle harness for the Dada Cloud autonomous routine.
+
+The routine kept spending its hours on firefighting (red main, dead CI, lost
+images) and reporting that as a productive cycle, because the only record of a
+cycle was prose in cycle-log.md. Prose cannot be counted, so nothing was.
+
+This tool makes a cycle a machine record with a verified ship claim:
+
+    cyc mandate                 -> what THIS cycle is allowed to work on
+    cyc record ...              -> append one validated cycle row
+    cyc score [--window N]      -> scoreboard over the last N cycles
+
+A ship claim is not taken on trust. Commit hashes are checked against the
+repository, the touched paths are classified from git (not from the report),
+and a cycle only counts as a product ship when a real commit touched product
+code AND the report names the user-facing capability and its live proof.
+
+Storage: state/cycles.jsonl, one JSON object per line, append-only.
+"""
+
+import argparse
+import datetime
+import json
+import os
+import subprocess
+import sys
+
+ROOT = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(os.path.dirname(ROOT))
+LEDGER = os.path.join(ROOT, "cycles.jsonl")
+
+PRODUCT_PREFIXES = (
+    "frontend/",
+    "backend/",
+    "build-agent/",
+    "gitops-agent/",
+    "mcp-server/",
+    "gateway/",
+    "portainer-agent/",
+)
+CI_PREFIXES = ("Jenkinsfile", "helm/", ".github/", "docker/", "tools/", "scripts/")
+STATE_PREFIXES = ("automator/", "docs/")
+
+CLASSES = ("product", "firefight", "measure", "ops", "skipped")
+
+TARGET_SHIP_RATE = 0.5
+TARGET_TAX_RATE = 0.35
+DRY_SPELL_LIMIT = 2
+
+
+def git(*args):
+    try:
+        out = subprocess.run(
+            ["git", "-C", REPO] + list(args),
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    return out.stdout
+
+
+def commit_paths(sha):
+    out = git("show", "--pretty=format:", "--name-only", sha)
+    if out is None:
+        return None
+    return [p for p in out.splitlines() if p.strip()]
+
+
+def classify_paths(paths):
+    buckets = {"product": 0, "ci": 0, "state": 0, "other": 0}
+    for p in paths:
+        if p.startswith(STATE_PREFIXES):
+            buckets["state"] += 1
+        elif p.startswith(PRODUCT_PREFIXES):
+            buckets["product"] += 1
+        elif p.startswith(CI_PREFIXES):
+            buckets["ci"] += 1
+        else:
+            buckets["other"] += 1
+    return buckets
+
+
+def load():
+    rows = []
+    if not os.path.exists(LEDGER):
+        return rows
+    with open(LEDGER, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except ValueError:
+                continue
+    return rows
+
+
+def append(row):
+    with open(LEDGER, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def today():
+    return datetime.date.today()
+
+
+def parse_date(row):
+    try:
+        return datetime.date.fromisoformat(row.get("date", "")[:10])
+    except ValueError:
+        return None
+
+
+def metrics(rows, window):
+    live = [r for r in rows if r.get("class") != "skipped"][-window:]
+    if not live:
+        return {
+            "cycles": 0,
+            "ship_rate": 0.0,
+            "tax_rate": 0.0,
+            "self_inflicted": 0,
+            "dry_spell_days": 999,
+            "hypotheses": [],
+            "ships": 0,
+        }
+    ships = [r for r in live if r.get("verified_ship")]
+    minutes = sum(int(r.get("minutes") or 0) for r in live) or 1
+    tax = sum(
+        int(r.get("minutes") or 0)
+        for r in live
+        if r.get("class") in ("firefight", "ops")
+    )
+    hyps = sorted({r.get("hypothesis") for r in live if r.get("hypothesis")})
+    last_ship = None
+    for r in reversed(rows):
+        if r.get("verified_ship"):
+            last_ship = parse_date(r)
+            break
+    dry = (today() - last_ship).days if last_ship else 999
+    return {
+        "cycles": len(live),
+        "ships": len(ships),
+        "ship_rate": len(ships) / len(live),
+        "tax_rate": tax / minutes,
+        "self_inflicted": sum(1 for r in live if r.get("self_inflicted")),
+        "dry_spell_days": dry,
+        "hypotheses": hyps,
+    }
+
+
+def mandate(m):
+    """The gate. Returns (mode, reasons) computed from the ledger, not from mood."""
+    reasons = []
+    if m["cycles"] == 0:
+        return "PRODUCT-ONLY", ["ledger empty - start by shipping, not by sweeping"]
+    if m["dry_spell_days"] >= DRY_SPELL_LIMIT:
+        reasons.append(
+            "%d days without a verified product ship (limit %d)"
+            % (m["dry_spell_days"], DRY_SPELL_LIMIT)
+        )
+    if m["ship_rate"] < TARGET_SHIP_RATE:
+        reasons.append(
+            "ship rate %.0f%% below target %.0f%%"
+            % (m["ship_rate"] * 100, TARGET_SHIP_RATE * 100)
+        )
+    if m["tax_rate"] > TARGET_TAX_RATE:
+        reasons.append(
+            "ops/firefight tax %.0f%% above ceiling %.0f%%"
+            % (m["tax_rate"] * 100, TARGET_TAX_RATE * 100)
+        )
+    if reasons:
+        return "PRODUCT-ONLY", reasons
+    return "NORMAL", ["ship rate and tax within budget"]
+
+
+def cmd_mandate(args):
+    rows = load()
+    m = metrics(rows, args.window)
+    mode, reasons = mandate(m)
+    print("=== CYCLE MANDATE (harness, computed from state/cycles.jsonl) ===")
+    print("mode: %s" % mode)
+    for r in reasons:
+        print("  - %s" % r)
+    print(
+        "window %d cycles: ships %d/%d (%.0f%%), tax %.0f%%, self-inflicted %d, "
+        "dry spell %dd, H touched: %s"
+        % (
+            m["cycles"],
+            m["ships"],
+            m["cycles"],
+            m["ship_rate"] * 100,
+            m["tax_rate"] * 100,
+            m["self_inflicted"],
+            m["dry_spell_days"],
+            ",".join(m["hypotheses"]) or "none",
+        )
+    )
+    print()
+    if mode == "PRODUCT-ONLY":
+        print("RULES FOR THIS CYCLE:")
+        print("  1. Work a product backlog item to a live user-facing change. Nothing else.")
+        print("  2. Infrastructure/CI/delivery work is FORBIDDEN unless a named live")
+        print("     user is blocked right now. Red main, stale delivery, panel noise ->")
+        print("     `bl add --prio P0` and hand to the Automator-ops job. Do not fix here.")
+        print("  3. No ops sweep, no panel walk-through, no measurement archaeology.")
+        print("     The ops job already did the pulse; read its handoff, do not redo it.")
+        print("  4. End with `cyc record` naming the capability a user gained and its")
+        print("     live proof. A cycle with no shipped capability is a failed cycle.")
+    else:
+        print("RULES FOR THIS CYCLE:")
+        print("  1. Product stream first; measurement debt second.")
+        print("  2. Ops still belongs to the Automator-ops job. One follow-up max.")
+        print("  3. End with `cyc record`.")
+    return 0
+
+
+def cmd_record(args):
+    shas = [s.strip() for s in (args.commits or "").split(",") if s.strip()]
+    resolved, missing, buckets = [], [], {"product": 0, "ci": 0, "state": 0, "other": 0}
+    for sha in shas:
+        paths = commit_paths(sha)
+        if paths is None:
+            missing.append(sha)
+            continue
+        full = (git("rev-parse", sha) or sha).strip()
+        resolved.append(full[:8])
+        got = classify_paths(paths)
+        for k in buckets:
+            buckets[k] += got[k]
+
+    capability = (args.capability or "").strip()
+    proof = (args.proof or "").strip()
+    verified = bool(
+        args.klass == "product"
+        and buckets["product"] > 0
+        and len(capability) >= 20
+        and len(proof) >= 10
+    )
+
+    row = {
+        "cycle": args.cycle,
+        "date": args.date or datetime.datetime.now().isoformat(timespec="seconds"),
+        "class": args.klass,
+        "minutes": args.minutes,
+        "commits": resolved,
+        "missing_commits": missing,
+        "paths": buckets,
+        "capability": capability,
+        "proof": proof,
+        "hypothesis": args.hypothesis or "",
+        "self_inflicted": bool(args.self_inflicted),
+        "backlog_ids": [x for x in (args.backlog or "").split(",") if x],
+        "verified_ship": verified,
+    }
+    append(row)
+
+    print("recorded %s class=%s minutes=%s" % (row["cycle"], row["class"], row["minutes"]))
+    print("  commits: %s%s" % (", ".join(resolved) or "none",
+                               "  MISSING: " + ", ".join(missing) if missing else ""))
+    print("  paths: product=%d ci=%d state=%d other=%d" % (
+        buckets["product"], buckets["ci"], buckets["state"], buckets["other"]))
+    print("  verified_ship: %s" % ("YES" if verified else "NO"))
+    if not verified and args.klass == "product":
+        why = []
+        if buckets["product"] == 0:
+            why.append("no commit touched product code (frontend/backend/agents)")
+        if len(capability) < 20:
+            why.append("--capability missing or too vague")
+        if len(proof) < 10:
+            why.append("--proof missing (need the live check that proves it)")
+        print("  NOT A SHIP: " + "; ".join(why))
+    return 0
+
+
+def cmd_score(args):
+    rows = load()
+    m = metrics(rows, args.window)
+    if args.json:
+        print(json.dumps(m, ensure_ascii=False))
+        return 0
+    print("SCOREBOARD (last %d live cycles)" % m["cycles"])
+    print("  verified product ships : %d/%d  (%.0f%%, target >=%.0f%%)"
+          % (m["ships"], m["cycles"], m["ship_rate"] * 100, TARGET_SHIP_RATE * 100))
+    print("  ops/firefight tax      : %.0f%% of minutes (ceiling %.0f%%)"
+          % (m["tax_rate"] * 100, TARGET_TAX_RATE * 100))
+    print("  self-inflicted incidents: %d" % m["self_inflicted"])
+    print("  days since last ship   : %d" % m["dry_spell_days"])
+    print("  hypotheses touched     : %s" % (", ".join(m["hypotheses"]) or "none"))
+    print()
+    for r in [x for x in rows if x.get("class") != "skipped"][-args.window:]:
+        print("  %-10s %-9s %3sm %-3s %s"
+              % (r.get("cycle"), r.get("class"), r.get("minutes"),
+                 "SHIP" if r.get("verified_ship") else "-",
+                 (r.get("capability") or r.get("proof") or "")[:70]))
+    mode, reasons = mandate(m)
+    print()
+    print("verdict: %s (%s)" % (mode, "; ".join(reasons)))
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="cyc")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("mandate", help="what this cycle is allowed to do")
+    p.add_argument("--window", type=int, default=7)
+    p.set_defaults(fn=cmd_mandate)
+
+    p = sub.add_parser("record", help="append one validated cycle row")
+    p.add_argument("--cycle", required=True)
+    p.add_argument("--class", dest="klass", required=True, choices=CLASSES)
+    p.add_argument("--minutes", type=int, required=True)
+    p.add_argument("--commits", default="")
+    p.add_argument("--capability", default="", help="what a user can now do")
+    p.add_argument("--proof", default="", help="the live check proving it")
+    p.add_argument("--hypothesis", default="")
+    p.add_argument("--backlog", default="")
+    p.add_argument("--self-inflicted", action="store_true",
+                   dest="self_inflicted",
+                   help="the incident was caused by our own earlier commit")
+    p.add_argument("--date", default="")
+    p.set_defaults(fn=cmd_record)
+
+    p = sub.add_parser("score", help="scoreboard")
+    p.add_argument("--window", type=int, default=14)
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_score)
+
+    args = ap.parse_args()
+    sys.exit(args.fn(args))
+
+
+if __name__ == "__main__":
+    main()
