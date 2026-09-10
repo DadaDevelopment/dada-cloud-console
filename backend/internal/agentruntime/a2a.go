@@ -120,7 +120,7 @@ func (c *httpA2AClient) Send(ctx context.Context, run AgentRunRequest) (string, 
 
 func buildContextualMessage(messages []Message) string {
 	var buf bytes.Buffer
-	now := time.Now().UTC()
+	now := time.Now().In(RuntimeLocation())
 
 	if len(messages) > 1 {
 		buf.WriteString("## Previous conversation:\n")
@@ -142,9 +142,9 @@ func buildContextualMessage(messages []Message) string {
 }
 
 // renderMessage renders one history line. User messages carry their
-// source-sent time in a semantic form ("[sent 22:41 UTC, 3m ago]") rather
-// than a bare timestamp, so the model can reason about recency the way a
-// human reads a chat backlog. Assistant messages have no source time (the
+// source-sent time in the runtime zone in a semantic form ("[sent 22:41 MSK,
+// 3m ago]") rather than a bare timestamp, so the model can reason about
+// recency the way a human reads a chat backlog. Assistant messages have no source time (the
 // platform generated them) and render plain. This is the temporal-awareness
 // slice of the harness: idle gaps and batched rapid-fire messages become
 // visible to the model without any prompt work.
@@ -159,7 +159,7 @@ func renderMessage(m Message, now time.Time) string {
 		sb.WriteString(fmt.Sprintf("%s: %s\n", m.Role, m.Content))
 	} else {
 		sb.WriteString(fmt.Sprintf("user [sent %s, %s ago]: %s\n",
-			m.SourceSentAt.UTC().Format("15:04 MST"), humanizeDelay(now.Sub(*m.SourceSentAt)), m.Content))
+			m.SourceSentAt.In(RuntimeLocation()).Format("15:04 MST"), humanizeDelay(now.Sub(*m.SourceSentAt)), m.Content))
 	}
 	for _, e := range m.Entities {
 		em, ok := e.(map[string]any)

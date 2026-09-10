@@ -45,6 +45,13 @@ func main() {
 	}
 	defer pool.Close()
 
+	loc, err := agentruntime.LocationFromEnv()
+	if err != nil {
+		log.Fatal().Err(err).Msg("AGENT_RUNTIME_TZ is not a known IANA zone")
+	}
+	agentruntime.SetRuntimeLocation(loc)
+	log.Info().Str("zone", loc.String()).Msg("agentruntime: model clock zone")
+
 	gitopsBasePath := os.Getenv("GITOPS_BASE_PATH")
 	if gitopsBasePath == "" {
 		gitopsBasePath = "/tmp/dada-state-repo"
