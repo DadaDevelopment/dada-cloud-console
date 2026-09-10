@@ -80,8 +80,9 @@ func main() {
 	if maxMS := envInt("TG_GATEWAY_DEBOUNCE_MAX_MS", 0); maxMS > 0 {
 		debounceCfg.MaxWindow = time.Duration(maxMS) * time.Millisecond
 	}
+	debounceCfg.Pacing = tggateway.PacingFromEnv()
 	var debouncePtr *tggateway.DebounceConfig
-	if debounceCfg.QuietWindow > 0 || debounceCfg.MaxWindow > 0 {
+	if debounceCfg.QuietWindow > 0 || debounceCfg.MaxWindow > 0 || debounceCfg.Pacing != nil {
 		debouncePtr = &debounceCfg
 	}
 

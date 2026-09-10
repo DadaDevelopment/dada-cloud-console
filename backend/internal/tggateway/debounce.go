@@ -17,10 +17,15 @@ const (
 // DebounceConfig sizes the two windows. QuietWindow is how long a batch waits
 // after its LAST message before dispatching (every new message resets it);
 // MaxWindow is the hard cap measured from the batch's FIRST message, so a
-// continuous stream cannot hold a chat hostage forever.
+// continuous stream cannot hold a chat hostage forever. A non-nil Pacing
+// replaces the fixed QuietWindow with a per-batch one drawn from the
+// client's last message (see PacingConfig) and lifts MaxWindow to at least
+// Pacing.MaxQuiet, since a quiet window the cap always cuts short is no
+// window at all.
 type DebounceConfig struct {
 	QuietWindow time.Duration
 	MaxWindow   time.Duration
+	Pacing      *PacingConfig
 }
 
 // debouncedBatch is one chat's open buffer: the messages so far plus the two
@@ -57,7 +62,12 @@ func NewDebouncer(cfg DebounceConfig, dispatch func(key string, batch []Telegram
 	if cfg.MaxWindow <= 0 {
 		cfg.MaxWindow = DebounceMaxDefault
 	}
-	if cfg.MaxWindow < cfg.QuietWindow {
+	switch {
+	case cfg.Pacing != nil:
+		if cfg.MaxWindow < cfg.Pacing.MaxQuiet {
+			cfg.MaxWindow = cfg.Pacing.MaxQuiet
+		}
+	case cfg.MaxWindow < cfg.QuietWindow:
 		cfg.MaxWindow = cfg.QuietWindow
 	}
 	return &Debouncer{
@@ -88,7 +98,7 @@ func (d *Debouncer) Enqueue(key string, u TelegramUpdate) {
 		batch.maxTimer = time.AfterFunc(d.cfg.MaxWindow, func() {
 			d.flush(key)
 		})
-		batch.quietTimer = time.AfterFunc(d.cfg.QuietWindow, func() {
+		batch.quietTimer = time.AfterFunc(d.quietFor(batch.updates), func() {
 			d.flush(key)
 		})
 		d.mu.Unlock()
@@ -101,11 +111,24 @@ func (d *Debouncer) Enqueue(key string, u TelegramUpdate) {
 		batch.quietTimer.Stop()
 	}
 	k := key
-	batch.quietTimer = time.AfterFunc(d.cfg.QuietWindow, func() {
+	batch.quietTimer = time.AfterFunc(d.quietFor(batch.updates), func() {
 		d.flush(k)
 	})
 	batch.mu.Unlock()
 	d.mu.Unlock()
+}
+
+// quietFor is the quiet window for the batch as it stands: the fixed
+// QuietWindow, or the paced one when pacing is on. Called with batch.mu held.
+func (d *Debouncer) quietFor(updates []TelegramUpdate) time.Duration {
+	if d.cfg.Pacing == nil {
+		return d.cfg.QuietWindow
+	}
+	quiet := d.cfg.Pacing.QuietFor(updates)
+	if quiet > d.cfg.MaxWindow {
+		quiet = d.cfg.MaxWindow
+	}
+	return quiet
 }
 
 // flush removes the batch under d.mu first, so a racing Enqueue either fully

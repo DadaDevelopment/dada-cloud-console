@@ -389,6 +389,10 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 	defer runs.forgetAll()
 	policy := NewGroupPolicyForAgent(b.BotUsername, b.AgentName)
 	observer := NewObserverForAgent(b.AgentName)
+	var pacing *PacingConfig
+	if cfg != nil {
+		pacing = cfg.Pacing
+	}
 
 	// One line per poller, naming the agent and the settings that decide what
 	// it will do. Without it a bot that never speaks is indistinguishable from
@@ -404,6 +408,7 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		Float64("post_comment_rate", policy.PostCommentRate).
 		Int("hourly_budget", policy.HourlyBudget).
 		Bool("observer", observer != nil).
+		Bool("pacing", pacing != nil).
 		Str("vision_model", mediaCfg.VisionModel).
 		Str("whisper", mediaCfg.WhisperBaseURL).
 		Msg("tggateway: poller started")
@@ -424,8 +429,10 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		}
 
 		// Runtime admits a turn before announcing processing over the response
-		// stream. Paused and courtesy-only turns never start typing.
-		if !useRuntime {
+		// stream. Paused and courtesy-only turns never start typing. With
+		// pacing on, typing is shown only once the reply exists, for as long
+		// as a person would need to type it (see PacingConfig).
+		if !useRuntime && pacing == nil {
 			stopTyping := startTyping(runCtx, tg, b.BotToken, chatID)
 			defer stopTyping()
 		}
@@ -489,7 +496,7 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 					}
 				}()
 				resp, procErr = progress.ProcessMessageWithProgress(runCtx, req, func() {
-					if stopTyping == nil && runCtx.Err() == nil {
+					if stopTyping == nil && runCtx.Err() == nil && pacing == nil {
 						stopTyping = startTyping(runCtx, tg, b.BotToken, chatID)
 					}
 				})
@@ -558,6 +565,11 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 					Msg("tggateway: agent chose silence in a group, nothing sent")
 			}
 			return
+		}
+		if pacing != nil {
+			stopTyping := startTyping(runCtx, tg, b.BotToken, chatID)
+			sleepOrDone(runCtx, pacing.TypingFor(sendText))
+			stopTyping()
 		}
 		var sendErr error
 		switch {
