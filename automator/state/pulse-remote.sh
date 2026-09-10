@@ -98,6 +98,17 @@ done
 echo
 echo "counters:"
 printf '%s' "$snapshot" | python3 "$HERE/pulse-read.py" counters
+# Sections the snapshot carries that the panel loop above never prints. The
+# breakage panel answers "which apps are marked broken", and a run that reads
+# only it reports a clean platform while a console pod sits Pending and two
+# user sites answer 503 (caught live 2026-09-10). These are separate questions
+# and the snapshot already holds both, so print them rather than trust the one.
+echo
+echo "здоровье подов (kubectl-взгляд снимка, НЕ панель):"
+printf '%s' "$snapshot" | python3 "$HERE/pulse-read.py" health
+echo
+echo "живые URL:"
+printf '%s' "$snapshot" | python3 "$HERE/pulse-read.py" urls
 err_out=$(printf '%s' "$snapshot" | python3 "$HERE/pulse-read.py" errors)
 n=$(echo "$err_out" | head -1)
 if [ "$n" = "0" ]; then
