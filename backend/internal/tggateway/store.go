@@ -30,7 +30,7 @@ func NewPGStore(pool *pgxpool.Pool) Store { return pgStore{pool: pool} }
 
 func (s pgStore) List(ctx context.Context) ([]Binding, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT agent_name, project_id, bot_token, bot_username, status, created_at FROM tg_bindings`)
+		`SELECT agent_name, project_id, bot_token, bot_username, transport, status, created_at FROM tg_bindings`)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +49,7 @@ func (s pgStore) List(ctx context.Context) ([]Binding, error) {
 
 func (s pgStore) Get(ctx context.Context, agentName string) (Binding, error) {
 	row := s.pool.QueryRow(ctx,
-		`SELECT agent_name, project_id, bot_token, bot_username, status, created_at
+		`SELECT agent_name, project_id, bot_token, bot_username, transport, status, created_at
 		   FROM tg_bindings WHERE agent_name = $1`, agentName)
 	b, err := scanBinding(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -60,14 +60,15 @@ func (s pgStore) Get(ctx context.Context, agentName string) (Binding, error) {
 
 func (s pgStore) Upsert(ctx context.Context, b Binding) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO tg_bindings (agent_name, project_id, bot_token, bot_username, status)
-		 VALUES ($1, $2, $3, $4, $5)
+		`INSERT INTO tg_bindings (agent_name, project_id, bot_token, bot_username, transport, status)
+		 VALUES ($1, $2, $3, $4, $5, $6)
 		 ON CONFLICT (agent_name) DO UPDATE
 		   SET project_id   = EXCLUDED.project_id,
 		       bot_token    = EXCLUDED.bot_token,
 		       bot_username = EXCLUDED.bot_username,
+		       transport    = EXCLUDED.transport,
 		       status       = EXCLUDED.status`,
-		b.AgentName, b.ProjectID, b.BotToken, b.BotUsername, string(b.Status),
+		b.AgentName, b.ProjectID, b.BotToken, b.BotUsername, string(b.transport()), string(b.Status),
 	)
 	return err
 }
@@ -83,10 +84,11 @@ type rowScanner interface {
 
 func scanBinding(row rowScanner) (Binding, error) {
 	var b Binding
-	var status string
-	if err := row.Scan(&b.AgentName, &b.ProjectID, &b.BotToken, &b.BotUsername, &status, &b.CreatedAt); err != nil {
+	var status, transport string
+	if err := row.Scan(&b.AgentName, &b.ProjectID, &b.BotToken, &b.BotUsername, &transport, &status, &b.CreatedAt); err != nil {
 		return Binding{}, err
 	}
 	b.Status = Status(status)
+	b.Transport = Transport(transport)
 	return b, nil
 }

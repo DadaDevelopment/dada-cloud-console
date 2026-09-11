@@ -58,6 +58,7 @@ type bindRequest struct {
 	AgentName string `json:"agent_name"`
 	ProjectID string `json:"project_id"`
 	BotToken  string `json:"bot_token"`
+	Transport string `json:"transport,omitempty"`
 }
 
 func (s *Server) handleBind(w http.ResponseWriter, r *http.Request) {
@@ -72,19 +73,28 @@ func (s *Server) handleBind(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_name and bot_token are required"})
 		return
 	}
+	transport, ok := ParseTransport(strings.TrimSpace(req.Transport))
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "transport must be bot or user"})
+		return
+	}
 
-	b, err := s.mgr.Bind(r.Context(), req.AgentName, req.ProjectID, req.BotToken)
+	b, err := s.mgr.BindTransport(r.Context(), req.AgentName, req.ProjectID, req.BotToken, transport)
 	if err != nil {
 		var invalid ErrInvalidToken
 		if errors.As(err, &invalid) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid bot token"})
 			return
 		}
+		if errors.Is(err, ErrTransportUnavailable) {
+			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "transport " + string(transport) + " is not wired yet"})
+			return
+		}
 		log.Error().Err(err).Str("agent", req.AgentName).Msg("tggateway: bind failed")
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "bind failed"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"bot_username": b.BotUsername})
+	writeJSON(w, http.StatusOK, map[string]string{"bot_username": b.BotUsername, "transport": string(b.Transport)})
 }
 
 func (s *Server) handleUnbind(w http.ResponseWriter, r *http.Request) {
@@ -153,19 +163,24 @@ func (s *Server) handleOutbound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tg, ok := s.mgr.clientFor(binding)
+	if !ok {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "transport " + string(binding.transport()) + " is not wired yet"})
+		return
+	}
 	sendText, wantsButton := splitLocationButtonMarker(sanitizeModelReply(req.Text))
 	var sendErr error
 	switch {
 	case wantsButton:
-		sendErr = s.mgr.tg.SendMessageWithLocationButton(r.Context(), binding.BotToken, chatID, sendText)
+		sendErr = tg.SendMessageWithLocationButton(r.Context(), binding.BotToken, chatID, sendText)
 	case req.ReplyToID != "":
 		if replyTo, perr := strconv.ParseInt(req.ReplyToID, 10, 64); perr == nil && replyTo > 0 {
-			sendErr = s.mgr.tg.SendMessageReply(r.Context(), binding.BotToken, chatID, replyTo, sendText)
+			sendErr = tg.SendMessageReply(r.Context(), binding.BotToken, chatID, replyTo, sendText)
 		} else {
-			sendErr = s.mgr.tg.SendMessage(r.Context(), binding.BotToken, chatID, sendText)
+			sendErr = tg.SendMessage(r.Context(), binding.BotToken, chatID, sendText)
 		}
 	default:
-		sendErr = s.mgr.tg.SendMessage(r.Context(), binding.BotToken, chatID, sendText)
+		sendErr = tg.SendMessage(r.Context(), binding.BotToken, chatID, sendText)
 	}
 	if sendErr != nil {
 		log.Warn().Err(sendErr).Str("agent", req.AgentName).Msg("tggateway: outbound send failed")

@@ -23,15 +23,50 @@ type Status string
 // (UPDATE ... SET status = 'paused') without touching Go.
 const StatusActive Status = "active"
 
-// Binding is one agent <-> Telegram bot pairing, as tg_bindings holds it.
+// Transport is which Telegram API a binding speaks. TransportBot is the Bot
+// API (BotToken is a BotFather token, the account is a bot, it cannot write
+// first). TransportUser is a real account session over MTProto (BotToken is
+// the session credential, the account looks like a person, it can open a
+// dialog). The poller, the runtime and the CRM never see the difference: both
+// transports implement TelegramClient, Manager picks the client per binding.
+// Bot API is live today; the user-session client lands separately, until then
+// a "user" row is stored but its poller is not started.
+type Transport string
+
+const (
+	TransportBot  Transport = "bot"
+	TransportUser Transport = "user"
+)
+
+// ParseTransport maps the wire value to a Transport; empty means bot.
+func ParseTransport(raw string) (Transport, bool) {
+	switch Transport(raw) {
+	case "", TransportBot:
+		return TransportBot, true
+	case TransportUser:
+		return TransportUser, true
+	}
+	return "", false
+}
+
+// Binding is one agent <-> Telegram account pairing, as tg_bindings holds it.
 type Binding struct {
 	AgentName   string
 	ProjectID   string
 	BotToken    string
 	BotUsername string
+	Transport   Transport
 	Status      Status
 	CreatedAt   time.Time
 }
 
 // Live reports whether this binding should have a running poller.
 func (b Binding) Live() bool { return b.Status == StatusActive }
+
+// transport defaults rows written before the column existed to bot.
+func (b Binding) transport() Transport {
+	if b.Transport == "" {
+		return TransportBot
+	}
+	return b.Transport
+}
