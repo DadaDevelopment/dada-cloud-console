@@ -91,6 +91,7 @@ type Runtime struct {
 	states           StateStore
 	contextKey       []byte
 	contacts         *ContactSync
+	stateSync        *StateSync
 	courtesyAgents   map[string]bool
 	structuredAgents map[string]bool
 	syncPause        func(context.Context, Conversation) error
@@ -174,9 +175,11 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 		}
 	}
 	if state.AgentEnabled && r.courtesyAgents[conv.AgentName] && explicitStop(req.Messages) {
-		if _, err := r.states.PauseAgent(ctx, conv.ID, "customer requested no further replies"); err != nil {
+		paused, err := r.states.PauseAgent(ctx, conv.ID, "customer requested no further replies")
+		if err != nil {
 			return MessageResponse{}, err
 		}
+		r.mirrorState(ctx, conv, paused, "")
 		if r.syncPause != nil {
 			_ = r.syncPause(ctx, conv)
 		}
@@ -269,16 +272,18 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 		req.OnProcessing()
 	}
 	var reply string
+	var after RuntimeState
 	for attempt := 0; attempt < 2; attempt++ {
 		reply, err = r.a2a.Send(ctx, run)
 		if err != nil {
 			return MessageResponse{}, fmt.Errorf("a2a send: %w", err)
 		}
-		after, err := r.states.GetState(ctx, conv.ID)
+		after, err = r.states.GetState(ctx, conv.ID)
 		if err != nil {
 			return MessageResponse{}, err
 		}
 		if !after.AgentEnabled {
+			r.mirrorState(ctx, conv, after, "")
 			return MessageResponse{Suppressed: true}, nil
 		}
 		if !r.structuredAgents[conv.AgentName] {
@@ -316,6 +321,7 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 	} else {
 		return MessageResponse{}, fmt.Errorf("runtime receipt storage is not configured")
 	}
+	r.mirrorState(ctx, conv, after, "")
 	return MessageResponse{Text: reply, ReplyToChannelMessageID: anchor}, nil
 }
 

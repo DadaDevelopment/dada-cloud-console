@@ -192,6 +192,7 @@ func (s *Server) handleEscalate(c *gin.Context) {
 	if s.operator != nil {
 		notified = s.operator.Notify(c.Request.Context(), conv, escalationCard("🔺 Эскалация", conv, req.ReasonCode, req.Summary, state)) == nil
 	}
+	s.runtime.mirrorState(c.Request.Context(), conv, state, req.Summary)
 	state, err = s.syncPausedCRM(c.Request.Context(), conv)
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"agent_enabled": false, "client_notified": clientTold, "operator_notified": notified, "crm_status_sync": "pending"})

@@ -170,6 +170,7 @@ func (s *Server) handleStopAgent(c *gin.Context) {
 	if s.operator != nil {
 		_ = s.operator.Notify(c.Request.Context(), conv, stopCard(conv, req.Reason, state))
 	}
+	s.runtime.mirrorState(c.Request.Context(), conv, state, "")
 	// Persist pause before contacting CRM; retries never re-enable replies.
 	state, err = s.syncPausedCRM(c.Request.Context(), conv)
 	if err != nil {
