@@ -29,7 +29,27 @@ export const domains: Messages = {
   "domains.row.added": { ru: "Добавлен {ago}", en: "Added {ago}" },
 
   "domains.action.verify": { ru: "Проверить сейчас", en: "Check now" },
-  "domains.autoCheck": { ru: "Автопроверка каждые 30 с", en: "Auto-checking every 30s" },
+  "domains.autoCheck": { ru: "Проверяем автоматически, пока запись не появится", en: "Checking automatically until the record appears" },
+  "domains.verify.notPublishedLabel": {
+    ru: "Записи ещё не видно. Добавьте TXT с именем {label} в зоне {apex} и подождите — провайдеры обновляют DNS до 30 минут.",
+    en: "The record is not visible yet. Add a TXT named {label} in the {apex} zone, then wait — DNS providers take up to 30 minutes.",
+  },
+  "domains.verify.notPublished": {
+    ru: "Записи ещё не видно. Проверьте, что TXT добавлена именно в этой зоне, и подождите — DNS обновляется до 30 минут.",
+    en: "The record is not visible yet. Check the TXT lives in this zone, then wait — DNS takes up to 30 minutes.",
+  },
+  "domains.verify.wrongValue": {
+    ru: "Запись нашлась, но значение другое. Скопируйте значение ниже целиком и замените им содержимое TXT.",
+    en: "The record exists but its value differs. Copy the value below in full and replace the TXT contents.",
+  },
+  "domains.verify.other": {
+    ru: "Проверка не прошла. Скопируйте запись ниже и убедитесь, что она опубликована у вашего DNS-провайдера.",
+    en: "The check did not pass. Copy the record below and make sure it is published at your DNS provider.",
+  },
+  "domains.verify.stopped": {
+    ru: "Автопроверка остановлена — запись так и не появилась. Опубликуйте TXT ниже и нажмите «Проверить сейчас».",
+    en: "Auto-checking stopped — the record never appeared. Publish the TXT below and press Check now.",
+  },
   "domains.checking": { ru: "Проверка…", en: "Checking…" },
 
   "domains.challenge.instruction": {

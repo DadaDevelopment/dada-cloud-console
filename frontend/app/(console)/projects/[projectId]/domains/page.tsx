@@ -5,6 +5,13 @@ import { customDomainsApi, appsApi, managedDnsApi } from "@/lib/api";
 import { UpgradeDialog } from "@/components/billing/upgrade-dialog";
 import { docsHref } from "@/lib/site";
 import { deriveAuthorizationDomain } from "@/lib/domain-authorization";
+import {
+  VERIFY_MAX_ATTEMPTS,
+  challengeLabel,
+  classifyVerifyFailure,
+  verifyDelayMs,
+  verifyExhausted,
+} from "@/lib/domain-verify-backoff";
 import type {
   DomainAuthorization,
   DomainChallenge,
@@ -70,6 +77,29 @@ function CopyField({ label, value }: { label: string; value: string }) {
       </div>
     </div>
   );
+}
+
+/**
+ * What to tell the user while an apex authorization is not verified yet.
+ *
+ * Live audit showed 145 failed verification calls against 5 successes, with the
+ * raw resolver string ("lookup _dada-verify.run.place ... no such host") echoed
+ * back unchanged on every one of them. That names the symptom but never the
+ * action, so users repeated the check until they gave up.
+ */
+function verifyGuidance(t: TFn, auth: DomainAuthorization, attempts: number): string {
+  const kind = classifyVerifyFailure(auth.error_message);
+  if (!kind) return t("domains.autoCheck");
+  if (verifyExhausted(attempts)) return t("domains.verify.stopped");
+  if (kind === "not_published") {
+    const host = auth.challenge?.host ?? "";
+    const label = host ? challengeLabel(host, auth.apex_domain) : "";
+    return label
+      ? t("domains.verify.notPublishedLabel", { label, apex: auth.apex_domain })
+      : t("domains.verify.notPublished");
+  }
+  if (kind === "wrong_value") return t("domains.verify.wrongValue");
+  return t("domains.verify.other");
 }
 
 function ChallengeBlock({ challenge }: { challenge: DomainChallenge }) {
@@ -139,6 +169,7 @@ export default function ProjectDomainsPage() {
   const [funnelPrefill, setFunnelPrefill] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [verifyAttempts, setVerifyAttempts] = useState<number>(0);
 
   const authsRef = useRef<DomainAuthorization[]>([]);
   useEffect(() => {
@@ -231,7 +262,8 @@ export default function ProjectDomainsPage() {
   useEffect(() => {
     const hasPending = auths.some((a) => a.status !== "verified");
     if (!hasPending || funnelOpen) return;
-    const id = setInterval(() => {
+    if (verifyExhausted(verifyAttempts)) return;
+    const id = setTimeout(() => {
       const targets = authsRef.current.filter((a) => a.status !== "verified");
       if (targets.length === 0) return;
       Promise.all(
@@ -246,11 +278,12 @@ export default function ProjectDomainsPage() {
           (r, i) => r && r.status === "verified" && targets[i].status !== "verified"
         );
         setAuths((prev) => prev.map((a) => results.find((r) => r && r.id === a.id) ?? a));
+        setVerifyAttempts((n) => (verifiedNow ? 0 : n + 1));
         if (verifiedNow) void reload();
       });
-    }, 15_000);
-    return () => clearInterval(id);
-  }, [auths, funnelOpen, projectId, reload]);
+    }, verifyDelayMs(verifyAttempts));
+    return () => clearTimeout(id);
+  }, [auths, funnelOpen, projectId, reload, verifyAttempts]);
 
   async function handleVerify(id: string) {
     setBusyId(id);
@@ -517,7 +550,7 @@ export default function ProjectDomainsPage() {
                         </StateChip>
                       </div>
                       <p className={subCls}>
-                        {auth.error_message ? auth.error_message : t("domains.autoCheck")}
+                        {verifyGuidance(t, auth, verifyAttempts)}
                       </p>
                     </div>
                     {canEdit && (
@@ -631,6 +664,7 @@ function AddDomainFunnel({
   const [path, setPath] = useState<"app" | "delegate">("app");
   const [appName, setAppName] = useState(apps.length === 1 ? apps[0].name : "");
   const [dnsHint, setDnsHint] = useState<{ type: string; host: string; target: string } | null>(null);
+  const [funnelAttempts, setFunnelAttempts] = useState<number>(0);
 
   const authRef = useRef<DomainAuthorization | null>(null);
   useEffect(() => {
@@ -639,7 +673,8 @@ function AddDomainFunnel({
 
   useEffect(() => {
     if (step !== "verify" || !auth || auth.status === "verified") return;
-    const id = setInterval(() => {
+    if (verifyExhausted(funnelAttempts)) return;
+    const id = setTimeout(() => {
       const a = authRef.current;
       if (!a) return;
       customDomainsApi
@@ -648,14 +683,17 @@ function AddDomainFunnel({
           const updated = { ...r.authorization, challenge: r.challenge };
           setAuth(updated);
           if (updated.status === "verified") {
+            setFunnelAttempts(0);
             setStep("path");
             void onChanged();
+          } else {
+            setFunnelAttempts((n) => n + 1);
           }
         })
-        .catch(() => undefined);
-    }, 10_000);
-    return () => clearInterval(id);
-  }, [step, auth, projectId, onChanged]);
+        .catch(() => setFunnelAttempts((n) => n + 1));
+    }, verifyDelayMs(funnelAttempts));
+    return () => clearTimeout(id);
+  }, [step, auth, projectId, onChanged, funnelAttempts]);
 
   async function handleContinue(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
