@@ -128,7 +128,7 @@ func TestRuntimeConfiguredRouting(t *testing.T) {
 	}
 }
 
-func TestRuntimeBatchPreservesMetadataAndReplyAnchor(t *testing.T) {
+func TestRuntimeBatchPreservesMetadata(t *testing.T) {
 	for _, debounce := range []bool{false, true} {
 		name := "immediate"
 		var cfg *DebounceConfig
@@ -170,10 +170,34 @@ func TestRuntimeBatchPreservesMetadataAndReplyAnchor(t *testing.T) {
 			}
 			tg.mu.Lock()
 			defer tg.mu.Unlock()
-			if len(tg.repliedTo) != 1 || tg.repliedTo[0] != 101 {
-				t.Fatalf("reply anchors=%v", tg.repliedTo)
+			if len(tg.repliedTo) != 0 {
+				t.Fatalf("private chat must not quote the client, reply anchors=%v", tg.repliedTo)
 			}
 		})
+	}
+}
+
+// TestRuntimeGroupReplyHonoursRuntimeAnchor: in a group the runtime's own
+// anchor wins over the last-message fallback, so a reply lands under the
+// message the agent actually answered.
+func TestRuntimeGroupReplyHonoursRuntimeAnchor(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(RuntimeMessageResponse{Text: "one batch reply", ReplyToChannelMessageID: "101"})
+	}))
+	defer server.Close()
+	tg := &runtimeWiringTelegram{onceTelegram: onceTelegram{updates: []TelegramUpdate{
+		{UpdateID: 1, ChatID: -42, ChatType: "supergroup", UserID: 43, MessageID: 101, Text: "подскажите, как попасть в вашу группу"},
+		{UpdateID: 2, ChatID: -42, ChatType: "supergroup", UserID: 43, MessageID: 102, Text: "и что нужно для регистрации у брокера"},
+	}}}
+	a2a := &runtimeWiringA2A{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go runPollerDebounced(ctx, tg, a2a, NewAuthenticatedRuntimeClient(server.URL, "test-token"), Binding{AgentName: "agent", BotToken: "token"}, nil)
+	waitFor(t, func() bool { return tg.sentCount() == 1 })
+	tg.mu.Lock()
+	defer tg.mu.Unlock()
+	if len(tg.repliedTo) != 1 || tg.repliedTo[0] != 101 {
+		t.Fatalf("reply anchors=%v", tg.repliedTo)
 	}
 }
 

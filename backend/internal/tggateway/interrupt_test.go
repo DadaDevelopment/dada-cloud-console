@@ -363,15 +363,16 @@ func (c *countingRuntime) ProcessMessage(_ context.Context, _ RuntimeMessageRequ
 	return RuntimeMessageResponse{Text: "reply"}, nil
 }
 
-// TestRunPollerDebounced_ReplyAnchorsToLastBatchMessage verifies Step 4: a
-// batch of three messages gets ONE reply, sent as a native Telegram reply
-// to the LAST message of the batch (the natural reading anchor).
+// TestRunPollerDebounced_ReplyAnchorsToLastBatchMessage verifies Step 4 in
+// a group: a batch of three messages gets ONE reply, sent as a native
+// Telegram reply to the LAST message of the batch, so the group sees whom
+// the bot answers.
 func TestRunPollerDebounced_ReplyAnchorsToLastBatchMessage(t *testing.T) {
 	tg := &sequentialTelegram{batches: [][]TelegramUpdate{
 		{
-			{UpdateID: 1, ChatID: 11, MessageID: 101, Text: "привет"},
-			{UpdateID: 2, ChatID: 11, MessageID: 102, Text: "слушай"},
-			{UpdateID: 3, ChatID: 11, MessageID: 103, Text: "вопрос по регистрации"},
+			{UpdateID: 1, ChatID: -11, ChatType: "supergroup", MessageID: 101, Text: "привет, есть вопрос по регистрации"},
+			{UpdateID: 2, ChatID: -11, ChatType: "supergroup", MessageID: 102, Text: "слушай, а как вообще зайти в группу"},
+			{UpdateID: 3, ChatID: -11, ChatType: "supergroup", MessageID: 103, Text: "вопрос по регистрации у брокера"},
 		},
 	}}
 	rt := &recordingRuntime{}
@@ -391,6 +392,33 @@ func TestRunPollerDebounced_ReplyAnchorsToLastBatchMessage(t *testing.T) {
 	}
 	if tg.repliedTo[0] != 103 {
 		t.Fatalf("reply must anchor to the LAST batch message id 103, got %d", tg.repliedTo[0])
+	}
+}
+
+// TestRunPollerDebounced_PrivateChatSendsPlainMessage: in a private chat the
+// reply is a plain message, never a quote of the client's own text -- real
+// operators reply-to in 1.6% of messages, a bot quoting every message
+// gives itself away.
+func TestRunPollerDebounced_PrivateChatSendsPlainMessage(t *testing.T) {
+	tg := &sequentialTelegram{batches: [][]TelegramUpdate{
+		{
+			{UpdateID: 1, ChatID: 11, ChatType: "private", MessageID: 101, Text: "привет"},
+			{UpdateID: 2, ChatID: 11, ChatType: "private", MessageID: 102, Text: "вопрос по регистрации"},
+		},
+	}}
+	rt := &recordingRuntime{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go runPollerDebounced(ctx, tg, fakeA2A{}, rt, Binding{AgentName: "agent-pm", BotToken: "tok-pm"}, nil)
+
+	waitFor(t, func() bool { return tg.sentCount() == 1 })
+
+	tg.mu.Lock()
+	defer tg.mu.Unlock()
+	if len(tg.repliedTo) != 0 {
+		t.Fatalf("private chat must use plain SendMessage, got SendMessageReply to %v", tg.repliedTo)
 	}
 }
 

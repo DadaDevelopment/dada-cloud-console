@@ -2,6 +2,7 @@ package tggateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -45,8 +46,9 @@ func (e ErrInvalidToken) Unwrap() error { return e.cause }
 
 // runningPoller is one live long-poll goroutine plus what stops it.
 type runningPoller struct {
-	cancel context.CancelFunc
-	token  string
+	cancel    context.CancelFunc
+	token     string
+	transport Transport
 }
 
 // Manager owns every live poller goroutine and reconciles them against the
@@ -55,7 +57,7 @@ type runningPoller struct {
 // Store/TelegramClient/A2AClient implementations.
 type Manager struct {
 	store         Store
-	tg            TelegramClient
+	clients       map[Transport]TelegramClient
 	a2a           A2AClient
 	runtime       RuntimeClient
 	runtimeAgents map[string]bool
@@ -73,7 +75,23 @@ type Manager struct {
 // rapid-fire messages of one chat inside the quiet window become ONE agent
 // turn with one reply; nil keeps the legacy immediate-dispatch behavior.
 func NewManager(store Store, tg TelegramClient, a2a A2AClient, debounce *DebounceConfig) *Manager {
-	return &Manager{store: store, tg: tg, a2a: a2a, debounce: debounce, pollers: map[string]*runningPoller{}}
+	m := &Manager{store: store, clients: map[Transport]TelegramClient{}, a2a: a2a, debounce: debounce, pollers: map[string]*runningPoller{}}
+	if tg != nil {
+		m.RegisterTransport(TransportBot, tg)
+	}
+	return m
+}
+
+// RegisterTransport wires the client that serves bindings of one Transport.
+// Call before Run; a binding whose transport has no client stays stored but
+// gets no poller until the next Reconcile after the client is registered.
+func (m *Manager) RegisterTransport(t Transport, client TelegramClient) {
+	m.clients[t] = client
+}
+
+func (m *Manager) clientFor(b Binding) (TelegramClient, bool) {
+	client, ok := m.clients[b.transport()]
+	return client, ok
 }
 
 // SetRuntimeClient configures Manager to route messages through agent-runtime
@@ -139,7 +157,7 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 
 	for name, running := range m.pollers {
 		b, ok := want[name]
-		if !ok || b.BotToken != running.token {
+		if !ok || b.BotToken != running.token || b.transport() != running.transport {
 			running.cancel()
 			delete(m.pollers, name)
 		}
@@ -155,16 +173,35 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 
 // startLocked assumes m.mu is held.
 func (m *Manager) startLocked(b Binding) {
+	tg, ok := m.clientFor(b)
+	if !ok {
+		log.Warn().Str("agent", b.AgentName).Str("transport", string(b.transport())).Msg("tggateway: no client for transport, poller not started")
+		return
+	}
 	pctx, cancel := context.WithCancel(context.Background())
-	m.pollers[b.AgentName] = &runningPoller{cancel: cancel, token: b.BotToken}
-	go runPollerDebounced(pctx, m.tg, m.a2a, m.runtimeForAgent(b.AgentName), b, m.debounce)
+	m.pollers[b.AgentName] = &runningPoller{cancel: cancel, token: b.BotToken, transport: b.transport()}
+	go runPollerDebounced(pctx, tg, m.a2a, m.runtimeForAgent(b.AgentName), b, m.debounce)
 }
 
-// Bind validates token via getMe, upserts the row, and starts (or restarts,
-// on a token change) its poller immediately rather than waiting for the next
-// reconcile tick.
+// Bind is BindTransport over the Bot API.
 func (m *Manager) Bind(ctx context.Context, agentName, projectID, token string) (Binding, error) {
-	username, err := m.tg.GetMe(ctx, token)
+	return m.BindTransport(ctx, agentName, projectID, token, TransportBot)
+}
+
+// ErrTransportUnavailable is returned by BindTransport when no client is
+// registered for the requested transport, so a row is never stored for an
+// account nobody can validate.
+var ErrTransportUnavailable = errors.New("tggateway: transport has no client")
+
+// BindTransport validates the credential via the transport's getMe, upserts
+// the row, and starts (or restarts, on a credential or transport change) its
+// poller immediately rather than waiting for the next reconcile tick.
+func (m *Manager) BindTransport(ctx context.Context, agentName, projectID, token string, transport Transport) (Binding, error) {
+	tg, ok := m.clients[transport]
+	if !ok {
+		return Binding{}, ErrTransportUnavailable
+	}
+	username, err := tg.GetMe(ctx, token)
 	if err != nil {
 		return Binding{}, ErrInvalidToken{cause: err}
 	}
@@ -174,6 +211,7 @@ func (m *Manager) Bind(ctx context.Context, agentName, projectID, token string) 
 		ProjectID:   projectID,
 		BotToken:    token,
 		BotUsername: username,
+		Transport:   transport,
 		Status:      StatusActive,
 	}
 	if err := m.store.Upsert(ctx, b); err != nil {
@@ -333,6 +371,11 @@ func splitLocationButtonMarker(reply string) (text string, wantsButton bool) {
 // lastBatchChannelID returns the channel message id of the batch's LAST
 // message, or "" -- the A2A-fallback path's reply anchor (the runtime path
 // gets the same anchor from resp.ReplyToChannelMessageID).
+//
+// The anchor is used only in groups, where a quote says whom the bot is
+// answering. In a private chat a person just writes back: in 18k real
+// operator messages only 1.6% were Telegram replies, and a bot that quotes
+// every message reads as a bot.
 func lastBatchChannelID(batch []TelegramUpdate) string {
 	for i := len(batch) - 1; i >= 0; i-- {
 		if batch[i].MessageID > 0 {
@@ -576,9 +619,12 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		case wantsButton:
 			sendErr = tg.SendMessageWithLocationButton(ctx, b.BotToken, chatID, sendText)
 		default:
-			anchor := resp.ReplyToChannelMessageID
-			if anchor == "" {
-				anchor = lastBatchChannelID(batch)
+			anchor := ""
+			if inGroup {
+				anchor = resp.ReplyToChannelMessageID
+				if anchor == "" {
+					anchor = lastBatchChannelID(batch)
+				}
 			}
 			if replyTo, parseErr := strconv.ParseInt(anchor, 10, 64); parseErr == nil && replyTo > 0 {
 				sendErr = tg.SendMessageReply(ctx, b.BotToken, chatID, replyTo, sendText)
