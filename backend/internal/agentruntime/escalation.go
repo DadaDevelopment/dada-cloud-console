@@ -161,9 +161,10 @@ func sortedKeys[V any](m map[string]V) []string {
 
 func (s *Server) handleEscalate(c *gin.Context) {
 	var req struct {
-		ContextToken string `json:"context_token"`
-		ReasonCode   string `json:"reason_code"`
-		Summary      string `json:"summary"`
+		ContextToken  string `json:"context_token"`
+		ReasonCode    string `json:"reason_code"`
+		Summary       string `json:"summary"`
+		ClientMessage string `json:"client_message"`
 	}
 	if !decodeControl(c, &req) {
 		return
@@ -186,16 +187,44 @@ func (s *Server) handleEscalate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "pause rejected"})
 		return
 	}
+	clientTold := s.tellClient(c.Request.Context(), conv, req.ClientMessage)
 	notified := false
 	if s.operator != nil {
 		notified = s.operator.Notify(c.Request.Context(), conv, escalationCard("🔺 Эскалация", conv, req.ReasonCode, req.Summary, state)) == nil
 	}
 	state, err = s.syncPausedCRM(c.Request.Context(), conv)
 	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"agent_enabled": false, "operator_notified": notified, "crm_status_sync": "pending"})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"agent_enabled": false, "client_notified": clientTold, "operator_notified": notified, "crm_status_sync": "pending"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"agent_enabled": false, "operator_notified": notified, "crm_status_sync": state.CRMStatusSync, "state_version": state.Version})
+	c.JSON(http.StatusOK, gin.H{"agent_enabled": false, "client_notified": clientTold, "operator_notified": notified, "crm_status_sync": state.CRMStatusSync, "state_version": state.Version})
+}
+
+const escalationClientLine = "По этому вопросу вам напишет коллега"
+
+// tellClient is the last line the client gets from the agent: the model's
+// own reply is suppressed once the agent is paused (runtime.go re-reads the
+// state after the run), so the hand-off sentence has to leave through the
+// same outbound path idle follow-ups use. Text comes from the tool call so
+// it matches the model's voice; empty falls back to a fixed line. The line
+// is saved to history before delivery so a later operator sees it.
+func (s *Server) tellClient(ctx context.Context, conv Conversation, text string) bool {
+	if text = strings.TrimSpace(text); text == "" {
+		text = escalationClientLine
+	}
+	if _, err := s.runtime.store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "assistant", Content: text}); err != nil {
+		log.Warn().Err(err).Str("conversation", conv.ID.String()).Msg("agentruntime: escalation client line not saved")
+		return false
+	}
+	if s.outbound == nil {
+		log.Info().Str("conversation", conv.ID.String()).Msg("agentruntime: escalation client line persisted but no outbound configured")
+		return false
+	}
+	if err := s.outbound.SendOutbound(ctx, conv.AgentName, conv.ExternalID, text, ""); err != nil {
+		log.Warn().Err(err).Str("conversation", conv.ID.String()).Msg("agentruntime: escalation client line delivery failed")
+		return false
+	}
+	return true
 }
 
 func stopCard(conv Conversation, reason string, state RuntimeState) string {

@@ -24,6 +24,7 @@ type Server struct {
 	token          string
 	pauseCRM       PauseCRM
 	operator       *OperatorNotifier
+	outbound       ChannelOutbound
 	pauseSyncLocks [64]sync.Mutex
 }
 
@@ -52,6 +53,9 @@ func NewServer(pool *pgxpool.Pool, gitopsBasePath string) *Server {
 	runtime.contextKey = []byte(token)
 	srv := &Server{runtime: runtime, pool: pool, a2a: a2a, token: token, pauseCRM: NewHTTPPauseCRM(os.Getenv("AGENT_PAUSE_CRM_URL"), os.Getenv("AGENT_PAUSE_CRM_TOKEN"), os.Getenv("AGENT_PAUSE_CRM_STATUS"))}
 	srv.operator = NewOperatorNotifier(pool, os.Getenv("AGENT_ESCALATION_OPERATOR"), os.Getenv("TG_GATEWAY_OUTBOUND_URL"))
+	if url := os.Getenv("TG_GATEWAY_OUTBOUND_URL"); url != "" {
+		srv.outbound = NewHTTPChannelOutbound(url)
+	}
 	runtime.syncPause = func(ctx context.Context, conv Conversation) error { _, err := srv.syncPausedCRM(ctx, conv); return err }
 	return srv
 }
