@@ -167,6 +167,9 @@ func (s *Server) handleStopAgent(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "pause rejected"})
 		return
 	}
+	if s.operator != nil {
+		_ = s.operator.Notify(c.Request.Context(), conv, stopCard(conv, req.Reason, state))
+	}
 	// Persist pause before contacting CRM; retries never re-enable replies.
 	state, err = s.syncPausedCRM(c.Request.Context(), conv)
 	if err != nil {

@@ -23,6 +23,7 @@ type Server struct {
 	scheduler      *IdleScheduler
 	token          string
 	pauseCRM       PauseCRM
+	operator       *OperatorNotifier
 	pauseSyncLocks [64]sync.Mutex
 }
 
@@ -50,6 +51,7 @@ func NewServer(pool *pgxpool.Pool, gitopsBasePath string) *Server {
 	token := os.Getenv("AGENT_RUNTIME_TOKEN")
 	runtime.contextKey = []byte(token)
 	srv := &Server{runtime: runtime, pool: pool, a2a: a2a, token: token, pauseCRM: NewHTTPPauseCRM(os.Getenv("AGENT_PAUSE_CRM_URL"), os.Getenv("AGENT_PAUSE_CRM_TOKEN"), os.Getenv("AGENT_PAUSE_CRM_STATUS"))}
+	srv.operator = NewOperatorNotifier(pool, os.Getenv("AGENT_ESCALATION_OPERATOR"), os.Getenv("TG_GATEWAY_OUTBOUND_URL"))
 	runtime.syncPause = func(ctx context.Context, conv Conversation) error { _, err := srv.syncPausedCRM(ctx, conv); return err }
 	return srv
 }
@@ -93,6 +95,7 @@ func (s *Server) Handler() http.Handler {
 	protected.POST("/tools/load-skill", s.handleLoadSkill)
 	protected.POST("/tools/update-state", s.handleUpdateState)
 	protected.POST("/tools/stop-agent", s.handleStopAgent)
+	protected.POST("/tools/escalate", s.handleEscalate)
 	protected.POST("/hooks", s.handleCreateHook)
 	protected.GET("/hooks", s.handleListHooks)
 	protected.DELETE("/hooks/:id", s.handleDeleteHook)
