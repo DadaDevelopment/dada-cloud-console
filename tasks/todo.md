@@ -930,3 +930,25 @@ web OAuth client lacks the local callback used by `seo-google`. See
 
 Песочница убрана: агент `mcp-probe` удалён, клейм ушёл из git,
 `RemoteMCPServer/probe-own-mcp` спрунен.
+
+## 2026-09-12 — Cloud marketing readability
+
+Intent: make Cloud easier to understand and attractive while preserving familiar console interfaces.
+
+- [x] Study live landing, source routes, shared components and console workflows.
+- [x] Rebuild homepage composition with a clear GitHub-to-app story and labelled product illustration.
+- [x] Improve shared marketing sections/header, concise RU/EN copy, Box/MCP explanations.
+- [x] Verify scoped lint/type checks and browser desktop/mobile routes; preserve attribution and console destinations.
+- [x] Show local review artifact; no Cloud deployment or console redesign in this pass.
+
+Review: homepage plus shared marketing templates implemented in existing Cloud identity. Scoped ESLint and TypeScript passed; browser 320/768/1024/1440 home checks, RU/EN route/link checks, menu Escape/focus, illustration switches and FAQ verified. Fixed MCP command-block overflow. Console/global theme and controls unchanged. Preview http://127.0.0.1:4181/. No Cloud deployment.
+
+## 2026-09-12 — Cloud redesign, second iteration
+
+Intent: replace the text-heavy catalogue with clear product choices and a strong visual identity recognizable as Cloud.
+
+- [ ] Recompose homepage around outcome, three starting scenarios, visual workflow and one conversion action.
+- [ ] Rewrite servers, databases/storage, Box and MCP around actual use cases; remove jargon and repeated prose.
+- [ ] Unify light editorial marketing shell, header/footer, shared landing sections and compact consent.
+- [ ] Review desktop/mobile visuals and real navigation/keyboard behavior; targeted lint/types.
+- [ ] Leave updated local preview for review. No infrastructure work.

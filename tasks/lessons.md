@@ -976,3 +976,12 @@ Rule: при замене secret-хранилища инвентаризация
 ## 2026-08-26 — “Показать legacy” не означает оставить platform-owned BYOK вне настоящего пула
 
 Если пользователь уточняет, что проекты `internal` и `platform` являются источниками платформенных ключей, их credentials нужно не только показать read-only, а идемпотентно продвинуть в global pool. Tenant-исключения задаются явно (`fin-core` остаётся BYOK), ciphertext копируется без расшифровки, а cutover получает alias/model snapshot, чтобы включение пула не сужало рабочий каталог.
+
+## 2026-09-12 — Keep design work focused on code
+
+User: «не дрочи сборки — займись кодом».
+Rule: after a bounded delivery verification, do not spend the design task on infrastructure queues, retries or unrelated auth incidents. Record the delivery state and return to interface implementation. A Cloud marketing redesign must not change global console sizing/navigation/theme without an explicit synchronization choice.
+
+## 2026-09-12 — 35% is not a successful redesign
+
+User rated the first Cloud redesign35%: styling improved, but the experience remained too close to the old text-heavy landing. Rule: inspect and rewrite the information architecture and product-page copy, not only shared styles. Give each screen one decision, show its result visually, and remove repeated explanations. Do not call a typography pass a finished redesign. User now explicitly authorizes substantial cuts and marketing design changes; familiar console workflows remain protected.
