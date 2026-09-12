@@ -60,6 +60,50 @@ function ingestEndpoint(): string {
 const ANON_STORAGE_KEY = "dada_ux_aid";
 const SESSION_STORAGE_KEY = "dada_ux_sid";
 
+/**
+ * Cookie mirror of `anon_id`, scoped to the whole `dada-tuda.ru` zone.
+ *
+ * localStorage is origin-scoped, so the browser id minted here is invisible on
+ * `id.dada-tuda.ru` -- which is exactly where a third of the funnel happens.
+ * Live data: 127 people reached `/login` in a 30-day window and only 33 came
+ * back to `/callback`; the 94 in between were unreachable because the Keycloak
+ * host could not read this id and its own Metrika counter has no key that
+ * joins back to a person.
+ *
+ * Same attributes as `dada_uid` (lib/uid-cookie.ts): readable by JS on purpose
+ * -- the Keycloak login theme reads it and sends its events to our ingest with
+ * the SAME id, which is what removes the seam instead of moving it to another
+ * counter.
+ */
+export const ANON_COOKIE_NAME = "dada_aid";
+const ANON_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
+
+/** Reads a cookie value by name, or "" when absent or during SSR. */
+function readCookie(name: string): string {
+  if (typeof document === "undefined") return "";
+  const prefix = `${name}=`;
+  const hit = document.cookie.split("; ").find((c) => c.startsWith(prefix));
+  if (!hit) return "";
+  try {
+    return decodeURIComponent(hit.slice(prefix.length));
+  } catch {
+    return "";
+  }
+}
+
+/** Publishes `anon_id` into the zone-wide cookie so other hosts can report it. */
+function publishAnonCookie(id: string): void {
+  if (typeof document === "undefined" || !id) return;
+  try {
+    const host = document.location.hostname;
+    const domain = /(^|\.)dada-tuda\.ru$/.test(host) ? "; Domain=.dada-tuda.ru" : "";
+    const secure = document.location.protocol === "https:" ? "; Secure" : "";
+    document.cookie = `${ANON_COOKIE_NAME}=${encodeURIComponent(id)}; Path=/; Max-Age=${ANON_COOKIE_MAX_AGE}; SameSite=Lax${domain}${secure}`;
+  } catch {
+    ignore();
+  }
+}
+
 const FLUSH_INTERVAL_MS = 4000;
 const FLUSH_AT_COUNT = 20;
 const QUEUE_MAX = 60;
@@ -122,9 +166,36 @@ function readStoredId(store: Storage | undefined, key: string): string {
   }
 }
 
+/**
+ * The browser's stable id, kept in localStorage and mirrored into the
+ * zone-wide cookie.
+ *
+ * The cookie wins when localStorage is empty: a visitor who first met us on
+ * `id.dada-tuda.ru` (the login theme mints the id there) must keep the SAME id
+ * when they land back on the console, or the two halves of their walk would be
+ * two different people again.
+ */
 function anonId(): string {
   if (typeof window === "undefined") return "";
-  return readStoredId(window.localStorage, ANON_STORAGE_KEY);
+  let id = "";
+  try {
+    id = window.localStorage.getItem(ANON_STORAGE_KEY) ?? "";
+  } catch {
+    ignore();
+  }
+  if (!id) {
+    id = readCookie(ANON_COOKIE_NAME);
+    if (id) {
+      try {
+        window.localStorage.setItem(ANON_STORAGE_KEY, id);
+      } catch {
+        ignore();
+      }
+    }
+  }
+  if (!id) id = readStoredId(window.localStorage, ANON_STORAGE_KEY) || uuid();
+  publishAnonCookie(id);
+  return id;
 }
 
 function sessionId(): string {

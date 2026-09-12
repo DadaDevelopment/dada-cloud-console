@@ -4,11 +4,34 @@ import type { Messages } from "./common";
  * Admin — product adoption funnel (signup -> App/DB/VM/Box/S3/Model -> paid).
  */
 export const adminFunnel: Messages = {
+  "adminFunnel.journey.title": { ru: "Путь пользователя", en: "User journey" },
+  "adminFunnel.journey.body": {
+    ru: "Одна лента, одна шкала, одна единица: человек на каждой ступени. Источник — собственная телеметрия и база, поэтому проценты считаются везде. Серое вниз — отвал. Яндекс.Метрика вынесена в блок внешней сверки ниже: её числа нельзя сопоставить с конкретным человеком.",
+    en: "One ribbon, one scale, one unit: a person at every stage. The source is our own telemetry and database, so every transition has a rate. Grey going down is drop-off. Yandex.Metrika moved to the cross-check block below: its numbers cannot be matched to a person.",
+  },
+  "adminFunnel.journey.empty": {
+    ru: "За окно нет событий телеметрии — воронке не из чего вырасти.",
+    en: "No telemetry events in this window — the funnel has nothing to grow from.",
+  },
+  "adminFunnel.journey.darkNote": {
+    ru: "вход происходит на id.dada-tuda.ru",
+    en: "sign-in happens on id.dada-tuda.ru",
+  },
+  "adminFunnel.journey.scaleLog": { ru: "лог", en: "log" },
+  "adminFunnel.journey.scaleLinear": { ru: "линейная", en: "linear" },
+  "adminFunnel.journey.scaleLabel": { ru: "ширина ленты", en: "ribbon width" },
+  "adminFunnel.journey.door.password": { ru: "почта и пароль", en: "email and password" },
+  "adminFunnel.journey.door.yandex": { ru: "Яндекс ID", en: "Yandex ID" },
+  "adminFunnel.crossCheck.title": { ru: "Внешняя сверка: Яндекс.Метрика", en: "External cross-check: Yandex.Metrika" },
+  "adminFunnel.crossCheck.body": {
+    ru: "Метрика семплирует, теряет людей с блокировщиками и не соединяется со строкой пользователя, поэтому она не участвует в воронке выше. Здесь она нужна как независимый сигнал: если её динамика расходится с нашей — что-то сломано в сборе.",
+    en: "Metrika samples, loses ad-blocked visitors and never joins a user row, so it does not take part in the funnel above. It is kept here as an independent signal: if its trend diverges from ours, collection is broken.",
+  },
   "adminFunnel.crumb.funnel": { ru: "Воронка", en: "Funnel" },
   "adminFunnel.title": { ru: "Воронки продукта", en: "Product funnels" },
   "adminFunnel.subtitle": {
-    ru: "Два подробных пути: веб-источник → аккаунт → первый вход и все customer-аккаунты → ресурсы → оплата.",
-    en: "Two detailed paths: web source to account to first entry, and all customer accounts to resources to payment.",
+    ru: "Единый путь человека на своих данных, плюс внешняя сверка с Метрикой и исторические разрезы.",
+    en: "One person's journey on first-party data, plus the Metrika cross-check and historical breakdowns.",
   },
   "adminFunnel.accessDenied": {
     ru: "Нет доступа. Воронка доступна администраторам и аналитикам платформы.",

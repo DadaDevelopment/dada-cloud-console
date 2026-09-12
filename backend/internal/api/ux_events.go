@@ -104,6 +104,25 @@ func optionalUUID(raw string) *uuid.UUID {
 	return &v
 }
 
+// uxAnonFromRequest resolves the browser id for a batch: the payload value
+// first, then the `dada_aid` cookie.
+//
+// The cookie is what makes the Keycloak host reportable. `id.dada-tuda.ru` is
+// a different origin, so it cannot read the console's localStorage, and its
+// own Metrika counter produces numbers that no query can join back to a
+// person. The login theme reads the zone-wide cookie and posts here with the
+// SAME id, so a walk that crosses the auth host stays one walk.
+func (h *Handler) uxAnonFromRequest(c *gin.Context, payload string) *uuid.UUID {
+	if id := optionalUUID(payload); id != nil {
+		return id
+	}
+	raw, err := c.Cookie("dada_aid")
+	if err != nil {
+		return nil
+	}
+	return optionalUUID(raw)
+}
+
 // uxUserFromCookie resolves the internal user id from the dada_uid cookie,
 // which carries the Keycloak sub published at login and is the same id sent to
 // Yandex.Metrika. Resolved server-side on purpose: a client-supplied user id
@@ -215,7 +234,7 @@ func (h *Handler) RecordUXEvents(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	anonID := optionalUUID(req.AnonID)
+	anonID := h.uxAnonFromRequest(c, req.AnonID)
 	sessionID := optionalUUID(req.SessionID)
 	userID := h.uxUserFromCookie(ctx, c)
 	now := time.Now().UTC()

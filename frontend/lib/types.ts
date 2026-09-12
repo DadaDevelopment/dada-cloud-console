@@ -1676,10 +1676,51 @@ export interface AdminFunnelLifecycle {
   resources: AdminFunnelResource[];
 }
 
+/**
+ * One step of the seamless funnel. Value counts PEOPLE at every stage without
+ * exception -- that is what removes the seams the previous funnel had to warn
+ * about in prose.
+ */
+export interface AdminFunnelJourneyStage {
+  key: string;
+  label: string;
+  value: number;
+  source: string;
+}
+
+/** One part of a breakdown WITHIN a stage (signup door, resource kind). */
+export interface AdminFunnelJourneySlicePart {
+  key: string;
+  value: number;
+}
+
+/**
+ * A breakdown drawn under the spine rather than as a parallel lane: the parts
+ * overlap and do not sum to the stage above them.
+ */
+export interface AdminFunnelJourneySlice {
+  stage_key: string;
+  label: string;
+  parts: AdminFunnelJourneySlicePart[];
+}
+
+/**
+ * The seamless funnel: one identity, one unit, one source. Metrika is absent
+ * here on purpose and reported separately as an external cross-check.
+ * dark_segment names the transition the chain still cannot observe.
+ */
+export interface AdminFunnelJourney {
+  days: number;
+  stages: AdminFunnelJourneyStage[];
+  slices: AdminFunnelJourneySlice[];
+  dark_segment?: string;
+}
+
 export interface AdminFunnelResponse {
   window: string;
   excluded_kinds: string[] | null;
   cohort_counts: AdminFunnelCohortCount[];
+  journey: AdminFunnelJourney;
   channel_funnel: AdminFunnelChannelReport;
   kc_funnel: AdminFunnelKcFunnel;
   acquisition: AdminFunnelAcquisition;

@@ -86,6 +86,7 @@ type adminFunnelResponse struct {
 	Window        string                   `json:"window"`
 	ExcludedKinds []string                 `json:"excluded_kinds"`
 	CohortCounts  []adminFunnelCohortCount `json:"cohort_counts"`
+	Journey       adminFunnelJourney       `json:"journey"`
 	ChannelFunnel adminFunnelChannelReport `json:"channel_funnel"`
 	KcFunnel      adminFunnelKcFunnel      `json:"kc_funnel"`
 	Acquisition   adminFunnelAcquisition   `json:"acquisition"`
@@ -431,6 +432,7 @@ func (h *Handler) GetAdminFunnel(c *gin.Context) {
 		resp.CohortCounts = append(resp.CohortCounts, cc)
 	}
 
+	resp.Journey = h.adminFunnelJourneyReport(c.Request.Context(), funnelWindowDays[window], excludeArg)
 	resp.ChannelFunnel = h.adminFunnelChannelReport(c.Request.Context(), funnelWindowDays[window])
 	resp.KcFunnel = h.adminKcFunnelReport(c.Request.Context(), funnelWindowDays[window])
 
