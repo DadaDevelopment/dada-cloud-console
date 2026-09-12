@@ -47,3 +47,4 @@ __pycache__/
 *.pyc
 backend/autodeploy-detect
 tasks/autodeploy-results.jsonl
+amo.txt

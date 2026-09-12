@@ -72,28 +72,15 @@ func (r *StatusReconciler) reconcileOrphans(ctx context.Context, live map[snapKe
 	}
 
 	repos := map[uuid.UUID]*git.Manager{}
-	var marked, cleared, purged int
+	own, aliveHomes := r.resolveOwnBacking(ctx, snaps, live, repos)
 
+	var marked, cleared, purged int
 	decisions := make([]gcAction, len(snaps))
 	markCount := 0
 	for i, s := range snaps {
-		liveBacked := live[snapKey{s.EnvID, s.Name}]
-
-		mgr, resolved := repos[s.ProjectID]
-		if !resolved {
-			mgr = r.gcRepo(ctx, s.ProjectID)
-			repos[s.ProjectID] = mgr
-		}
-
-		gitVerifiable := mgr != nil
-		gitBacked := gitVerifiable && appGitExists(mgr, s.ProjectSlug, s.EnvSlug, s.Name)
-		if gitVerifiable && !gitBacked {
-			if where, ok := appGitExistsElsewhere(mgr, s.ProjectSlug, s.EnvSlug, s.Name); ok {
-				log.Warn().Str("project", s.ProjectSlug).Str("env", s.EnvSlug).
-					Str("app", s.Name).Str("manifest", where).
-					Msg("orphan-gc: manifest lives outside this row's project/env path — row misfiled, not deleted")
-				gitBacked = true
-			}
+		liveBacked, gitBacked, gitVerifiable := own[i].liveBacked, own[i].gitBacked, own[i].gitVerifiable
+		if gitVerifiable && !gitBacked && !liveBacked {
+			gitBacked = resolveElsewhere(repos[s.ProjectID], s, aliveHomes)
 		}
 
 		decisions[i] = gcDecide(liveBacked, gitBacked, gitVerifiable, s.Phase, s.LastSyncedAt, s.OrphanedAt, now, r.cfg.OrphanMarkAfter, r.cfg.OrphanPurgeAfter)
@@ -146,6 +133,70 @@ func (r *StatusReconciler) reconcileOrphans(ctx context.Context, live map[snapKe
 	}
 
 	r.reconcileChildOrphans(ctx, repos, now)
+}
+
+// ownBacking is one App snapshot's liveBacked/gitBacked/gitVerifiable state
+// computed against its OWN project/env path only, before any cross-project
+// fallback is consulted.
+type ownBacking struct {
+	liveBacked, gitBacked, gitVerifiable bool
+}
+
+// resolveOwnBacking computes each row's ownBacking and, alongside it, aliveHomes:
+// a count, per app name, of how many rows across the WHOLE estate are
+// confirmed alive by their own git manifest or a live pod. An Orphaned or
+// otherwise dead row never contributes to this count, so two dead twins can
+// never vouch for each other. resolveElsewhere uses aliveHomes to tell a
+// genuine cross-project misfile (2026-08-08: zero other rows track the
+// manifest's real path, so the row itself is the estate's only record and
+// must be protected) apart from a stale twin left behind by a real
+// project/env move (the destination already has its own confirmed-alive row,
+// so this one is safe to age out through the normal mark/purge timer).
+func (r *StatusReconciler) resolveOwnBacking(ctx context.Context, snaps []db.GCAppSnapshot, live map[snapKey]bool, repos map[uuid.UUID]*git.Manager) ([]ownBacking, map[string]int) {
+	own := make([]ownBacking, len(snaps))
+	aliveHomes := map[string]int{}
+	for i, s := range snaps {
+		liveBacked := live[snapKey{s.EnvID, s.Name}]
+
+		mgr, resolved := repos[s.ProjectID]
+		if !resolved {
+			mgr = r.gcRepo(ctx, s.ProjectID)
+			repos[s.ProjectID] = mgr
+		}
+
+		gitVerifiable := mgr != nil
+		gitBacked := gitVerifiable && appGitExists(mgr, s.ProjectSlug, s.EnvSlug, s.Name)
+		own[i] = ownBacking{liveBacked, gitBacked, gitVerifiable}
+		if liveBacked || gitBacked {
+			aliveHomes[s.Name]++
+		}
+	}
+	return own, aliveHomes
+}
+
+// resolveElsewhere is consulted only for a row with no own backing. It reports
+// whether the row should be treated as gitBacked=true because its manifest
+// was found filed under a different project/env. See resolveOwnBacking for
+// the aliveHomes distinction between a genuine misfile (protect, log warn)
+// and a stale twin from a real move (let it decay, log info).
+func resolveElsewhere(mgr *git.Manager, s db.GCAppSnapshot, aliveHomes map[string]int) bool {
+	if mgr == nil {
+		return false
+	}
+	where, ok := appGitExistsElsewhere(mgr, s.ProjectSlug, s.EnvSlug, s.Name)
+	if !ok {
+		return false
+	}
+	if aliveHomes[s.Name] > 0 {
+		log.Info().Str("project", s.ProjectSlug).Str("env", s.EnvSlug).
+			Str("app", s.Name).Str("manifest", where).
+			Msg("orphan-gc: manifest re-homed to a confirmed-alive row elsewhere — stale twin left to decay normally")
+		return false
+	}
+	log.Warn().Str("project", s.ProjectSlug).Str("env", s.EnvSlug).
+		Str("app", s.Name).Str("manifest", where).
+		Msg("orphan-gc: manifest lives outside this row's project/env path — row misfiled, not deleted")
+	return true
 }
 
 // gcChildKinds are the child snapshot kinds the orphan GC reconciles: exactly

@@ -20,7 +20,7 @@ import (
 // The deploy path cannot be reused for this. It regenerates values.yaml out of
 // the database, and for an app whose manifests are hand-maintained the database
 // holds almost none of what the file contains -- so the render drops the rest,
-// and guardUnattendedClobber has to refuse the operation to keep it from
+// and guardValuesClobber has to refuse the operation to keep it from
 // deleting a live app's environment and volumes. That refusal is correct and it
 // also meant the autoscaler could not resize any of those apps: every starving
 // one it found on this cluster failed there.

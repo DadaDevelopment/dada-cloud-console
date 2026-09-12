@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dada-tuda/console/gitops-agent/internal/db"
 	"github.com/dada-tuda/console/gitops-agent/internal/git"
 	"github.com/dada-tuda/console/gitops-agent/internal/renderer"
 )
@@ -179,5 +180,44 @@ func TestAppGitExistsElsewhere(t *testing.T) {
 
 	if _, ok := appGitExistsElsewhere(mgr, "platform", "prod", "never-existed"); ok {
 		t.Fatal("a genuinely deleted app must stay deletable")
+	}
+}
+
+// TestResolveElsewhere covers the 2026-08-21 kagent/n8n/pg-router gap:
+// appGitExistsElsewhere alone can't tell a true cross-project misfile (protect
+// forever, per the 08-08 incident) apart from a stale twin left behind by a
+// real project/env move (the destination already has its own confirmed-alive
+// row, so this twin must be allowed to decay through the normal timer).
+// aliveHomes is the disambiguator: zero means misfile, nonzero means moved.
+func TestResolveElsewhere(t *testing.T) {
+	mgr := git.New(git.RepoConfig{
+		RepoURL:   "https://example.com/dadadevelopment/argo-infra.git",
+		Branch:    "live",
+		LocalBase: t.TempDir(),
+	})
+	write := func(rel string) {
+		full := filepath.Join(mgr.LocalPath(), rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(full, []byte("kind: App\n"), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	write(renderer.AppGitPath("agents", "prod", "kagent"))
+	write(renderer.AppGitPath("delivery", "prod", "jenkins"))
+
+	staleTwin := db.GCAppSnapshot{ProjectSlug: "platform", EnvSlug: "prod", Name: "kagent"}
+	if got := resolveElsewhere(mgr, staleTwin, map[string]int{"kagent": 1}); got {
+		t.Fatal("a stale twin with a confirmed-alive home elsewhere must not be protected as misfiled")
+	}
+
+	misfiled := db.GCAppSnapshot{ProjectSlug: "platform", EnvSlug: "prod", Name: "jenkins"}
+	if got := resolveElsewhere(mgr, misfiled, map[string]int{"jenkins": 0}); !got {
+		t.Fatal("a genuine misfile with no other confirmed-alive row must stay protected")
+	}
+
+	if got := resolveElsewhere(nil, staleTwin, map[string]int{"kagent": 1}); got {
+		t.Fatal("an unresolvable repo must never be treated as gitBacked")
 	}
 }
