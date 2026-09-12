@@ -182,10 +182,11 @@ func (h *Handler) runLogSearch(c *gin.Context, maxSize, defaultSize int) (result
 	res, err := cache.Fetch(ctx, h.cache, key, h.cfg.CacheLogsTTL,
 		func() (*logsearch.SearchResult, error) {
 			var (
-				wg       sync.WaitGroup
-				userRes  *logsearch.SearchResult
-				userErr  error
-				infraRes *logsearch.SearchResult
+				wg        sync.WaitGroup
+				userRes   *logsearch.SearchResult
+				userErr   error
+				infraRes  *logsearch.SearchResult
+				infraNote string
 			)
 
 			wg.Add(1)
@@ -205,25 +206,13 @@ func (h *Handler) runLogSearch(c *gin.Context, maxSize, defaultSize int) (result
 				go func() {
 					defer wg.Done()
 					namespaces, nsErr := h.k8sAppNamespaces(ctx, projectID, app)
-					if nsErr != nil {
-						log.Warn().Err(nsErr).Str("app", app).Msg("logs: resolving k8s namespaces")
-						return
-					}
-					if len(namespaces) == 0 {
-						return
-					}
-					infra, infraErr := h.infraLogsearch.Search(ctx, logsearch.SearchOpts{
+					infraRes, infraNote = clusterAppLogs(ctx, h.infraLogsearch, namespaces, nsErr, logsearch.SearchOpts{
 						KubeApp:        app,
 						KubeNamespaces: namespaces,
 						Query:          q,
 						Since:          sinceTime,
 						Size:           size,
 					})
-					if infraErr != nil {
-						log.Warn().Err(infraErr).Str("app", app).Msg("logs: infra stream search")
-						return
-					}
-					infraRes = infra
 				}()
 			}
 
@@ -236,6 +225,9 @@ func (h *Handler) runLogSearch(c *gin.Context, maxSize, defaultSize int) (result
 			if infraRes != nil {
 				res = mergeLogResults(res, infraRes, size)
 			}
+			if infraNote != "" && res != nil {
+				res.Note = infraNote
+			}
 			return res, nil
 		})
 	if err != nil {
@@ -247,6 +239,37 @@ func (h *Handler) runLogSearch(c *gin.Context, maxSize, defaultSize int) (result
 		res.Entries = []logsearch.LogEntry{}
 	}
 	return res, vm, app, sinceParam, true
+}
+
+// clusterLogSearcher is the part of the infra Elasticsearch client this path
+// uses. It is an interface so the degraded paths can be exercised without a
+// cluster.
+type clusterLogSearcher interface {
+	Search(ctx context.Context, opts logsearch.SearchOpts) (*logsearch.SearchResult, error)
+}
+
+// clusterAppLogs searches the cluster log stream for one app and returns, as a
+// note, any reason the search did not happen.
+//
+// For a k8s app this stream is the only one that carries its lines, so a
+// swallowed failure here is indistinguishable from a quiet app: the caller gets
+// {"entries":[],"total":0} and reads a broken query as silence (reported
+// 2026-08-28 for leadgen/prod/lead-gen). No namespaces is not a failure — that
+// is an ordinary VM-only app, which has nothing in this stream by design.
+func clusterAppLogs(ctx context.Context, searcher clusterLogSearcher, namespaces []string, nsErr error, opts logsearch.SearchOpts) (*logsearch.SearchResult, string) {
+	if nsErr != nil {
+		log.Warn().Err(nsErr).Str("app", opts.KubeApp).Msg("logs: resolving k8s namespaces")
+		return nil, "the cluster log stream was not searched: could not resolve the app's namespaces, so these results cover the VM stream only"
+	}
+	if len(namespaces) == 0 {
+		return nil, ""
+	}
+	res, err := searcher.Search(ctx, opts)
+	if err != nil {
+		log.Warn().Err(err).Str("app", opts.KubeApp).Msg("logs: infra stream search")
+		return nil, "the cluster log stream was not searched: " + err.Error()
+	}
+	return res, ""
 }
 
 // k8sAppNamespaces returns the namespaces to search infra logs in for an App:

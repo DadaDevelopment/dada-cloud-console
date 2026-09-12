@@ -259,6 +259,9 @@ func slimSearchLogs(doc map[string]any) any {
 	if total, ok := doc["total"]; ok {
 		out["total"] = total
 	}
+	if note, ok := doc["note"]; ok {
+		out["note"] = note
+	}
 	for _, key := range logEntryConstantKeys {
 		if v, ok := constantAcross(entries, key); ok {
 			out[outKey(key)] = v

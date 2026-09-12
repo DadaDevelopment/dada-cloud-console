@@ -148,3 +148,16 @@ func slimmedRecord(t *testing.T, tool, body, envelope string) map[string]any {
 	t.Logf("%s: %d bytes in, %d bytes out", tool, len(body), len(out))
 	return record
 }
+
+// TestSlimSearchLogsKeepsTheDegradationNote holds the one field that says the
+// answer is incomplete. The slimmer rebuilds the envelope from scratch, so a
+// note it does not copy is a note the caller never sees — and an empty entries
+// list then reads as a quiet app instead of a search that did not run.
+func TestSlimSearchLogsKeepsTheDegradationNote(t *testing.T) {
+	const body = `{"total":0,"entries":[],"note":"the cluster log stream was not searched: elasticsearch search: status 503"}`
+	out := slimResponse("searchLogs", []byte(body))
+
+	if !strings.Contains(string(out), "status 503") {
+		t.Errorf("the slimmer dropped the note, leaving an empty list to speak for a failed search: %s", out)
+	}
+}

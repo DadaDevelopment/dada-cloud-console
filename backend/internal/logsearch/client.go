@@ -116,9 +116,15 @@ type LogEntry struct {
 }
 
 // SearchResult is the normalized search response.
+//
+// Note carries a degradation the caller cannot see in the rows: one of the
+// streams that should have been searched was not. Without it an empty list
+// means both "this app logged nothing" and "the search for its logs broke",
+// and the caller reads a broken query as a quiet app.
 type SearchResult struct {
 	Total   int        `json:"total"`
 	Entries []LogEntry `json:"entries"`
+	Note    string     `json:"note,omitempty"`
 }
 
 type sourceDoc struct {
