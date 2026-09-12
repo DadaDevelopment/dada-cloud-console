@@ -221,3 +221,102 @@ func TestCarriedOverAgent_FieldsSurviveASaveThatDoesNotKnowAboutThem(t *testing.
 		t.Fatalf("an agent that names no Langfuse project must stay without one, got %q", none.LangfuseProjectID)
 	}
 }
+
+// TestFillUnsaid_APromptOnlySaveKeepsTheRestOfTheSpec replays the 2026-09-11
+// native.38 incident: a saveAgent carrying only the prompt re-rendered the whole
+// claim, modelConfig/runtime/description/tools fell out, the agent dropped onto
+// the platform default model tier and the bot went silent for 38 hours. A save
+// that says nothing about a field must leave what git has; a save that names a
+// new value must win.
+func TestFillUnsaid_APromptOnlySaveKeepsTheRestOfTheSpec(t *testing.T) {
+	mgr, valuesPath := agentCarrierFixture(t, "agents", "prod", "native")
+
+	fullSpec := renderer.ManagedAgentSpec{
+		Name:        "native",
+		Namespace:   "kagent",
+		ProjectSlug: "agents",
+		EnvSlug:     "prod",
+		DisplayName: "Hello Trading",
+		Description: "Referral bot",
+		ModelConfig: "tg-referral-glm-53-flash",
+		Runtime:     "python",
+		Prompt:      "Ты помощник.",
+		Tools: []renderer.ManagedAgentToolRef{{
+			Name:     "tg-agent-tools",
+			URL:      "http://tg-agent-tools.agents-prod.svc:8080/mcp",
+			Protocol: "streamable-http",
+			Timeout:  "30s",
+			Headers:  []renderer.ManagedAgentToolHeader{{Name: "X-Project", Value: "agents"}},
+		}},
+		Env: []renderer.ManagedAgentEnvVar{{Name: "REFERRAL_TIER", Value: "flash"}},
+	}
+	yaml, err := renderer.RenderManagedAgent(fullSpec)
+	if err != nil {
+		t.Fatalf("RenderManagedAgent(full): %v", err)
+	}
+	var b strings.Builder
+	b.WriteString("manifests:\n")
+	for i, line := range strings.Split(strings.TrimRight(yaml, "\n"), "\n") {
+		if i == 0 {
+			b.WriteString("  - " + line + "\n")
+			continue
+		}
+		b.WriteString("    " + line + "\n")
+	}
+	full := filepath.Join(mgr.LocalPath(), valuesPath)
+	if err := os.WriteFile(full, []byte(b.String()), 0o644); err != nil {
+		t.Fatalf("write values: %v", err)
+	}
+
+	carried, err := carriedOverAgent(mgr, valuesPath, "native")
+	if err != nil {
+		t.Fatalf("carriedOverAgent: %v", err)
+	}
+
+	promptOnly := renderer.ManagedAgentSpec{
+		Name:        "native",
+		Namespace:   "kagent",
+		ProjectSlug: "agents",
+		EnvSlug:     "prod",
+		Prompt:      "Ты помощник. Отвечай коротко.",
+	}
+	fillUnsaid(&promptOnly, carried)
+	saved, err := renderer.RenderManagedAgent(promptOnly)
+	if err != nil {
+		t.Fatalf("RenderManagedAgent(prompt-only): %v", err)
+	}
+	for _, want := range []string{
+		"modelConfig: tg-referral-glm-53-flash",
+		"runtime: python",
+		`displayName: "Hello Trading"`,
+		`description: "Referral bot"`,
+		"- name: tg-agent-tools",
+		"url: http://tg-agent-tools.agents-prod.svc:8080/mcp",
+		"protocol: streamable-http",
+		"timeout: 30s",
+		`- name: "X-Project"`,
+		"- name: REFERRAL_TIER",
+		`value: "flash"`,
+		"Отвечай коротко.",
+	} {
+		if !strings.Contains(saved, want) {
+			t.Fatalf("a prompt-only save lost %q from the claim:\n%s", want, saved)
+		}
+	}
+
+	retargeted := renderer.ManagedAgentSpec{
+		Name:        "native",
+		Namespace:   "kagent",
+		ProjectSlug: "agents",
+		EnvSlug:     "prod",
+		Prompt:      "Ты помощник.",
+		ModelConfig: "tg-referral-gpt5-mini",
+	}
+	fillUnsaid(&retargeted, carried)
+	if retargeted.ModelConfig != "tg-referral-gpt5-mini" {
+		t.Fatalf("a save that names a new modelConfig must win, got %q", retargeted.ModelConfig)
+	}
+	if retargeted.Runtime != "python" || len(retargeted.Tools) != 1 {
+		t.Fatalf("naming one field must not drop the others: %#v", retargeted)
+	}
+}

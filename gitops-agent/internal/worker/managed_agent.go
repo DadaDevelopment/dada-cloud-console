@@ -53,22 +53,35 @@ type managedAgentPayload struct {
 // per-project runtime does not need a new operation action.
 const defaultAgentRuntimeNamespace = "kagent"
 
-// carriedOverAgentFields are the parts of a claim the console does not know
-// about and therefore cannot re-state on a save.
+// carriedOverAgentFields are the parts of the claim in git that a save may
+// leave unsaid, and that the file must then keep.
 type carriedOverAgentFields struct {
-	Memory            *renderer.ManagedAgentMemory
+	DisplayName       string
+	Description       string
+	ModelConfig       string
+	Runtime           string
 	LangfuseProjectID string
+	Memory            *renderer.ManagedAgentMemory
+	Tools             []renderer.ManagedAgentToolRef
+	Env               []renderer.ManagedAgentEnvVar
 }
 
-// carriedOverAgent returns the fields the claim in git already declares that a
-// console save would otherwise erase.
+// carriedOverAgent returns what the claim in git already declares, so a save
+// that says nothing about a field does not erase it.
 //
-// A save re-states every field the console knows, and what it does not know
-// would leave the file on that save. Long-term memory is one such field -- an
-// agent onboarded by hand can keep thirty days of notes, and dropping them
-// because somebody fixed a typo in the prompt is a data loss nobody would
-// connect to the edit that caused it. The Langfuse project is the other: lose
-// it and the agent keeps running while its "traces" link goes silent.
+// Two kinds of field need this. The ones the console does not know about at
+// all: long-term memory -- an agent onboarded by hand can keep thirty days of
+// notes, and dropping them because somebody fixed a typo in the prompt is a
+// data loss nobody would connect to the edit -- and the Langfuse project, which
+// when lost leaves the agent running while its "traces" link goes silent.
+//
+// And the ones the console knows but a caller may not restate. saveAgent over
+// MCP with only a new prompt (2026-09-11, native.38) wrote a claim with no
+// modelConfig, runtime or tools: the agent fell back to the default model
+// config, whose tier was broken, every turn ran past the A2A timeout and the
+// bot went silent for 38 hours. An edit to the prompt had unplugged the model.
+// A field left empty on a save now means "keep what git has"; a caller that
+// wants a field gone sets it to something else, not to nothing.
 func carriedOverAgent(mgr *git.Manager, valuesPath, name string) (carriedOverAgentFields, error) {
 	var out carriedOverAgentFields
 	rv, err := loadResourcesValues(mgr, valuesPath)
@@ -81,16 +94,40 @@ func carriedOverAgent(mgr *git.Manager, valuesPath, name string) (carriedOverAge
 	}
 	var claim struct {
 		Spec struct {
+			DisplayName       string `yaml:"displayName"`
+			Description       string `yaml:"description"`
+			ModelConfig       string `yaml:"modelConfig"`
+			Runtime           string `yaml:"runtime"`
 			LangfuseProjectID string `yaml:"langfuseProjectId"`
 			Memory            *struct {
 				ModelConfig string `yaml:"modelConfig"`
 				TTLDays     int    `yaml:"ttlDays"`
 			} `yaml:"memory"`
+			Tools []struct {
+				Name        string `yaml:"name"`
+				URL         string `yaml:"url"`
+				Description string `yaml:"description"`
+				Timeout     string `yaml:"timeout"`
+				Protocol    string `yaml:"protocol"`
+				Headers     []struct {
+					Name  string `yaml:"name"`
+					Value string `yaml:"value"`
+				} `yaml:"headers"`
+				AllowedHeaders []string `yaml:"allowedHeaders"`
+			} `yaml:"tools"`
+			Env []struct {
+				Name  string `yaml:"name"`
+				Value string `yaml:"value"`
+			} `yaml:"env"`
 		} `yaml:"spec"`
 	}
 	if err := yaml.Unmarshal([]byte(existing), &claim); err != nil {
 		return out, fmt.Errorf("parse existing agent %q: %w", name, err)
 	}
+	out.DisplayName = claim.Spec.DisplayName
+	out.Description = claim.Spec.Description
+	out.ModelConfig = claim.Spec.ModelConfig
+	out.Runtime = claim.Spec.Runtime
 	out.LangfuseProjectID = claim.Spec.LangfuseProjectID
 	if claim.Spec.Memory != nil && claim.Spec.Memory.ModelConfig != "" {
 		out.Memory = &renderer.ManagedAgentMemory{
@@ -98,7 +135,50 @@ func carriedOverAgent(mgr *git.Manager, valuesPath, name string) (carriedOverAge
 			TTLDays:     claim.Spec.Memory.TTLDays,
 		}
 	}
+	for _, t := range claim.Spec.Tools {
+		tool := renderer.ManagedAgentToolRef{
+			Name:           t.Name,
+			URL:            t.URL,
+			Description:    t.Description,
+			Timeout:        t.Timeout,
+			Protocol:       t.Protocol,
+			AllowedHeaders: t.AllowedHeaders,
+		}
+		for _, h := range t.Headers {
+			tool.Headers = append(tool.Headers, renderer.ManagedAgentToolHeader{Name: h.Name, Value: h.Value})
+		}
+		out.Tools = append(out.Tools, tool)
+	}
+	for _, e := range claim.Spec.Env {
+		out.Env = append(out.Env, renderer.ManagedAgentEnvVar{Name: e.Name, Value: e.Value})
+	}
 	return out, nil
+}
+
+// fillUnsaid completes a save with what git already holds for every field the
+// save left empty. Memory and the Langfuse project are always taken from git,
+// because no save can state them; the rest only when the save did not.
+func fillUnsaid(spec *renderer.ManagedAgentSpec, carried carriedOverAgentFields) {
+	spec.Memory = carried.Memory
+	spec.LangfuseProjectID = carried.LangfuseProjectID
+	if spec.DisplayName == "" {
+		spec.DisplayName = carried.DisplayName
+	}
+	if spec.Description == "" {
+		spec.Description = carried.Description
+	}
+	if spec.ModelConfig == "" {
+		spec.ModelConfig = carried.ModelConfig
+	}
+	if spec.Runtime == "" {
+		spec.Runtime = carried.Runtime
+	}
+	if len(spec.Tools) == 0 {
+		spec.Tools = carried.Tools
+	}
+	if len(spec.Env) == 0 {
+		spec.Env = carried.Env
+	}
 }
 
 // doCreateAgent writes one ManagedAgent claim into the project's agent carrier
@@ -161,8 +241,7 @@ func (w *DBWatcher) doCreateAgent(ctx context.Context, op db.Operation) error {
 	if err != nil {
 		return err
 	}
-	spec.Memory = carried.Memory
-	spec.LangfuseProjectID = carried.LangfuseProjectID
+	fillUnsaid(&spec, carried)
 
 	yaml, err := renderer.RenderManagedAgent(spec)
 	if err != nil {
@@ -192,10 +271,10 @@ func (w *DBWatcher) doCreateAgent(ctx context.Context, op db.Operation) error {
 	summaryJSON, _ := json.Marshal(map[string]any{
 		"name":           p.Name,
 		"kind":           "ManagedAgent",
-		"display_name":   p.DisplayName,
+		"display_name":   spec.DisplayName,
 		"namespace":      spec.Namespace,
 		"prompt_version": p.PromptVersion,
-		"model_config":   p.ModelConfig,
+		"model_config":   spec.ModelConfig,
 		"status":         "Pending",
 	})
 	return db.UpsertSnapshot(ctx, w.pool,

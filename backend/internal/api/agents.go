@@ -152,7 +152,7 @@ func (h *Handler) ListAgents(c *gin.Context) {
 //
 // @ID          saveAgent
 // @Summary     Create or update an agent
-// @Description Queues the git write for one agent (prompt, tools, model). Async: returns 202 with an operation; poll until terminal. Re-posting the same name updates that agent.
+// @Description Queues the git write for one agent (prompt, tools, model). Async: returns 202 with an operation; poll until terminal. Re-posting the same name updates that agent; a field left out keeps its current value, so a prompt-only save does not drop the model, runtime or tools.
 // @Tags        agents
 // @Accept      json
 // @Produce     json
