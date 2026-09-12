@@ -2,329 +2,140 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { ArrowRight, Box, Check, Database, Gem, Minus, Plug, Rocket, Zap } from "lucide-react";
-import { clsx } from "clsx";
+import { ArrowDown, ArrowRight, Box, Code2, Globe, Laptop, Terminal } from "lucide-react";
 import { useLang } from "@/lib/i18n/context";
 import { BOX_UTM_SOURCE, reportBoxPageView } from "@/lib/box-events";
 import { boxCopy } from "@/lib/box-copy";
 import { localeHref } from "@/lib/site";
-import { BoxDemo } from "@/components/marketing/box-demo";
-import { BoxConnect } from "@/components/marketing/box-connect";
-import { BoxAccessForm } from "@/components/marketing/box-access-form";
-import { FaqList } from "@/components/marketing/sections";
-import { FaqJsonLd } from "@/components/marketing/faq-jsonld";
+import { BoxDemo } from "./box-demo";
+import { BoxConnect } from "./box-connect";
+import { BoxAccessForm } from "./box-access-form";
+import { FaqJsonLd } from "./faq-jsonld";
+import styles from "./agent-products.module.css";
 
-/**
- * Dada Box landing, rendered at /box (RU) and /en/box (EN).
- *
- * Started as a fake-door experiment (docs/product/box-product-brief.md) but the
- * mechanics it was testing — self-service boot from a warm pool, public TLS
- * addresses, per-minute billing — are live now, proven against the production
- * MCP endpoint. The "connect in 60 seconds" section carries the primary CTA
- * because that is the door that now actually opens; the request form stays as
- * the fallback for anyone who wants a hand instead of a config snippet. The
- * "what works / what doesn't" section keeps the remaining honesty rules: it is
- * not filler, it is what stops the copy from claiming more than we've proven.
- */
-
-const STEP_ICONS = [Zap, Plug, Database, Gem];
-
-/**
- * In-page CTA targets, carrying `utm_source=door_box`.
- *
- * Same pattern as the other landings (`/login?utm_source=door_b`), so the tag
- * is in the URL from the first click onward and the funnel's `utm_source` lines up
- * with the existing `door_*` tests. The difference is that this landing's
- * conversion IS the form on the page — there is no /login hop to carry the tag
- * for us — so the CTAs stay in-page anchors and the tag rides the query string of
- * the landing's own URL. Written out in full rather than as a bare `?...#...`
- * relative href so the target is unambiguous on both /box and /en/box.
- */
-function ctaHref(path: string, locale: "ru" | "en", hash: string): string {
-  return `${localeHref(path, locale)}?utm_source=${BOX_UTM_SOURCE}#${hash}`;
+function ctaHref(locale: "ru" | "en", hash: string): string {
+  return `${localeHref("/box", locale)}?utm_source=${BOX_UTM_SOURCE}#${hash}`;
 }
 
 export function BoxLanding() {
   const { locale } = useLang();
   const copy = boxCopy[locale];
-  const ctaConnect = ctaHref("/box", locale, "connect");
-  const ctaAccess = ctaHref("/box", locale, "access");
-  const ctaDemo = ctaHref("/box", locale, "demo");
+  const isRu = locale === "ru";
+  const connectHref = ctaHref(locale, "connect");
+  const helpHref = ctaHref(locale, "access");
+  // The historical replay also includes experimental VM promotion. Keep the
+  // working Box illustration separate from the explicitly qualified VM details.
+  const promotionIndex = copy.demo.lines.findIndex((line) => line.kind === "cmd" && line.text.includes("crystallize"));
+  const demoLines = promotionIndex < 0 ? copy.demo.lines : copy.demo.lines.slice(0, promotionIndex);
 
-  // Top of the funnel, recorded server-side once per session. Without this the
-  // denominator of "view -> request" lives in Yandex Metrika while the numerator
-  // lives in our own tables, and the ratio becomes something to argue about
-  // instead of something to use.
   useEffect(() => {
     reportBoxPageView(locale);
   }, [locale]);
 
+  const steps = isRu ? [
+    { title: "Подключите агента", text: "Добавьте DADA Cloud в Claude Code или другой MCP-клиент. Войдите в свой аккаунт через браузер." },
+    { title: "Выделите ему Box", text: "Агент создаст отдельное окружение для задачи. Код, зависимости и сборка будут выполняться в облаке." },
+    { title: "Покажите результат", text: "Откройте порт приложения по HTTPS, чтобы поделиться прототипом. Состояние бокса видно в консоли." },
+  ] : [
+    { title: "Connect your agent", text: "Add DADA Cloud to Claude Code or another MCP client. Sign in to your account through the browser." },
+    { title: "Give it a Box", text: "Your agent creates a separate environment for the task. Code, dependencies and builds run in the cloud." },
+    { title: "Share the result", text: "Expose an app port over HTTPS to share your prototype. Check the box status in the console." },
+  ];
+
   return (
-    <>
+    <div className={styles.page}>
       <FaqJsonLd path="/box" items={copy.faq.items} />
-
-      {/* Hero */}
-      <section className="mkt-hero-gradient">
-        <div className="mkt-grid-bg">
-          <div className="mx-auto max-w-7xl px-4 py-24 sm:px-6 lg:px-8 lg:py-32">
-            <span className="mb-5 inline-flex items-center gap-2 rounded-full border border-amber-400/30 bg-amber-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-amber-300">
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
-              {copy.badge}
-            </span>
-            <h1 className="max-w-4xl text-4xl font-bold leading-tight tracking-tight text-white sm:text-5xl lg:text-6xl">
-              {copy.heroTitle}
-            </h1>
-            <p className="mt-6 max-w-2xl text-lg text-white/70 sm:text-xl">{copy.heroSubtitle}</p>
-            <div className="mt-9 flex flex-wrap items-center gap-3">
-              <Link
-                href={ctaConnect}
-                data-ux="box_connect:hero_cta"
-                className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-7 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
-              >
-                <Box className="h-4 w-4" />
-                {copy.heroPrimary}
+      <section className={styles.hero}>
+        <div className={`${styles.wrap} ${styles.heroGrid}`}>
+          <div>
+            <p className={styles.eyebrow}>DADA BOX <span /> {copy.badge}</p>
+            <h1 className={styles.title}>{copy.heroTitle}</h1>
+            <p className={styles.lead}>{copy.heroSubtitle}</p>
+            <div className={styles.actions}>
+              <Link href={connectHref} data-ux="box_connect:hero_cta" className={styles.primary}>
+                {copy.heroPrimary}<ArrowRight size={17} aria-hidden="true" />
               </Link>
-              <Link
-                href={ctaDemo}
-                className="rounded-md border border-white/20 px-7 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/5"
-              >
-                {copy.heroSecondary}
-              </Link>
+              <Link href={ctaHref(locale, "how")} className={styles.secondary}>{copy.heroSecondary}</Link>
             </div>
-            <p className="mt-6 text-sm text-white/50">{copy.heroNote}</p>
+            <p className={styles.note}>{copy.heroNote}</p>
           </div>
-        </div>
-      </section>
-
-      {/* Problem */}
-      <section className="bg-white py-20">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="mb-12 max-w-2xl">
-            <h2 className="text-3xl font-bold tracking-tight text-slate-900">
-              {copy.problem.title}
-            </h2>
-            <p className="mt-3 text-lg text-slate-600">{copy.problem.subtitle}</p>
-          </div>
-          <div className="grid gap-6 md:grid-cols-3">
-            {copy.problem.items.map((item) => (
-              <div key={item.title} className="rounded-xl border border-slate-200 bg-white p-7">
-                <h3 className="text-lg font-semibold text-slate-900">{item.title}</h3>
-                <p className="mt-2 text-sm text-slate-600">{item.desc}</p>
+          <div className={styles.diagram} aria-label={isRu ? "Ваш агент выполняет задачи в отдельном облачном компьютере" : "Your agent runs tasks on a separate cloud computer"}>
+            <p className={styles.diagramLabel}>{isRu ? "Ваш агент. Отдельное окружение." : "Your agent. A separate environment."}</p>
+            <div className={styles.agentNode}><Laptop size={18} aria-hidden="true" />Claude · Cursor · Codex</div>
+            <div className={styles.connector}><ArrowDown size={21} aria-hidden="true" /></div>
+            <div className={styles.cloudNode}>
+              <div className={styles.nodeHead}>
+                <span className={styles.nodeIcon}><Box size={25} aria-hidden="true" /></span>
+                <div><strong>DADA Box</strong><small>{isRu ? "Компьютер в облаке · root-доступ" : "Cloud computer · root access"}</small></div>
               </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* How it works */}
-      <section id="how" className="scroll-mt-20 bg-slate-50 py-20">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="mb-12 max-w-2xl">
-            <h2 className="text-3xl font-bold tracking-tight text-slate-900">{copy.how.title}</h2>
-            <p className="mt-3 text-lg text-slate-600">{copy.how.subtitle}</p>
-          </div>
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            {copy.how.steps.map((step, i) => {
-              const Icon = STEP_ICONS[i] ?? Zap;
-              return (
-                <div
-                  key={step.title}
-                  className="flex flex-col rounded-xl border border-slate-200 bg-white p-6"
-                >
-                  <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-white">
-                    <Icon className="h-5 w-5" />
-                  </div>
-                  <code className="mb-3 w-fit rounded bg-slate-100 px-2 py-1 font-mono text-xs text-slate-700">
-                    {step.cmd}
-                  </code>
-                  <h3 className="text-base font-semibold text-slate-900">{step.title}</h3>
-                  <p className="mt-2 text-sm text-slate-600">{step.desc}</p>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </section>
-
-      {/* Connect in 60 seconds — the door that actually opens */}
-      <BoxConnect copy={copy.connect} helpHref={ctaAccess} />
-
-      {/* Scripted terminal replay */}
-      <BoxDemo
-        title={copy.demo.title}
-        subtitle={copy.demo.subtitle}
-        recordingLabel={copy.demo.recordingLabel}
-        playLabel={copy.demo.playLabel}
-        replayLabel={copy.demo.replayLabel}
-        lines={copy.demo.lines}
-      />
-
-      {/* Crystallization — the differentiator */}
-      <section className="bg-white py-20">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="grid gap-12 lg:grid-cols-2 lg:items-center">
-            <div>
-              <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600 text-white">
-                <Gem className="h-6 w-6" />
+              <div className={styles.nodeResources}>
+                <span><Code2 size={13} aria-hidden="true" />{isRu ? "Код и файлы" : "Code and files"}</span>
+                <span><Terminal size={13} aria-hidden="true" />{isRu ? "Команды и сборка" : "Commands and builds"}</span>
+                <span><Globe size={13} aria-hidden="true" />HTTPS</span>
               </div>
-              <h2 className="text-3xl font-bold tracking-tight text-slate-900">
-                {copy.crystal.title}
-              </h2>
-              <p className="mt-3 text-lg text-slate-600">{copy.crystal.subtitle}</p>
-              <p className="mt-5 rounded-lg border-l-4 border-blue-500 bg-blue-50 p-4 text-sm text-slate-700">
-                {copy.crystal.note}
-              </p>
             </div>
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-7">
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-                {copy.crystal.carriedTitle}
-              </h3>
-              <ul className="mt-5 space-y-3">
-                {copy.crystal.carried.map((item) => (
-                  <li key={item} className="flex items-start gap-3 text-sm text-slate-800">
-                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <p className={styles.diagramFoot}>{isRu ? "Задачи выполняются здесь. Ваш ноутбук свободен." : "Tasks run here. Your laptop stays free."}</p>
           </div>
         </div>
       </section>
 
-      {/* Objections */}
-      <section className="bg-slate-50 py-20">
-        <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
-          <div className="mb-10 max-w-2xl">
-            <h2 className="text-3xl font-bold tracking-tight text-slate-900">{copy.vps.title}</h2>
-            <p className="mt-3 text-lg text-slate-600">{copy.vps.subtitle}</p>
+      <section id="how" className={`${styles.section} ${styles.sectionWhite} scroll-mt-24`}>
+        <div className={styles.wrap}>
+          <div className={styles.sectionHead}>
+            <h2 className={styles.heading}>{isRu ? "От задачи до ссылки на результат" : "From a task to a link you can share"}</h2>
+            <p className={styles.description}>{isRu ? "Для прототипов, сборок и экспериментов, которым тесно на рабочей машине." : "For prototypes, builds and experiments that need room beyond your own machine."}</p>
           </div>
-          <div className="space-y-4">
-            {copy.vps.rows.map((row) => (
-              <div key={row.claim} className="rounded-xl border border-slate-200 bg-white p-6">
-                <p className="text-base font-semibold text-slate-900">— {row.claim}</p>
-                <p className="mt-2 text-sm text-slate-600">{row.answer}</p>
+          <div className={styles.steps}>{steps.map((step, i) => (
+            <div key={step.title} className={styles.step}><span className={styles.stepNumber}>0{i + 1}</span><h3>{step.title}</h3><p>{step.text}</p></div>
+          ))}</div>
+        </div>
+      </section>
+
+      <div className={styles.embedded}><BoxConnect copy={copy.connect} helpHref={helpHref} /></div>
+
+      <section className={styles.section}>
+        <div className={styles.wrap}>
+          <div className={styles.sectionHead}><h2 className={styles.heading}>{copy.pricing.title}</h2><p className={styles.description}>{copy.pricing.subtitle}</p></div>
+          {copy.pricing.tiers.slice(0, 2).map((tier) => (
+            <div key={tier.name} className={styles.priceRow}><h3>{tier.name}</h3><strong>{tier.price}</strong><p>{tier.note}</p></div>
+          ))}
+          <p className={styles.note}>{copy.pricing.disclaimer} <Link href={localeHref("/pricing", locale)} className="font-semibold text-blue-600 hover:underline">{isRu ? "Все тарифы →" : "All plans →"}</Link></p>
+          <p className={styles.limit}>{copy.crystal.note}</p>
+        </div>
+      </section>
+
+      <section className={`${styles.section} ${styles.sectionWhite}`}>
+        <div className={styles.wrap}>
+          <div className={styles.sectionHead}><h2 className={styles.heading}>{isRu ? "Что стоит знать" : "Before you start"}</h2><p className={styles.description}>{isRu ? "Возможности, ограничения и ответы без мелкого шрифта." : "Capabilities, limits and answers without the fine print."}</p></div>
+          <div className={styles.detailsGrid}>
+            {copy.faq.items.map((item) => <details className={styles.detail} key={item.q}><summary>{item.q}</summary><div className={styles.detailBody}><p>{item.a}</p></div></details>)}
+            <details className={styles.detail}>
+              <summary>{copy.honesty.title}</summary>
+              <div className={styles.detailBody}>
+                <p>{copy.honesty.subtitle}</p>
+                <h3>{copy.honesty.worksTitle}</h3><ul>{copy.honesty.works.map((item) => <li key={item}>{item}</li>)}</ul>
+                <h3>{copy.honesty.notYetTitle}</h3><ul>{copy.honesty.notYet.map((item) => <li key={item}>{item}</li>)}</ul>
               </div>
-            ))}
+            </details>
+            <details className={styles.detail}>
+              <summary>{copy.crystal.title}</summary>
+              <div className={styles.detailBody}><p>{copy.crystal.subtitle}</p><p>{copy.crystal.note}</p><h3>{copy.crystal.carriedTitle}</h3><ul>{copy.crystal.carried.map((item) => <li key={item}>{item}</li>)}</ul></div>
+            </details>
+            <details className={styles.detail}>
+              <summary>{isRu ? "Посмотреть пример работы с Box" : "See an example Box workflow"}</summary>
+              <div className={styles.disclosureDemo}><BoxDemo title={copy.demo.title} subtitle={copy.demo.subtitle} recordingLabel={copy.demo.recordingLabel} playLabel={copy.demo.playLabel} replayLabel={copy.demo.replayLabel} lines={demoLines} /></div>
+            </details>
           </div>
         </div>
       </section>
 
-      {/* Pricing hypothesis */}
-      <section className="bg-white py-20">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="mb-12 max-w-2xl">
-            <h2 className="text-3xl font-bold tracking-tight text-slate-900">
-              {copy.pricing.title}
-            </h2>
-            <p className="mt-3 text-lg text-slate-600">{copy.pricing.subtitle}</p>
-          </div>
-          <div className="grid gap-6 md:grid-cols-3">
-            {copy.pricing.tiers.map((tier) => (
-              <div key={tier.name} className="rounded-xl border border-slate-200 bg-white p-7">
-                <h3 className="text-lg font-semibold text-slate-900">{tier.name}</h3>
-                <div className="mt-2 text-xl font-bold text-blue-600">{tier.price}</div>
-                <p className="mt-3 text-sm text-slate-600">{tier.note}</p>
-              </div>
-            ))}
-          </div>
-          <p className="mt-8 max-w-2xl text-sm text-slate-500">{copy.pricing.disclaimer}</p>
-        </div>
-      </section>
-
-      <FaqList title={copy.faq.title} items={copy.faq.items} />
-
-      {/* Radical honesty — what is real today and what is not */}
-      <section className="bg-slate-900 py-20">
-        <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
-          <div className="mb-10 max-w-2xl">
-            <h2 className="text-3xl font-bold tracking-tight text-white">{copy.honesty.title}</h2>
-            <p className="mt-3 text-lg text-white/60">{copy.honesty.subtitle}</p>
-          </div>
-          <div className="grid gap-6 md:grid-cols-2">
-            <HonestyCard
-              tone="works"
-              title={copy.honesty.worksTitle}
-              items={copy.honesty.works}
-            />
-            <HonestyCard
-              tone="pending"
-              title={copy.honesty.notYetTitle}
-              items={copy.honesty.notYet}
-            />
-          </div>
-        </div>
-      </section>
-
-      <BoxAccessForm copy={copy} locale={locale} />
-
-      {/* Closing nudge back to the door */}
-      <section className="mkt-hero-gradient">
-        <div className="mx-auto max-w-7xl px-4 py-16 text-center sm:px-6 lg:px-8">
-          <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
-            {copy.heroTitle}
-          </h2>
-          <p className="mx-auto mt-4 max-w-xl text-lg text-white/70">{copy.heroNote}</p>
-          <Link
-            href={ctaConnect}
-            data-ux="box_connect:closing_cta"
-            className="mt-8 inline-flex items-center gap-2 rounded-md bg-blue-600 px-8 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
-          >
-            <Rocket className="h-4 w-4" />
-            {copy.heroPrimary}
-            <ArrowRight className="h-4 w-4" />
-          </Link>
-        </div>
-      </section>
-    </>
-  );
-}
-
-function HonestyCard({
-  tone,
-  title,
-  items,
-}: {
-  tone: "works" | "pending";
-  title: string;
-  items: string[];
-}) {
-  const works = tone === "works";
-  const Icon = works ? Check : Minus;
-  return (
-    <div
-      className={clsx(
-        "rounded-xl border p-7",
-        works ? "border-emerald-400/30 bg-emerald-500/5" : "border-white/15 bg-white/5",
-      )}
-    >
-      <h3
-        className={clsx(
-          "text-sm font-semibold uppercase tracking-wide",
-          works ? "text-emerald-300" : "text-white/50",
-        )}
-      >
-        {title}
-      </h3>
-      <ul className="mt-5 space-y-3">
-        {items.map((item) => (
-          <li
-            key={item}
-            className={clsx(
-              "flex items-start gap-3 text-sm",
-              works ? "text-white/85" : "text-white/60",
-            )}
-          >
-            <Icon
-              className={clsx(
-                "mt-0.5 h-4 w-4 shrink-0",
-                works ? "text-emerald-400" : "text-white/40",
-              )}
-            />
-            <span>{item}</span>
-          </li>
-        ))}
-      </ul>
+      <div className={styles.embedded}><BoxAccessForm copy={copy} locale={locale} /></div>
+      <div className={styles.wrap}>
+        <section className={styles.callout}>
+          <div><h2 className={styles.heading}>{isRu ? "Начните с одной задачи" : "Start with one task"}</h2><p>{copy.heroNote}</p></div>
+          <Link href={connectHref} data-ux="box_connect:closing_cta" className={styles.primary}>{copy.heroPrimary}<ArrowRight size={17} aria-hidden="true" /></Link>
+        </section>
+      </div>
     </div>
   );
 }

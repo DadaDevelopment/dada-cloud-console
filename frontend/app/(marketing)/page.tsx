@@ -1,253 +1,62 @@
 "use client";
 
 import Link from "next/link";
-import {
-  GitBranch,
-  Database,
-  Globe,
-  RotateCcw,
-  ScrollText,
-  ArrowRight,
-  Check,
-} from "lucide-react";
+import { ArrowRight, ArrowUpRight, Box, Check, GitBranch, Server, Database, HardDrive, Sparkles } from "lucide-react";
 import { useLang } from "@/lib/i18n/context";
 import { consoleHref, localeHref } from "@/lib/site";
-import { CtaBand, FaqList } from "@/components/marketing/sections";
+import { FaqList } from "@/components/marketing/sections";
 import { GOAL_LANDING_CTA, reachGoal } from "@/lib/metrika";
 import { HomeJsonLd } from "@/components/marketing/home-jsonld";
-import { McpAgentSection } from "@/components/marketing/mcp-agent";
-import { BoxSpotlight } from "@/components/marketing/box-spotlight";
-import { clsx } from "clsx";
-
-const STEP_ICONS = [GitBranch, Database, RotateCcw];
-const VALUE_ICONS = [GitBranch, Globe, ScrollText];
+import { DeployPreview } from "@/components/marketing/deploy-preview";
+import { LaunchScene } from "@/components/marketing/launch-scene";
+import styles from "./home.module.css";
 
 export default function HomePage() {
   const { t, locale } = useLang();
-
-  return (
-    <>
-      <HomeJsonLd />
-      {/* Hero */}
-      <section className="mkt-hero-gradient">
-        <div className="mkt-grid-bg">
-          <div className="mx-auto max-w-7xl px-4 py-24 sm:px-6 lg:px-8 lg:py-32">
-            <span className="mb-5 inline-flex items-center gap-2 rounded-full border border-blue-400/30 bg-blue-500/10 px-3 py-1 text-xs font-semibold text-blue-300">
-              <span className="h-1.5 w-1.5 rounded-full bg-blue-400" />
-              {t.home.heroBadge}
-            </span>
-            <h1 className="max-w-4xl text-4xl font-bold leading-tight tracking-tight text-white sm:text-5xl lg:text-6xl">
-              {t.home.heroTitle}
-            </h1>
-            <p className="mt-6 max-w-2xl text-lg text-white/70 sm:text-xl">{t.home.heroSubtitle}</p>
-            <div className="mt-9 flex flex-wrap gap-3">
-              <Link
-                href={consoleHref("/login")}
-                onClick={() => reachGoal(GOAL_LANDING_CTA, { source: "direct", placement: "hero" })}
-                className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-7 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
-              >
-                <GitBranch className="h-4 w-4" />
-                {t.home.heroPrimary}
-              </Link>
-              <Link
-                href="#how"
-                className="rounded-md border border-white/20 px-7 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/5"
-              >
-                {t.home.heroSecondary}
-              </Link>
-              <Link
-                href={localeHref("/pricing", locale)}
-                className="rounded-md px-7 py-3 text-sm font-semibold text-white/70 transition-colors hover:text-white"
-              >
-                {t.home.heroTertiary}
-              </Link>
-            </div>
-          </div>
+  const en = locale === "en";
+  const start = (placement: string) => reachGoal(GOAL_LANDING_CTA, { source: "direct", placement });
+  const choices = [
+    { icon: GitBranch, label: en ? "01 / APPLICATIONS" : "01 / ПРИЛОЖЕНИЯ", title: en ? "I have code.\nI want it online." : "Есть код.\nНужен запуск.", text: en ? "Connect GitHub. Get builds, a public address and logs in one place." : "Подключите GitHub. Получите сборку, адрес приложения и логи в одном месте.", action: en ? "Deploy an app" : "Запустить приложение", href: consoleHref("/login"), goal: true },
+    { icon: Server, label: en ? "02 / SERVERS" : "02 / СЕРВЕРЫ", title: en ? "My server.\nLess manual work." : "Свой сервер.\nМеньше ручной работы.", text: en ? "Bring your VPS or order a VM. Manage deployments and containers from one console." : "Подключите VPS или закажите VM. Управляйте деплоями и контейнерами из консоли.", action: en ? "Choose a server" : "Выбрать вариант", href: localeHref("/cloud-servers", locale) },
+    { icon: Box, label: en ? "03 / AI AGENTS" : "03 / AI-АГЕНТЫ", title: en ? "An agent needs\nroom to work." : "Агенту нужно\nместо для работы.", text: en ? "Give Claude, Cursor or Codex a cloud computer with tools and root access." : "Дайте Claude, Cursor или Codex облачный компьютер с инструментами и root-доступом.", action: en ? "Explore Dada Box" : "Посмотреть Dada Box", href: localeHref("/box", locale) },
+  ];
+  return <div className={styles.home}>
+    <HomeJsonLd />
+    <section className={styles.hero}>
+      <div className={`${styles.container} ${styles.heroGrid}`}>
+        <div className={styles.heroCopy}>
+          <p className={styles.eyebrow}><span />{en ? "DADA CLOUD / BUILT FOR YOUR NEXT PROJECT" : "DADA CLOUD / ДЛЯ ВАШЕГО СЛЕДУЮЩЕГО ПРОЕКТА"}</p>
+          <h1>{en ? "Your code." : "Ваш код."}<br/><em>{en ? "Our cloud." : "Наше облако."}</em></h1>
+          <p className={styles.lead}>{en ? "Launch apps from GitHub. Connect databases and domains. Build your product while we handle builds and deployment." : "Запускайте приложения из GitHub. Подключайте базы и домены. Вы создаёте продукт — облако собирает и запускает его."}</p>
+          <div className={styles.actions}><Link href={consoleHref("/login")} onClick={()=>start("hero")} className={styles.primary}>{en ? "Start for free" : "Начать бесплатно"}<ArrowUpRight size={20} aria-hidden="true" /></Link><Link href="#start" className={styles.textLink}>{en ? "Find my starting point" : "Выбрать свой сценарий"}<ArrowRight size={18} aria-hidden="true" /></Link></div>
+          <p className={styles.heroNote}>{en ? "Free plan: 1 app + 1 database. From 0 ₽." : "На Free: 1 приложение и 1 база. От 0 ₽."}</p>
         </div>
-      </section>
+        <LaunchScene en={en} />
+      </div>
+      <div className={`${styles.container} ${styles.proofline}`}><span>{en ? "Familiar tools. One workspace." : "Знакомые инструменты. Одно рабочее место."}</span><span>GitHub</span><span>Docker</span><span>PostgreSQL</span><span>HTTPS</span><Link href={localeHref("/mcp",locale)}>MCP <ArrowUpRight size={13} aria-hidden="true" /></Link></div>
+    </section>
 
-      {/* Box — new central product, top placement under the hero */}
-      <BoxSpotlight />
+    <section id="start" className={styles.section}><div className={styles.container}>
+      <div className={styles.headingRow}><h2>{en ? "Where do\nyou want to start?" : "С чего\nначнём?"}</h2><p>{en ? "One platform. Different ways to get your work online." : "Одна платформа. Несколько способов запустить то, что вы задумали."}</p></div>
+      <div className={styles.choices}>{choices.map(({icon:Icon,...choice})=><Link key={choice.label} href={choice.href} className={styles.choice} onClick={()=>choice.goal&&start("scenario_app")}><div className={styles.choiceTop}><span>{choice.label}</span><Icon size={26} strokeWidth={1.4} aria-hidden="true" /></div><h3>{choice.title}</h3><p>{choice.text}</p><span className={styles.choiceAction}>{choice.action}<ArrowUpRight size={20} aria-hidden="true" /></span></Link>)}</div>
+    </div></section>
 
-      {/* How it works */}
-      <section id="how" className="scroll-mt-20 bg-white py-20">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="mb-12 max-w-2xl">
-            <h2 className="text-3xl font-bold tracking-tight text-slate-900">{t.home.stepsTitle}</h2>
-            <p className="mt-3 text-lg text-slate-600">{t.home.stepsSubtitle}</p>
-          </div>
-          <div className="grid gap-6 md:grid-cols-3">
-            {t.home.steps.map((s, i) => {
-              const Icon = STEP_ICONS[i] ?? GitBranch;
-              return (
-                <div key={s.num} className="relative rounded-xl border border-slate-200 bg-white p-7">
-                  <span className="absolute right-6 top-6 text-4xl font-bold text-slate-100">
-                    {s.num}
-                  </span>
-                  <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600 text-white">
-                    <Icon className="h-6 w-6" />
-                  </div>
-                  <h3 className="text-lg font-semibold text-slate-900">{s.title}</h3>
-                  <p className="mt-2 text-sm text-slate-600">{s.desc}</p>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </section>
+    <section id="how" className={`${styles.section} ${styles.how}`}><div className={`${styles.container} ${styles.howGrid}`}>
+      <div><p className={styles.kicker}>{en ? "FROM REPOSITORY TO A PUBLIC URL" : "ОТ РЕПОЗИТОРИЯ ДО ССЫЛКИ"}</p><h2>{en ? "Push your code.\nSee it live." : "Написали.\nЗапушили.\nРаботает."}</h2><ol className={styles.steps}>{t.home.steps.map(step=><li key={step.num}><span>{step.num}</span><div><h3>{step.title}</h3><p>{step.desc}</p></div></li>)}</ol></div>
+      <div className={styles.workspace}><DeployPreview /><Link href={localeHref("/developer",locale)} className={styles.textLink}>{en ? "Read the deployment guide" : "Посмотреть инструкцию запуска"}<ArrowRight size={18} aria-hidden="true" /></Link></div>
+    </div></section>
 
-      {/* Value props */}
-      <section className="bg-slate-50 py-20">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="mb-12 max-w-2xl">
-            <h2 className="text-3xl font-bold tracking-tight text-slate-900">{t.home.valueTitle}</h2>
-            <p className="mt-3 text-lg text-slate-600">{t.home.valueSubtitle}</p>
-          </div>
-          <div className="grid gap-6 md:grid-cols-3">
-            {t.home.value.map((f, i) => {
-              const Icon = VALUE_ICONS[i] ?? Check;
-              return (
-                <div key={f.title} className="rounded-xl border border-slate-200 bg-white p-7">
-                  <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
-                    <Icon className="h-6 w-6" />
-                  </div>
-                  <h3 className="text-lg font-semibold text-slate-900">{f.title}</h3>
-                  <p className="mt-2 text-sm text-slate-600">{f.desc}</p>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </section>
+    <section className={styles.section}><div className={styles.container}>
+      <div className={styles.headingRow}><h2>{en ? "Your app grows.\nIts workspace does too." : "Приложение растёт.\nВсё нужное — рядом."}</h2><p>{en ? "Add resources when you need them. Keep managing everything in the same project." : "Добавляйте ресурсы по мере необходимости. Управляйте ими в том же проекте."}</p></div>
+      <div className={styles.resources}>
+        <Link href={localeHref("/databases",locale)}><Database size={36} strokeWidth={1.3} aria-hidden="true" /><div><h3>PostgreSQL</h3><p>{en ? "A database for your app, with backups." : "База для приложения. С резервными копиями."}</p></div><ArrowUpRight size={24} aria-hidden="true" /></Link>
+        <Link href={localeHref("/storage",locale)}><HardDrive size={36} strokeWidth={1.3} aria-hidden="true" /><div><h3>{en ? "S3 storage" : "S3-хранилище"}</h3><p>{en ? "Files, images and uploads through the S3 API." : "Файлы, изображения и загрузки через S3 API."}</p></div><ArrowUpRight size={24} aria-hidden="true" /></Link>
+      </div>
+      <Link href={localeHref("/mcp",locale)} className={styles.mcp}><span className={styles.mcpIcon}><Sparkles size={25} aria-hidden="true" /></span><div><h3>{en ? "Prefer to ask your AI agent?" : "Удобнее попросить AI-агента?"}</h3><p>{en ? "Connect MCP. Your agent can deploy apps and inspect logs with your permissions." : "Подключите MCP: агент сможет запускать приложения и смотреть логи с вашими правами."}</p></div><span>{en ? "Connect MCP" : "Подключить MCP"}<ArrowRight size={19} aria-hidden="true" /></span></Link>
+    </div></section>
 
-      {/* Scenarios */}
-      <section className="bg-white py-20">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="mb-12 max-w-2xl">
-            <h2 className="text-3xl font-bold tracking-tight text-slate-900">
-              {t.home.scenariosTitle}
-            </h2>
-            <p className="mt-3 text-lg text-slate-600">{t.home.scenariosSubtitle}</p>
-          </div>
-          <div className="grid gap-6 md:grid-cols-3">
-            {t.home.scenarios.map((s) => (
-              <div
-                key={s.tag}
-                className="flex flex-col rounded-xl border border-slate-200 bg-white p-7 transition-shadow hover:shadow-md"
-              >
-                <span className="mb-4 inline-flex w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-                  {s.tag}
-                </span>
-                <h3 className="text-lg font-semibold text-slate-900">{s.title}</h3>
-                <p className="mt-2 text-sm text-slate-600">{s.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* MCP / AI agent */}
-      <McpAgentSection copy={t.home.mcp} href={localeHref("/developer/mcp-ai-agents", locale)} />
-
-      {/* Pricing teaser */}
-      <section className="bg-white py-20">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="mb-12 max-w-2xl">
-            <h2 className="text-3xl font-bold tracking-tight text-slate-900">
-              {t.home.pricingTitle}
-            </h2>
-            <p className="mt-3 text-lg text-slate-600">{t.home.pricingSubtitle}</p>
-          </div>
-          <div className="grid gap-6 md:grid-cols-3">
-            {t.home.pricingTiers.map((tier) => (
-              <div
-                key={tier.name}
-                className={clsx(
-                  "flex flex-col rounded-xl border bg-white p-7",
-                  tier.highlight ? "border-blue-500 shadow-lg" : "border-slate-200",
-                )}
-              >
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-slate-900">{tier.name}</h3>
-                  {tier.highlight && (
-                    <span className="rounded-full bg-blue-600 px-2 py-0.5 text-xs font-semibold text-white">
-                      {t.common.getStarted}
-                    </span>
-                  )}
-                </div>
-                <div className="mt-3 text-2xl font-bold text-slate-900">{tier.price}</div>
-                <p className="mt-1 text-sm text-slate-600">{tier.tagline}</p>
-                <ul className="mt-5 space-y-2">
-                  {tier.bullets.map((b) => (
-                    <li key={b} className="flex items-start gap-2 text-sm text-slate-700">
-                      <Check className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
-                      <span>{b}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-          <div className="mt-8 flex flex-wrap items-center gap-4">
-            <Link
-              href={consoleHref("/login")}
-              onClick={() =>
-                reachGoal(GOAL_LANDING_CTA, { source: "direct", placement: "pricing_teaser" })
-              }
-              className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
-            >
-              {t.common.createAccount}
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-            <Link
-              href={localeHref("/pricing", locale)}
-              className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-6 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
-            >
-              {t.common.learnMore}
-            </Link>
-            <p className="text-xs text-slate-400">{t.home.pricingNote}</p>
-          </div>
-        </div>
-      </section>
-
-      {/* FAQ objections */}
-      <FaqList title={t.home.faqTitle} items={t.home.faq} />
-
-      {/* Landing hub: every marketing page reachable from the highest-authority page */}
-      <section className="bg-slate-50 py-20">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="mb-10 max-w-2xl">
-            <h2 className="text-3xl font-bold tracking-tight text-slate-900">{t.home.hubTitle}</h2>
-            <p className="mt-3 text-lg text-slate-600">{t.home.hubSubtitle}</p>
-          </div>
-          <div className="grid gap-10 sm:grid-cols-2">
-            {[
-              { title: t.footer.productsTitle, links: t.footer.products },
-              { title: t.footer.hostingTitle, links: t.footer.hosting },
-            ].map((col) => (
-              <div key={col.title}>
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">{col.title}</h3>
-                <ul className="mt-4 grid gap-2 sm:grid-cols-2">
-                  {col.links
-                    .filter((l) => !l.href.startsWith("http"))
-                    .map((l) => (
-                      <li key={l.href}>
-                        <Link
-                          href={localeHref(l.href, locale)}
-                          className="text-sm text-slate-700 transition-colors hover:text-blue-600"
-                        >
-                          {l.label}
-                        </Link>
-                      </li>
-                    ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <CtaBand />
-    </>
-  );
+    <section className={styles.pricing}><div className={`${styles.container} ${styles.pricingGrid}`}><div><p className={styles.kicker}>{en ? "START SMALL" : "НАЧНИТЕ С МАЛОГО"}</p><h2>{en ? "First app.\nZero rubles." : "Первое приложение.\nНоль рублей."}</h2><p>{en ? "Explore the platform on Free. Choose a larger plan when your project needs more." : "Попробуйте платформу на Free. Когда проекту станет тесно — выберите план побольше."}</p><Link className={styles.primary} href={consoleHref("/login")} onClick={()=>start("pricing_teaser")}>{en ? "Create a free account" : "Создать бесплатный аккаунт"}<ArrowUpRight size={20} aria-hidden="true" /></Link></div><div className={styles.priceTable}>{t.home.pricingTiers.map(tier=><div key={tier.name}><strong>{tier.name}</strong><span>{tier.price}</span><p>{tier.tagline}</p></div>)}<Link className={styles.textLink} href={localeHref("/pricing",locale)}>{en ? "Compare limits and conditions" : "Сравнить лимиты и условия"}<ArrowRight size={18} aria-hidden="true" /></Link></div></div></section>
+    <FaqList title={en ? "Before you start" : "Перед стартом"} items={t.home.faq} />
+    <section className={styles.finalCta}><div className={styles.container}><span className={styles.endMark} aria-hidden="true">↗</span><h2>{en ? "Make it real." : "Пора запускать."}</h2><Link href={consoleHref("/login")} onClick={()=>start("band")} className={styles.primary}>{en ? "Start for free" : "Начать бесплатно"}<ArrowUpRight size={20} aria-hidden="true" /></Link><p><Check size={15} aria-hidden="true" />{en ? "Start with one app. See how it feels." : "Начните с одного приложения. Разберётесь в процессе."}</p></div></section>
+  </div>;
 }

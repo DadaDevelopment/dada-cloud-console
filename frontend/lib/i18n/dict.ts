@@ -322,69 +322,77 @@ const ru: Dict = {
     noteColumn: "Что входит",
   },
   home: {
-    heroBadge: "Backend-облако · деплой из GitHub",
-    heroTitle: "Backend из GitHub в проде за пару минут",
+    heroBadge: "DADA Cloud · облако для приложений",
+    heroTitle: "Код — в GitHub.\nСервис — в сети.",
     heroSubtitle:
-      "Подключаете репозиторий, рядом поднимаете Postgres и домен. Дальше каждый push сам собирается, едет в прод и отдаётся по HTTPS. DevOps-команда для этого не нужна.",
-    heroPrimary: "Подключить GitHub",
-    heroSecondary: "Смотреть, как работает",
-    heroTertiary: "Запросить пилот или миграцию",
-    stepsTitle: "От репозитория до прода. Три шага",
-    stepsSubtitle: "Без самописного CI/CD и релизов по SSH.",
+      "Деплой из репозитория, Postgres и свой домен — в одном проекте. Обновляйте код, смотрите логи и управляйте приложением из консоли.",
+    heroPrimary: "Войти или создать аккаунт",
+    heroSecondary: "Как устроен деплой",
+    heroTertiary: "Посмотреть тарифы",
+    stepsTitle: "От репозитория до рабочего приложения",
+    stepsSubtitle: "Три шага в консоли DADA Cloud.",
     steps: [
-      { num: "01", title: "Подключите GitHub", desc: "Выбираете репозиторий, дальше платформа сама собирает сервис. Есть Dockerfile — берём его. Нет — соберём из исходников." },
-      { num: "02", title: "Добавьте Postgres и домен", desc: "База, домен и сертификат поднимаются здесь же. Не нужно заводить тикет в инфраструктуру и ждать." },
-      { num: "03", title: "Катите и откатывайтесь", desc: "Push в ветку = новый деплой. Логи идут вживую. Что-то сломалось — откат на прошлую версию одной кнопкой." },
+      { num: "01", title: "Подключите репозиторий", desc: "Выберите репозиторий в GitHub. DADA Cloud соберёт приложение из исходников или вашего Dockerfile." },
+      { num: "02", title: "Добавьте данные и домен", desc: "Создайте Postgres и подключите свой домен в том же проекте. Сертификат HTTPS выпустится автоматически." },
+      { num: "03", title: "Обновляйте приложение", desc: "Новый push запускает деплой. Ход сборки и логи доступны в консоли; предыдущую версию можно вернуть." }
     ],
-    valueTitle: "Что вы получаете",
-    valueSubtitle: "По делу, без слоёв конфигов.",
+    valueTitle: "Всё для работы приложения",
+    valueSubtitle: "Деплой, данные и состояние сервиса — в одном месте.",
     value: [
-      { title: "От push до HTTPS без своего CI/CD", desc: "Запушили в ветку — сервис собрался, выкатился и уже отвечает по HTTPS. Пайплайны под это писать не надо." },
-      { title: "База и домен там же, где деплой", desc: "Postgres, домен и TLS живут в том же проекте. DATABASE_URL прилетает в сервис сам, руками строку не собираете." },
-      { title: "Мониторинг сразу после деплоя", desc: "Логи, метрики и алерты не нужно подключать отдельно — видно, что упало и где, а уведомление прилетает в Telegram или на почту раньше, чем напишет клиент." },
+      { title: "Автоматический деплой", desc: "Сборка и публикация после push в подключённую ветку. История версий и откат — рядом." },
+      { title: "Postgres и свой домен", desc: "База данных, домен и HTTPS управляются из того же проекта, что и приложение." },
+      { title: "Логи и метрики", desc: "Следите за работой сервиса и разбирайте ошибки в консоли." }
     ],
-    scenariosTitle: "Под ваш случай",
-    scenariosSubtitle: "От пет-проекта до растущей команды.",
+    scenariosTitle: "Начните с вашей задачи",
+    scenariosSubtitle: "Новое приложение, работающий VPS или проекты клиентов.",
     scenarios: [
-      { tag: "Solo / founder", title: "Запуск сервиса за минуты", desc: "Уже есть VPS с docker-compose? Подключите его по SSH как App Server — платформа берёт сервер под управление и предлагает забрать уже работающие контейнеры без пересборки." },
-      { tag: "Стартап 2–10", title: "Команда без DevOps", desc: "Деплой из GitHub, доступы по ролям, общие логи и откаты. Инженеры катят сами. Отдельный ops под это держать не нужно." },
-      { tag: "Агентство", title: "Парк клиентских серверов в одной панели", desc: "Подключаете VM каждого клиента по SSH — домены, базы, деплой и мониторинг всех серверов видно из одной панели, без десятка отдельных логинов." },
+      { tag: "Solo / founder", title: "Подключить свой VPS", desc: "Добавьте сервер по SSH. Работающие контейнеры docker-compose можно взять под управление без пересборки." },
+      { tag: "Стартап 2–10", title: "Разрабатывать командой", desc: "Деплой из GitHub, доступы по ролям, общие логи и откаты для вашей команды." },
+      { tag: "Агентство", title: "Управлять серверами клиентов", desc: "Подключите VM клиентов по SSH и работайте с доменами, базами и деплоем из одной панели." }
     ],
-    pricingTitle: "Прозрачные планы",
-    pricingSubtitle: "Без сюрпризов в счёте: понятные квоты плана и оценка стоимости до деплоя.",
+    pricingTitle: "Начните с Free",
+    pricingSubtitle: "Выберите план по числу приложений, баз и участников.",
     pricingTiers: [
       { name: "Free", price: "0 ₽", tagline: "Попробовать и пет-проекты", bullets: ["1 приложение", "1 база данных", "Деплой из GitHub", "Базовые логи"] },
       { name: "Startup", price: "990 ₽/мес", tagline: "Один разработчик в продакшене", bullets: ["5 приложений", "2 базы данных", "5 доменов", "Бэкапы 7 дней"], highlight: true },
       { name: "Business", price: "2 900 ₽/мес", tagline: "Растущая команда с продакшеном", bullets: ["20 приложений", "10 баз данных", "Бэкапы 30 дней", "Приоритетная поддержка"] },
     ],
-    pricingNote: "Полная таблица тарифов — на странице цен.",
-    faqTitle: "Частые возражения",
+    pricingNote: "Квоты и условия каждого плана — на странице тарифов.",
+    faqTitle: "Перед первым деплоем",
     faq: [
-      { q: "У меня уже есть VPS", a: "VPS вы тащите сами: обновления ОС, бэкапы, деплой-скрипты, ночные SSH-сессии когда что-то легло. Подключите его к платформе по SSH одним разом — мы поставим Docker и агента, а контейнеры, которые на нём уже работают, можно забрать в управляемые приложения без пересборки. Переносить данные никуда не нужно." },
-      { q: "У нас есть GitHub Actions", a: "Actions соберут артефакт, и на этом всё. Дальше его надо куда-то выкатить, поднять базу, прицепить домен, придумать откат. Вот этот кусок от push до живого HTTPS-сервиса мы и берём на себя. Свой CD-пайплайн писать не придётся." },
-      { q: "Мы ещё маленькие", a: "Тем более ваш вариант. Один проект вместо ручной инфраструктуры, которую в таком размере держать нечем. Sandbox бесплатный, квоты плана держат счёт под контролем, а вырастете — переезжать не надо." },
-      { q: "Чем это отличается от Heroku, Vercel и Coolify?", a: "DADA Cloud — backend-облако уровня PaaS: как Heroku или Render, вы деплоите бэкенд из GitHub одним push. В отличие от Vercel, заточенного под фронтенд, здесь первичен долгоживущий бэкенд с управляемым Postgres. А в отличие от self-hosted Coolify, свой сервер администрировать не нужно — хотя существующий VPS можно подключить по SSH и вести из той же панели." },
+      { q: "Можно подключить существующий VPS?", a: "Да. Добавьте сервер по SSH как Managed VM. Работающие контейнеры можно взять под управление без пересборки. Сам сервер и его ресурсы остаются у вашего провайдера." },
+      { q: "Нужен ли свой CI/CD?", a: "Для деплоя из подключённого GitHub-репозитория — нет. DADA Cloud собирает и публикует приложение после push. Если у вас уже есть процесс сборки, можно развернуть готовый Docker-образ." },
+      { q: "Можно начать бесплатно?", a: "Да. План Free включает одно приложение и одну базу данных. Полные квоты и условия указаны на странице тарифов." },
+      { q: "Что входит в облако?", a: "Деплой приложений, Postgres, хранилище S3, домены, логи и метрики. Можно запускать приложения на платформе или подключить свой VPS и управлять им из той же консоли." }
     ],
-    hubTitle: "Все возможности платформы",
-    hubSubtitle: "Сценарии, фреймворки и замены зарубежным площадкам — каждая страница отвечает на конкретный вопрос.",
-    ctaTitle: "Поднимите backend из GitHub сегодня",
-    ctaSubtitle: "Подключение репозитория занимает минуту. Платите только за то, что реально потребляете.",
+    hubTitle: "Нужен конкретный сценарий?",
+    hubSubtitle: "Руководства по фреймворкам, хостингу ботов и переезду на DADA Cloud.",
+    ctaTitle: "Дайте вашему коду адрес",
+    ctaSubtitle: "Создайте аккаунт и разверните первое приложение. План Free — 0 ₽.",
     mcp: {
-      tag: "Новое · MCP",
-      title: "Управляйте облаком прямо из Claude",
-      subtitle:
-        "Подключите платформу к Claude одной командой — и просите его словами: подними сервер, разверни приложение, покажи логи. Он сделает и отчитается.",
+      tag: "MCP · для AI-агентов",
+      title: "То же облако. Через вашего AI-агента.",
+      subtitle: "Подключите Claude или другой MCP-клиент к DADA Cloud: агент сможет работать с вашими приложениями, серверами и логами.",
       chat: [
-        { role: "user", text: "Claude, подними сервер под API и разверни туда приложение из моего репозитория" },
-        { role: "assistant", text: "Создаю сервер, беру репозиторий, собираю образ…" },
-        { role: "assistant", text: "Готово, сэр. Приложение живёт по HTTPS, база и домен на месте." },
+        {
+          role: "user",
+          text: "Покажи приложения в моём проекте и их состояние."
+        },
+        {
+          role: "assistant",
+          text: "Проверю список приложений и статусы в DADA Cloud."
+        },
+        {
+          role: "user",
+          text: "Если сборка завершилась с ошибкой, открой её логи."
+        }
       ],
       bullets: [
-        "61 инструмент платформы прямо в чате",
-        "Вход через браузер — ни токенов, ни ключей вручную",
-        "Работает только с вашими проектами, по вашим правам",
+        "Приложения и данные остаются в вашей консоли",
+        "Вход через браузер",
+        "Доступ в пределах ваших прав"
       ],
-      cta: "Как подключить",
+      cta: "Подключить MCP"
     },
   },
   servers: {
@@ -2011,69 +2019,77 @@ const en: Dict = {
     noteColumn: "What you get",
   },
   home: {
-    heroBadge: "Backend cloud · deploy from GitHub",
-    heroTitle: "Your backend from GitHub, live in a couple of minutes",
+    heroBadge: "DADA Cloud · application hosting",
+    heroTitle: "Code on GitHub.\nYour app, online.",
     heroSubtitle:
-      "Connect a repo, spin up Postgres and a domain next to it. From there every push builds itself, ships to prod and serves over HTTPS. You don't need a DevOps team for this.",
-    heroPrimary: "Connect GitHub",
-    heroSecondary: "See how it works",
-    heroTertiary: "Request a pilot or migration",
-    stepsTitle: "From repo to prod. Three steps",
-    stepsSubtitle: "No homegrown CI/CD, no releases over SSH.",
+      "Deploy from your repository, add Postgres and connect a domain in one project. Update your code, read logs and manage your app from the console.",
+    heroPrimary: "Sign in or create an account",
+    heroSecondary: "How deployment works",
+    heroTertiary: "View pricing",
+    stepsTitle: "From repository to running app",
+    stepsSubtitle: "Three steps in the DADA Cloud console.",
     steps: [
-      { num: "01", title: "Connect GitHub", desc: "Pick a repository and the platform builds the service for you. Got a Dockerfile? We use it. No Dockerfile? We build from source." },
-      { num: "02", title: "Add Postgres and a domain", desc: "Database, domain and certificate come up right here. No infrastructure ticket to file and wait on." },
-      { num: "03", title: "Ship and roll back", desc: "Push to a branch = a new deploy. Logs stream live. Something broke? Roll back to the previous version with one button." },
+      { num: "01", title: "Connect your repository", desc: "Choose a repository on GitHub. DADA Cloud builds your app from source or your Dockerfile." },
+      { num: "02", title: "Add data and a domain", desc: "Create Postgres and connect your domain in the same project. An HTTPS certificate is issued automatically." },
+      { num: "03", title: "Keep shipping", desc: "A new push starts a deployment. Follow the build and logs in the console, or return to a previous version." }
     ],
-    valueTitle: "What you get",
-    valueSubtitle: "Straight to the point, no layers of config.",
+    valueTitle: "Everything your app needs to run",
+    valueSubtitle: "Deployment, data and service health in one place.",
     value: [
-      { title: "From push to HTTPS without your own CI/CD", desc: "Push to a branch and the service is built, shipped and already answering over HTTPS. No pipelines to write for it." },
-      { title: "Database and domain right where you deploy", desc: "Postgres, domain and TLS live in the same project. DATABASE_URL lands in the service on its own — you don't assemble the string by hand." },
-      { title: "Monitoring the moment you deploy", desc: "Logs, metrics and alerts don't need separate wiring — see what broke and where, with a notification in Telegram or email before a client has to tell you." },
+      { title: "Automatic deployment", desc: "Build and publish after a push to your connected branch. Version history and rollback stay close at hand." },
+      { title: "Postgres and your domain", desc: "Manage your database, domain and HTTPS in the same project as your app." },
+      { title: "Logs and metrics", desc: "Check service health and investigate errors from the console." }
     ],
-    scenariosTitle: "Built for your case",
-    scenariosSubtitle: "From a pet project to a growing team.",
+    scenariosTitle: "Start with your task",
+    scenariosSubtitle: "A new app, an existing VPS or your clients’ projects.",
     scenarios: [
-      { tag: "Solo / founder", title: "Launch a service in minutes", desc: "Already have a VPS running docker-compose? Connect it over SSH as an App Server — the platform takes it under management and offers to adopt the containers already running there, no rebuild." },
-      { tag: "Startup 2–10", title: "A team without DevOps", desc: "Deploy from GitHub, role-based access, shared logs and rollbacks. Engineers ship themselves. No dedicated ops needed for it." },
-      { tag: "Agency", title: "A whole client fleet, one panel", desc: "Connect each client's VM over SSH — domains, databases, deploys and monitoring for every server show up in one panel, no juggling a dozen separate logins." },
+      { tag: "Solo / founder", title: "Connect your existing VPS", desc: "Add your server over SSH. Adopt running docker-compose containers without rebuilding them." },
+      { tag: "Startup 2–10", title: "Develop as a team", desc: "GitHub deployments, role-based access, shared logs and rollbacks for your team." },
+      { tag: "Agency", title: "Manage client servers", desc: "Connect client VMs over SSH and manage domains, databases and deployments from one panel." }
     ],
-    pricingTitle: "Transparent plans",
-    pricingSubtitle: "No billing surprises: clear plan quotas and a cost estimate before you deploy.",
+    pricingTitle: "Start with Free",
+    pricingSubtitle: "Choose a plan for your apps, databases and team.",
     pricingTiers: [
       { name: "Free", price: "$0", tagline: "Trials and pet projects", bullets: ["1 application", "1 database", "Deploy from GitHub", "Basic logs"] },
       { name: "Startup", price: "$12/mo", tagline: "Solo developer in production", bullets: ["5 applications", "2 databases", "5 domains", "7-day backups"], highlight: true },
       { name: "Business", price: "$35/mo", tagline: "Growing team with production load", bullets: ["20 applications", "10 databases", "30-day backups", "Priority support"] },
     ],
-    pricingNote: "Full pricing table on the pricing page.",
-    faqTitle: "Common objections",
+    pricingNote: "See pricing for each plan’s quotas and terms.",
+    faqTitle: "Before your first deployment",
     faq: [
-      { q: "I already have a VPS", a: "A VPS is on you: OS updates, backups, deploy scripts, the late-night SSH session when something falls over. Connect it to the platform over SSH once — we install Docker and an agent, and containers already running on it can be adopted into managed applications with no rebuild. Nothing to migrate." },
-      { q: "We have GitHub Actions", a: "Actions build an artifact and that's where they stop. You still have to ship it somewhere, stand up a database, attach a domain, figure out rollback. That stretch from push to a live HTTPS service is the part we take on. No CD pipeline of your own to write." },
-      { q: "We're still small", a: "All the more reason. One project instead of manual infrastructure you've got no one to run at this size. Sandbox is free, plan quotas keep the bill in check, and when you grow there's no migration to do." },
-      { q: "How is this different from Heroku, Vercel and Coolify?", a: "DADA Cloud is a PaaS-grade backend cloud: like Heroku or Render, you deploy a backend from GitHub with a single push. Unlike Vercel, which is frontend-first, the long-running backend with managed Postgres is the primary object here. And unlike self-hosted Coolify, you don't administer your own server — though you can connect an existing VPS over SSH and run it from the same panel." },
+      { q: "Can I connect an existing VPS?", a: "Yes. Add it over SSH as a Managed VM. You can adopt running containers without rebuilding them. The server and its resources stay with your provider." },
+      { q: "Do I need my own CI/CD?", a: "Not for deployments from a connected GitHub repository. DADA Cloud builds and publishes your app after a push. If you already have a build process, you can deploy a Docker image." },
+      { q: "Can I start for free?", a: "Yes. The Free plan includes one application and one database. See pricing for full quotas and terms." },
+      { q: "What does the cloud include?", a: "Application deployment, Postgres, S3 storage, domains, logs and metrics. Run apps on the platform or connect your own VPS and manage it from the same console." }
     ],
-    hubTitle: "Everything the platform covers",
-    hubSubtitle: "Scenarios, frameworks and replacements for foreign platforms — each page answers one specific question.",
-    ctaTitle: "Get your backend live from GitHub today",
-    ctaSubtitle: "Connecting a repo takes a minute. You only pay for what you actually use.",
+    hubTitle: "Looking for a specific setup?",
+    hubSubtitle: "Guides for frameworks, bots and moving to DADA Cloud.",
+    ctaTitle: "Give your code a public address",
+    ctaSubtitle: "Create an account and deploy your first app. The Free plan costs $0.",
     mcp: {
-      tag: "New · MCP",
-      title: "Run your cloud straight from Claude",
-      subtitle:
-        "Connect the platform to Claude with one command, then just ask: spin up a server, deploy an app, show me the logs. It does it and reports back.",
+      tag: "MCP · for AI agents",
+      title: "The same cloud. Through your AI agent.",
+      subtitle: "Connect Claude or another MCP client to DADA Cloud. Your agent can work with your apps, servers and logs.",
       chat: [
-        { role: "user", text: "Claude, spin up a server for my API and deploy the app from my repo" },
-        { role: "assistant", text: "Creating the server, pulling the repo, building the image…" },
-        { role: "assistant", text: "Done, sir. The app is live over HTTPS, database and domain in place." },
+        {
+          role: "user",
+          text: "Show the apps in my project and their current status."
+        },
+        {
+          role: "assistant",
+          text: "I’ll check the application list and statuses in DADA Cloud."
+        },
+        {
+          role: "user",
+          text: "If a build failed, open its logs."
+        }
       ],
       bullets: [
-        "61 platform tools right in the chat",
-        "Browser login — no tokens or keys to paste",
-        "Scoped to your projects, under your permissions",
+        "Your apps and data stay in your console",
+        "Sign in through your browser",
+        "Access follows your permissions"
       ],
-      cta: "How to connect",
+      cta: "Connect MCP"
     },
   },
   servers: {

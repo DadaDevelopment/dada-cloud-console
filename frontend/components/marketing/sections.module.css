@@ -1,0 +1,111 @@
+.container {
+  width: min(100% - 3rem, 72rem);
+  margin-inline: auto;
+}
+.hero {
+  background: #f5f7fb;
+  color: #17253b;
+  padding-block: clamp(3.5rem, 8vw, 6rem) clamp(3rem, 6vw, 4.5rem);
+}
+.badge {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  margin-bottom: 1.6rem;
+  color: #315cff;
+  font-size: .75rem;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.badge span { width: .4rem; height: .4rem; background: #315cff; border-radius: 50%; flex-shrink: 0; }
+.heroTitle {
+  max-width: 19ch;
+  font-size: clamp(2.35rem, 5.2vw, 4.5rem);
+  font-weight: 550;
+  line-height: 1.08;
+  letter-spacing: -.05em;
+  text-wrap: balance;
+  overflow-wrap: break-word;
+}
+.heroBottom {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 2.5rem;
+  border-top: 1px solid #d9e1ee;
+  margin-top: 2.75rem;
+  padding-top: 1.75rem;
+}
+.heroSubtitle { max-width: 43rem; font-size: 1.05rem; line-height: 1.65; color: #637086; }
+.actions { display: flex; align-items: center; gap: .75rem; flex-shrink: 0; flex-wrap: wrap; }
+.primaryButton, .secondaryButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  min-height: 2.85rem;
+  padding: .8rem 1.25rem;
+  border-radius: .4rem;
+  font-size: .85rem;
+  font-weight: 600;
+  line-height: 1.3;
+  transition: background-color 150ms;
+}
+.primaryButton { color: white; background: #2563eb; }
+.primaryButton:hover { background: #1d4ed8; }
+.secondaryButton { color: #17253b; border: 1px solid #bbc7db; }
+.secondaryButton:hover { background: #e8edf7; }
+.primaryButton:focus-visible, .secondaryButton:focus-visible, .faqList summary:focus-visible {
+  outline: 3px solid #60a5fa;
+  outline-offset: 5px;
+}
+.section { background: white; color: #0f172a; padding-block: clamp(3rem, 6vw, 5rem); }
+.tinted { background: #f4f6f9; }
+.sectionTitle { max-width: 25ch; font-size: clamp(1.8rem, 3vw, 2.75rem); font-weight: 550; line-height: 1.16; letter-spacing: -.04em; text-wrap: balance; }
+.sectionSubtitle { color: #526176; max-width: 43rem; font-size: 1rem; line-height: 1.7; margin-top: 1rem; }
+.sectionIntro { margin-bottom: 2.5rem; }
+.featureGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 3.5rem; }
+.sectionTitle + .featureGrid { margin-top: 2.5rem; }
+.feature { display: grid; grid-template-columns: 2rem 1fr; gap: 1rem; border-top: 1px solid #d8dfe9; padding-block: 1.6rem 2rem; }
+.number { color: #2563eb; font-family: var(--font-geist-mono), monospace; font-size: .75rem; line-height: 1.6rem; }
+.feature h3, .steps h3, .useCases h3 { font-size: 1.08rem; font-weight: 600; letter-spacing: -.02em; line-height: 1.4; }
+.feature p, .steps p, .useCases p { margin-top: .65rem; font-size: .9rem; line-height: 1.75; color: #526176; }
+.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2rem; padding: 0; list-style: none; }
+.steps li { border-top: 1px solid #c6d1e1; padding-top: 1.2rem; }
+.stepNumber { display: block; margin-bottom: 1.2rem; color: #2563eb; font-family: var(--font-geist-mono), monospace; font-size: 1.8rem; line-height: 1; letter-spacing: -.06em; }
+.useCases { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2rem 4rem; }
+.useCases article { border-left: 2px solid #93b9f8; padding-left: 1.4rem; }
+.faqLayout { display: grid; grid-template-columns: 1fr 2fr; align-items: start; gap: 4rem; }
+.faqList details { border-top: 1px solid #cfd7e3; }
+.faqList details:last-child { border-bottom: 1px solid #cfd7e3; }
+.faqList summary { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; padding-block: 1.35rem; font-size: 1rem; font-weight: 550; line-height: 1.5; cursor: pointer; list-style: none; }
+.faqList summary::-webkit-details-marker { display: none; }
+.faqList summary svg { flex-shrink: 0; color: #64748b; transition: transform 150ms; }
+.faqList details[open] summary svg { transform: rotate(180deg); }
+.faqList p { color: #526176; font-size: .95rem; line-height: 1.8; padding-bottom: 1.5rem; max-width: 67ch; }
+.ctaBand { background: #eaf0ff; color: #17253b; padding-block: 3.5rem; }
+.ctaLayout { display: flex; align-items: center; justify-content: space-between; gap: 3rem; }
+.ctaLayout h2 { max-width: 27ch; font-size: clamp(1.8rem, 3vw, 2.65rem); font-weight: 550; line-height: 1.16; letter-spacing: -.04em; }
+.ctaLayout p { max-width: 48rem; color: #637086; font-size: 1rem; line-height: 1.7; margin-top: 1rem; }
+.ctaLayout > a { flex-shrink: 0; }
+@media (max-width: 1100px) {
+  .heroBottom { align-items: flex-start; flex-direction: column; gap: 1.6rem; }
+  .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .faqLayout { gap: 2rem; }
+}
+@media (max-width: 700px) {
+  .container { width: calc(100% - 2rem); }
+  .heroTitle { font-size: clamp(2rem, 8vw, 3.2rem); }
+  .heroBottom { margin-top: 2rem; }
+  .featureGrid, .useCases, .faqLayout { grid-template-columns: 1fr; }
+  .feature { padding-block: 1.35rem; }
+  .steps { gap: 1.75rem 1.25rem; }
+  .ctaLayout { align-items: flex-start; flex-direction: column; gap: 1.75rem; }
+}
+@media (max-width: 420px) {
+  .steps { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .primaryButton, .secondaryButton, .faqList summary svg { transition: none; }
+}

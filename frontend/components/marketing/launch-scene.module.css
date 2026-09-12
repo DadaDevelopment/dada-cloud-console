@@ -1,0 +1,26 @@
+.scene { position: relative; width: 100%; min-height: 490px; margin: 0; isolation: isolate; }
+.orbit,.orbitSmall { position: absolute; border: 1px solid #cbd7f4; border-radius: 50%; left: 50%; top: 49%; transform: translate(-50%,-50%); z-index: -1; width: 420px; height: 420px; }
+.orbitSmall { width: 320px; height: 320px; border-style: dashed; }
+.cloud { position: absolute; left: 50%; top: 42%; transform: translate(-50%,-50%) rotate(-7deg); width: 245px; height: 210px; border-radius: 64px; background: #315cff; display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; box-shadow: 10px 12px 0 #c9d5ff, 0 30px 60px #315cff22; }
+.cloud > svg { width: 116px; height: 104px; }
+.cloud > span { font-size: 11px; font-weight: 600; letter-spacing: .2em; margin-top: 8px; }
+.code { position: absolute; z-index: 2; left: 0; top: 10px; display: flex; align-items: center; gap: 14px; padding: 18px 20px; background: #fff; border: 1px solid #dce3ef; border-radius: 8px; box-shadow: 0 12px 24px #17253b07; transform: rotate(-4deg); }
+.code > div { display: grid; gap: 4px; }
+.code span { font-size: 11px; color: #657086; }
+.code strong { color: #17253b; font-size: 13px; font-family: var(--font-geist-mono),monospace; font-weight: 500; }
+.code > svg { color: #17253b; }
+.code .branch { margin-left: 8px; padding: 3px 6px; background: #edf2fa; border-radius: 4px; font-size: 10px; }
+.connector { position: absolute; top: 93px; left: 22%; display: flex; gap: 7px; transform: rotate(38deg); }
+.connector > span { width: 5px; height: 5px; background: #315cff; border-radius: 50%; }
+.database { position: absolute; z-index: 2; right: -3px; top: 185px; display: flex; gap: 10px; align-items: center; padding: 17px 20px; background: #e9efff; border: 1px solid #cbd7f4; border-radius: 8px; transform: rotate(5deg); color: #214ac9; }
+.database span { font-size: 12px; font-weight: 600; }
+.live { position: absolute; z-index: 3; top: 325px; left: 17%; right: 1%; background: #fff; padding: 23px 26px; border: 1px solid #dce3ef; border-radius: 8px; transform: rotate(2deg); box-shadow: 0 18px 34px #17253b0b; }
+.liveLabel { display: flex; align-items: center; gap: 7px; color: #35715c; font-size: 9px; font-weight: 600; letter-spacing: .07em; }
+.liveLabel > span { width: 5px; height: 5px; border-radius: 50%; background: #328365; }
+.live strong { display: flex; justify-content: space-between; align-items: center; gap: 20px; color: #17253b; font-weight: 500; font-size: 34px; letter-spacing: -.05em; margin-block: 11px 15px; }
+.address { display: flex; align-items: center; gap: 7px; color: #667187; font-size: 10px; }
+.address > svg:last-child { margin-left: auto; color: #328365; }
+.scene figcaption { position: absolute; left: 0; bottom: -20px; font-size: 11px; color: #6c7689; }
+@media(max-width:1100px) { .scene { min-height: 460px; } .orbit { width: 360px; height: 360px; } .orbitSmall { width: 270px; height: 270px; } .cloud { width: 210px; height: 185px; } .live { top: 290px; left: 9%; } .code { padding: 14px; } .code strong { font-size: 11px; } .database { right: -10px; padding: 14px; } }
+@media(max-width:700px) { .scene { max-width: 470px; margin: 0 auto; min-height: 450px; } .cloud { width: 220px; height: 190px; } .code { left: 2%; top: 0; } .orbit { width: 320px; height: 320px; } .orbitSmall { width: 260px; height: 260px; } .database { right: 0; top: 180px; } .live { top: 280px; left: 10%; right: 2%; padding: 20px; } .live strong { font-size: 32px; } .scene figcaption { bottom: 0; left: 4%; font-size: 10px; } }
+@media(max-width:360px) { .orbit { width: 280px; height: 280px; } .database { padding: 12px; } .database span { font-size: 10px; } .code { gap: 8px; } .code .branch { margin-left: 0; } }

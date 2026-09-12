@@ -141,23 +141,23 @@ export interface BoxCopy {
 
 const ru: BoxCopy = {
   badge: "Доступно сейчас",
-  heroTitle: "Тело для твоего агента",
+  heroTitle: "Облачный компьютер для вашего AI-агента",
   heroSubtitle:
-    "Бокс с рутом поднимается за секунды. Твой Claude, Cursor или Codex подключается и работает как на своей машине — только это не твоя машина. Прототип выжил — кристаллизуй его в постоянную VM с доменом.",
+    "Пусть Claude, Cursor или Codex пишет код, ставит зависимости и запускает сборки в Box. На вашем ноутбуке ничего устанавливать не нужно.",
   heroPrimary: "Подключить агента",
-  heroSecondary: "Посмотреть, как это работает",
-  heroNote: "Своего агента приводишь сам. Токены мы не перепродаём.",
+  heroSecondary: "Как это работает",
+  heroNote: "Вы используете своего агента и свою подписку на модель.",
 
   spotlight: {
-    eyebrow: "Новое · приватный превью",
-    title: "Dada Box — тело для твоего агента",
-    body: "Бокс с рутом за секунды, твой Claude или Cursor подключается и работает как на своей машине. База и S3 доцепляются на ходу, а выживший прототип кристаллизуется в постоянную VM с доменом — без переезда.",
+    eyebrow: "Dada Box",
+    title: "Отдельный компьютер для вашего AI-агента",
+    body: "Запускайте задачи Claude, Cursor или Codex в облачном окружении с root-доступом. Рабочая машина остаётся свободной.",
     bullets: [
-      "Десять агентов параллельно вместо одного",
-      "Ноутбук остаётся чистым",
-      "Одно окружение от мысли до прода",
+      "Ваш агент и инструменты",
+      "Окружение в облаке",
+      "Состояние в консоли"
     ],
-    cta: "Посмотреть Box",
+    cta: "Как работает Box"
   },
 
   problem: {
@@ -208,31 +208,31 @@ const ru: BoxCopy = {
   },
 
   connect: {
-    title: "Подключить за 60 секунд",
+    title: "Подключите своего агента",
     subtitle:
-      "Без формы и без ожидания оператора: агент сам поднимает бокс, как только у него есть доступ к платформе.",
+      "Выберите клиент, добавьте DADA Cloud и войдите в аккаунт. Затем попросите агента создать Box для вашей задачи.",
     tabClaude: "Claude Code",
     tabOther: "Любой другой агент",
-    claudeStep1Label: "Добавь маркетплейс",
+    claudeStep1Label: "1. Добавьте маркетплейс в Claude Code",
     claudeStep1Cmd: "/plugin marketplace add DadaDevelopment/dada-cloud-console",
-    claudeStep2Label: "Поставь плагин",
+    claudeStep2Label: "2. Установите плагин",
     claudeStep2Cmd: "/plugin install dada-cloud@dada-cloud",
-    otherLabel: "Cursor, Codex, Claude Desktop — любой MCP-клиент. Конфиг руками:",
+    otherLabel: "Добавьте этот конфиг в настройки MCP вашего клиента:",
     otherCmd:
       '{\n  "mcpServers": {\n    "dada": {\n      "command": "npx",\n      "args": [\n        "-y",\n        "mcp-remote",\n        "https://console.dada-tuda.ru/mcp",\n        "--static-oauth-client-info",\n        "{\\"client_id\\":\\"dada-mcp\\"}"\n      ]\n    }\n  }\n}',
     otherNote:
-      "client_id прибит явно — анонимная авто-регистрация клиента у нас закрыта, без этого флага клиент не подключится.",
+      "Оставьте client_id dada-mcp в конфиге: он нужен для входа через браузер.",
     copyLabel: "Скопировать",
     footNote:
-      "Нужен аккаунт Dada Cloud, вход через браузер. Free-план даёт 300 box-минут — этого хватит попробовать.",
-    helpLink: "Нужна помощь с переездом — поговорим",
+      "Нужен аккаунт DADA Cloud. План Free включает 300 активных box-минут в календарный месяц.",
+    helpLink: "Нужна помощь с подключением?",
   },
 
   demo: {
-    title: "Один и тот же объект от мысли до прода",
+    title: "Пример работы с Box",
     subtitle:
-      "Сегодня песочница и прод — разные продукты, разные форматы, и переход между ними это переписывание. Здесь — одна среда, у которой стадия жизненного цикла является свойством, а не сортом.",
-    recordingLabel: "демо-запись, не живая сессия",
+      "Иллюстрация команд и ответов. Это заранее подготовленный сценарий, а не запущенное окружение.",
+    recordingLabel: "Иллюстративный сценарий",
     playLabel: "Запустить демо",
     replayLabel: "Повторить",
     lines: [
@@ -254,20 +254,18 @@ const ru: BoxCopy = {
   },
 
   crystal: {
-    title: "Кристаллизация",
+    title: "Перенос Box в постоянную VM",
     subtitle:
-      "Главное отличие от песочницы: эксперимент не выбрасывается и не пересобирается. Он переезжает целиком и взрослеет. Одно удостоверение проходит весь путь.",
-    carriedTitle: "Что переносится",
+      "Экспериментальная возможность: перенести приложение и его окружение на постоянный сервер. Сквозной перенос пока не заявлен как гарантированно работающий сценарий.",
+    carriedTitle: "Что предусмотрено переносом",
     carried: [
-      "файловая система бокса целиком, как есть",
-      "тома и данные побайтово, без дампов и восстановлений (для базы внутри бокса — короткая остановка на финальной синхронизации)",
+      "файлы приложения и подключённые тома",
       "переменные окружения и секреты",
-      "подцепленные база и бакет, теми же строками подключения",
-      "публичный адрес — с временного на твой домен",
-      "порты как есть, процессы — те же команды, перезапущенные один раз",
+      "команда запуска и опубликованные порты",
+      "подключённые ресурсы и собственный домен",
     ],
     note:
-      "Это механический перенос объекта, а не пересборка по описанию. Модель в этом пути не участвует — значит нечему угадать неправильно.",
+      "Автоматический перенос в постоянную VM остаётся экспериментальным. Потребуется короткая остановка; работа без простоя не гарантируется. VM оплачивается по месячному тарифу.",
   },
 
   vps: {
@@ -298,9 +296,9 @@ const ru: BoxCopy = {
   },
 
   pricing: {
-    title: "Гипотеза цены",
+    title: "Оплата за время работы",
     subtitle:
-      "Цифры ниже — гипотеза, которую мы проверяем этим превью. В форме есть вопрос, сколько это должно стоить по-твоему.",
+      "План Free включает 300 активных box-минут в месяц. Дополнительные ресурсы учитываются отдельно.",
     tiers: [
       {
         name: "Бокс",
@@ -319,75 +317,56 @@ const ru: BoxCopy = {
       },
     ],
     disclaimer:
-      "На превью доступ бесплатный и выдаётся вручную. Тарификация включится не раньше, чем мы поймём, что боксом действительно пользуются.",
+      "Минуты входят в квоту вашего плана. Проверяйте лимиты и условия перед запуском.",
   },
 
   honesty: {
-    title: "Что уже работает, а что нет",
+    title: "Возможности и ограничения",
     subtitle:
-      "Box — не приватный превью на ручной выдаче, это работает прямо сейчас, самообслуживанием. Кристаллизация — ещё нет, вот честная граница.",
-    worksTitle: "Работает сейчас",
+      "Создание Box и публикация приложения доступны через агента. Перенос в постоянную VM имеет отдельные ограничения.",
+    worksTitle: "Доступно",
     works: [
-      "самообслуживание — бокс поднимается по вызову агента, без оператора и без заявки",
-      "старт из тёплого пула — Ready за 350-450 мс, проверено живым MCP-вызовом",
-      "публичный адрес с TLS — https://<box>-<port>.box.dada-tuda.ru отдаёт 200 с валидным сертификатом",
-      "тарификация по активным минутам — считаем реальные деньги, не оценку",
-      "управляемый Postgres, S3, домены и TLS для постоянных VM — основная платформа, в проде",
+      "Создание окружения по запросу агента через MCP",
+      "Запуск команд, сборок и приложений с root-доступом",
+      "Публикация порта приложения по адресу с HTTPS",
+      "Учёт активного времени Box в квотах плана",
     ],
-    notYetTitle: "Ещё нет",
+    notYetTitle: "Ограничения",
     notYet: [
-      "кристаллизация в один шаг — инструмент есть, но сквозной прогон бокс → прод вживую не доказан",
-      "перенос без простоя — короткая пауза на финальной синхронизации остаётся, это не ноль",
-      "гарантии времени старта в худшем случае — публично называем медиану, не SLA на хвост",
+      "Автоматический перенос Box в постоянную VM остаётся экспериментальным",
+      "При переносе предусмотрена короткая остановка, без гарантии нулевого простоя",
+      "Время запуска зависит от наличия подготовленных окружений; фиксированное время не гарантируется",
     ],
   },
 
   faq: {
-    title: "Вопросы",
+    title: "Вопросы о Box",
     items: [
-      {
-        q: "Вы перепродаёте доступ к Claude?",
-        a: "Нет, и не планируем. Ты приводишь своего агента и свою подписку. Мы даём тело, в котором он работает. Так у нас нет ни наценки на токены, ни доступа к твоей подписке.",
-      },
-      {
-        q: "Мой код и данные попадают к вам?",
-        a: "Код и данные лежат в боксе, который развёрнут на нашей инфраструктуре в России. На превью боксы выдаются вручную и живут в изолированном контуре. Не заливай в превью то, что нельзя показывать посторонним, — сейчас это честнее любых обещаний.",
-      },
-      {
-        q: "Чем это отличается от Codespaces или Gitpod?",
-        a: "Те продукты строились для человека внутри среды, и умерли на человеческих претензиях — задержка и привязанность к своему сетапу. Агенту всё равно на задержку и у него нет дотфайлов. Плюс у них нет выпускного пути: бокс там не становится продом.",
-      },
-      {
-        q: "Что если агент внутри что-то сломает?",
-        a: "Ничего страшного, в этом смысл. Бокс одноразовый: сносишь и поднимаешь новый. Пока он не кристаллизован, ломать его — нормальный режим работы.",
-      },
-      {
-        q: "Можно поднять несколько боксов сразу?",
-        a: "Это основной сценарий, ради которого всё делается. Параллельные агенты — то, что локальная машина не выдерживает.",
-      },
-      {
-        q: "Когда открытый доступ?",
-        a: "Зависит от результата этого превью. Мы сознательно не строим автоматику до того, как убедимся, что боксом пользуются повторно, а не один раз из любопытства.",
-      },
+      { q: "Нужна отдельная подписка на AI-модель?", a: "Да. Вы подключаете своего агента и свою подписку или ключ модели. DADA Cloud предоставляет вычислительное окружение и не перепродаёт доступ к Claude, Cursor или Codex." },
+      { q: "Где хранятся код и данные?", a: "В Box на инфраструктуре DADA Cloud в России. Это удалённое окружение: загруженные файлы хранятся в облаке, а не только на вашем ноутбуке." },
+      { q: "Чем Box отличается от обычного VPS?", a: "Box подходит для отдельных задач агента: создать окружение, выполнить работу и удалить его. VPS рассчитан на постоянную работу. Автоматический перенос Box в постоянную VM остаётся экспериментальной возможностью." },
+      { q: "Что будет, если агент сломает окружение?", a: "Можно удалить Box и создать новый. Перед удалением сохраните нужные файлы: удаление окружения не заменяет резервное копирование." },
+      { q: "Можно запустить несколько боксов?", a: "Да, отдельные задачи можно выполнять в отдельных окружениях. Их суммарное потребление учитывается в лимитах вашего плана." },
+      { q: "Нужно ждать подтверждения доступа?", a: "Для самостоятельного запуска через MCP заявка не нужна. Подключите клиент и войдите в аккаунт DADA Cloud. Форма на странице предназначена для помощи с вашим сценарием." },
     ],
   },
 
   form: {
-    title: "Получить доступ к превью",
+    title: "Нужна помощь с Box?",
     subtitle:
-      "Доступ выдаём вручную и небольшими партиями. Расскажи, что собираешься запускать — так мы поднимем бокс под твой сценарий, а не универсальный.",
+      "Расскажите о задаче и оставьте контакт. Это запрос команде, а не обязательный шаг для подключения агента.",
     emailLabel: "Email",
     emailPlaceholder: "you@example.com",
     contactLabel: "Telegram или другой контакт",
     contactPlaceholder: "@username — необязательно",
-    agentLabel: "Каким агентом пользуешься",
+    agentLabel: "Каким агентом пользуетесь",
     agentOptions: ["Claude Code", "Cursor", "Codex", "Несколькими", "Другим"],
-    parallelLabel: "Сколько агентов гоняешь одновременно",
+    parallelLabel: "Сколько агентов запускаете одновременно",
     parallelOptions: ["Один", "Два-три", "Больше трёх", "Пока не пробовал параллельно"],
-    useCaseLabel: "Что будешь запускать в боксе",
+    useCaseLabel: "Что хотите запустить в Box",
     useCasePlaceholder:
       "Например: ночные рефакторинги на трёх агентах, прототипы для клиентов, эксперименты с моделями…",
-    priceLabel: "Сколько это должно стоить, по-твоему",
+    priceLabel: "Какой бюджет вам подходит",
     priceOptions: [
       "Только бесплатно",
       "До 500 ₽/мес",
@@ -395,18 +374,18 @@ const ru: BoxCopy = {
       "Больше 2000 ₽/мес",
       "Готов платить за минуты, а не за месяц",
     ],
-    submit: "Оставить заявку",
+    submit: "Отправить запрос",
     submitting: "Отправляем…",
-    errorRequired: "Заполни email и что собираешься запускать.",
-    errorEmail: "Похоже, email указан неверно.",
-    errorGeneric: "Не получилось отправить. Попробуй ещё раз или напиши нам в Telegram.",
-    successTitle: "Заявка принята",
+    errorRequired: "Укажите email и задачу для Box.",
+    errorEmail: "Проверьте адрес email.",
+    errorGeneric: "Не удалось отправить запрос. Попробуйте ещё раз.",
+    successTitle: "Запрос принят",
     successBody:
-      "Боксы на превью поднимает живой человек, поэтому напишем лично — обычно в течение рабочего дня. Никакой автоматической выдачи пока нет, и мы не будем делать вид, что она есть.",
+      "Сохранили ваш запрос. Команда сможет связаться с вами по указанному контакту. Отправка формы не создаёт Box.",
     claimLabel: "Код заявки",
     crystalTitle: "Нужен перенос в постоянную VM?",
     crystalBody:
-      "Это самая дорогая часть продукта, и мы строим её только если она действительно нужна. Отметь, что для тебя важно перенести.",
+      "Если планируете постоянный сервер, отметьте, что важно сохранить при переносе.",
     crystalOptions: [
       "Данные базы без дампов и восстановления",
       "Файлы и тома как есть",
@@ -415,32 +394,32 @@ const ru: BoxCopy = {
       "Запущенные процессы без перезапуска",
     ],
     crystalSubmit: "Мне это нужно",
-    crystalDone: "Записали. Это сильно влияет на то, что мы будем строить дальше — спасибо.",
+    crystalDone: "Сохранили ваши пожелания.",
     privacy:
-      "Используем контакт только чтобы выдать доступ и спросить, как прошло. Ни рассылок, ни передачи третьим лицам.",
+      "Используем контакт для ответа на запрос и уточнения вашего сценария.",
     privacyLink: "Политика конфиденциальности",
   },
 };
 
 const en: BoxCopy = {
   badge: "Available now",
-  heroTitle: "A body for your agent",
+  heroTitle: "A cloud computer for your AI agent",
   heroSubtitle:
-    "A root box boots in seconds. Your Claude, Cursor or Codex connects and works like it owns the machine — except it isn't your machine. Prototype survived? Crystallize it into a permanent VM with a domain.",
+    "Let Claude, Cursor or Codex write code, install dependencies and run builds in a Box. Keep those tools off your own laptop.",
   heroPrimary: "Connect your agent",
-  heroSecondary: "See how it works",
-  heroNote: "You bring your own agent. We don't resell tokens.",
+  heroSecondary: "How it works",
+  heroNote: "Bring your own agent and model subscription.",
 
   spotlight: {
-    eyebrow: "New · private preview",
-    title: "Dada Box — a body for your agent",
-    body: "A root box in seconds; your Claude or Cursor connects and works like it owns the machine. A database and S3 attach mid-flight, and a surviving prototype crystallizes into a permanent VM with a domain — no migration.",
+    eyebrow: "Dada Box",
+    title: "A separate computer for your AI agent",
+    body: "Run Claude, Cursor or Codex tasks in a cloud environment with root access. Keep your own machine free.",
     bullets: [
-      "Ten agents in parallel instead of one",
-      "Your laptop stays clean",
-      "One environment from thought to production",
+      "Your agent and tools",
+      "A cloud environment",
+      "Visible in your console"
     ],
-    cta: "See Box",
+    cta: "How Box works"
   },
 
   problem: {
@@ -491,31 +470,31 @@ const en: BoxCopy = {
   },
 
   connect: {
-    title: "Connect in 60 seconds",
+    title: "Connect your agent",
     subtitle:
-      "No form, no waiting on an operator: the agent boots its own box the moment it has access to the platform.",
+      "Choose a client, add DADA Cloud and sign in. Then ask your agent to create a Box for your task.",
     tabClaude: "Claude Code",
     tabOther: "Any other agent",
-    claudeStep1Label: "Add the marketplace",
+    claudeStep1Label: "1. Add the marketplace in Claude Code",
     claudeStep1Cmd: "/plugin marketplace add DadaDevelopment/dada-cloud-console",
-    claudeStep2Label: "Install the plugin",
+    claudeStep2Label: "2. Install the plugin",
     claudeStep2Cmd: "/plugin install dada-cloud@dada-cloud",
-    otherLabel: "Cursor, Codex, Claude Desktop — any MCP client. Config by hand:",
+    otherLabel: "Add this configuration to your client’s MCP settings:",
     otherCmd:
       '{\n  "mcpServers": {\n    "dada": {\n      "command": "npx",\n      "args": [\n        "-y",\n        "mcp-remote",\n        "https://console.dada-tuda.ru/mcp",\n        "--static-oauth-client-info",\n        "{\\"client_id\\":\\"dada-mcp\\"}"\n      ]\n    }\n  }\n}',
     otherNote:
-      "client_id is pinned on purpose — anonymous client auto-registration is closed on our side, and a client without this flag will not connect.",
+      "Keep client_id dada-mcp in the config: it is required for browser sign-in.",
     copyLabel: "Copy",
     footNote:
-      "Needs a Dada Cloud account, signed in through the browser. The free plan gives 300 box-minutes — enough to try it.",
-    helpLink: "Need help migrating instead — let's talk",
+      "A DADA Cloud account is required. Free includes 300 active box-minutes per calendar month.",
+    helpLink: "Need help connecting?",
   },
 
   demo: {
-    title: "One object, from thought to production",
+    title: "An example Box workflow",
     subtitle:
-      "Today a sandbox and production are different products in different formats, and moving between them is a rewrite. Here it's one environment whose lifecycle stage is a property, not a species.",
-    recordingLabel: "recorded demo, not a live session",
+      "An illustration of commands and responses. This is a prepared scenario, not a running environment.",
+    recordingLabel: "Illustrative scenario",
     playLabel: "Play demo",
     replayLabel: "Replay",
     lines: [
@@ -537,20 +516,18 @@ const en: BoxCopy = {
   },
 
   crystal: {
-    title: "Crystallization",
+    title: "Move a Box to a permanent VM",
     subtitle:
-      "The real difference from a sandbox: the experiment is neither thrown away nor rebuilt. It moves across whole, and grows up. One identity for the whole journey.",
-    carriedTitle: "What carries over",
+      "An experimental capability for moving an app and its environment to a permanent server. The end-to-end migration is not yet offered as a guaranteed working flow.",
+    carriedTitle: "What the migration is designed to carry",
     carried: [
-      "the box filesystem, exactly as it is",
-      "volumes and data byte for byte, with no dump-and-restore (a database inside the box needs a short pause for the final sync)",
+      "application files and attached volumes",
       "environment variables and secrets",
-      "attached database and bucket, same connection strings",
-      "the public address — from a temporary one to your domain",
-      "the same ports, and the same processes relaunched once — same commands, same working dirs",
+      "the startup command and published ports",
+      "connected resources and a custom domain",
     ],
     note:
-      "This is a mechanical move of an object, not a rebuild from a description. No model participates in this path — so there is nothing to guess wrong.",
+      "Automatic migration to a permanent VM remains experimental. A brief pause is required; zero downtime is not guaranteed. The VM uses monthly billing.",
   },
 
   vps: {
@@ -581,9 +558,9 @@ const en: BoxCopy = {
   },
 
   pricing: {
-    title: "Pricing hypothesis",
+    title: "Pay for active time",
     subtitle:
-      "The numbers below are a hypothesis this preview is testing. The form asks what you think it should cost.",
+      "Free includes 300 active box-minutes each month. Additional resources are accounted for separately.",
     tiers: [
       {
         name: "Box",
@@ -602,75 +579,56 @@ const en: BoxCopy = {
       },
     ],
     disclaimer:
-      "Preview access is free and granted by hand. Billing won't switch on until we know boxes are actually being used.",
+      "Minutes count against your plan’s allowance. Check the limits and terms before starting.",
   },
 
   honesty: {
-    title: "What works today and what doesn't",
+    title: "Capabilities and limits",
     subtitle:
-      "Box isn't a hand-provisioned private preview anymore — it's self-service, working right now. Crystallization is the honest edge that's still open.",
-    worksTitle: "Works today",
+      "Create a Box and publish an app through your agent. Migration to a permanent VM has separate limitations.",
+    worksTitle: "Available",
     works: [
-      "self-service — a box boots on the agent's own call, no operator and no request",
-      "boot from a warm pool — Ready in 350-450ms, verified with a live MCP call",
-      "a public address with TLS — https://<box>-<port>.box.dada-tuda.ru serves 200 with a valid certificate",
-      "per-active-minute billing — we track real money, not an estimate",
-      "managed Postgres, S3, domains and TLS for permanent VMs — our core platform, in production",
+      "Create an environment through your agent over MCP",
+      "Run commands, builds and apps with root access",
+      "Publish an application port at an HTTPS address",
+      "Active Box time counts against your plan’s allowance",
     ],
-    notYetTitle: "Not yet",
+    notYetTitle: "Limitations",
     notYet: [
-      "one-step crystallization — the tool exists, but an end-to-end box-to-production run hasn't been proven live",
-      "zero-downtime promotion — there's still a short pause on the final sync, that's not zero",
-      "worst-case start-time guarantees — we quote the median publicly, not a tail SLA",
+      "Automatic Box migration to a permanent VM remains experimental",
+      "Migration requires a brief pause; zero downtime is not guaranteed",
+      "Startup time depends on warm environment availability; no fixed startup time is guaranteed",
     ],
   },
 
   faq: {
-    title: "Questions",
+    title: "Box questions",
     items: [
-      {
-        q: "Are you reselling access to Claude?",
-        a: "No, and we don't plan to. You bring your own agent and your own subscription. We provide the body it works in. That way there's no token markup and no access to your subscription.",
-      },
-      {
-        q: "Do my code and data end up with you?",
-        a: "Code and data live in a box on our infrastructure in Russia. During the preview, boxes are provisioned by hand and live in an isolated segment. Don't put anything into the preview that outsiders mustn't see — right now that's more honest than any promise.",
-      },
-      {
-        q: "How is this different from Codespaces or Gitpod?",
-        a: "Those were built for a human inside the environment, and died on human complaints — latency and attachment to a personal setup. An agent doesn't care about latency and has no dotfiles. They also have no graduation path: the box never becomes production.",
-      },
-      {
-        q: "What if the agent breaks something inside?",
-        a: "That's the point. The box is disposable: destroy it and boot another. Until it's crystallized, breaking it is normal operation.",
-      },
-      {
-        q: "Can I run several boxes at once?",
-        a: "That's the primary scenario this exists for. Parallel agents are exactly what a local machine can't take.",
-      },
-      {
-        q: "When does it open up?",
-        a: "It depends on this preview. We're deliberately not building automation until we're sure boxes get used more than once out of curiosity.",
-      },
+      { q: "Do I need my own AI model subscription?", a: "Yes. Bring your own agent and model subscription or API key. DADA Cloud provides the computing environment and does not resell access to Claude, Cursor or Codex." },
+      { q: "Where do my code and data live?", a: "Inside a Box on DADA Cloud infrastructure in Russia. It is a remote environment: uploaded files are stored in the cloud, not only on your laptop." },
+      { q: "How is this different from a regular VPS?", a: "A Box is designed for individual agent tasks: create an environment, do the work, then delete it. A VPS is intended to run continuously. Automatic migration from Box to a permanent VM remains experimental." },
+      { q: "What if the agent breaks its environment?", a: "You can delete the Box and create a new one. Save the files you need before deleting it: replacing an environment is not a backup." },
+      { q: "Can I run several boxes?", a: "Yes. Separate tasks can run in separate environments. Their combined usage counts against your plan’s limits." },
+      { q: "Do I need to wait for access approval?", a: "No request is needed for self-service access over MCP. Connect your client and sign in to DADA Cloud. The form on this page is for help with your use case." },
     ],
   },
 
   form: {
-    title: "Request preview access",
+    title: "Need help with Box?",
     subtitle:
-      "We grant access by hand, in small batches. Tell us what you plan to run so we can prepare a box for your scenario rather than a generic one.",
+      "Tell us about your task and leave a contact. This is a request to the team, not a required step to connect your agent.",
     emailLabel: "Email",
     emailPlaceholder: "you@example.com",
     contactLabel: "Telegram or another contact",
     contactPlaceholder: "@username — optional",
-    agentLabel: "Which agent do you use",
+    agentLabel: "Which agent do you use?",
     agentOptions: ["Claude Code", "Cursor", "Codex", "Several", "Something else"],
-    parallelLabel: "How many agents do you run at once",
+    parallelLabel: "How many agents do you run at once?",
     parallelOptions: ["One", "Two or three", "More than three", "Haven't tried parallel yet"],
-    useCaseLabel: "What will you run in the box",
+    useCaseLabel: "What would you like to run in Box?",
     useCasePlaceholder:
       "For example: overnight refactors across three agents, client prototypes, model experiments…",
-    priceLabel: "What should this cost, in your view",
+    priceLabel: "What budget works for you?",
     priceOptions: [
       "Free only",
       "Up to $5/mo",
@@ -678,18 +636,18 @@ const en: BoxCopy = {
       "More than $25/mo",
       "Happy to pay per minute rather than per month",
     ],
-    submit: "Request access",
+    submit: "Send request",
     submitting: "Sending…",
-    errorRequired: "Please fill in your email and what you plan to run.",
-    errorEmail: "That email doesn't look right.",
-    errorGeneric: "Couldn't send that. Try again, or ping us on Telegram.",
+    errorRequired: "Enter your email and describe your task.",
+    errorEmail: "Check your email address.",
+    errorGeneric: "Could not send the request. Please try again.",
     successTitle: "Request received",
     successBody:
-      "Preview boxes are provisioned by a human, so we'll reply personally — usually within a business day. There's no automatic provisioning yet, and we won't pretend otherwise.",
+      "We saved your request. The team can follow up using the contact you provided. Submitting this form does not create a Box.",
     claimLabel: "Request code",
     crystalTitle: "Do you need the move to a permanent VM?",
     crystalBody:
-      "It's the most expensive part of the product, and we'll only build it if it's genuinely needed. Mark what matters for you to carry over.",
+      "If you need a permanent server, select what matters to you during migration.",
     crystalOptions: [
       "Database data with no dump-and-restore",
       "Files and volumes as they are",
@@ -698,9 +656,9 @@ const en: BoxCopy = {
       "Running processes without a restart",
     ],
     crystalSubmit: "I need this",
-    crystalDone: "Noted. This weighs heavily on what we build next — thank you.",
+    crystalDone: "Your preferences have been saved.",
     privacy:
-      "We use your contact only to grant access and ask how it went. No newsletters, no sharing with third parties.",
+      "We use your contact to respond to the request and clarify your use case.",
     privacyLink: "Privacy policy",
   },
 };

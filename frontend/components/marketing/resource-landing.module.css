@@ -1,0 +1,75 @@
+.page { background: #f5f7fb; color: #17253b; }
+.container { width: min(100% - 4rem, 74rem); margin-inline: auto; }
+.hero { display: grid; grid-template-columns: 1.15fr 1fr; align-items: center; gap: 4rem; padding-block: 4.5rem 4rem; }
+.heroCopy { min-width: 0; }
+.eyebrow { color: #315cff; font-size: .65rem; font-weight: 650; text-transform: uppercase; letter-spacing: .1em; margin-bottom: 1.5rem; }
+.hero h1 { font-size: clamp(2.4rem, 4.1vw, 3.6rem); font-weight: 550; letter-spacing: -.06em; line-height: 1.1; }
+.hero h1 span { display: block; color: #315cff; }
+.lead { font-size: 1rem; color: #5b697d; max-width: 34rem; line-height: 1.75; margin-top: 1.5rem; }
+.actions { display: flex; align-items: center; flex-wrap: wrap; gap: 1.4rem; margin-top: 2rem; }
+.button { display: inline-flex; align-items: center; justify-content: center; gap: 1.5rem; padding: .85rem 1.2rem; min-height: 2.9rem; border-radius: .45rem; background: #315cff; color: white; font-size: .8rem; font-weight: 600; transition: background .15s; }
+.button:hover { background: #2148df; }
+.button svg { flex-shrink: 0; }
+.textLink { display: inline-flex; align-items: center; gap: .7rem; padding-block: .65rem; color: #315cff; font-size: .8rem; font-weight: 550; }
+.textLink:hover { text-decoration: underline; text-underline-offset: .3rem; }
+.note { max-width: 35rem; color: #68758a; font-size: .68rem; line-height: 1.65; margin-top: 1.2rem; }
+.diagram { position: relative; display: flex; flex-direction: column; justify-content: space-between; min-height: 26rem; padding: 1.65rem; border: 1px solid #dce3ef; border-radius: 1.2rem; background: #ecf1fc; overflow: hidden; }
+.diagramCaption { display: flex; align-items: center; justify-content: space-between; gap: 1rem; font-size: .55rem; letter-spacing: .08em; color: #64748b; }
+.diagramCaption > :last-child { font-size: 1.1rem; }
+.diagramFlow { display: flex; flex-direction: column; align-items: center; padding-block: 1.6rem; }
+.diagramSource { display: inline-flex; align-items: center; gap: .8rem; padding: .85rem 1.3rem; border: 1px solid #d5deef; border-radius: .6rem; background: #fff; font-size: .85rem; }
+.diagramSource svg { color: #315cff; }
+.connector { height: 3.5rem; width: 1px; background: #8ca7ef; position: relative; }
+.connector span { position: absolute; top: 50%; left: .8rem; color: #6b7c9a; font-size: .55rem; transform: translateY(-50%); white-space: nowrap; }
+.diagramResource { display: flex; align-items: center; flex-direction: column; gap: .8rem; width: min(100%, 20rem); padding: 1.65rem 1rem; border: 1px solid #baccf7; border-radius: .8rem; background: #f8faff; box-shadow: 0 12px 30px #315cff0c; }
+.diagramResource > svg { color: #315cff; }
+.diagramResource strong { font-size: 1rem; font-weight: 550; }
+.diagramChips { display: flex; justify-content: center; flex-wrap: wrap; gap: .4rem; margin-top: .4rem; }
+.diagramChips span { padding: .35rem .6rem; border: 1px solid #dbe3f4; border-radius: .3rem; font-size: .6rem; background: white; }
+.diagram figcaption { text-align: center; color: #64748b; font-size: .65rem; }
+.servers { background: #ecf1fc; }
+.databases { background: #eaf2f5; }
+.storage { background: #eeedfa; }
+.benefits { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3rem; padding-block: 2rem 4rem; border-bottom: 1px solid #dbe1eb; }
+.number { display: block; color: #8a99b1; font-family: var(--font-geist-mono), monospace; font-size: .65rem; margin-bottom: 1rem; }
+.benefits h2, .steps h3 { font-size: 1.1rem; font-weight: 550; line-height: 1.4; letter-spacing: -.025em; }
+.benefits p, .steps p { font-size: .8rem; line-height: 1.8; color: #5b697d; margin-top: .65rem; }
+.section { padding-block: 4rem; border-bottom: 1px solid #dbe1eb; scroll-margin-top: 5rem; }
+.sectionHeading { max-width: 37rem; margin-bottom: 2.5rem; }
+.sectionHeading .eyebrow { margin-bottom: 1rem; }
+.sectionHeading h2, .detailsLayout h2, .end h2 { font-size: clamp(1.65rem, 3vw, 2.5rem); font-weight: 550; line-height: 1.2; letter-spacing: -.045em; }
+.steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3rem; list-style: none; padding: 0; }
+.steps li { border-top: 1px solid #c8d2e2; padding-top: 1.3rem; scroll-margin-top: 6rem; }
+.stepNumber { display: block; color: #315cff; font-size: .7rem; font-family: var(--font-geist-mono), monospace; margin-bottom: 1.5rem; }
+.choices { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; }
+.choices article { padding: 1.8rem 2rem 0 0; border-top: 1px solid #c8d2e2; }
+.choices svg { color: #315cff; }
+.choices h3 { margin-block: 1.2rem .8rem; font-size: 1.6rem; letter-spacing: -.04em; font-weight: 550; }
+.choices p { font-size: .85rem; color: #5b697d; line-height: 1.75; max-width: 31rem; }
+.choices .textLink { margin-top: 1rem; }
+.detailsLayout { display: grid; grid-template-columns: 1fr 1.7fr; gap: 5rem; padding-block: 3.5rem; border-bottom: 1px solid #dbe1eb; }
+.detailsLayout > div > p { color: #5b697d; font-size: .8rem; line-height: 1.75; margin-top: 1rem; }
+.disclosures details { border-bottom: 1px solid #dbe1eb; }
+.disclosures details:last-child { border-bottom: 0; }
+.disclosures summary { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; padding-block: 1rem; font-size: .87rem; font-weight: 550; line-height: 1.5; cursor: pointer; list-style: none; }
+.disclosures summary::-webkit-details-marker { display: none; }
+.disclosures summary svg { flex-shrink: 0; color: #718096; }
+.disclosures details[open] > summary svg { transform: rotate(180deg); }
+.disclosures details > p { max-width: 65ch; padding-bottom: 1.2rem; font-size: .8rem; color: #5b697d; line-height: 1.8; }
+.moreQuestions > summary { color: #315cff; }
+.moreQuestions > div { padding-left: 1.25rem; }
+.end { background: #eaf0ff; }
+.endInner { padding-block: 3.5rem; }
+.end .actions { margin-top: 1.5rem; }
+.related { display: flex; flex-wrap: wrap; gap: 1rem 2rem; margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid #d0dcf4; }
+.related a { color: #5b697d; font-size: .7rem; }
+.related a:hover { color: #315cff; }
+.page a:focus-visible, .page summary:focus-visible { outline: 3px solid #315cff; outline-offset: 5px; }
+@media (max-width: 1000px) { .hero { gap: 2rem; } .detailsLayout { gap: 2.5rem; } .benefits, .steps { gap: 1.75rem; } }
+@media (max-width: 800px) { .hero { grid-template-columns: 1fr; padding-top: 3rem; } .heroCopy { max-width: 37rem; } .diagram { min-height: 24rem; } .detailsLayout { grid-template-columns: 1fr; gap: 1.5rem; } }
+@media (max-width: 600px) {
+ .container { width: calc(100% - 2rem); } .hero { padding-block: 2.5rem; gap: 2rem; } .hero h1 { font-size: clamp(2.1rem, 9vw, 3rem); } .lead { font-size: .9rem; } .eyebrow { font-size: .6rem; margin-bottom: 1.2rem; }
+ .benefits, .steps, .choices { grid-template-columns: 1fr; gap: 1.5rem; } .benefits { padding-block: .5rem 2.5rem; } .benefits article { display: grid; grid-template-columns: 1.3rem 1fr; gap: 0 .6rem; } .benefits p { grid-column: 2; } .number { margin-top: .2rem; } .benefits h2 { font-size: 1rem; }
+ .section, .detailsLayout, .endInner { padding-block: 2.5rem; } .sectionHeading { margin-bottom: 1.75rem; } .choices article { padding: 1.4rem 0 0; } .choices h3 { font-size: 1.4rem; } .diagram { padding: 1.25rem; min-height: 23rem; } .moreQuestions > div { padding-left: .5rem; }
+}
+@media (prefers-reduced-motion: reduce) { .button { transition: none; } }
