@@ -329,6 +329,7 @@ export default function AppDetailPage() {
       ? getAppNextSteps({
           hasCustomDomain: hostnames.some((h) => !h.managed),
           hasGitRepo: hasGitSource,
+          isWorker: summary.worker === true,
         })
       : [];
 
@@ -567,6 +568,7 @@ export default function AppDetailPage() {
         onConnectDomain={() => { setDomainForm(defaultDomainForm(appName)); setIsDomainModalOpen(true); }}
         gitSettingsHref={`/projects/${projectId}/apps/${appName}/settings?tab=git${envId ? `&envId=${envId}` : ""}`}
         deploymentsHref={`/projects/${projectId}/apps/${appName}/deployments${envId ? `?envId=${envId}` : ""}`}
+        portSettingsHref={`/projects/${projectId}/apps/${appName}/settings?tab=config${envId ? `&envId=${envId}` : ""}#port`}
       />
 
       {!isResource && summary.url && (urlStatus === "active" || urlStatus === "unknown") && (

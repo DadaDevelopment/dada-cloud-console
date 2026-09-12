@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, type ReactNode } from "react";
-import { Globe, GitBranch, Rocket } from "lucide-react";
+import { Globe, GitBranch, Rocket, Plug } from "lucide-react";
 import { useT } from "@/lib/i18n/console/context";
 import type { NextStepId } from "@/lib/app-next-step";
 import { trackUxEvent } from "@/lib/ux-telemetry";
@@ -15,6 +15,11 @@ interface StepDef {
 }
 
 const STEP_DEFS: Record<NextStepId, Omit<StepDef, "id">> = {
+  publish_web: {
+    icon: <Plug className="h-5 w-5" />,
+    titleKey: "apps.nextStep.publishWeb.title",
+    descKey: "apps.nextStep.publishWeb.desc",
+  },
   connect_domain: {
     icon: <Globe className="h-5 w-5" />,
     titleKey: "apps.nextStep.domain.title",
@@ -37,6 +42,7 @@ interface AppNextStepCardProps {
   onConnectDomain: () => void;
   gitSettingsHref: string;
   deploymentsHref: string;
+  portSettingsHref: string;
 }
 
 /**
@@ -53,7 +59,7 @@ interface AppNextStepCardProps {
  * happened -- without that, a card nobody clicked and a card nobody saw
  * were indistinguishable in the data.
  */
-export function AppNextStepCard({ steps, onConnectDomain, gitSettingsHref, deploymentsHref }: AppNextStepCardProps) {
+export function AppNextStepCard({ steps, onConnectDomain, gitSettingsHref, deploymentsHref, portSettingsHref }: AppNextStepCardProps) {
   const { t } = useT();
   const viewedRef = useRef(false);
 
@@ -67,6 +73,7 @@ export function AppNextStepCard({ steps, onConnectDomain, gitSettingsHref, deplo
   if (steps.length === 0) return null;
 
   function hrefFor(id: NextStepId): string | undefined {
+    if (id === "publish_web") return portSettingsHref;
     if (id === "connect_git") return gitSettingsHref;
     if (id === "deploy_commit") return deploymentsHref;
     return undefined;

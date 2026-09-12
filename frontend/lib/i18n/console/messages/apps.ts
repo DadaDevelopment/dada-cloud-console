@@ -740,6 +740,11 @@ export const apps: Messages = {
   "apps.detail.config.gitCommit": { ru: "Коммит {sha}", en: "Commit {sha}" },
 
   "apps.nextStep.title": { ru: "Что дальше", en: "What's next" },
+  "apps.nextStep.publishWeb.title": { ru: "Открыть приложение в интернет", en: "Publish the app to the web" },
+  "apps.nextStep.publishWeb.desc": {
+    ru: "Мы не нашли в коде веб-порта и запустили приложение как фоновый воркер - поэтому адрес не выдан. Если это сайт или API, укажите порт, который он слушает, и адрес появится.",
+    en: "We found no web port in your code and started the app as a background worker, so no address was issued. If it is a site or an API, set the port it listens on and the address will appear.",
+  },
   "apps.nextStep.domain.title": { ru: "Подключить свой домен", en: "Connect your own domain" },
   "apps.nextStep.domain.desc": { ru: "Сейчас приложение доступно только по временному адресу dada-tuda.ru.", en: "Right now the app is only reachable at a temporary dada-tuda.ru address." },
   "apps.nextStep.connectGit.title": { ru: "Подключить репозиторий", en: "Connect a repository" },
