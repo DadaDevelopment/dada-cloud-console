@@ -97,6 +97,7 @@ type SaveMessageInput struct {
 type ConversationStore interface {
 	GetOrCreateConversation(ctx context.Context, agentName, channel, externalID string, actor Actor) (conv Conversation, created bool, err error)
 	GetConversation(ctx context.Context, id uuid.UUID) (Conversation, error)
+	FindActiveConversation(ctx context.Context, agentName, channel, externalID string) (Conversation, error)
 	UpdateMetadata(ctx context.Context, id uuid.UUID, metadata map[string]any) error
 	Touch(ctx context.Context, id uuid.UUID) error
 	ListIdleConversations(ctx context.Context, agentName string, threshold time.Time) ([]Conversation, error)
@@ -165,6 +166,23 @@ func (s *pgStore) GetConversation(ctx context.Context, id uuid.UUID) (Conversati
 		SELECT id, agent_name, channel, external_id, actor_external_id, actor_username, actor_metadata, metadata, status, created_at, updated_at
 		FROM conversations WHERE id = $1
 	`, id).Scan(
+		&conv.ID, &conv.AgentName, &conv.Channel, &conv.ExternalID,
+		&conv.ActorExternalID, &conv.ActorUsername, &conv.ActorMetadata,
+		&conv.Metadata, &conv.Status, &conv.CreatedAt, &conv.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Conversation{}, ErrConversationNotFound
+	}
+	return conv, err
+}
+
+func (s *pgStore) FindActiveConversation(ctx context.Context, agentName, channel, externalID string) (Conversation, error) {
+	var conv Conversation
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, agent_name, channel, external_id, actor_external_id, actor_username, actor_metadata, metadata, status, created_at, updated_at
+		FROM conversations WHERE agent_name = $1 AND channel = $2 AND external_id = $3 AND status = 'active'
+		LIMIT 1
+	`, agentName, channel, externalID).Scan(
 		&conv.ID, &conv.AgentName, &conv.Channel, &conv.ExternalID,
 		&conv.ActorExternalID, &conv.ActorUsername, &conv.ActorMetadata,
 		&conv.Metadata, &conv.Status, &conv.CreatedAt, &conv.UpdatedAt,

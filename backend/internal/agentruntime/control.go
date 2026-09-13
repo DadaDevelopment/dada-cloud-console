@@ -51,18 +51,39 @@ func decodeControl(c *gin.Context, v any) bool {
 	return true
 }
 func (s *Server) controlConversation(c *gin.Context, token string) (Conversation, bool) {
+	agent := strings.TrimSpace(c.GetHeader(agentHeader))
+	endUser := strings.TrimSpace(c.GetHeader(endUserHeader))
+	if agent != "" || endUser != "" {
+		channel, externalID, ok := strings.Cut(endUser, ":")
+		if !ok || agent == "" || channel == "" || externalID == "" {
+			s.rejectIdentity(c, "malformed_identity_headers", agent, endUser)
+			return Conversation{}, false
+		}
+		conv, err := s.runtime.store.FindActiveConversation(c.Request.Context(), agent, channel, externalID)
+		if err != nil {
+			s.rejectIdentity(c, "unknown_conversation", agent, endUser)
+			return Conversation{}, false
+		}
+		return conv, true
+	}
 	claims, err := verifyContextToken([]byte(s.token), token, time.Now())
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "invalid runtime context"})
+		s.rejectIdentity(c, "invalid_context_token", "", "")
 		return Conversation{}, false
 	}
 	conv, err := s.runtime.store.GetConversation(c.Request.Context(), claims.ConversationID)
 	if err != nil || conv.AgentName != claims.AgentName {
-		c.JSON(http.StatusForbidden, gin.H{"error": "invalid runtime context"})
+		s.rejectIdentity(c, "context_token_conversation_mismatch", claims.AgentName, "")
 		return Conversation{}, false
 	}
 	return conv, true
 }
+
+func (s *Server) rejectIdentity(c *gin.Context, reason, agent, endUser string) {
+	log.Warn().Str("reason", reason).Str("agent", agent).Str("end_user", endUser).Str("route", c.FullPath()).Msg("agentruntime: runtime tool call rejected: invalid runtime context")
+	c.JSON(http.StatusForbidden, gin.H{"error": "invalid runtime context", "error_code": reason})
+}
+
 func (s *Server) requireActive(c *gin.Context, conv Conversation) bool {
 	state, err := s.runtime.states.GetState(c.Request.Context(), conv.ID)
 	if err != nil {
