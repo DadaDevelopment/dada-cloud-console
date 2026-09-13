@@ -28,6 +28,8 @@ var leakEnglishFillers = []string{"continue to", "hmm", "okay,", "fine.", "let m
 
 var leakMarkerPattern = regexp.MustCompile(`(?i)\b(kb|skill|placeholder|internal)\b`)
 
+var leakIdentifierPattern = regexp.MustCompile(`(?i:\b(discovery|price|offer|objection|continuity|registration|signals|learning|such)\b)|\bdeposit\b`)
+
 var leakLinks = regexp.MustCompile(`https?:\/\/\S+|\S+@\S+\.\S+|@\w+`)
 
 var leakTokenFragment = regexp.MustCompile(`\pL_|_\pL`)
@@ -59,6 +61,9 @@ func leakReason(reply string) string {
 			if strings.Contains(lower, filler) {
 				return "english filler " + strings.TrimSpace(filler)
 			}
+		}
+		if m := leakIdentifierPattern.FindString(leakLinks.ReplaceAllString(text, " ")); m != "" {
+			return "internal identifier " + strings.ToLower(m)
 		}
 	}
 	if leakTokenFragment.MatchString(leakLinks.ReplaceAllString(text, " ")) {

@@ -36,6 +36,11 @@ func TestLeakReasonCatchesMonologues(t *testing.T) {
 		"S94 link placeholder":                   "Регистрируйтесь по нашей партнёрской ссылке, счёт по ней нужен для привязки к группе: [ссылка]",
 		"curly placeholder":                      "Куратор {имя} напишет вам здесь после пополнения",
 		"angle placeholder":                      "Пополняйте от <сумма> долларов в кабинете FxPro",
+		"S122 skill name glued to a word":        "Дно у вас 800, так что с ними и заходите, запас наlearning-период лишним не будет. С 800 стартуем?",
+		"S17 english word inside russian":        "Колеса фортуны у нас нет, это не наше предложение, ничего such активировать не нужно. Пополните и напишите куратору.",
+		"S194 skill name as a step":              "Чтобы участвовать, вступаете в торговую группу, дальше registration у FxPro. Начнём: был опыт на форексе?",
+		"S437 skill name as a section":           "Посмотрите в кабинете, какие варианты кроме карты предлагает deposit-раздел, и напишите, что там есть",
+		"S250 bare skill name":                   "Загрузите price? Цель 800 в месяц требует не половины той суммы, стартуйте с 2000.",
 	}
 	for name, reply := range cases {
 		if reason := leakReason(reply); reason == "" {
@@ -60,6 +65,9 @@ func TestLeakReasonPassesClientReplies(t *testing.T) {
 		"P2P and support mail":  "Пополнение через P2P у FxPro нет, есть карта и SBP; по спорным платежам пишите на support@fxpro.com. Депозит уже виден?",
 		"comparison sign":       "Сумма < 300 не откроет вход, реально ли собрать 300?",
 		"bracketed number":      "Ваш счёт [518002177] по нашей ссылке?",
+		"MT5 error text":        "Invalid account чаще всего значит, что логин или сервер выбраны не те: в MT5 логином служит не email, а числовой номер счёта. Какой сервер выбран?",
+		"cabinet button":        "В кабинете нажмите Deposit, выберите карту и сумму от 300 USD. Получилось?",
+		"english client offer":  "Our offer is simple: you trade on your own FxPro account, signals come to the group, the deposit stays with you. Do you have an FxPro account already?",
 	}
 	for name, reply := range cases {
 		if reason := leakReason(reply); reason != "" {
