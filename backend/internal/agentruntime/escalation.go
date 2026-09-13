@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
@@ -29,6 +31,124 @@ var escalationReasons = map[string]string{
 	"E_GUARANTEE_DEMAND":    "требует гарантий",
 	"E_SECOND_PERSON":       "в диалоге второй человек",
 	"E_OTHER":               "другое",
+}
+
+// clientMessageFeminineVerbs is the same list qa/tools/corpus_voice.py's FEM
+// regex flags in the main reply channel (S92 class): the agent's persona is
+// male, but the model sometimes writes first-person past tense in feminine
+// grammatical gender. core.md's voice rule fixed the main reply channel; it
+// does not reliably reach escalate_to_operator's separate client_message
+// argument, so this is a runtime backstop specific to that field.
+var clientMessageFeminineVerbs = map[string]string{
+	"поняла":        "понял",
+	"отправила":     "отправил",
+	"зафиксировала": "зафиксировал",
+	"записала":      "записал",
+	"знакома":       "знаком",
+	"рада":          "рад",
+	"услышала":      "услышал",
+	"увидела":       "увидел",
+	"прочитала":     "прочитал",
+	"спрашивала":    "спрашивал",
+	"вернулась":     "вернулся",
+	"передала":      "передал",
+	"посмотрела":    "посмотрел",
+	"проверила":     "проверил",
+	"получила":      "получил",
+	"нашла":         "нашёл",
+	"сказала":       "сказал",
+	"написала":      "написал",
+	"ответила":      "ответил",
+	"подумала":      "подумал",
+	"учла":          "учёл",
+	"отметила":      "отметил",
+	"занесла":       "занёс",
+	"уточнила":      "уточнил",
+	"разобралась":   "разобрался",
+	"готова":        "готов",
+}
+
+var clientMessageFeminineVerbPattern = regexp.MustCompile(`(?i)(^|[^\p{L}])(` +
+	strings.Join([]string{
+		"поняла", "отправила", "зафиксировала", "записала", "знакома", "рада",
+		"услышала", "увидела", "прочитала", "спрашивала", "вернулась", "передала",
+		"посмотрела", "проверила", "получила", "нашла", "сказала", "написала",
+		"ответила", "подумала", "учла", "отметила", "занесла", "уточнила",
+		"разобралась", "готова",
+	}, "|") + `)([^\p{L}]|$)`)
+
+// fixClientMessageGender rewrites known feminine first-person past-tense verb
+// forms to masculine in place. Looping a small, fixed number of times (rather
+// than a single ReplaceAll pass) lets two flagged words sitting back to back
+// both get corrected, since consuming a boundary character as part of one
+// match can otherwise hide an immediately adjacent match.
+func fixClientMessageGender(text string) string {
+	for i := 0; i < 3 && clientMessageFeminineVerbPattern.MatchString(text); i++ {
+		text = clientMessageFeminineVerbPattern.ReplaceAllStringFunc(text, func(m string) string {
+			sub := clientMessageFeminineVerbPattern.FindStringSubmatch(m)
+			lead, word, trail := sub[1], sub[2], sub[3]
+			repl, known := clientMessageFeminineVerbs[strings.ToLower(word)]
+			if !known {
+				return m
+			}
+			if r := []rune(word); len(r) > 0 && unicode.IsUpper(r[0]) {
+				rr := []rune(repl)
+				rr[0] = unicode.ToUpper(rr[0])
+				repl = string(rr)
+			}
+			return lead + repl + trail
+		})
+	}
+	return text
+}
+
+// clientMessageStopwords are excluded from the S374-class echo check below:
+// short function words common to both an operator summary and a customer
+// line, so they should never count as evidence of duplicated content.
+var clientMessageStopwords = map[string]bool{
+	"вам": true, "вас": true, "вы": true, "ваш": true, "ваша": true, "ваше": true,
+	"что": true, "это": true, "как": true, "при": true, "для": true, "или": true,
+	"уже": true, "если": true, "есть": true, "будет": true, "здесь": true,
+	"когда": true, "туда": true, "было": true, "было ": true, "него": true,
+}
+
+var clientMessageWordSplit = regexp.MustCompile(`[^\p{L}]+`)
+
+func significantWords(text string) []string {
+	var out []string
+	for _, w := range clientMessageWordSplit.Split(strings.ToLower(text), -1) {
+		r := []rune(w)
+		if len(r) < 5 || clientMessageStopwords[w] {
+			continue
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
+// clientMessageEchoesSummary catches the S374 class: the model writes
+// client_message as a paraphrase or copy of the third-person, narrative
+// summary meant for the human operator, so the customer reads a report about
+// themselves instead of a line addressed to them. A high share of shared
+// content words between the two fields is treated as evidence of that, since
+// a genuine customer-facing line and an operator summary describing the same
+// turn normally diverge in wording even when they cover the same facts.
+func clientMessageEchoesSummary(clientMessage, summary string) bool {
+	words := significantWords(clientMessage)
+	if len(words) < 3 {
+		return false
+	}
+	summarySet := make(map[string]bool, len(words))
+	for _, w := range significantWords(summary) {
+		summarySet[w] = true
+	}
+	matched := 0
+	for _, w := range words {
+		if summarySet[w] {
+			matched++
+		}
+	}
+	return float64(matched)/float64(len(words)) >= 0.6
 }
 
 // OperatorNotifier hands a conversation to a person: one Telegram message to
@@ -188,6 +308,12 @@ func (s *Server) handleEscalate(c *gin.Context) {
 	}
 	if strings.TrimSpace(req.Summary) == "" {
 		rejectControl(c, "empty_summary", "empty escalation summary", "Write for the operator: what the customer wants, what is known, what is unclear, what you tried, how the customer feels.")
+		return
+	}
+	req.ClientMessage = fixClientMessageGender(req.ClientMessage)
+	if clientMessageEchoesSummary(req.ClientMessage, req.Summary) {
+		rejectControl(c, "client_message_echoes_summary", "client_message duplicates the operator summary",
+			"client_message is the line the customer reads, addressed to them directly (вы): do not repeat summary's third-person facts about them. Write 1-2 short sentences in the dialogue's own voice.")
 		return
 	}
 	state, err := s.runtime.states.PauseAgent(c.Request.Context(), conv.ID, "escalated: "+req.ReasonCode)
