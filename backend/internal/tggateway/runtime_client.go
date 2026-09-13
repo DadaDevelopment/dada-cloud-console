@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/dada-tuda/console/backend/internal/turnbudget"
 )
 
 type RuntimeClient interface {
@@ -104,7 +106,7 @@ func NewAuthenticatedRuntimeClient(baseURL, token string) RuntimeClient {
 		baseURL = "http://agent-runtime.dada-cloud.svc.cluster.local:8083"
 	}
 	return &httpRuntimeClient{
-		http:    &http.Client{Timeout: 120 * time.Second},
+		http:    &http.Client{Timeout: turnbudget.GatewayWait()},
 		baseURL: strings.TrimRight(baseURL, "/"),
 		token:   token,
 	}

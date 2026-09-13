@@ -19,6 +19,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/agentruntime"
 	"github.com/dada-tuda/console/backend/internal/config"
 	"github.com/dada-tuda/console/backend/internal/db"
+	"github.com/dada-tuda/console/backend/internal/turnbudget"
 	"github.com/joho/godotenv"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -98,7 +99,7 @@ func main() {
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      120 * time.Second,
+		WriteTimeout:      turnbudget.RuntimeTurn(),
 		IdleTimeout:       120 * time.Second,
 	}
 

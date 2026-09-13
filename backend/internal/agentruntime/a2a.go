@@ -9,11 +9,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dada-tuda/console/backend/internal/turnbudget"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 )
 
 type httpA2AClient struct {
-	http *http.Client
+	http     *http.Client
+	endpoint func(agentName string) string
+	timeout  time.Duration
 }
 
 // endUserHeader and agentHeader carry caller identity to the agent, which
@@ -25,19 +29,36 @@ const (
 	agentHeader   = "x-dada-agent"
 )
 
+const askUserUnavailableAnswer = "Инструмент ask_user в этом канале не работает: клиент этот вопрос не видит и ответить на него не может. Ответь клиенту обычным текстом; если нужно что-то уточнить, задай вопрос в самом ответе."
+
 func NewA2AClient() A2AClient {
 	return &httpA2AClient{
-		http: &http.Client{Timeout: 90 * time.Second},
+		http:     &http.Client{},
+		endpoint: kagentEndpoint,
+		timeout:  turnbudget.AgentCall(),
 	}
 }
 
+func kagentEndpoint(agentName string) string {
+	return fmt.Sprintf("http://%s.kagent.svc.cluster.local:8080", agentName)
+}
+
+func (c *httpA2AClient) url(agentName string) string {
+	if c.endpoint == nil {
+		return kagentEndpoint(agentName)
+	}
+	return c.endpoint(agentName)
+}
+
 type a2aPart struct {
-	Kind string `json:"kind"`
-	Text string `json:"text,omitempty"`
+	Kind string         `json:"kind"`
+	Text string         `json:"text,omitempty"`
+	Data map[string]any `json:"data,omitempty"`
 }
 
 type a2aMessage struct {
 	ContextID string    `json:"contextId,omitempty"`
+	TaskID    string    `json:"taskId,omitempty"`
 	Role      string    `json:"role"`
 	MessageID string    `json:"messageId"`
 	Parts     []a2aPart `json:"parts"`
@@ -53,6 +74,7 @@ type a2aRequest struct {
 }
 
 type a2aRPCError struct {
+	Code    int    `json:"code"`
 	Message string `json:"message"`
 }
 
@@ -72,22 +94,65 @@ func (c *httpA2AClient) Send(ctx context.Context, run AgentRunRequest) (string, 
 		return "", fmt.Errorf("last message must be user or system, got %s", lastMsg.Role)
 	}
 
-	reqBody := a2aRequest{JSONRPC: "2.0", ID: "agentruntime", Method: "message/send"}
-	reqBody.Params.Message = a2aMessage{
+	message := a2aMessage{
 		ContextID: run.ContextID,
 		Role:      "user",
 		MessageID: uuid.NewString(),
 		Parts:     []a2aPart{{Kind: "text", Text: renderAgentRun(run)}},
 	}
-	payload, err := json.Marshal(reqBody)
+	result, err := c.call(ctx, run, message)
 	if err != nil {
 		return "", err
 	}
+	task := parseTask(result)
+	if task.State == "input-required" {
+		log.Warn().Str("agent", agentName).Str("context", run.ContextID).Str("task", task.ID).
+			Strs("questions", task.Questions).
+			Msg("agentruntime: agent paused on ask_user; resuming with the unavailable-tool answer")
+		answers := make([]map[string]any, 0, len(task.Questions))
+		for range task.Questions {
+			answers = append(answers, map[string]any{"answer": []string{askUserUnavailableAnswer}})
+		}
+		result, err = c.call(ctx, run, a2aMessage{
+			ContextID: run.ContextID,
+			TaskID:    task.ID,
+			Role:      "user",
+			MessageID: uuid.NewString(),
+			Parts: []a2aPart{{Kind: "data", Data: map[string]any{
+				"decision_type": "approve", "ask_user_answers": answers,
+			}}},
+		})
+		if err != nil {
+			return "", fmt.Errorf("resume after ask_user: %w", err)
+		}
+		task = parseTask(result)
+	}
+	if task.State != "" && task.State != "completed" {
+		return "", fmt.Errorf("a2a task did not complete: %s", task.State)
+	}
+	text := extractText(result)
+	if text == "" {
+		return "", fmt.Errorf("a2a %s: no text in response", agentName)
+	}
+	return text, nil
+}
 
-	url := fmt.Sprintf("http://%s.kagent.svc.cluster.local:8080", agentName)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+func (c *httpA2AClient) call(ctx context.Context, run AgentRunRequest, message a2aMessage) (json.RawMessage, error) {
+	if c.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.timeout)
+		defer cancel()
+	}
+	agentName := run.AgentName
+	reqBody := a2aRequest{JSONRPC: "2.0", ID: "agentruntime", Method: "message/send"}
+	reqBody.Params.Message = message
+	payload, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", err
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url(agentName), bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if run.EndUserKey != "" {
@@ -97,38 +162,72 @@ func (c *httpA2AClient) Send(ctx context.Context, run AgentRunRequest) (string, 
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("a2a %s: %w", agentName, err)
+		return nil, fmt.Errorf("a2a %s: %w", agentName, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("a2a %s: status %d", agentName, resp.StatusCode)
+		return nil, fmt.Errorf("a2a %s: status %d", agentName, resp.StatusCode)
 	}
 
 	var parsed a2aResponse
 	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
-		return "", fmt.Errorf("a2a %s: decode response: %w", agentName, err)
+		return nil, fmt.Errorf("a2a %s: decode response: %w", agentName, err)
 	}
 	if parsed.Error != nil {
-		return "", fmt.Errorf("a2a %s: %s", agentName, parsed.Error.Message)
+		msg := strings.TrimSpace(parsed.Error.Message)
+		if msg == "" {
+			msg = "agent returned an error without a message (typically the agent could not reach its MCP tool server)"
+		}
+		return nil, fmt.Errorf("a2a %s: rpc error %d: %s", agentName, parsed.Error.Code, msg)
 	}
-
-	var task struct {
+	var probe struct {
 		Status struct {
 			State string `json:"state"`
 		} `json:"status"`
 	}
-	if json.Unmarshal(parsed.Result, &task) != nil {
-		return "", fmt.Errorf("invalid a2a result")
+	if json.Unmarshal(parsed.Result, &probe) != nil {
+		return nil, fmt.Errorf("invalid a2a result")
 	}
-	if state := task.Status.State; state != "" && state != "completed" && state != "input-required" {
-		return "", fmt.Errorf("a2a task did not complete: %s", state)
+	return parsed.Result, nil
+}
+
+type a2aTask struct {
+	ID        string
+	State     string
+	Questions []string
+}
+
+func parseTask(raw json.RawMessage) a2aTask {
+	var v struct {
+		ID     string `json:"id"`
+		Status struct {
+			State   string `json:"state"`
+			Message struct {
+				Parts []a2aPart `json:"parts"`
+			} `json:"message"`
+		} `json:"status"`
 	}
-	text := extractText(parsed.Result)
-	if text == "" {
-		return "", fmt.Errorf("a2a %s: no text in response", agentName)
+	if json.Unmarshal(raw, &v) != nil {
+		return a2aTask{}
 	}
-	return text, nil
+	task := a2aTask{ID: v.ID, State: v.Status.State}
+	for _, part := range v.Status.Message.Parts {
+		if part.Kind != "data" || part.Data["name"] != "ask_user" {
+			continue
+		}
+		args, _ := part.Data["args"].(map[string]any)
+		questions, _ := args["questions"].([]any)
+		for _, q := range questions {
+			qm, _ := q.(map[string]any)
+			text, _ := qm["question"].(string)
+			task.Questions = append(task.Questions, text)
+		}
+	}
+	if task.State == "input-required" && len(task.Questions) == 0 {
+		task.Questions = []string{""}
+	}
+	return task
 }
 
 func buildContextualMessage(messages []Message) string {
