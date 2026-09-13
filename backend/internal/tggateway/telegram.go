@@ -119,6 +119,17 @@ type tgResponse struct {
 	Result      json.RawMessage `json:"result"`
 }
 
+// redactToken strips a bot token out of a transport error string.
+// net/http wraps request failures in a *url.Error whose Error() reprints
+// the full request URL -- which for Telegram's API embeds the token in
+// the path -- so any log.Err(err) on it would otherwise leak the secret.
+func redactToken(msg, token string) string {
+	if token == "" {
+		return msg
+	}
+	return strings.ReplaceAll(msg, token, "REDACTED")
+}
+
 func (c *httpTelegramClient) call(ctx context.Context, token, method string, body any, out any) error {
 	var reqBody io.Reader
 	if body != nil {
@@ -137,7 +148,7 @@ func (c *httpTelegramClient) call(ctx context.Context, token, method string, bod
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("telegram %s: %w", method, err)
+		return fmt.Errorf("telegram %s: %s", method, redactToken(err.Error(), token))
 	}
 	defer resp.Body.Close()
 

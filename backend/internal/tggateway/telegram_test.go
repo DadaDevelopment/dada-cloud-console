@@ -1,7 +1,10 @@
 package tggateway
 
 import (
+	"context"
 	"encoding/json"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -70,5 +73,30 @@ func TestUpdateFromRaw_EmptyMessageIsDropped(t *testing.T) {
 	}
 	if _, ok := updateFromRaw(raw); ok {
 		t.Fatalf("a message with no text, media or location must not reach the agent")
+	}
+}
+
+func TestRedactToken_StripsTokenFromMessage(t *testing.T) {
+	msg := `Post "https://api.telegram.org/bot123456:SECRETVALUE/getUpdates": dial tcp: connection refused`
+	got := redactToken(msg, "123456:SECRETVALUE")
+	if strings.Contains(got, "SECRETVALUE") {
+		t.Fatalf("token survived redaction: %q", got)
+	}
+	if !strings.Contains(got, "REDACTED") {
+		t.Fatalf("expected redaction marker, got %q", got)
+	}
+}
+
+func TestGetUpdates_TransportFailureDoesNotLeakToken(t *testing.T) {
+	srv := httptest.NewServer(nil)
+	srv.Close()
+
+	client := NewTelegramClient(srv.URL)
+	_, err := client.GetUpdates(context.Background(), "123456:SECRETVALUE", 0, 1)
+	if err == nil {
+		t.Fatalf("expected a transport error against a closed server")
+	}
+	if strings.Contains(err.Error(), "SECRETVALUE") {
+		t.Fatalf("getUpdates error leaked bot token: %v", err)
 	}
 }
