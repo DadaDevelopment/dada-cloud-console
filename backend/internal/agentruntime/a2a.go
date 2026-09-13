@@ -19,13 +19,20 @@ type httpA2AClient struct {
 	endpoint   func(agentName string) string
 	timeout    time.Duration
 	retryPause time.Duration
+	retries    int
+	pause      func(ctx context.Context, d time.Duration) error
 }
 
-// failedTaskRetryPause is how long the runtime waits before re-sending a turn
-// whose task the agent reported as failed. Those failures are almost always the
-// model provider rate-limiting a burst of chats, so a short pause and one more
-// try turns a silent lost turn into a late reply.
-const failedTaskRetryPause = 3 * time.Second
+// failedTaskRetryPause is the first pause before re-sending a turn whose task
+// the agent reported as failed; every further retry doubles it. Those failures
+// are almost always the model provider rate-limiting a burst of chats, and a
+// single short pause loses to a burst that is still going (P10 eval: 4 of 9
+// retries failed again), so the runtime backs off a few times before it gives
+// the turn up.
+const (
+	failedTaskRetryPause = 3 * time.Second
+	failedTaskRetries    = 3
+)
 
 // endUserHeader and agentHeader carry caller identity to the agent, which
 // replays them onto its MCP calls when its claim lists them in allowedHeaders.
@@ -44,6 +51,8 @@ func NewA2AClient() A2AClient {
 		endpoint:   kagentEndpoint,
 		timeout:    turnbudget.AgentCall(),
 		retryPause: failedTaskRetryPause,
+		retries:    failedTaskRetries,
+		pause:      pauseFor,
 	}
 }
 
@@ -113,10 +122,12 @@ func (c *httpA2AClient) Send(ctx context.Context, run AgentRunRequest) (string, 
 		return "", err
 	}
 	task := parseTask(result)
-	if task.State == "failed" {
+	for attempt := 0; task.State == "failed" && attempt < c.retries; attempt++ {
+		wait := c.retryPause << attempt
 		log.Warn().Str("agent", agentName).Str("context", run.ContextID).Str("task", task.ID).
-			Str("error", task.Error).Msg("agentruntime: agent task failed; retrying the turn once")
-		if err := pauseFor(ctx, c.retryPause); err != nil {
+			Str("error", task.Error).Int("attempt", attempt+1).Dur("pause", wait).
+			Msg("agentruntime: agent task failed; retrying the turn")
+		if err := c.pause(ctx, wait); err != nil {
 			return "", fmt.Errorf("retry after failed task: %w", err)
 		}
 		message.MessageID = uuid.NewString()

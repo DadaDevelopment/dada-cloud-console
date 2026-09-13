@@ -40,7 +40,8 @@ const pausedOnAskUser = `{"id":"task-1","contextId":"runtime-c1","kind":"task","
 const completedReply = `{"id":"task-1","contextId":"runtime-c1","kind":"task","status":{"state":"completed"},"artifacts":[{"parts":[{"kind":"text","text":"Деньги в кошельке FxPro, переведите их на торговый счёт. Перевод сделали?"}]}]}`
 
 func newTestA2AClient(url string) *httpA2AClient {
-	return &httpA2AClient{http: &http.Client{Timeout: 5 * time.Second}, endpoint: func(string) string { return url }}
+	return &httpA2AClient{http: &http.Client{Timeout: 5 * time.Second}, endpoint: func(string) string { return url },
+		retryPause: failedTaskRetryPause, retries: failedTaskRetries, pause: func(context.Context, time.Duration) error { return nil }}
 }
 
 func testRun() AgentRunRequest {
