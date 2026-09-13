@@ -16,6 +16,15 @@ type httpA2AClient struct {
 	http *http.Client
 }
 
+// endUserHeader and agentHeader carry caller identity to the agent, which
+// replays them onto its MCP calls when its claim lists them in allowedHeaders.
+// A shared tool server has no other way to know whose account a call is for,
+// and the integration broker refuses a call that arrives without them.
+const (
+	endUserHeader = "x-dada-end-user"
+	agentHeader   = "x-dada-agent"
+)
+
 func NewA2AClient() A2AClient {
 	return &httpA2AClient{
 		http: &http.Client{Timeout: 90 * time.Second},
@@ -81,6 +90,10 @@ func (c *httpA2AClient) Send(ctx context.Context, run AgentRunRequest) (string, 
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if run.EndUserKey != "" {
+		req.Header.Set(endUserHeader, run.EndUserKey)
+		req.Header.Set(agentHeader, agentName)
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {

@@ -25,9 +25,18 @@ type AgentConversationContext struct {
 	Now             string       `json:"now,omitempty"`
 	TimeZone        string       `json:"time_zone,omitempty"`
 }
+
+// AgentRunRequest is one invocation of an agent.
+//
+// EndUserKey names the person this run acts for, in "<channel>:<external id>"
+// form. It travels as a request header on the A2A call so the agent runtime can
+// replay it onto MCP calls (allowedHeaders), which is the only channel a shared
+// tool server has for learning whose account to use. Empty means a tool server
+// must refuse the call rather than serve it as somebody.
 type AgentRunRequest struct {
 	AgentName           string
 	ContextID           string
+	EndUserKey          string
 	Messages            []Message
 	ConversationContext AgentConversationContext
 }

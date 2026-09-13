@@ -1,224 +1,129 @@
-# Plan: Composio (managed OAuth + per-user tool sessions) in the DADA agent platform
+# Composio integrations: one button in the console, per-user tools in the agent
 
-Source: owner's message with the Composio guide set (sessions, authentication,
-managed-vs-custom auth, manual auth, connected accounts, sessions-via-MCP, meta
-tools). Owner's own sequencing: "я бы начал с Hermes integration -> прямо сейчас
-подключил MCP и проверил Gmail/GitHub, а после этого уже читал Sessions/Auth с
-мыслью о встраивании в платформу."
+What a client does: opens Integrations in their project, clicks **Подключить**
+next to Gmail, signs in on Google's own page, comes back. From that moment their
+agent can act in Gmail as them. Composio is never mentioned in the product.
 
-Status: plan only. Nothing is built. No Composio account exists yet, no key, no
-measurement. Every number below that is not tagged `[live]` is a design claim.
+Status 2026-09-12: broker built and verified live on the demo route. Not yet
+deployed to the cluster, not yet in the console's Next.js UI.
 
-## 1. What Composio actually gives us (grounded)
+## Live verification (this session, real Composio project, key ak_KYHK...)
 
-`[origin docs]` A **session** = `composio.create(user_id)`: scopes one user's
-connected accounts, the toolkit/tool allowlist, the auth configs, and execution
-state. Connections persist under `user_id` and are reused by later sessions.
-`user_id` must be a stable DB id.
+| Step | Signal | Result |
+|---|---|---|
+| API key valid | `GET /api/v3.1/toolkits` | `[live]` 200, Gmail/GitHub/... catalog |
+| Session per user | `POST /api/v3.1/tool_router/session` | `[live]` `trs_8YT8zYAz8jEH`, `mcp.url` returned |
+| Session MCP works | `tools/list` on that URL | `[live]` 5 meta tools |
+| Broker resolves user | `POST /composio/mcp/<project>` + `x-dada-end-user` | `[live]` proxied, SSE relayed |
+| Fail closed, no identity | same without the header | `[live]` JSON-RPC -32001, zero upstream calls |
+| Fail closed, unknown user | header for a stranger | `[live]` -32002, zero upstream calls |
+| One button | `/composio/demo` -> Подключить (Gmail) | `[live]` real Google consent page "to continue to Composio" |
+| Audit | `composio_tool_calls` row | `[live]` tool + agent recorded |
 
-`[origin docs]` **Managed auth**: Composio owns the OAuth app, stores and rotates
-tokens (~30 min rotation), emits `composio.connected_account.expired`. Credentials
-never touch our app or the model. Custom auth configs (`auth_configs={"github":
-"ac_..."}`) swap in our own OAuth client per toolkit; mixing per toolkit is
-supported, so "DADA Cloud wants access to your Google account" for Google/GitHub/
-Slack and managed auth for the long tail.
+Demo route (token in `/opt/data/secrets/composio-broker-token.txt`):
+`https://harness.dada-tuda.ru/composio/demo?project_id=<uuid>&end_user_key=<channel>:<id>&token=<token>`
 
-`[origin docs]` **Manual auth**: `manage_connections=False` kills in-chat auth;
-`session.authorize(toolkit, callback_url=...)` returns a Connect Link
-`redirect_url`, and the callback receives `status` + `connected_account_id`.
-`session.toolkits()` reports per-toolkit connection status. That is exactly the
-shape of a console "Integrations" page.
+## The architecture problem, and what had to change
 
-`[origin docs]` **Sessions via MCP**: `mcp=True` -> `session.mcp.url` +
-`session.mcp.headers`, a **per-user MCP endpoint**. With
-`session_preset=DIRECT_TOOLS` the URL serves exactly the listed tools, no meta
-tools. Trade-off spelled out by the docs: over MCP the client talks to Composio
-directly, so **SDK `beforeExecute`/`afterExecute` modifiers and session-bound
-custom tools do not run**. Anything we need around a call (audit, write-confirm,
-quota, redaction) has to be OUR code in front of the URL, not a Composio hook.
+`[code argo-infra .../managedagent-xrd.yaml:132-200]` A ManagedAgent's `tools[]`
+entry renders a **RemoteMCPServer CR**: static URL, static headers, one object
+per name in **one cluster-global namespace**. `[code backend/internal/api/agents.go:499-553]`
+The console already refuses name takeovers because a duplicate name is a fight,
+not a merge.
 
-`[live 2026-09-12, composio.dev/pricing]` Money shape: tool calls $0.0003 each
-(100K/mo free on Hobby), Composio-managed OAuth apps add $0.0002/call beyond 20K
-free calls/mo, trigger events $0.003 each (50K free), connected accounts
-unlimited and free, sandbox LLM tokens $3.75/M (only if Composio runs the model).
-Log retention 7d Hobby / 30d Pro. **ZDR, IP allowlist, BAA, advanced
-white-labeling are Pro add-ons billed per call**, Enterprise for custom terms.
-Meta tools (tool search) are free — so the agentic discovery loop is cheap, the
-executions are what bills.
+A Composio session's MCP URL is minted **per end user at runtime**. So the naive
+mapping -- one CR per user -- is impossible: it is a per-user object in a shared
+namespace, unbounded in count, containing a credential-bearing URL, in git.
 
-## 2. Where it can and cannot plug into what we already have
+The platform bends in three places instead:
 
-Two planes, and they are not the same problem.
-
-### Plane A — our own operator-side agents (Hermes, Claude Code, console agent chat)
-
-Single human, single set of accounts, no multi-tenancy. Composio's native agent
-plugin / MCP URL is a drop-in. Zero platform code.
-
-### Plane B — tenant agents on the kagent runtime (the product)
-
-`[code argo-infra .../crds/managedagent-xrd.yaml:132-200]` A ManagedAgent's
-`tools[]` entry renders a **RemoteMCPServer CR** with a static `url`, static
-`headers`, and `allowedHeaders`. `[code gitops-agent/internal/renderer/managedagent.go:106-122]`
-That is a git-rendered manifest, one object per name in one shared runtime
-namespace.
-
-Consequences, in order of importance:
-
-1. **A per-end-user MCP URL cannot live in git.** `session.mcp.url` is minted per
-   user at runtime; a CR per user in a shared namespace is not a design, it is a
-   leak and a name fight. `[code backend/internal/api/agents.go:499-553]` the
-   console already refuses name takeovers for exactly this reason.
-2. **The identity channel exists but is empty.** `allowedHeaders` is the whole
-   multi-tenant story (XRD comment: caller identity travels in A2A request
-   headers, replayed onto MCP calls; the controller proxy drops custom headers, so
-   callers must hit the agent's own Service). Live examples set it
-   (`x-reels-telegram-id`, `x-telemost-chat-id`).
-   `[code backend/internal/tggateway/a2a.go:85-102]` and
-   `[code backend/internal/agentruntime/a2a.go:83]` — **our own harness sends only
-   `Content-Type`**. So today the platform's own gateway cannot tell a tool server
-   which end user is talking. This is prerequisite work, not Composio work.
-3. **We already own every other piece the integration needs**:
-   - `[code backend/internal/agentruntime/store.go + migrations/148_conversation_state.sql]`
-     `conversations(agent_name, channel, external_id, actor_external_id)` is the
-     stable end-user identity -> the natural `user_id` source.
-   - `[code backend/migrations/145_tg_bindings.sql]` the precedent for a live
-     third-party secret: one table, one owning service, console proxies through
-     that service's internal HTTP API, never touches git.
-   - `[code backend/internal/crypto/crypto.go]` AES-256-GCM at rest with
-     `GITOPS_ENCRYPTION_KEY`.
-   - `[code mcp-server/internal/reflect/proxy.go + internal/auth/bearer.go]` a
-     working MCP proxy with bearer passthrough — the shape of the broker below.
-   - `[code backend/migrations/051..147 agent_token_usage*]` a usage ledger to
-     hang Composio cost on.
-
-## 3. Architecture: one broker, not one CR per user
+1. **One static broker URL per project** in the claim
+   (`https://<broker>/mcp/<project-id>`). Git stays static. The per-user part is
+   resolved at call time.
+2. **Identity travels in a request header, not in the manifest.** The mechanism
+   already existed and was unused by our own harness: `allowedHeaders` on the
+   claim, replayed by the runtime onto MCP calls. `[code backend/internal/tggateway/a2a.go]`
+   and `[code backend/internal/agentruntime/a2a.go]` sent only `Content-Type`
+   before this change; both now send `x-dada-end-user` + `x-dada-agent`.
+3. **The broker is the policy layer the MCP transport removes.** `[origin docs/sessions-via-mcp]`
+   Over MCP the client executes against Composio directly, so the SDK's
+   before/after-execute modifiers never run. Audit, the fail-closed identity
+   check and the toolkit gate exist only because the call passes through us.
 
 ```
 end user (telegram/web)
-   -> tg-gateway / agent-runtime   (adds identity headers)
-      -> kagent Agent              (allowedHeaders replay)
-         -> RemoteMCPServer "composio-<project>"   [one static CR per project]
-            -> composio-broker (ours, in-cluster)
-               resolve header -> conversations row -> user_id
-               session cache  -> session.mcp.url + headers
-               policy / quota / audit / cost
-               -> Composio hosted MCP (per-user session)
+  -> tg-gateway / agent-runtime      adds x-dada-end-user
+     -> kagent Agent                 allowedHeaders replays it
+        -> RemoteMCPServer "composio" (ONE static CR per project)
+           -> composio-broker        header -> session -> audit -> proxy
+              -> Composio hosted MCP (that user's session, that user's accounts)
 ```
 
-Why a broker and not the session URL in the CR:
+## Authorization is a server-side allowlist, not a prompt
 
-- keeps git static and the name space clean (one CR per project, guard already
-  written);
-- restores everything MCP transport takes away (the docs' own trade-off list):
-  audit rows, the write-confirm gate the agent chat already has, per-project
-  toolkit allowlist, quota, redaction of upstream error bodies
-  (`sanitizeModelReply` precedent);
-- makes Composio swappable: the agent sees `composio-<project>`, whatever is
-  behind it;
-- gives one place to bill tool calls into `agent_token_usage`-style rows.
+`composio_sessions.toolkits` mirrors the session's upstream allowlist. Connecting
+an app PATCHes the session to add its toolkit; an app the user never connected
+has **no tools in the session at all**, so no prompt can talk the agent into
+reaching it. Only status `ACTIVE` counts as connected: a connected account exists
+from the moment a link is minted, and treating that as permission would put tools
+in front of the agent that answer 401.
 
-`user_id` format: `dada:<project_id>:<channel>:<external_id>` — stable, derived
-from a DB primary key, never an email (docs' own rule).
+## Components
 
-## 4. Phases
+| Piece | Path |
+|---|---|
+| Composio REST client | `backend/internal/composio/client.go` |
+| Store (3 tables) | `backend/internal/composio/store.go` |
+| Service (user id, connect, sync) | `backend/internal/composio/service.go` |
+| MCP proxy | `backend/internal/composio/proxy.go` |
+| HTTP surface + demo page | `backend/internal/composio/server.go`, `demo.go` |
+| Binary | `backend/cmd/composio-broker/main.go` |
+| Migration | `backend/migrations/154_composio_integrations.sql` |
+| Tests | `backend/internal/composio/proxy_test.go` |
 
-### Phase 0 — spike, sandbox only (target: same day)
+Composio user id: `dada:<project-uuid>:<channel>:<external-id>` -- derived from
+primary keys, never an email, because Composio keys every connected account on
+that string.
 
-Owner's sequencing. Deliverables are measurements, not code:
+## Agent-side claim
 
-1. Composio account + API key; key in `/opt/data/secrets/` for the spike (NOT in
-   git, NOT in the repo).
-2. Connect Gmail + GitHub over MCP from this box's Hermes; run 3 real tasks.
-3. Record: tool calls per task, wall-clock latency per call, what the Connect
-   Link consent screen says ("Composio wants access..."), whether SSE or
-   streamable HTTP, header shape.
+```yaml
+tools:
+  - name: composio-<project-slug>
+    url: http://composio-broker.dada-cloud.svc.cluster.local:8085/mcp/<project-uuid>
+    protocol: STREAMABLE_HTTP
+    allowedHeaders:
+      - x-dada-end-user
+      - x-dada-agent
+```
 
-Exit criterion: a real transcript with real numbers. If latency per call or cost
-per task is unacceptable here, the rest of the plan does not start.
+Without those two `allowedHeaders` entries the runtime drops the headers and the
+broker refuses every call with "no end user on this call" -- by design, since the
+alternative is serving one user's tools to another.
 
-### Phase 1 — plane A rollout (no platform code)
+## Env of the broker
 
-Composio MCP/plugin for the operator-side agents (Hermes, Claude Code). This is
-the cheapest real usage and it generates the cost/latency data Phase 3 needs.
+| Var | Meaning |
+|---|---|
+| `COMPOSIO_API_KEY` | platform key, k8s Secret, never in values or git |
+| `COMPOSIO_BROKER_DB_URL` / `DB_URL` | console DB |
+| `COMPOSIO_BROKER_PORT` | default 8085 |
+| `COMPOSIO_TOOLKITS` | curated app list |
+| `COMPOSIO_BROKER_PUBLIC_URL` | where the OAuth callback returns |
+| `COMPOSIO_BROKER_BASE_PATH` | prefix under a reverse proxy |
+| `COMPOSIO_BROKER_TOKEN` | guards the browser-facing half |
 
-### Phase 1.5 — quick win on plane B: single-account agents
+## Not done yet
 
-An agent that acts as ONE company account (support Gmail, one GitHub bot, one
-Slack workspace) needs **no broker and no identity plumbing**: create one session
-with `DIRECT_TOOLS` + `mcp=True`, put that URL in the agent's `tools[]` entry as
-a normal RemoteMCPServer with the session headers as static `headers`, token in
-the agent's env as `${COMPOSIO_...}` (the `${VAR}` mechanism already exists).
-Ship this first — it is a day of work and it is the shape most tenant agents
-actually want. Explicit limit to write in the UI: every end user shares that one
-account.
-
-### Phase 2 — identity plumbing (prerequisite for per-user)
-
-Real Go work in this repo, independent of Composio and valuable on its own:
-
-- `A2AClient.SendWithContext` gains identity headers (conversation id, project,
-  channel, external id) — a new method, existing callers unchanged (the
-  `SendWithContext` precedent).
-- agent-runtime does the same on its A2A path.
-- ManagedAgent claims get the matching `allowedHeaders` from the console side.
-- Verification bar: a header echo through a real kagent Agent to a real MCP
-  server, asserted on the received header, not on a 200.
-
-### Phase 3 — composio-broker
-
-New component: `backend/cmd/composio-broker` + `backend/internal/composio`.
-
-- `composio_sessions(user_key, session_id, project_id, created_at, last_used_at)`
-  — sessions persist server-side forever per docs, so we must own the mapping and
-  its cleanup.
-- `composio_connections` mirror for the console UI (id, toolkit, status,
-  connected_account_id, updated_at), fed by `session.toolkits()` and by the
-  `connected_account.expired` webhook.
-- MCP JSON-RPC passthrough with per-project toolkit allowlist; **fail closed**
-  when the identity header is missing or unresolvable (serve zero tools, say so —
-  never fall back to a shared account).
-- audit row + cost row per tool call.
-- API key: one platform key in a k8s Secret, delivered like `TG_GATEWAY_DB_URL`
-  (`kubectl patch secret`), never in values, never in git.
-
-### Phase 4 — console UX (Integrations)
-
-`manage_connections=False`. Per-project page listing toolkits with
-Connect/Connected, `session.authorize(toolkit, callback_url=<console>/callback)`
-on click, callback route reading `status`/`connected_account_id`, multiple
-accounts per toolkit supported (work/personal), disconnect, and an
-`expired` -> notification path (the notify package exists).
-
-### Phase 5 — production auth posture
-
-Own OAuth apps for Google/GitHub/Slack (`auth_configs` per toolkit) so the
-consent screen says DADA Cloud; managed auth for the rest. Decide the Pro add-ons
-(ZDR, IP allowlist) with the cost model from Phase 1's real numbers.
-
-## 5. Open questions the owner has to answer before Phase 3
-
-1. **Data residency / legal.** Per-user Gmail/Slack tokens for Russian clients
-   would live in a US SaaS, and payloads are retained (7d/30d) unless ZDR is
-   bought. This is the real blocker, not the code. Phase 1.5 (single company
-   account, our own consent screen) does not have this problem at the same scale.
-2. **Who pays.** $0.0003/call + $0.0002 managed-app surcharge is invisible per
-   call and loud in an agentic loop. Flat platform cost, or metered into the
-   tenant's bill through the usage ledger?
-3. **Blast radius.** A tenant agent with a user's real Gmail write scope is a
-   different risk class than our current tool servers. Does the write-confirm gate
-   from agent chat become mandatory in the broker for write tools?
-4. **Scope of catalog.** Full 1500 toolkits discoverable, or a curated per-plan
-   allowlist (the console already curates its own MCP surface at ~45-50 tools for
-   exactly this reason)?
-
-## 6. What this plan deliberately does not do
-
-- No new project in the cluster (CLAUDE.md hard rule) — everything lands in
-  `agent-sandbox` for testing.
-- No Composio SDK inside the kagent agent images: the agent only ever sees an MCP
-  server, so a vendor swap is a broker change.
-- No per-user CR of any kind in git.
-- No "platform ready" claim: this file is a plan, and each phase reports with a
-  real run (build/vet/test on the container rig, and a live transcript for the
-  spike).
+- Helm chart + prod values + Secret (the deploy path is
+  `references/agent-harness-deploy-path.md`).
+- Console Next.js Integrations page (the demo page proves the three endpoints).
+- Console REST proxy so the browser talks to the console's authenticated API
+  instead of the broker's token.
+- `composio.connected_account.expired` webhook -> notify the user to reconnect.
+- Cost: tool calls are `$0.0003` each plus `$0.0002` on Composio-managed OAuth
+  apps `[live composio.dev/pricing 2026-09-12]`. `composio_tool_calls` is the
+  counter; nothing bills off it yet.
+- Own OAuth apps so the consent screen says DADA Cloud rather than Composio.
+- Data residency: with managed auth a Russian client's Gmail token lives in a US
+  SaaS and payloads are retained 7d/30d unless ZDR (a Pro add-on) is bought.

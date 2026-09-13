@@ -263,6 +263,7 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 		return MessageResponse{}, err
 	}
 	run := AgentRunRequest{AgentName: conv.AgentName, ContextID: "runtime-" + conv.ID.String(), Messages: pending,
+		EndUserKey: conv.Channel + ":" + conv.ExternalID,
 		ConversationContext: AgentConversationContext{ConversationID: conv.ID.String(), Channel: conv.Channel,
 			ExternalID: conv.ExternalID, Username: conv.ActorUsername, State: state, AvailableSkills: skills, ContextToken: token}}
 	if r.structuredAgents[conv.AgentName] {

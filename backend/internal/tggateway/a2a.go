@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,8 +29,48 @@ func a2aURLFor(agentName string) string {
 	return fmt.Sprintf("http://%s.kagent.svc.cluster.local:8080", agentName)
 }
 
+// endUserHeader and agentHeader carry caller identity to the agent, which
+// replays them onto its MCP calls when its claim lists them in allowedHeaders.
+// A shared tool server has no other way to know whose connected account a call
+// is for, and the integration broker refuses a call that arrives without them.
+const (
+	endUserHeader = "x-dada-end-user"
+	agentHeader   = "x-dada-agent"
+)
+
+// endUserFromContextID turns the A2A contextId back into the platform's end-user
+// key. The contextId is already the stable per-chat identity ("tg-chat-<chat
+// id>"), so deriving from it keeps one source of truth instead of threading a
+// second identity argument through every caller. A contextId in another shape
+// yields no identity, and the tool server then refuses rather than guesses.
+func endUserFromContextID(contextID string) string {
+	const prefix = "tg-chat-"
+	if !strings.HasPrefix(contextID, prefix) {
+		return ""
+	}
+	chatID := strings.TrimPrefix(contextID, prefix)
+	if chatID == "" {
+		return ""
+	}
+	return "telegram:" + chatID
+}
+
+// httpA2AClient posts JSON-RPC message/send to an agent.
+//
+// endpoint exists so a test can point the client at an httptest server: the
+// production derivation is cluster-internal DNS, which no test can resolve, and
+// the identity headers this client sets are only observable on a real request.
 type httpA2AClient struct {
-	http *http.Client
+	http     *http.Client
+	endpoint func(agentName string) string
+}
+
+// agentURL is the address this client posts to for agentName.
+func (c *httpA2AClient) agentURL(agentName string) string {
+	if c.endpoint != nil {
+		return c.endpoint(agentName)
+	}
+	return a2aURLFor(agentName)
 }
 
 // a2aHTTPTimeout bounds one agent round trip; pollers apply their own
@@ -94,12 +135,16 @@ func (c *httpA2AClient) SendWithContext(ctx context.Context, agentName string, c
 		return "", err
 	}
 
-	url := a2aURLFor(agentName)
+	url := c.agentURL(agentName)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if endUser := endUserFromContextID(contextID); endUser != "" {
+		req.Header.Set(endUserHeader, endUser)
+		req.Header.Set(agentHeader, agentName)
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
