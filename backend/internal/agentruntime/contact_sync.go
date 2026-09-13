@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 )
 
 // ContactSync is service-owned, never an LLM effect. Only conversations that
@@ -67,6 +68,7 @@ func (s *ContactSync) Ensure(ctx context.Context, conv Conversation) error {
 	status := "completed"
 	if callErr != nil {
 		status = "failed"
+		log.Warn().Err(callErr).Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Msg("agentruntime: contact sync failed")
 	}
 	// Cancellation leaves the already persisted pending receipt for the worker.
 	if err := s.save(ctx, conv, status, pid); err != nil {

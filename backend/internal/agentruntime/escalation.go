@@ -205,6 +205,7 @@ func (n *OperatorNotifier) Notify(ctx context.Context, conv Conversation, text s
 		log.Warn().Err(err).Str("agent", conv.AgentName).Msg("agentruntime: operator notification failed")
 		return err
 	}
+	log.Info().Str("agent", conv.AgentName).Str("conversation", conv.ID.String()).Str("operator", n.username).Msg("agentruntime: escalation card delivered")
 	return nil
 }
 
