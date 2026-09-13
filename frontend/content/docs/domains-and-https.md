@@ -47,7 +47,32 @@ This is a two-step model:
 - Detaching a hostname removes its TLS certificate and ingress immediately (the app itself
   keeps running on the platform's default URL).
 
+## Networking: visitor IPs and outbound addresses
+
+What reaches your app and what leaves it matters if you run the app as a reverse proxy in
+front of your own origin server, or build any address-based protection.
+
+**Inbound requests.** The platform ingress sets the usual `X-Forwarded-For`, `X-Real-IP`,
+`X-Forwarded-Proto` and `X-Forwarded-Host` headers. However, **the visitor's real IP is not
+delivered today**: the public load balancer in front of the cluster operates at L4 and rewrites
+the source address, so `X-Forwarded-For` and `X-Real-IP` carry the balancer's own address
+(`155.212.223.198`), not the visitor's. Do not build rate limits, geo logic or anti-fraud on
+these headers — every visitor looks the same.
+
+**Outbound requests** (your app → your origin or any external service) leave from the public
+addresses of the cluster nodes. The node set changes with scaling and maintenance and there is
+**no fixed list of ranges** — an IP allowlist on the origin will break on the first node
+replacement. Protect the origin with something that cannot be spoofed instead:
+
+- a secret header (e.g. `X-Origin-Token`) your app adds to every request and the origin
+  verifies; keep the value in the app's environment variables;
+- mTLS: a client certificate on the app side, verified by the origin;
+- an origin that is closed to the internet entirely, reached over a tunnel/VPN from the app.
+
 ## Not yet supported
 
+- The visitor's real IP in `X-Forwarded-For` / `X-Real-IP` — needs PROXY protocol between
+  the load balancer and the ingress on the hosting provider's side.
+- Static egress IPs.
 - Auto-polling verification (you must click Verify yourself).
 - Attaching/managing hostnames from the Domains page itself — it's app-settings-only today.
