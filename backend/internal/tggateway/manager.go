@@ -464,12 +464,13 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		convKey := ConversationKey(batch[0])
 		inGroup := IsGroup(batch[0].ChatType)
 
-		runCtx, done, superseded := runs.begin(convKey, ctx)
+		runCtx, done, full, superseded := runs.begin(convKey, ctx, batch)
 		defer done()
 		if superseded {
-			log.Debug().Str("agent", b.AgentName).Str("conv", convKey).
+			log.Debug().Str("agent", b.AgentName).Str("conv", convKey).Int("carried", len(full)-len(batch)).
 				Msg("tggateway: superseded an in-flight run (interrupt: cancel_and_restart)")
 		}
+		batch = full
 
 		// Runtime admits a turn before announcing processing over the response
 		// stream. Paused and courtesy-only turns never start typing. With
@@ -695,7 +696,16 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 
 		if deb != nil {
 			for _, u := range batch {
-				deb.Enqueue(fmt.Sprintf("agent=%s conv=%s", b.AgentName, ConversationKey(u)), u)
+				convKey := ConversationKey(u)
+				key := fmt.Sprintf("agent=%s conv=%s", b.AgentName, convKey)
+				if stale := runs.cancelUnclaimed(convKey); len(stale) > 0 {
+					log.Info().Str("agent", b.AgentName).Str("conv", convKey).Int("carried", len(stale)).
+						Msg("tggateway: message landed mid-generation, restarting over the full batch")
+					for _, prev := range stale {
+						deb.Enqueue(key, prev)
+					}
+				}
+				deb.Enqueue(key, u)
 			}
 		} else {
 			// One Telegram poll may contain several chats. Never mix their

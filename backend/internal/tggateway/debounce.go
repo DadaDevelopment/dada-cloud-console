@@ -5,6 +5,19 @@ import (
 	"time"
 )
 
+// DebounceConfigFromEnv sizes the windows from TG_GATEWAY_DEBOUNCE_QUIET_MS,
+// TG_GATEWAY_DEBOUNCE_MAX_MS and the pacing env. It never returns nil:
+// batching is the gateway's baseline behaviour, not an opt-in, because a
+// gateway without it answers "привет / хочу / с вами работать" three
+// times. Unset windows stay zero and NewDebouncer fills the defaults.
+func DebounceConfigFromEnv() *DebounceConfig {
+	return &DebounceConfig{
+		QuietWindow: envDurationMS("TG_GATEWAY_DEBOUNCE_QUIET_MS", 0),
+		MaxWindow:   envDurationMS("TG_GATEWAY_DEBOUNCE_MAX_MS", 0),
+		Pacing:      PacingFromEnv(),
+	}
+}
+
 // DebounceDefaults are the owner's numbers from the harness review: a human
 // fires off "привет / слушай / у меня вопрос / по регистрации" a couple of
 // seconds apart, and each of those used to become its own kagent run and its

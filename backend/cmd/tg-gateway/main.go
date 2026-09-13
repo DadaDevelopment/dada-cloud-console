@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
@@ -24,23 +23,6 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
-
-// envInt reads an int env var, falling back to def when unset or malformed.
-// tg-gateway reads its own tuning knobs directly rather than growing the
-// shared config.Load: this binary's only required env is the DB URL, and a
-// debouncer window is a transport detail that never belongs in the console's
-// config surface.
-func envInt(key string, def int) int {
-	v := os.Getenv(key)
-	if v == "" {
-		return def
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		return def
-	}
-	return n
-}
 
 func main() {
 	_ = godotenv.Load()
@@ -73,20 +55,7 @@ func main() {
 
 	store := tggateway.NewPGStore(pool)
 
-	debounceCfg := tggateway.DebounceConfig{}
-	if quietMS := envInt("TG_GATEWAY_DEBOUNCE_QUIET_MS", 0); quietMS > 0 {
-		debounceCfg.QuietWindow = time.Duration(quietMS) * time.Millisecond
-	}
-	if maxMS := envInt("TG_GATEWAY_DEBOUNCE_MAX_MS", 0); maxMS > 0 {
-		debounceCfg.MaxWindow = time.Duration(maxMS) * time.Millisecond
-	}
-	debounceCfg.Pacing = tggateway.PacingFromEnv()
-	var debouncePtr *tggateway.DebounceConfig
-	if debounceCfg.QuietWindow > 0 || debounceCfg.MaxWindow > 0 || debounceCfg.Pacing != nil {
-		debouncePtr = &debounceCfg
-	}
-
-	mgr := tggateway.NewManager(store, tggateway.NewTelegramClient(""), tggateway.NewA2AClient(), debouncePtr)
+	mgr := tggateway.NewManager(store, tggateway.NewTelegramClient(""), tggateway.NewA2AClient(), tggateway.DebounceConfigFromEnv())
 	runtimeAgents, err := tggateway.ParseRuntimeAgents(os.Getenv("AGENT_RUNTIME_AGENTS"), runtimeClient != nil)
 	if err != nil {
 		log.Fatal().Err(err).Msg("invalid runtime rollout scope")

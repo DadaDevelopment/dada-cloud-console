@@ -12,7 +12,7 @@ func TestInterrupt_BeginDoneLifecycle(t *testing.T) {
 	s := newInterruptState()
 	ctx := context.Background()
 
-	runCtx, done, superseded := s.begin("1", ctx)
+	runCtx, done, _, superseded := s.begin("1", ctx, nil)
 	if superseded {
 		t.Fatal("first begin must not report superseded")
 	}
@@ -34,12 +34,12 @@ func TestInterrupt_SupersedeCancelsInFlightRun(t *testing.T) {
 	s := newInterruptState()
 	ctx := context.Background()
 
-	runCtx1, done1, _ := s.begin("1", ctx)
+	runCtx1, done1, _, _ := s.begin("1", ctx, nil)
 	if s.claimReply("1", runCtx1) != true {
 		t.Fatal("run 1 must hold the reply claim")
 	}
 
-	runCtx2, done2, superseded := s.begin("1", ctx)
+	runCtx2, done2, _, superseded := s.begin("1", ctx, nil)
 	if !superseded {
 		t.Fatal("second begin while run 1 active must report superseded")
 	}
@@ -71,7 +71,7 @@ func TestInterrupt_SupersedeWaitsForDone(t *testing.T) {
 	var mu sync.Mutex
 	var order []string
 
-	_, done1, _ := s.begin("1", ctx)
+	_, done1, _, _ := s.begin("1", ctx, nil)
 	go func() {
 		time.Sleep(30 * time.Millisecond)
 		mu.Lock()
@@ -80,7 +80,7 @@ func TestInterrupt_SupersedeWaitsForDone(t *testing.T) {
 		done1()
 	}()
 
-	_, done2, superseded := s.begin("1", ctx)
+	_, done2, _, superseded := s.begin("1", ctx, nil)
 	mu.Lock()
 	order = append(order, "begin2-returned")
 	mu.Unlock()
@@ -105,12 +105,12 @@ func TestInterrupt_ClaimAfterLateSupersede(t *testing.T) {
 	s := newInterruptState()
 	ctx := context.Background()
 
-	runCtx1, done1, _ := s.begin("1", ctx)
+	runCtx1, done1, _, _ := s.begin("1", ctx, nil)
 	if !s.claimReply("1", runCtx1) {
 		t.Fatal("run 1 must win its claim while active")
 	}
 
-	runCtx2, done2, superseded := s.begin("1", ctx)
+	runCtx2, done2, _, superseded := s.begin("1", ctx, nil)
 	if !superseded {
 		t.Fatal("expected superseded")
 	}

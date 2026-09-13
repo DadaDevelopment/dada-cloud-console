@@ -168,6 +168,31 @@ ALL P0 ITEMS FROM THE OWNER'S REVIEW ARE NOW IMPLEMENTED AND PUSHED.
   the same failure path was proven earlier from the HTTP handler;
   behavior verified via claim/state, log plumbing unchecked.
 
+## Step 8 (2026-09-14): one reply per burst, guaranteed — DONE
+
+Owner's case: "10:34:01 привет / 10:34:03 хочу / 10:34:07 с вами
+работать" must earn ONE reply. Live pacing already coalesced it (short
+message quiet floor 20s*0.8*0.4 = 6.4s > 4s gap), but the guarantee had
+two holes: a message landing while the previous run was at the agent
+made the second reply a race and dropped the first half of the thought
+on supersede, and with no debounce env at all there was no Debouncer.
+
+- interruptState: cancelUnclaimed(conv) -- the poll loop cancels a run
+  that has not claimed its reply the moment a new message arrives and
+  takes its batch back; the poll loop enqueues the old messages ahead of
+  the new one. begin() carries the unclaimed batch of the run it
+  supersedes (closes the flush->begin window). claimReply refuses a
+  canceled context and marks the run claimed, so a run that is only
+  typing its reply out is never unsent (that stays two turns, as a
+  person would send what they typed).
+- DebounceConfigFromEnv never returns nil: batching is the baseline, the
+  env only sizes the windows. Step 2's "OFF by default" is superseded.
+- Tests: production-number arithmetic for the owner's timeline, the
+  timeline end-to-end through the poller across three polls (1 runtime
+  call with 3 messages, 1 send), mid-generation restart (2nd run carries
+  both messages, 1 send), mid-typing keeps the composed reply, begin
+  carry, claim rules. Package green under -race.
+
 Next candidates (owner's P1): delayed typing policy, delayed read policy
 (Business-connection-gated), outbound voice/images/files (TTS),
 edit/delete/reactions, quiet hours/timezone (mandatory before enabling

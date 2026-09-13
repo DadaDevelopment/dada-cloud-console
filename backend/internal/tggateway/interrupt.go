@@ -21,12 +21,18 @@ type runGenKey struct{}
 // generation: begin() bumps it, and a run whose generation no longer matches
 // has been superseded. doneCh is closed by the owning run's done() exactly
 // once; a superseding begin() waits on it so two runs of one chat never
-// overlap (their replies and cancels never interleave).
+// overlap (their replies and cancels never interleave). batch is what the
+// run is answering, handed back by cancelUnclaimed so a message that lands
+// mid-generation restarts the run over the whole thought instead of
+// losing its first half. claimed flips once the run has won the right to
+// send: from then on a new message can no longer unsend it.
 type chatRun struct {
-	mu     sync.Mutex
-	gen    int
-	cancel context.CancelFunc
-	doneCh chan struct{}
+	mu      sync.Mutex
+	gen     int
+	cancel  context.CancelFunc
+	doneCh  chan struct{}
+	batch   []TelegramUpdate
+	claimed bool
 }
 
 // interruptState is the per-poller run tracking that implements the
@@ -54,10 +60,14 @@ func newInterruptState() *interruptState {
 // begin registers a fresh run for the chat, superseding any active one: the
 // old run's context is canceled and begin waits (bounded) for its done().
 // The caller MUST call the returned done exactly once when its terminal
-// bookkeeping (reply sent, or silence on cancel) is finished. superseded
-// reports whether an active run was actually canceled -- for the debug log,
-// not for control flow.
-func (s *interruptState) begin(convKey string, parent context.Context) (runCtx context.Context, done func(), superseded bool) {
+// bookkeeping (reply sent, or silence on cancel) is finished. full is the
+// batch this run answers: the caller's batch, preceded by the superseded
+// run's batch when that run had not yet claimed its reply, so a message
+// that slipped in between the debouncer's flush and this begin (where
+// cancelUnclaimed cannot see the run yet) still ends in one run over the
+// whole thought. superseded reports whether an active run was actually
+// canceled -- for the debug log, not for control flow.
+func (s *interruptState) begin(convKey string, parent context.Context, batch []TelegramUpdate) (runCtx context.Context, done func(), full []TelegramUpdate, superseded bool) {
 	s.mu.Lock()
 	run, ok := s.runs[convKey]
 	if !ok {
@@ -66,9 +76,14 @@ func (s *interruptState) begin(convKey string, parent context.Context) (runCtx c
 	}
 	s.mu.Unlock()
 
+	full = batch
 	run.mu.Lock()
 	if run.cancel != nil {
 		run.cancel()
+		if !run.claimed && len(run.batch) > 0 {
+			full = append(append(make([]TelegramUpdate, 0, len(run.batch)+len(batch)), run.batch...), batch...)
+		}
+		run.batch = nil
 		ch := run.doneCh
 		run.mu.Unlock()
 		superseded = true
@@ -82,6 +97,8 @@ func (s *interruptState) begin(convKey string, parent context.Context) (runCtx c
 	ctx, cancel := context.WithCancel(parent)
 	run.cancel = cancel
 	run.doneCh = make(chan struct{})
+	run.batch = full
+	run.claimed = false
 	myGen := run.gen
 	myCh := run.doneCh
 	run.mu.Unlock()
@@ -97,13 +114,15 @@ func (s *interruptState) begin(convKey string, parent context.Context) (runCtx c
 		close(myCh)
 	}
 
-	return context.WithValue(ctx, runGenKey{}, myGen), done, superseded
+	return context.WithValue(ctx, runGenKey{}, myGen), done, full, superseded
 }
 
 // claimReply atomically grants the run identified by gen the right to send
 // its reply. It returns false once a newer generation exists (the run was
-// superseded mid-flight and must stay silent) or the run already finished
-// (done() cleared cancel). Winning the claim is final: a supersede landing
+// superseded mid-flight and must stay silent), the run already finished
+// (done() cleared cancel), or cancelUnclaimed got there first (the context
+// is canceled and the batch is back in the debouncer, so a reply now would
+// be the first of two). Winning the claim is final: a supersede landing
 // microseconds later cannot unsend -- the reply was fully computed before
 // the correction arrived, and the new run restarts anyway.
 func (s *interruptState) claimReply(convKey string, runCtx context.Context) bool {
@@ -121,7 +140,38 @@ func (s *interruptState) claimReply(convKey string, runCtx context.Context) bool
 
 	run.mu.Lock()
 	defer run.mu.Unlock()
-	return run.gen == gen && run.cancel != nil
+	if run.gen != gen || run.cancel == nil || runCtx.Err() != nil {
+		return false
+	}
+	run.claimed = true
+	return true
+}
+
+// cancelUnclaimed is the poll loop's half of the mid-generation restart: a
+// new message for a chat whose run is still at the agent cancels that run
+// and takes its batch back, so the caller can enqueue the old messages
+// ahead of the new one and the chat gets ONE reply to the whole thought.
+// A run that already claimed its reply is left alone -- it is only typing
+// the answer out, and a new message must not unsend it. The batch is
+// handed out once: a second message landing while the canceled run is
+// still unwinding finds nothing to carry.
+func (s *interruptState) cancelUnclaimed(convKey string) []TelegramUpdate {
+	s.mu.Lock()
+	run, ok := s.runs[convKey]
+	s.mu.Unlock()
+	if !ok {
+		return nil
+	}
+
+	run.mu.Lock()
+	defer run.mu.Unlock()
+	if run.cancel == nil || run.claimed {
+		return nil
+	}
+	run.cancel()
+	batch := run.batch
+	run.batch = nil
+	return batch
 }
 
 // forget drops the chat's run entry -- used on poller shutdown so a
