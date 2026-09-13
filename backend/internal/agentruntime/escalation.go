@@ -321,6 +321,9 @@ func (s *Server) handleEscalate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "pause rejected"})
 		return
 	}
+	if err := s.runtime.store.ClearEscalationAck(c.Request.Context(), conv.ID); err != nil {
+		log.Warn().Err(err).Str("conversation", conv.ID.String()).Msg("agentruntime: escalation ack flag not cleared")
+	}
 	clientTold := s.tellClient(c.Request.Context(), conv, req.ClientMessage)
 	notified := false
 	if s.operator != nil {

@@ -111,6 +111,18 @@ type ConversationStore interface {
 	// can fire again after real user activity.
 	ClearIdleFlag(ctx context.Context, conversationID uuid.UUID) error
 
+	// ClearEscalationAck re-arms the post-escalation silent-message
+	// acknowledgment for a fresh escalation: called when a conversation is
+	// newly paused so the next silent message during THIS pause gets exactly
+	// one ack.
+	ClearEscalationAck(ctx context.Context, conversationID uuid.UUID) error
+
+	// ClaimEscalationAck atomically claims the one-time acknowledgment slot
+	// for a conversation paused by escalation: true means this caller won
+	// the claim and must send the ack; false means someone already did for
+	// the current pause.
+	ClaimEscalationAck(ctx context.Context, conversationID uuid.UUID) (bool, error)
+
 	// FinishConversation retires a conversation without deleting it: history and
 	// state rows stay for audit, but the identity tuple is released so the next
 	// inbound message from the same user opens a fresh conversation.
@@ -392,6 +404,33 @@ func (s *pgStore) ClearIdleFlag(ctx context.Context, conversationID uuid.UUID) e
 		WHERE id = $1
 	`, conversationID)
 	return err
+}
+
+// ClearEscalationAck removes the escalation_ack_sent_at metadata key so the
+// next silent inbound message on this (new) pause can claim the ack slot.
+func (s *pgStore) ClearEscalationAck(ctx context.Context, conversationID uuid.UUID) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE conversations
+		SET metadata = metadata - 'escalation_ack_sent_at'
+		WHERE id = $1
+	`, conversationID)
+	return err
+}
+
+// ClaimEscalationAck marks the ack as sent for the current pause. The WHERE
+// clause re-checks the claim, same pattern as claimIdleSQL (idle.go): two
+// concurrent messages racing the pause window cannot both win.
+func (s *pgStore) ClaimEscalationAck(ctx context.Context, conversationID uuid.UUID) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE conversations SET metadata = jsonb_set(
+				COALESCE(metadata, '{}'::jsonb), '{escalation_ack_sent_at}',
+				to_jsonb(to_char(NOW() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')), true)
+		WHERE id = $1 AND COALESCE(metadata->>'escalation_ack_sent_at', '') = ''
+	`, conversationID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 // MarkRuntimeHandled records a completed runtime result, not Telegram delivery.

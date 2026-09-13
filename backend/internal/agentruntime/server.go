@@ -58,6 +58,12 @@ func NewServer(pool *pgxpool.Pool, gitopsBasePath string) *Server {
 	if url := os.Getenv("TG_GATEWAY_OUTBOUND_URL"); url != "" {
 		srv.outbound = NewHTTPChannelOutbound(url)
 	}
+	runtime.outbound = func(ctx context.Context, agentName, externalID, text, mediaURL string) error {
+		if srv.outbound == nil {
+			return errOutboundNotConfigured
+		}
+		return srv.outbound.SendOutbound(ctx, agentName, externalID, text, mediaURL)
+	}
 	runtime.syncPause = func(ctx context.Context, conv Conversation) error { _, err := srv.syncPausedCRM(ctx, conv); return err }
 	return srv
 }

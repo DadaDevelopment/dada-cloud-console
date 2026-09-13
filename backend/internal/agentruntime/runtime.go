@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -97,6 +98,7 @@ type Runtime struct {
 	structuredAgents map[string]bool
 	linkAllowlist    []string
 	syncPause        func(context.Context, Conversation) error
+	outbound         func(ctx context.Context, agentName, externalID, text, mediaURL string) error
 	runLocks         [256]sync.Mutex
 }
 
@@ -188,6 +190,7 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 		return MessageResponse{Suppressed: true}, nil
 	}
 	if !state.AgentEnabled {
+		r.maybeAckEscalationSilence(ctx, conv, state)
 		return MessageResponse{Suppressed: true}, nil
 	}
 	if created {
@@ -402,4 +405,48 @@ func (r *Runtime) pauseAfterHookFailure(ctx context.Context, conv Conversation, 
 		return MessageResponse{}, fmt.Errorf("hook failed and pause unavailable: %w", err)
 	}
 	return MessageResponse{}, cause
+}
+
+const escalationSilenceAck = "Коллега уже в курсе, ответит здесь."
+
+var errOutboundNotConfigured = errors.New("agentruntime: outbound channel not configured")
+
+// A conversation paused by a genuine escalation (PauseReason "escalated:
+// ...") still silently persists any further inbound message while paused,
+// since the early AgentEnabled gate above never calls the model again. Left
+// alone the customer gets no signal their message arrived at all. This
+// sends a fixed, non-generated line once per pause (claimed through
+// ClaimEscalationAck, the same atomic-metadata pattern idle.go uses for
+// idle_fired_at) through the same outbound path tellClient uses for the
+// original hand-off. Courtesy-stop ("customer requested no further
+// replies") and hook-failure pauses are intentionally excluded: the former
+// is the customer's own request for silence, the latter is a platform
+// fault, not a human already engaged.
+func (r *Runtime) maybeAckEscalationSilence(ctx context.Context, conv Conversation, state RuntimeState) {
+	if !strings.HasPrefix(state.PauseReason, "escalated:") {
+		return
+	}
+	claimed, err := r.store.ClaimEscalationAck(ctx, conv.ID)
+	if err != nil {
+		log.Warn().Err(err).Str("conversation", conv.ID.String()).Msg("agentruntime: escalation ack claim failed")
+		return
+	}
+	if !claimed {
+		return
+	}
+	if _, err := r.store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "assistant", Content: escalationSilenceAck}); err != nil {
+		log.Warn().Err(err).Str("conversation", conv.ID.String()).Msg("agentruntime: escalation ack not saved")
+		return
+	}
+	if r.outbound == nil {
+		log.Info().Str("conversation", conv.ID.String()).Msg("agentruntime: escalation ack persisted but no outbound configured")
+		return
+	}
+	if err := r.outbound(ctx, conv.AgentName, conv.ExternalID, escalationSilenceAck, ""); err != nil {
+		if errors.Is(err, errOutboundNotConfigured) {
+			log.Info().Str("conversation", conv.ID.String()).Msg("agentruntime: escalation ack persisted but no outbound configured")
+			return
+		}
+		log.Warn().Err(err).Str("conversation", conv.ID.String()).Msg("agentruntime: escalation ack delivery failed")
+	}
 }
