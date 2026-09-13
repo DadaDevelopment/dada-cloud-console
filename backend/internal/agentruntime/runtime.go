@@ -286,6 +286,7 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 			return MessageResponse{Suppressed: true}, nil
 		}
 		if !r.structuredAgents[conv.AgentName] {
+			reply = stripEmDash(reply)
 			reason := leakReason(reply)
 			if reason == "" {
 				reason = linkLeakReason(reply, r.linkAllowlist)

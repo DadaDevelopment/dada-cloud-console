@@ -14,6 +14,30 @@ const (
 	leakLatinMinCount = 12
 )
 
+// emDashPattern matches an em dash together with its surrounding spaces.
+// core.md bans em dashes several times over (they read as a canned line), but
+// the ban does not reliably hold across every reply (S17, S428 n43: 2/27).
+// A comma is the closest natural substitute for both uses seen in practice -
+// a pause before a clause and a copula ("X - Y") - so this is a mechanical
+// backstop rather than a reject-and-reprompt, the same tradeoff as the
+// client_message gender fix in escalation.go: a safe rewrite beats added
+// round-trip latency for a purely cosmetic defect.
+var emDashPattern = regexp.MustCompile(`\s*—\s*`)
+
+func stripEmDash(text string) string {
+	if !strings.Contains(text, "—") {
+		return text
+	}
+	replaced := emDashPattern.ReplaceAllString(text, ", ")
+	replaced = strings.TrimLeft(replaced, ", ")
+	for _, pair := range [][2]string{
+		{", .", "."}, {", ,", ","}, {", ?", "?"}, {", !", "!"}, {",  ", ", "},
+	} {
+		replaced = strings.ReplaceAll(replaced, pair[0], pair[1])
+	}
+	return strings.TrimSpace(replaced)
+}
+
 var leakMarkers = []string{
 	"kb_search", "load_skill", "update_conversation_state", "escalate_to_operator", "stop_agent", "ask_user",
 	"runtime_context", "incoming_messages", "incoming_text", "expected_version", "source_message_id",
