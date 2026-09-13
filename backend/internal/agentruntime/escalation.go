@@ -18,6 +18,7 @@ import (
 // The model picks one; anything else is rejected so the operator card never
 // carries a made-up category.
 var escalationReasons = map[string]string{
+	"E_DEPOSIT_HANDOFF":     "клиент сообщил о пополнении, дальше ведёт куратор",
 	"E_TECH_BLOCKED":        "клиент застрял технически",
 	"E_LEGAL_TAX":           "юридический или налоговый вопрос",
 	"E_DISTRUST":            "недоверие, требует доказательств",
@@ -159,6 +160,13 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
+func escalationTitle(reason string) string {
+	if reason == "E_DEPOSIT_HANDOFF" {
+		return "🤝 Передача куратору"
+	}
+	return "🔺 Эскалация"
+}
+
 func (s *Server) handleEscalate(c *gin.Context) {
 	var req struct {
 		ContextToken  string `json:"context_token"`
@@ -190,7 +198,7 @@ func (s *Server) handleEscalate(c *gin.Context) {
 	clientTold := s.tellClient(c.Request.Context(), conv, req.ClientMessage)
 	notified := false
 	if s.operator != nil {
-		notified = s.operator.Notify(c.Request.Context(), conv, escalationCard("🔺 Эскалация", conv, req.ReasonCode, req.Summary, state)) == nil
+		notified = s.operator.Notify(c.Request.Context(), conv, escalationCard(escalationTitle(req.ReasonCode), conv, req.ReasonCode, req.Summary, state)) == nil
 	}
 	s.runtime.mirrorState(c.Request.Context(), conv, state, req.Summary)
 	state, err = s.syncPausedCRM(c.Request.Context(), conv)
