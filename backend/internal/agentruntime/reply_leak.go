@@ -1,6 +1,7 @@
 package agentruntime
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"unicode"
@@ -30,6 +31,8 @@ var leakMarkerPattern = regexp.MustCompile(`(?i)\b(kb|skill|placeholder|internal
 var leakLinks = regexp.MustCompile(`https?:\/\/\S+|\S+@\S+\.\S+|@\w+`)
 
 var leakTokenFragment = regexp.MustCompile(`\pL_|_\pL`)
+
+var leakPlaceholder = regexp.MustCompile(`[\[{<]\s*\pL[\pL ]{1,30}\s*[\]}>]`)
 
 var leakBrandTokens = regexp.MustCompile(`(?i)\b(fxpro|mt5|metatrader|usd|eur|rub|kyc|vpn|p2p|id|ok|pdf|ios|android|telegram|whatsapp|app ?store|google ?play|sbp|swift|iban|cvc|cvv|otp|sms|qr|api|url|pin)\b`)
 
@@ -61,6 +64,9 @@ func leakReason(reply string) string {
 	if leakTokenFragment.MatchString(leakLinks.ReplaceAllString(text, " ")) {
 		return "token fragment with underscore"
 	}
+	if m := leakPlaceholder.FindString(text); m != "" {
+		return "placeholder " + m
+	}
 	if utf8.RuneCountInString(text) > leakMaxRunes {
 		return "reply longer than a client message"
 	}
@@ -88,6 +94,15 @@ func latinShare(text string) (float64, int) {
 		return 0, 0
 	}
 	return float64(latin) / float64(latin+cyrillic), latin
+}
+
+const leakPlaceholderHint = "Предыдущий черновик клиенту не отправлен: вместо значения в нём стоял плейсхолдер %s. Подставь настоящее значение (ссылку и факты бери из kb_search, партнёрская ссылка в статье ref_link) или перепиши ответ без этого места. Напиши только сам ответ клиенту: 1-3 коротких предложения по-русски."
+
+func leakRepairMessage(reason string) string {
+	if strings.HasPrefix(reason, "placeholder ") {
+		return fmt.Sprintf(leakPlaceholderHint, strings.TrimPrefix(reason, "placeholder "))
+	}
+	return fmt.Sprintf(leakRepairHint, reason)
 }
 
 const leakRepairHint = "Предыдущий черновик клиенту не отправлен: в нём были внутренние рассуждения или служебные слова (%s). Напиши только сам ответ клиенту: 1-3 коротких предложения по-русски, без размышлений, черновиков, названий инструментов и правил."

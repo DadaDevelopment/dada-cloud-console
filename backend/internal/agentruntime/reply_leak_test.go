@@ -33,6 +33,9 @@ func TestLeakReasonCatchesMonologues(t *testing.T) {
 		"answer frame":                           "Отвечаю: депозит 500 лежит на вашем счёте у FxPro как ваши деньги",
 		"mixed script":                           "Okay so client wants to know about leverage settings, но в базе этого нет, so I will answer that defaults are fine and move on to deposit. Отдельных требований нет.",
 		"long reply":                             strings.Repeat("Депозит заводите из личного кабинета FxPro, сумму выбираете сами. ", 12),
+		"S94 link placeholder":                   "Регистрируйтесь по нашей партнёрской ссылке, счёт по ней нужен для привязки к группе: [ссылка]",
+		"curly placeholder":                      "Куратор {имя} напишет вам здесь после пополнения",
+		"angle placeholder":                      "Пополняйте от <сумма> долларов в кабинете FxPro",
 	}
 	for name, reply := range cases {
 		if reason := leakReason(reply); reason == "" {
@@ -55,6 +58,8 @@ func TestLeakReasonPassesClientReplies(t *testing.T) {
 		"empty":                 "",
 		"english client filler": "Okay, let me be clear: the account is opened at FxPro through our link, the deposit stays on your own broker account. Fine to continue to the deposit step?",
 		"P2P and support mail":  "Пополнение через P2P у FxPro нет, есть карта и SBP; по спорным платежам пишите на support@fxpro.com. Депозит уже виден?",
+		"comparison sign":       "Сумма < 300 не откроет вход, реально ли собрать 300?",
+		"bracketed number":      "Ваш счёт [518002177] по нашей ссылке?",
 	}
 	for name, reply := range cases {
 		if reason := leakReason(reply); reason != "" {
@@ -124,4 +129,11 @@ func TestPGLeakedMonologueTwiceIsNeverDelivered(t *testing.T) {
 			require.Equal(t, out.Text, m.Content)
 		}
 	}
+}
+
+func TestLeakRepairMessageNamesThePlaceholder(t *testing.T) {
+	hint := leakRepairMessage(leakReason("Регистрируйтесь по ссылке: [ссылка]"))
+	require.Contains(t, hint, "плейсхолдер [ссылка]")
+	require.Contains(t, hint, "ref_link")
+	require.NotContains(t, leakRepairMessage("reasoning frame отвечаю:"), "плейсхолдер")
 }

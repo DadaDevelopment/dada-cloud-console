@@ -295,7 +295,7 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 				return MessageResponse{}, fmt.Errorf("agent reply leaked internal reasoning twice: %s", reason)
 			}
 			run.ConversationContext.State = after
-			run.ConversationContext.ReplyError = fmt.Sprintf(leakRepairHint, reason)
+			run.ConversationContext.ReplyError = leakRepairMessage(reason)
 			continue
 		}
 		rendered, contractErr := renderReplyPlan(reply, after)
