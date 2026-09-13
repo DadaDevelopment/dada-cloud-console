@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 )
 
 // RuntimeLinkMeta mirrors tggateway.RuntimeLinkMeta: one URL found in a
@@ -288,7 +289,18 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 			return MessageResponse{Suppressed: true}, nil
 		}
 		if !r.structuredAgents[conv.AgentName] {
-			break
+			reason := leakReason(reply)
+			if reason == "" {
+				break
+			}
+			log.Warn().Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Int("attempt", attempt).
+				Str("reason", reason).Int("runes", len([]rune(reply))).Msg("agentruntime: reply held back as internal monologue")
+			if attempt == 1 {
+				return MessageResponse{}, fmt.Errorf("agent reply leaked internal reasoning twice: %s", reason)
+			}
+			run.ConversationContext.State = after
+			run.ConversationContext.ReplyError = fmt.Sprintf(leakRepairHint, reason)
+			continue
 		}
 		rendered, contractErr := renderReplyPlan(reply, after)
 		if contractErr == nil {

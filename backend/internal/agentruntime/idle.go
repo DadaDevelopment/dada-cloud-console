@@ -223,6 +223,10 @@ func (s *IdleScheduler) invoke(ctx context.Context, r idleHookRow) {
 	if err != nil || !state.AgentEnabled {
 		return
 	}
+	if reason := leakReason(reply); reason != "" {
+		log.Warn().Str("conversation", convID).Str("reason", reason).Msg("agentruntime: idle follow-up dropped as internal monologue")
+		return
+	}
 	reply = redactContextToken(reply, token)
 	if _, err := s.runtime.store.SaveMessage(ctx, conv.ID, SaveMessageInput{
 		Role:    "assistant",
