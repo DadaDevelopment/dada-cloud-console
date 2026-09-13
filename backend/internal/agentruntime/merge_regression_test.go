@@ -36,10 +36,8 @@ func TestPGIdleSuppressesPausedConversationBeforeAndDuringRun(t *testing.T) {
 			model := runFunc(func(ctx context.Context, run AgentRunRequest) (string, error) {
 				calls++
 				require.Equal(t, "runtime-"+conv.ID.String(), run.ContextID)
-				claims, err := verifyContextToken([]byte(testRuntimeToken), run.ConversationContext.ContextToken, time.Now())
-				require.NoError(t, err)
-				require.Equal(t, conv.ID, claims.ConversationID)
-				_, err = store.PauseAgent(ctx, conv.ID, "customer stopped")
+				require.Equal(t, conv.Channel+":"+conv.ExternalID, run.EndUserKey)
+				_, err := store.PauseAgent(ctx, conv.ID, "customer stopped")
 				require.NoError(t, err)
 				return "must never be delivered", nil
 			})

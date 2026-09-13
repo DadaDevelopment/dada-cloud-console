@@ -259,14 +259,10 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 	if !state.AgentEnabled {
 		return MessageResponse{Suppressed: true}, nil
 	}
-	token, err := issueContextToken(r.contextKey, conv, time.Now().Add(15*time.Minute))
-	if err != nil {
-		return MessageResponse{}, err
-	}
 	run := AgentRunRequest{AgentName: conv.AgentName, ContextID: "runtime-" + conv.ID.String(), Messages: pending,
 		EndUserKey: conv.Channel + ":" + conv.ExternalID,
 		ConversationContext: AgentConversationContext{ConversationID: conv.ID.String(), Channel: conv.Channel,
-			ExternalID: conv.ExternalID, Username: conv.ActorUsername, State: state, AvailableSkills: skills, ContextToken: token}}
+			ExternalID: conv.ExternalID, Username: conv.ActorUsername, State: state, AvailableSkills: skills}}
 	if r.structuredAgents[conv.AgentName] {
 		run.ConversationContext.ReplyFormat = structuredReplyFormat
 	}
@@ -315,7 +311,6 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 		run.ConversationContext.State = after
 		run.ConversationContext.ReplyError = contractErr.Error()
 	}
-	reply = redactContextToken(reply, token)
 	if _, err := r.store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "assistant", Content: reply}); err != nil {
 		return MessageResponse{}, err
 	}

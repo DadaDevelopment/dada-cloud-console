@@ -181,11 +181,6 @@ func (s *IdleScheduler) invoke(ctx context.Context, r idleHookRow) {
 		log.Warn().Err(err).Msg("agentruntime: idle active skill refresh unavailable")
 		return
 	}
-	token, err := issueContextToken(s.runtime.contextKey, conv, time.Now().Add(15*time.Minute))
-	if err != nil {
-		log.Warn().Err(err).Msg("agentruntime: idle context unavailable")
-		return
-	}
 	var skills []string
 	if catalog, ok := s.runtime.domains.(DomainCatalog); ok {
 		skills, err = catalog.ListDomains(ctx, conv.AgentName)
@@ -211,9 +206,10 @@ func (s *IdleScheduler) invoke(ctx context.Context, r idleHookRow) {
 
 	reply, err := s.a2a.Send(ctx, AgentRunRequest{
 		AgentName: conv.AgentName, ContextID: "runtime-" + conv.ID.String(), Messages: history,
+		EndUserKey: conv.Channel + ":" + conv.ExternalID,
 		ConversationContext: AgentConversationContext{ConversationID: conv.ID.String(),
 			Channel: conv.Channel, ExternalID: conv.ExternalID, Username: conv.ActorUsername,
-			State: state, AvailableSkills: skills, ContextToken: token},
+			State: state, AvailableSkills: skills},
 	})
 	if err != nil {
 		log.Warn().Err(err).Str("conversation", convID).Msg("agentruntime: idle invoke: a2a")
@@ -227,7 +223,6 @@ func (s *IdleScheduler) invoke(ctx context.Context, r idleHookRow) {
 		log.Warn().Str("conversation", convID).Str("reason", reason).Msg("agentruntime: idle follow-up dropped as internal monologue")
 		return
 	}
-	reply = redactContextToken(reply, token)
 	if _, err := s.runtime.store.SaveMessage(ctx, conv.ID, SaveMessageInput{
 		Role:    "assistant",
 		Content: reply,

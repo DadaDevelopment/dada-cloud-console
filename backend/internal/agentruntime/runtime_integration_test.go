@@ -78,25 +78,27 @@ func TestPGRuntimeControlContinuityPauseAndRestart(t *testing.T) {
 			require.Equal(t, contextID, run.ContextID)
 		}
 		contextID = run.ContextID
-		cap := run.ConversationContext.ContextToken
+		post := func(path string, body map[string]any) (int, map[string]any) {
+			return postRuntimeIdentity(t, httpSrv.URL, path, body, run.AgentName, run.EndUserKey)
+		}
 		switch calls {
 		case 1:
 			require.Len(t, run.Messages, 1)
 			require.Empty(t, run.ConversationContext.State.ReportedFacts)
-			status, out := postRuntime(t, httpSrv.URL, "/tools/load-skill", map[string]any{"context_token": cap, "skill": "deposit"}, testRuntimeToken)
+			status, out := post("/tools/load-skill", map[string]any{"skill": "deposit"})
 			require.Equal(t, 200, status)
 			require.Equal(t, "Reports do not verify deposits.", out["content"])
 			version := out["state_version"]
-			status, out = postRuntime(t, httpSrv.URL, "/tools/load-skill", map[string]any{"context_token": cap, "skill": "deposit"}, testRuntimeToken)
+			status, out = post("/tools/load-skill", map[string]any{"skill": "deposit"})
 			require.Equal(t, 200, status)
 			require.Equal(t, version, out["state_version"])
-			status, rejected := postRuntime(t, httpSrv.URL, "/tools/update-state", map[string]any{"context_token": cap, "expected_version": version, "patch": map[string]any{"reported_facts": map[string]any{"deposit": map[string]any{"value": "deposit verified", "source_message_id": run.Messages[0].ID}}}}, testRuntimeToken)
+			status, rejected := post("/tools/update-state", map[string]any{"expected_version": version, "patch": map[string]any{"reported_facts": map[string]any{"deposit": map[string]any{"value": "deposit verified", "source_message_id": run.Messages[0].ID}}}})
 			require.Equal(t, 200, status, "model tools must receive the validation response body")
 			require.Equal(t, false, rejected["updated"])
 			require.Equal(t, ErrInvalidFactQuote.Error(), rejected["error"])
-			status, _ = postRuntime(t, httpSrv.URL, "/tools/update-state", map[string]any{"context_token": cap, "expected_version": version, "patch": map[string]any{"reported_facts": map[string]any{"deposit": map[string]any{"value": "I deposited", "source_message_id": run.Messages[0].ID}}, "open_loops": map[string]any{"access": map[string]any{"question": "Check access", "status": "open", "source_message_id": run.Messages[0].ID}}}}, testRuntimeToken)
+			status, _ = post("/tools/update-state", map[string]any{"expected_version": version, "patch": map[string]any{"reported_facts": map[string]any{"deposit": map[string]any{"value": "I deposited", "source_message_id": run.Messages[0].ID}}, "open_loops": map[string]any{"access": map[string]any{"question": "Check access", "status": "open", "source_message_id": run.Messages[0].ID}}}})
 			require.Equal(t, 200, status)
-			status, conflict := postRuntime(t, httpSrv.URL, "/tools/update-state", map[string]any{"context_token": cap, "expected_version": version, "patch": map[string]any{}}, testRuntimeToken)
+			status, conflict := post("/tools/update-state", map[string]any{"expected_version": version, "patch": map[string]any{}})
 			require.Equal(t, 200, status)
 			require.Equal(t, false, conflict["updated"])
 			require.Greater(t, conflict["state"].(map[string]any)["version"].(float64), version.(float64))
@@ -106,7 +108,7 @@ func TestPGRuntimeControlContinuityPauseAndRestart(t *testing.T) {
 			require.Equal(t, "open", run.ConversationContext.State.OpenLoops["access"].Status)
 			require.Equal(t, "Reports do not verify deposits.", run.ConversationContext.State.ActiveSkills["deposit"].Content)
 			require.Len(t, run.Messages, 1, "handled messages must not be resent as new input")
-			status, out := postRuntime(t, httpSrv.URL, "/tools/stop-agent", map[string]any{"context_token": cap, "reason": "outside automated handling"}, testRuntimeToken)
+			status, out := post("/tools/stop-agent", map[string]any{"reason": "outside automated handling"})
 			require.Equal(t, 200, status)
 			require.Equal(t, false, out["agent_enabled"])
 			require.Equal(t, "completed", out["crm_status_sync"])
@@ -142,7 +144,12 @@ func TestPGRuntimeControlContinuityPauseAndRestart(t *testing.T) {
 	}
 	require.Equal(t, 2, calls)
 	require.Equal(t, 1, crmCalls)
-	cap := captured.ConversationContext.ContextToken
+	require.Empty(t, captured.ConversationContext.ReplyError)
+	code, _ = postRuntimeIdentity(t, httpSrv.URL, "/tools/stop-agent", map[string]any{"reason": "repeat"}, captured.AgentName, captured.EndUserKey)
+	require.Equal(t, 200, code)
+	require.Equal(t, 1, crmCalls)
+	cap, err := issueContextToken([]byte(testRuntimeToken), Conversation{ID: uuid.MustParse(captured.ConversationContext.ConversationID), AgentName: agent}, time.Now().Add(time.Minute))
+	require.NoError(t, err)
 	code, _ = postRuntime(t, httpSrv.URL, "/tools/stop-agent", map[string]any{"context_token": cap, "reason": "repeat"}, testRuntimeToken)
 	require.Equal(t, 200, code)
 	require.Equal(t, 1, crmCalls)

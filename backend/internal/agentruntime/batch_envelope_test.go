@@ -44,6 +44,9 @@ func TestEnvelopeGluesWholeBatchIntoIncomingText(t *testing.T) {
 	if strings.Contains(envelope.Text, "user: ") {
 		t.Fatalf("role prefix leaked into incoming_text: %q", envelope.Text)
 	}
+	if strings.Contains(rendered, "context_token") || strings.Contains(rendered, "context token") {
+		t.Fatalf("envelope still carries a context token, identity must travel as request headers: %s", rendered)
+	}
 	if !strings.Contains(rendered, "reply must cover all of them") {
 		t.Fatalf("preface does not tell the model the batch is whole: %q", rendered[:200])
 	}
