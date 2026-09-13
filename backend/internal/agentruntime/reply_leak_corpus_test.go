@@ -19,7 +19,8 @@ func TestLeakCorpus(t *testing.T) {
 	defer f.Close()
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
-	total, flagged := 0, 0
+	allowlist := ParseLinkAllowlist(os.Getenv("LEAK_LINK_ALLOWLIST"))
+	total, flagged, links := 0, 0, 0
 	for sc.Scan() {
 		var row struct {
 			Run  string `json:"run"`
@@ -30,7 +31,13 @@ func TestLeakCorpus(t *testing.T) {
 			t.Fatal(err)
 		}
 		total++
-		if reason := leakReason(row.Text); reason != "" {
+		reason := leakReason(row.Text)
+		if reason == "" {
+			if reason = linkLeakReason(row.Text, allowlist); reason != "" {
+				links++
+			}
+		}
+		if reason != "" {
 			flagged++
 			text := []rune(row.Text)
 			if len(text) > 160 {
@@ -39,5 +46,5 @@ func TestLeakCorpus(t *testing.T) {
 			t.Logf("%s#%d [%s]: %s", row.Run, row.Turn, reason, string(text))
 		}
 	}
-	t.Logf("flagged %d of %d", flagged, total)
+	t.Logf("flagged %d of %d, links outside allowlist %d", flagged, total, links)
 }

@@ -95,6 +95,7 @@ type Runtime struct {
 	stateSync        *StateSync
 	courtesyAgents   map[string]bool
 	structuredAgents map[string]bool
+	linkAllowlist    []string
 	syncPause        func(context.Context, Conversation) error
 	runLocks         [256]sync.Mutex
 }
@@ -286,6 +287,9 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 		}
 		if !r.structuredAgents[conv.AgentName] {
 			reason := leakReason(reply)
+			if reason == "" {
+				reason = linkLeakReason(reply, r.linkAllowlist)
+			}
 			if reason == "" {
 				break
 			}
