@@ -29,6 +29,8 @@ func TestLeakReasonCatchesMonologues(t *testing.T) {
 		"runtime field":                          "expected_version не совпала, повторю. Счёт у FxPro уже есть?",
 		"english reasoning inside russian reply": "The user asks about leverage. Отдельных требований к плечу нет, оставляйте настройки FxPro по умолчанию.",
 		"placeholder":                            "placeholder: уточнить у куратора. Депозит виден в кабинете?",
+		"S441 narrated next step":                "Работаем дальше, так как свободные 1200 долларов выше порога, следующий вопрос о счёте у FxPro: «Счёт у FxPro уже есть?»",
+		"answer frame":                           "Отвечаю: депозит 500 лежит на вашем счёте у FxPro как ваши деньги",
 		"mixed script":                           "Okay so client wants to know about leverage settings, но в базе этого нет, so I will answer that defaults are fine and move on to deposit. Отдельных требований нет.",
 		"long reply":                             strings.Repeat("Депозит заводите из личного кабинета FxPro, сумму выбираете сами. ", 12),
 	}
@@ -47,6 +49,7 @@ func TestLeakReasonPassesClientReplies(t *testing.T) {
 		"handle":                "Куратор напишет вам с аккаунта @fxpro_curator в течение дня, ждите сообщение",
 		"short question":        "Счёт у FxPro уже открыт?",
 		"quote of client":       "Вы написали «не понравится, смогу вывести?»: да, деньги остаются на вашем счёте у брокера, вывод в любой момент из кабинета",
+		"подскажу is not скажу": "Тип счёта и плечо выбираете сами в кабинете при открытии, наша группа этот параметр не задаёт. Открывайте счёт по ссылке, дальше по кабинету подскажу: https://direct-fxpro.com/en/partner/2LJMnV3qh?platform=web",
 		"skills word natural":   "Навыки торговли не нужны, куратор ведёт с нуля. Счёт у FxPro уже есть?",
 		"several questions":     "По порядку: 1) плечо оставляйте по умолчанию, 2) тип счёта тоже стандартный, 3) MT5 для iPhone есть в App Store. Кабинет уже открыт?",
 		"empty":                 "",

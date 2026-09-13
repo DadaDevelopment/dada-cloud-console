@@ -17,9 +17,11 @@ var leakMarkers = []string{
 	"kb_search", "load_skill", "update_conversation_state", "escalate_to_operator", "stop_agent", "ask_user",
 	"runtime_context", "incoming_messages", "incoming_text", "expected_version", "source_message_id",
 	"reported_facts", "open_loops", "active_skills", "tool_call", "function_call",
-	"к клиенту:", "итоговое:", "итоговый ответ", "правило:", "правила промпта", "по правилам промпта",
+	"итоговый ответ", "правила промпта", "по правилам промпта", "следующий вопрос о",
 	"в kb нет", "нет в kb", "из kb", "kb ", "черновик",
 }
+
+var leakFramePattern = regexp.MustCompile(`(?i)(^|[^\pL])(к клиенту|итоговое|итог|правило|отвечаю|скажу|заметка|мысли|рассуждение):`)
 
 var leakEnglishFillers = []string{"continue to", "hmm", "okay,", "fine.", "let me ", "the user ", "the client "}
 
@@ -44,6 +46,9 @@ func leakReason(reply string) string {
 	}
 	if m := leakMarkerPattern.FindString(text); m != "" {
 		return "internal marker " + strings.ToLower(m)
+	}
+	if m := leakFramePattern.FindStringSubmatch(text); m != nil {
+		return "reasoning frame " + strings.ToLower(m[2]) + ":"
 	}
 	share, latin := latinShare(text)
 	if share > 0 {
