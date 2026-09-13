@@ -15,10 +15,17 @@ import (
 )
 
 type httpA2AClient struct {
-	http     *http.Client
-	endpoint func(agentName string) string
-	timeout  time.Duration
+	http       *http.Client
+	endpoint   func(agentName string) string
+	timeout    time.Duration
+	retryPause time.Duration
 }
+
+// failedTaskRetryPause is how long the runtime waits before re-sending a turn
+// whose task the agent reported as failed. Those failures are almost always the
+// model provider rate-limiting a burst of chats, so a short pause and one more
+// try turns a silent lost turn into a late reply.
+const failedTaskRetryPause = 3 * time.Second
 
 // endUserHeader and agentHeader carry caller identity to the agent, which
 // replays them onto its MCP calls when its claim lists them in allowedHeaders.
@@ -33,9 +40,10 @@ const askUserUnavailableAnswer = "Инструмент ask_user в этом ка
 
 func NewA2AClient() A2AClient {
 	return &httpA2AClient{
-		http:     &http.Client{},
-		endpoint: kagentEndpoint,
-		timeout:  turnbudget.AgentCall(),
+		http:       &http.Client{},
+		endpoint:   kagentEndpoint,
+		timeout:    turnbudget.AgentCall(),
+		retryPause: failedTaskRetryPause,
 	}
 }
 
@@ -105,6 +113,18 @@ func (c *httpA2AClient) Send(ctx context.Context, run AgentRunRequest) (string, 
 		return "", err
 	}
 	task := parseTask(result)
+	if task.State == "failed" {
+		log.Warn().Str("agent", agentName).Str("context", run.ContextID).Str("task", task.ID).
+			Str("error", task.Error).Msg("agentruntime: agent task failed; retrying the turn once")
+		if err := pauseFor(ctx, c.retryPause); err != nil {
+			return "", fmt.Errorf("retry after failed task: %w", err)
+		}
+		message.MessageID = uuid.NewString()
+		if result, err = c.call(ctx, run, message); err != nil {
+			return "", fmt.Errorf("retry after failed task: %w", err)
+		}
+		task = parseTask(result)
+	}
 	if task.State == "input-required" {
 		log.Warn().Str("agent", agentName).Str("context", run.ContextID).Str("task", task.ID).
 			Strs("questions", task.Questions).
@@ -128,6 +148,9 @@ func (c *httpA2AClient) Send(ctx context.Context, run AgentRunRequest) (string, 
 		task = parseTask(result)
 	}
 	if task.State != "" && task.State != "completed" {
+		if task.Error != "" {
+			return "", fmt.Errorf("a2a task did not complete: %s: %s", task.State, task.Error)
+		}
 		return "", fmt.Errorf("a2a task did not complete: %s", task.State)
 	}
 	text := extractText(result)
@@ -195,7 +218,22 @@ func (c *httpA2AClient) call(ctx context.Context, run AgentRunRequest, message a
 type a2aTask struct {
 	ID        string
 	State     string
+	Error     string
 	Questions []string
+}
+
+func pauseFor(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func parseTask(raw json.RawMessage) a2aTask {
@@ -213,6 +251,10 @@ func parseTask(raw json.RawMessage) a2aTask {
 	}
 	task := a2aTask{ID: v.ID, State: v.Status.State}
 	for _, part := range v.Status.Message.Parts {
+		if part.Kind == "text" && task.State == "failed" {
+			task.Error = strings.TrimSpace(strings.Join([]string{task.Error, strings.TrimSpace(part.Text)}, " "))
+			continue
+		}
 		if part.Kind != "data" || part.Data["name"] != "ask_user" {
 			continue
 		}
