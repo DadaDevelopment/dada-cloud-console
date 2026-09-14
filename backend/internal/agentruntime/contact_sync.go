@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 )
+
+// errContactRejected marks a request the tool server refused as malformed
+// (4xx): a conversation whose external id is not a Telegram chat id, such as a
+// synthetic fixture, will never pass validation, so the reconciler must not
+// keep re-sending it every tick.
+var errContactRejected = errors.New("contact request rejected")
 
 // ContactSync is service-owned, never an LLM effect. Only conversations that
 // actually receive input enter the durable retry queue; no historical backfill.
@@ -58,7 +65,7 @@ func (s *ContactSync) Ensure(ctx context.Context, conv Conversation) error {
 	if err := json.Unmarshal(receipt, &prior); err != nil {
 		return err
 	}
-	if prior.Status == "completed" && prior.Username == conv.ActorUsername {
+	if (prior.Status == "completed" || prior.Status == "rejected") && prior.Username == conv.ActorUsername {
 		return nil
 	}
 	if err := s.save(ctx, conv, "pending", ""); err != nil {
@@ -68,6 +75,9 @@ func (s *ContactSync) Ensure(ctx context.Context, conv Conversation) error {
 	status := "completed"
 	if callErr != nil {
 		status = "failed"
+		if errors.Is(callErr, errContactRejected) {
+			status = "rejected"
+		}
 		log.Warn().Err(callErr).Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Msg("agentruntime: contact sync failed")
 	}
 	// Cancellation leaves the already persisted pending receipt for the worker.
@@ -99,6 +109,9 @@ func (s *ContactSync) create(ctx context.Context, conv Conversation) (string, er
 		return "", fmt.Errorf("contact integration unavailable")
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+		return "", fmt.Errorf("%w: %s", errContactRejected, resp.Status)
+	}
 	var result struct {
 		Applied  bool   `json:"applied"`
 		PersonID string `json:"person_id"`
