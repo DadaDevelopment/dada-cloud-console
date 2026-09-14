@@ -169,6 +169,11 @@ func (s *Server) handleUpdateState(c *gin.Context) {
 		c.JSON(code, gin.H{"error": "state update rejected", "refresh_context": code == http.StatusConflict})
 		return
 	}
+	if withSkills, err := s.runtime.ensureFactSkills(c.Request.Context(), conv, state); err == nil {
+		state = withSkills
+	} else {
+		log.Warn().Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Err(err).Msg("agentruntime: fact skills not activated after state update")
+	}
 	c.JSON(http.StatusOK, gin.H{"updated": true, "state": state})
 }
 func (s *Server) handleStopAgent(c *gin.Context) {

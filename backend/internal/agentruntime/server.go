@@ -50,6 +50,7 @@ func NewServer(pool *pgxpool.Pool, gitopsBasePath string) *Server {
 		}
 	}
 
+	runtime.factSkills = ParseFactSkills(os.Getenv("AGENT_FACT_SKILLS"))
 	runtime.linkAllowlist = ParseLinkAllowlist(os.Getenv("AGENT_REPLY_LINK_ALLOWLIST"))
 	token := os.Getenv("AGENT_RUNTIME_TOKEN")
 	runtime.contextKey = []byte(token)

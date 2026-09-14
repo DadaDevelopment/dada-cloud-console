@@ -96,6 +96,7 @@ type Runtime struct {
 	stateSync        *StateSync
 	courtesyAgents   map[string]bool
 	structuredAgents map[string]bool
+	factSkills       map[string]string
 	linkAllowlist    []string
 	syncPause        func(context.Context, Conversation) error
 	outbound         func(ctx context.Context, agentName, externalID, text, mediaURL string) error
@@ -255,6 +256,10 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 		if err != nil {
 			return MessageResponse{}, err
 		}
+	}
+	state, err = r.ensureFactSkills(ctx, conv, state)
+	if err != nil {
+		return MessageResponse{}, err
 	}
 	state, err = r.refreshActiveSkills(ctx, conv, state)
 	if err != nil {
