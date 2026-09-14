@@ -41,6 +41,7 @@ func TestLeakReasonCatchesMonologues(t *testing.T) {
 		"S194 skill name as a step":              "Чтобы участвовать, вступаете в торговую группу, дальше registration у FxPro. Начнём: был опыт на форексе?",
 		"S437 skill name as a section":           "Посмотрите в кабинете, какие варианты кроме карты предлагает deposit-раздел, и напишите, что там есть",
 		"S250 bare skill name":                   "Загрузите price? Цель 800 в месяц требует не половины той суммы, стартуйте с 2000.",
+		"phrasing skill named in reply":          "Держу phrasing в голове, так что коротко: какую сумму готовы выделить на первый депозит?",
 	}
 	for name, reply := range cases {
 		if reason := leakReason(reply); reason == "" {

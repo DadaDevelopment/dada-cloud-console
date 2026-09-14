@@ -52,7 +52,7 @@ var leakEnglishFillers = []string{"continue to", "hmm", "okay,", "fine.", "let m
 
 var leakMarkerPattern = regexp.MustCompile(`(?i)\b(kb|skill|placeholder|internal)\b`)
 
-var leakIdentifierPattern = regexp.MustCompile(`(?i:\b(discovery|price|offer|objection|continuity|registration|signals|learning|such)\b)|\bdeposit\b`)
+var leakIdentifierPattern = regexp.MustCompile(`(?i:\b(discovery|price|offer|objection|continuity|registration|phrasing|signals|learning|such)\b)|\bdeposit\b`)
 
 var leakLinks = regexp.MustCompile(`https?:\/\/\S+|\S+@\S+\.\S+|@\w+`)
 
