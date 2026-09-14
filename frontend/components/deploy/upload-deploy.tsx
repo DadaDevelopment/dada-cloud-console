@@ -1,11 +1,14 @@
 "use client";
-import { useRef, useState, DragEvent, ChangeEvent } from "react";
+import { useEffect, useRef, useState, DragEvent, ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
 import { UploadCloud } from "lucide-react";
 import { appsApi } from "@/lib/api";
 import { Spinner } from "@/components/ui/spinner";
 import { useT } from "@/lib/i18n/console/context";
+import { trackUxEvent } from "@/lib/ux-telemetry";
 import { buildZip, isExcludedPath, type ZipInputEntry } from "@/lib/zip";
+import { classifyUploadPortError, needsPortVerdict, parseUploadPort } from "@/lib/upload-port-verdict";
+import type { DetectedSource } from "@/lib/upload-port-verdict";
 
 const APP_NAME_RE = /^([a-z0-9]|[a-z0-9][a-z0-9-]{0,61}[a-z0-9])$/;
 const ACCEPTED_EXT = [".zip", ".tar.gz", ".tgz"];
@@ -145,6 +148,16 @@ export function UploadDeployCard({ projectId, envId, compact, hero, className }:
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  interface Verdict {
+    detected: DetectedSource;
+    appName: string;
+    buildId: string;
+  }
+  const [verdict, setVerdict] = useState<Verdict | null>(null);
+  const [verdictPort, setVerdictPort] = useState("");
+  const [verdictError, setVerdictError] = useState<string | null>(null);
+  const [verdictSaving, setVerdictSaving] = useState(false);
+
   const trimmedName = appName.trim();
   const nameValid = trimmedName === "" || APP_NAME_RE.test(trimmedName);
   const canSubmit = !!source && trimmedName !== "" && nameValid && !submitting && packingCount === null && !!envId;
@@ -257,6 +270,10 @@ export function UploadDeployCard({ projectId, envId, compact, hero, className }:
     }
   }
 
+  function goToBuild(appName: string, buildId: string) {
+    router.push(`/projects/${projectId}/apps/${appName}/builds/${buildId}?envId=${envId}`);
+  }
+
   async function handleSubmit() {
     if (!canSubmit || !source || !envId) return;
     setSubmitting(true);
@@ -265,11 +282,54 @@ export function UploadDeployCard({ projectId, envId, compact, hero, className }:
     try {
       const uploadFile = await resolveUploadFile();
       const result = await appsApi.uploadSourceArchive(projectId, envId, trimmedName, uploadFile, (pct) => setProgress(pct));
-      router.push(`/projects/${projectId}/apps/${trimmedName}/builds/${result.build.id}?envId=${envId}`);
+      if (needsPortVerdict(result.detected)) {
+        setSubmitting(false);
+        setProgress(null);
+        setVerdict({ detected: result.detected, appName: trimmedName, buildId: result.build.id });
+        return;
+      }
+      goToBuild(trimmedName, result.build.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("apps.deploy.fromUpload.error.upload"));
       setSubmitting(false);
       setProgress(null);
+    }
+  }
+
+  useEffect(() => {
+    if (verdict) trackUxEvent("view", "upload_no_port:view");
+  }, [verdict]);
+
+  async function confirmVerdictPort() {
+    if (!verdict || !envId) return;
+    const port = parseUploadPort(verdictPort);
+    if (port == null) {
+      setVerdictError(t("apps.deploy.fromUpload.noPort.error.invalid"));
+      return;
+    }
+    setVerdictSaving(true);
+    setVerdictError(null);
+    try {
+      await appsApi.setUploadPort(projectId, envId, verdict.appName, { port, worker: false });
+      goToBuild(verdict.appName, verdict.buildId);
+    } catch (err) {
+      const { isRangeError, message } = classifyUploadPortError(err);
+      setVerdictError(isRangeError ? t("apps.deploy.fromUpload.noPort.error.invalid") : message || t("apps.deploy.fromUpload.error.upload"));
+      setVerdictSaving(false);
+    }
+  }
+
+  async function confirmVerdictWorker() {
+    if (!verdict || !envId) return;
+    setVerdictSaving(true);
+    setVerdictError(null);
+    try {
+      await appsApi.setUploadPort(projectId, envId, verdict.appName, { port: null, worker: true });
+      goToBuild(verdict.appName, verdict.buildId);
+    } catch (err) {
+      const { isRangeError, message } = classifyUploadPortError(err);
+      setVerdictError(isRangeError ? t("apps.deploy.fromUpload.noPort.error.invalid") : message || t("apps.deploy.fromUpload.error.upload"));
+      setVerdictSaving(false);
     }
   }
 
@@ -285,6 +345,67 @@ export function UploadDeployCard({ projectId, envId, compact, hero, className }:
     }
     return t("apps.deploy.fromUpload.filesPicked", { count: source.files.length });
   }
+
+  const verdictBody = verdict && (
+    <div className="mt-4 space-y-3">
+      <div className="rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3">
+        <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+          {t("apps.deploy.fromUpload.noPort.title")}
+        </p>
+        <p className="mt-1 text-sm text-amber-700 dark:text-amber-300">
+          {t("apps.deploy.fromUpload.noPort.desc")}
+        </p>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+          {t("apps.deploy.fromUpload.noPort.portLabel")}
+        </label>
+        <input
+          type="number"
+          min={1}
+          max={65535}
+          value={verdictPort}
+          onChange={(e) => {
+            setVerdictPort(e.target.value);
+            setVerdictError(null);
+          }}
+          disabled={verdictSaving}
+          placeholder="3000"
+          className="mt-1 w-40 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+        />
+      </div>
+
+      {verdictError && (
+        <div role="alert" className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm text-red-700 dark:text-red-300">
+          {verdictError}
+        </div>
+      )}
+
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <button
+          type="button"
+          onClick={confirmVerdictPort}
+          disabled={verdictSaving}
+          data-ux="upload_no_port:set_port"
+          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {verdictSaving && <Spinner size="sm" />}
+          {verdictSaving ? t("apps.deploy.fromUpload.noPort.saving") : t("apps.deploy.fromUpload.noPort.confirmPort")}
+        </button>
+        <button
+          type="button"
+          onClick={confirmVerdictWorker}
+          disabled={verdictSaving}
+          data-ux="upload_no_port:worker"
+          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {verdictSaving && <Spinner size="sm" />}
+          {t("apps.deploy.fromUpload.noPort.confirmWorker")}
+        </button>
+      </div>
+    </div>
+  );
 
   const body = (
     <>
@@ -411,13 +532,15 @@ export function UploadDeployCard({ projectId, envId, compact, hero, className }:
     </>
   );
 
+  const rendered = verdict ? verdictBody : body;
+
   if (compact) {
-    return <div className={className}>{body}</div>;
+    return <div className={className}>{rendered}</div>;
   }
 
   const containerClass = hero
     ? "rounded-2xl border-2 border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm sm:p-8"
     : "rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm";
 
-  return <div className={`${containerClass} ${className ?? ""}`}>{body}</div>;
+  return <div className={`${containerClass} ${className ?? ""}`}>{rendered}</div>;
 }

@@ -704,6 +704,27 @@ export const appsApi = {
       `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/source-archive/download`
     ),
 
+  /**
+   * Sets the web-port verdict for a freshly uploaded app whose detection
+   * came back with no port (detected.port === 0, see
+   * lib/upload-port-verdict.ts). `worker: true` confirms the app really has
+   * no HTTP surface; a `port` confirms it does and overrides the failed
+   * autodetection. Called from the upload-deploy inline verdict step
+   * before navigating to the build page, so the decision is recorded
+   * ahead of the build that would otherwise silently file the app as a
+   * worker and never mint it an address.
+   */
+  setUploadPort: (
+    projectId: string,
+    envId: string,
+    appName: string,
+    body: { port: number | null; worker: boolean }
+  ) =>
+    apiFetch<{ port: number | null; worker: boolean; message?: string }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/upload-port`,
+      { method: "PATCH", body }
+    ),
+
   updateStorage: (
     projectId: string,
     envId: string,
