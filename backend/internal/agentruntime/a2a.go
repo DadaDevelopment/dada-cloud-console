@@ -24,11 +24,15 @@ type httpA2AClient struct {
 }
 
 // failedTaskRetryPause is the first pause before re-sending a turn whose task
-// the agent reported as failed; every further retry doubles it. Those failures
-// are almost always the model provider rate-limiting a burst of chats, and a
-// single short pause loses to a burst that is still going (P10 eval: 4 of 9
-// retries failed again), so the runtime backs off a few times before it gives
-// the turn up.
+// the agent reported as failed or parked on ask_user; every further retry
+// doubles it. Failures are almost always the model provider rate-limiting a
+// burst of chats, and a single short pause loses to a burst that is still
+// going (P10 eval: 4 of 9 retries failed again). An ask_user pause means the
+// agent ran the turn without its MCP toolset (the tool pod was rolling and the
+// session could not be created), so the model had nothing but kagent's
+// built-in ask_user and called it with a placeholder; resuming that task keeps
+// the toolless turn and leaves a first-turn dialog without skills for its
+// whole life, while a fresh turn a few seconds later finds the new pod.
 const (
 	failedTaskRetryPause = 3 * time.Second
 	failedTaskRetries    = 3
@@ -122,24 +126,28 @@ func (c *httpA2AClient) Send(ctx context.Context, run AgentRunRequest) (string, 
 		return "", err
 	}
 	task := parseTask(result)
-	for attempt := 0; task.State == "failed" && attempt < c.retries; attempt++ {
+	for attempt := 0; task.needsRetry() && attempt < c.retries; attempt++ {
 		wait := c.retryPause << attempt
-		log.Warn().Str("agent", agentName).Str("context", run.ContextID).Str("task", task.ID).
-			Str("error", task.Error).Int("attempt", attempt+1).Dur("pause", wait).
-			Msg("agentruntime: agent task failed; retrying the turn")
+		entry := log.Warn().Str("agent", agentName).Str("context", run.ContextID).Str("task", task.ID).
+			Int("attempt", attempt+1).Dur("pause", wait)
+		if task.State == "failed" {
+			entry.Str("error", task.Error).Msg("agentruntime: agent task failed; retrying the turn")
+		} else {
+			entry.Strs("questions", task.Questions).Msg("agentruntime: agent paused on ask_user; retrying the turn")
+		}
 		if err := c.pause(ctx, wait); err != nil {
-			return "", fmt.Errorf("retry after failed task: %w", err)
+			return "", fmt.Errorf("retry after %s task: %w", task.State, err)
 		}
 		message.MessageID = uuid.NewString()
 		if result, err = c.call(ctx, run, message); err != nil {
-			return "", fmt.Errorf("retry after failed task: %w", err)
+			return "", fmt.Errorf("retry after %s task: %w", task.State, err)
 		}
 		task = parseTask(result)
 	}
 	if task.State == "input-required" {
 		log.Warn().Str("agent", agentName).Str("context", run.ContextID).Str("task", task.ID).
 			Strs("questions", task.Questions).
-			Msg("agentruntime: agent paused on ask_user; resuming with the unavailable-tool answer")
+			Msg("agentruntime: agent still paused on ask_user after retries; resuming with the unavailable-tool answer")
 		answers := make([]map[string]any, 0, len(task.Questions))
 		for range task.Questions {
 			answers = append(answers, map[string]any{"answer": []string{askUserUnavailableAnswer}})
@@ -233,6 +241,10 @@ type a2aTask struct {
 	Questions []string
 }
 
+func (t a2aTask) needsRetry() bool {
+	return t.State == "failed" || t.State == "input-required"
+}
+
 func pauseFor(ctx context.Context, d time.Duration) error {
 	if d <= 0 {
 		return ctx.Err()
@@ -266,21 +278,40 @@ func parseTask(raw json.RawMessage) a2aTask {
 			task.Error = strings.TrimSpace(strings.Join([]string{task.Error, strings.TrimSpace(part.Text)}, " "))
 			continue
 		}
-		if part.Kind != "data" || part.Data["name"] != "ask_user" {
+		if part.Kind != "data" {
 			continue
 		}
-		args, _ := part.Data["args"].(map[string]any)
-		questions, _ := args["questions"].([]any)
-		for _, q := range questions {
-			qm, _ := q.(map[string]any)
-			text, _ := qm["question"].(string)
-			task.Questions = append(task.Questions, text)
-		}
+		task.Questions = append(task.Questions, askUserQuestions(part.Data)...)
 	}
 	if task.State == "input-required" && len(task.Questions) == 0 {
 		task.Questions = []string{""}
 	}
 	return task
+}
+
+// askUserQuestions reads the questions of an ask_user call from a status
+// part. kagent parks a task on ask_user with only the ADK confirmation
+// wrapper in the status message, whose args carry the original call under
+// originalFunctionCall, so the wrapper is unwrapped before the questions are
+// read.
+func askUserQuestions(call map[string]any) []string {
+	if call["name"] == "adk_request_confirmation" {
+		args, _ := call["args"].(map[string]any)
+		original, _ := args["originalFunctionCall"].(map[string]any)
+		return askUserQuestions(original)
+	}
+	if call["name"] != "ask_user" {
+		return nil
+	}
+	args, _ := call["args"].(map[string]any)
+	questions, _ := args["questions"].([]any)
+	var out []string
+	for _, q := range questions {
+		qm, _ := q.(map[string]any)
+		text, _ := qm["question"].(string)
+		out = append(out, text)
+	}
+	return out
 }
 
 func buildContextualMessage(messages []Message) string {

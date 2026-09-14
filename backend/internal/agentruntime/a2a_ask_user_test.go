@@ -37,6 +37,9 @@ const pausedOnAskUser = `{"id":"task-1","contextId":"runtime-c1","kind":"task","
   {"kind":"data","data":{"id":"fc1","name":"ask_user","args":{"questions":[{"question":"placeholder"},{"question":"Когда добавите остальное?"}]}},"metadata":{"kagent_type":"function_call","kagent_is_long_running":true}},
   {"kind":"data","data":{"id":"fc2","name":"adk_request_confirmation","args":{"originalFunctionCall":{"name":"ask_user"}}},"metadata":{"kagent_type":"function_call","kagent_is_long_running":true}}]}},"artifacts":[]}`
 
+const pausedOnPlaceholder = `{"id":"task-1","contextId":"runtime-c1","kind":"task","status":{"state":"input-required","message":{"role":"agent","parts":[
+  {"kind":"data","data":{"id":"adk-cf72ff99","name":"adk_request_confirmation","args":{"originalFunctionCall":{"args":{"questions":[{"question":"placeholder"}]},"id":"call_-7265911073608296503","name":"ask_user"},"toolConfirmation":{"confirmed":false,"hint":"","payload":null}}},"metadata":{"kagent_type":"function_call","kagent_is_long_running":true}}]}},"artifacts":[]}`
+
 const completedReply = `{"id":"task-1","contextId":"runtime-c1","kind":"task","status":{"state":"completed"},"artifacts":[{"parts":[{"kind":"text","text":"Деньги в кошельке FxPro, переведите их на торговый счёт. Перевод сделали?"}]}]}`
 
 func newTestA2AClient(url string) *httpA2AClient {
@@ -49,8 +52,42 @@ func testRun() AgentRunRequest {
 		Messages: []Message{{Role: "user", Content: "пополнила 526, но на торговом 0, где деньги?"}}}
 }
 
-func TestA2ASendResumesTaskPausedOnAskUser(t *testing.T) {
-	agent := &fakeAgent{t: t, replies: []string{pausedOnAskUser, completedReply}}
+func TestA2ASendRetriesTheTurnWhenAgentPausesOnAskUser(t *testing.T) {
+	agent := &fakeAgent{t: t, replies: []string{pausedOnPlaceholder, completedReply}}
+	srv := httptest.NewServer(agent.handler())
+	defer srv.Close()
+
+	client := newTestA2AClient(srv.URL)
+	var pauses []time.Duration
+	client.pause = func(_ context.Context, d time.Duration) error {
+		pauses = append(pauses, d)
+		return nil
+	}
+	reply, err := client.Send(context.Background(), testRun())
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if !strings.Contains(reply, "переведите их на торговый счёт") {
+		t.Fatalf("reply = %q", reply)
+	}
+	if len(agent.requests) != 2 {
+		t.Fatalf("requests = %d, want initial + one fresh retry", len(agent.requests))
+	}
+	first, retry := agent.requests[0], agent.requests[1]
+	if retry.TaskID != "" || retry.ContextID != first.ContextID || retry.MessageID == first.MessageID {
+		t.Fatalf("a paused turn must be retried as a fresh message, not resumed: first=%+v retry=%+v", first, retry)
+	}
+	if len(retry.Parts) != 1 || retry.Parts[0].Kind != "text" || retry.Parts[0].Text != first.Parts[0].Text {
+		t.Fatalf("retry must resend the same envelope, got %+v", retry.Parts)
+	}
+	if len(pauses) != 1 || pauses[0] != 3*time.Second {
+		t.Fatalf("pauses = %v, want one 3s pause before the retry", pauses)
+	}
+}
+
+func TestA2ASendResumesTaskThatKeepsPausingOnAskUser(t *testing.T) {
+	replies := []string{pausedOnAskUser, pausedOnAskUser, pausedOnAskUser, pausedOnAskUser, completedReply}
+	agent := &fakeAgent{t: t, replies: replies}
 	srv := httptest.NewServer(agent.handler())
 	defer srv.Close()
 
@@ -61,10 +98,15 @@ func TestA2ASendResumesTaskPausedOnAskUser(t *testing.T) {
 	if !strings.Contains(reply, "переведите их на торговый счёт") {
 		t.Fatalf("reply = %q", reply)
 	}
-	if len(agent.requests) != 2 {
-		t.Fatalf("requests = %d, want initial + resume", len(agent.requests))
+	if len(agent.requests) != 2+failedTaskRetries {
+		t.Fatalf("requests = %d, want initial + %d retries + resume", len(agent.requests), failedTaskRetries)
 	}
-	resume := agent.requests[1]
+	for i := 1; i <= failedTaskRetries; i++ {
+		if agent.requests[i].TaskID != "" {
+			t.Fatalf("request %d must be a fresh retry, got %+v", i, agent.requests[i])
+		}
+	}
+	resume := agent.requests[len(agent.requests)-1]
 	if resume.ContextID != "runtime-c1" || resume.TaskID != "task-1" || resume.Role != "user" {
 		t.Fatalf("resume addressing = %+v", resume)
 	}
@@ -92,8 +134,12 @@ func TestA2ASendResumesTaskPausedOnAskUser(t *testing.T) {
 	}
 }
 
-func TestA2ASendGivesUpWhenAgentPausesTwice(t *testing.T) {
-	agent := &fakeAgent{t: t, replies: []string{pausedOnAskUser, pausedOnAskUser}}
+func TestA2ASendGivesUpWhenAgentPausesPastTheResume(t *testing.T) {
+	replies := make([]string, 0, 2+failedTaskRetries)
+	for len(replies) < 2+failedTaskRetries {
+		replies = append(replies, pausedOnPlaceholder)
+	}
+	agent := &fakeAgent{t: t, replies: replies}
 	srv := httptest.NewServer(agent.handler())
 	defer srv.Close()
 
@@ -101,8 +147,8 @@ func TestA2ASendGivesUpWhenAgentPausesTwice(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "input-required") {
 		t.Fatalf("err = %v, want task-did-not-complete", err)
 	}
-	if len(agent.requests) != 2 {
-		t.Fatalf("requests = %d, want exactly one resume", len(agent.requests))
+	if len(agent.requests) != 2+failedTaskRetries {
+		t.Fatalf("requests = %d, want retries and exactly one resume", len(agent.requests))
 	}
 }
 
@@ -142,6 +188,16 @@ func TestParseTaskCountsAskUserQuestions(t *testing.T) {
 	bare := parseTask(json.RawMessage(`{"id":"t","status":{"state":"input-required"}}`))
 	if len(bare.Questions) != 1 {
 		t.Fatalf("paused task without visible questions must still get one answer: %+v", bare)
+	}
+}
+
+func TestParseTaskUnwrapsConfirmationWrapper(t *testing.T) {
+	task := parseTask(json.RawMessage(pausedOnPlaceholder))
+	if task.State != "input-required" || !task.needsRetry() {
+		t.Fatalf("task = %+v", task)
+	}
+	if len(task.Questions) != 1 || task.Questions[0] != "placeholder" {
+		t.Fatalf("questions = %v, want the placeholder the model sent inside adk_request_confirmation", task.Questions)
 	}
 }
 
