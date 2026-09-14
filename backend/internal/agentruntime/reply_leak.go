@@ -48,6 +48,8 @@ var leakMarkers = []string{
 
 var leakFramePattern = regexp.MustCompile(`(?i)(^|[^\pL])(к клиенту|итоговое|итог|правило|отвечаю|скажу|заметка|мысли|рассуждение):`)
 
+var leakThirdPersonPattern = regexp.MustCompile(`(?i)(^|[^\pL])((он|она|клиент)\s+(назвал|назвала|сказал|сказала|написал|написала|спросил|спросила|ответил|ответила|прислал|прислала|пополнил|пополнила|зарегистрировался|зарегистрировалась|хочет|готов|готова|решил|решила))($|[^\pL])`)
+
 var leakEnglishFillers = []string{"continue to", "hmm", "okay,", "fine.", "let me ", "the user ", "the client "}
 
 var leakMarkerPattern = regexp.MustCompile(`(?i)\b(kb|skill|placeholder|internal)\b`)
@@ -78,6 +80,9 @@ func leakReason(reply string) string {
 	}
 	if m := leakFramePattern.FindStringSubmatch(text); m != nil {
 		return "reasoning frame " + strings.ToLower(m[2]) + ":"
+	}
+	if m := leakThirdPersonPattern.FindStringSubmatch(text); m != nil {
+		return "third person about the client «" + strings.ToLower(m[2]) + "»"
 	}
 	share, latin := latinShare(text)
 	if share > 0 {

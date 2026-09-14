@@ -42,6 +42,8 @@ func TestLeakReasonCatchesMonologues(t *testing.T) {
 		"S437 skill name as a section":           "Посмотрите в кабинете, какие варианты кроме карты предлагает deposit-раздел, и напишите, что там есть",
 		"S250 bare skill name":                   "Загрузите price? Цель 800 в месяц требует не половины той суммы, стартуйте с 2000.",
 		"phrasing skill named in reply":          "Держу phrasing в голове, так что коротко: какую сумму готовы выделить на первый депозит?",
+		"phr06 third person about the client":    "Размер зафиксирован, сумму он назвал сам, стартуем с 3000. Счёт у FxPro уже есть?",
+		"third person client":                    "Клиент хочет начать с 500, но дно 300, так что ок. Счёт открыт?",
 	}
 	for name, reply := range cases {
 		if reason := leakReason(reply); reason == "" {
@@ -52,23 +54,26 @@ func TestLeakReasonCatchesMonologues(t *testing.T) {
 
 func TestLeakReasonPassesClientReplies(t *testing.T) {
 	cases := map[string]string{
-		"link and brand":        "С 600 доступных стартуем сразу, регистрация у FxPro идёт по нашей ссылке: https://direct-fxpro.com/en/partner/2LJMnV3qh?platform=web , открывайте кабинет и напишите, когда он создан",
-		"MT5 and platforms":     "MT5 ставится на iOS и Android из App Store и Google Play, логин и пароль от торгового счёта приходят на почту после открытия счёта в кабинете FxPro. Установили?",
-		"english client":        "Registering through our partner link takes a couple of minutes, then verification in the profile: https://direct-fxpro.com/en/partner/2LJMnV3qh?platform=web — open it and start the FxPro signup, write here when the account is created?",
-		"handle":                "Куратор напишет вам с аккаунта @fxpro_curator в течение дня, ждите сообщение",
-		"short question":        "Счёт у FxPro уже открыт?",
-		"quote of client":       "Вы написали «не понравится, смогу вывести?»: да, деньги остаются на вашем счёте у брокера, вывод в любой момент из кабинета",
-		"подскажу is not скажу": "Тип счёта и плечо выбираете сами в кабинете при открытии, наша группа этот параметр не задаёт. Открывайте счёт по ссылке, дальше по кабинету подскажу: https://direct-fxpro.com/en/partner/2LJMnV3qh?platform=web",
-		"skills word natural":   "Навыки торговли не нужны, куратор ведёт с нуля. Счёт у FxPro уже есть?",
-		"several questions":     "По порядку: 1) плечо оставляйте по умолчанию, 2) тип счёта тоже стандартный, 3) MT5 для iPhone есть в App Store. Кабинет уже открыт?",
-		"empty":                 "",
-		"english client filler": "Okay, let me be clear: the account is opened at FxPro through our link, the deposit stays on your own broker account. Fine to continue to the deposit step?",
-		"P2P and support mail":  "Пополнение через P2P у FxPro нет, есть карта и SBP; по спорным платежам пишите на support@fxpro.com. Депозит уже виден?",
-		"comparison sign":       "Сумма < 300 не откроет вход, реально ли собрать 300?",
-		"bracketed number":      "Ваш счёт [518002177] по нашей ссылке?",
-		"MT5 error text":        "Invalid account чаще всего значит, что логин или сервер выбраны не те: в MT5 логином служит не email, а числовой номер счёта. Какой сервер выбран?",
-		"cabinet button":        "В кабинете нажмите Deposit, выберите карту и сумму от 300 USD. Получилось?",
-		"english client offer":  "Our offer is simple: you trade on your own FxPro account, signals come to the group, the deposit stays with you. Do you have an FxPro account already?",
+		"link and brand":          "С 600 доступных стартуем сразу, регистрация у FxPro идёт по нашей ссылке: https://direct-fxpro.com/en/partner/2LJMnV3qh?platform=web , открывайте кабинет и напишите, когда он создан",
+		"MT5 and platforms":       "MT5 ставится на iOS и Android из App Store и Google Play, логин и пароль от торгового счёта приходят на почту после открытия счёта в кабинете FxPro. Установили?",
+		"english client":          "Registering through our partner link takes a couple of minutes, then verification in the profile: https://direct-fxpro.com/en/partner/2LJMnV3qh?platform=web — open it and start the FxPro signup, write here when the account is created?",
+		"handle":                  "Куратор напишет вам с аккаунта @fxpro_curator в течение дня, ждите сообщение",
+		"short question":          "Счёт у FxPro уже открыт?",
+		"quote of client":         "Вы написали «не понравится, смогу вывести?»: да, деньги остаются на вашем счёте у брокера, вывод в любой момент из кабинета",
+		"подскажу is not скажу":   "Тип счёта и плечо выбираете сами в кабинете при открытии, наша группа этот параметр не задаёт. Открывайте счёт по ссылке, дальше по кабинету подскажу: https://direct-fxpro.com/en/partner/2LJMnV3qh?platform=web",
+		"skills word natural":     "Навыки торговли не нужны, куратор ведёт с нуля. Счёт у FxPro уже есть?",
+		"several questions":       "По порядку: 1) плечо оставляйте по умолчанию, 2) тип счёта тоже стандартный, 3) MT5 для iPhone есть в App Store. Кабинет уже открыт?",
+		"empty":                   "",
+		"english client filler":   "Okay, let me be clear: the account is opened at FxPro through our link, the deposit stays on your own broker account. Fine to continue to the deposit step?",
+		"P2P and support mail":    "Пополнение через P2P у FxPro нет, есть карта и SBP; по спорным платежам пишите на support@fxpro.com. Депозит уже виден?",
+		"comparison sign":         "Сумма < 300 не откроет вход, реально ли собрать 300?",
+		"bracketed number":        "Ваш счёт [518002177] по нашей ссылке?",
+		"MT5 error text":          "Invalid account чаще всего значит, что логин или сервер выбраны не те: в MT5 логином служит не email, а числовой номер счёта. Какой сервер выбран?",
+		"cabinet button":          "В кабинете нажмите Deposit, выберите карту и сумму от 300 USD. Получилось?",
+		"english client offer":    "Our offer is simple: you trade on your own FxPro account, signals come to the group, the deposit stays with you. Do you have an FxPro account already?",
+		"curator in third person": "Куратор персональный, он сам трейдер и ведёт вас по сделкам. Счёт у FxPro уже есть?",
+		"button in third person":  "Кнопка Deposit справа сверху, она может не появиться в списке до верификации. Паспорт уже загрузили?",
+		"он as a client word":     "Депозит остаётся на вашем счёте, он не переходит к нам. Пополняете сегодня?",
 	}
 	for name, reply := range cases {
 		if reason := leakReason(reply); reason != "" {
