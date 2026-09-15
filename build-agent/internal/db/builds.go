@@ -307,10 +307,14 @@ const (
 // recording the reason and bounding retries at maxAttempts. It clears the
 // started/finished timestamps and the Jenkins refs so the retry gets a fresh run
 // (and restart reconciliation does not re-attach to the dead run), and holds the
-// row back for a backoff (see retryBackoffBaseSeconds) so the retry does not
-// land inside the same outage. Returns true and the time the retry becomes
-// claimable; false (with no error) when attempts are exhausted or the row is no
-// longer in-flight, so the caller can fail it with a recorded reason instead.
+// back for a backoff (see retryBackoffBaseSeconds) so the retry does not
+// land inside the same outage. A row with no linked repository is refused:
+// it can never execute (LoadRepo has nothing to load), so requeueing it
+// would just burn the attempt budget in the self-heal loop. Returns true
+// and the time the retry becomes claimable; false (with no error) when
+// attempts are exhausted, the row is no longer in-flight, or the build has
+// no linked repository, so the caller can fail it with a recorded reason
+// instead.
 func RequeueForRetry(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, reason string, maxAttempts int) (bool, time.Time, error) {
 	var retryAt time.Time
 	err := pool.QueryRow(ctx, `
@@ -325,6 +329,7 @@ func RequeueForRetry(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, reas
 		       retry_after = NOW() + make_interval(secs => LEAST($4::int, $5::int << LEAST(attempt, 8))),
 		       updated_at = NOW()
 		WHERE  id = $1
+		  AND  git_repo_id IS NOT NULL
 		  AND  status IN ('detecting','building','pushing')
 		  AND  attempt < $3
 		RETURNING retry_after
@@ -545,6 +550,7 @@ func RetryPlatformFailedBuilds(ctx context.Context, pool *pgxpool.Pool, minAge, 
 			FROM   builds b
 			WHERE  b.status = 'failed'
 			  AND  b.fail_reason = 'platform_error'
+			  AND  b.git_repo_id IS NOT NULL
 			  AND  b.attempt < $3
 			  AND  b.finished_at < NOW() - make_interval(secs => $1)
 			  AND  b.finished_at > NOW() - make_interval(secs => $2)

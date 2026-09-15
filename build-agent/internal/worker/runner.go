@@ -213,6 +213,23 @@ const buildFailGeneric = "build_failed"
 // fault.
 const buildFailPlatformError = "platform_error"
 
+// buildFailRepoDetached marks a build whose git_repos row is gone: the app
+// was deleted (or its source row replaced) while a build was still in flight,
+// and FK ON DELETE SET NULL (migration 116) left the surviving build with
+// git_repo_id = NULL. LoadRepo cannot resolve it (`load repo 00000000-...:
+// no rows in result set`), no retry can bring the row back, and classifying
+// the death as platform_error made the self-heal pass requeue it up to the
+// attempt cap -- chirping-kolyaska burned six attempts across 2.5 hours on
+// 2026-09-12 while its owner watched, pressed rebuild three times, ran
+// auto-fix into a PR he never saw, and deleted the app. The code is terminal
+// by design: build-failure.ts deliberately offers neither an AI fix nor a
+// repo reconnect for it, because the build's source no longer exists.
+const buildFailRepoDetached = "repo_detached"
+
+// errRepoDetached is the sentinel under buildFailRepoDetached; the message is
+// the user-facing error line persisted on the build row.
+var errRepoDetached = errors.New("repository was unlinked from this app; the build can no longer run")
+
 // gitAuthSignatures are the lines git itself prints when the remote refused
 // the clone. Every one is emitted by git (not by a build step), which keeps a
 // package manager failing to reach a private registry from being mistaken for
@@ -842,6 +859,13 @@ func (r *Runner) run(ctx context.Context, b *db.Build) {
 	start := time.Now()
 	llog := log.With().Str("build", b.ID.String()).Str("sha", b.CommitSHA).Logger()
 	llog.Info().Msg("build started")
+
+	if b.GitRepoID == uuid.Nil {
+		llog.Warn().Msg("build has no linked repository; failing instead of retrying")
+		r.failFromCurrent(ctx, b, &classifiedFailure{code: buildFailRepoDetached, detail: errRepoDetached.Error(), err: errRepoDetached})
+		metrics.BuildTotal.WithLabelValues("failed").Inc()
+		return
+	}
 
 	repo, err := db.LoadRepo(ctx, r.pool, b.GitRepoID)
 	if err != nil {
