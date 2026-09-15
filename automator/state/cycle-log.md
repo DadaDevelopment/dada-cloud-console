@@ -6692,3 +6692,10 @@ send_failures=0), но поведенческий тест невозможен 
 **M3:** staged 11 явных путей, чужой automator/state стэшнут на время rebase и возвращён; origin/main ушёл вперёд во время цикла - rebase, повторный прогон гейтов ПОСЛЕ rebase, затем push (подтверждён на origin).
 **Беклог:** 0502 закрыт; заведён 0503 (тот же класс оверлея для остальных полей) - правило одного яка соблюдено.
 **Время:** ~40 мин.
+
+## 2026-09-15 sess-0915a (~50 мин, NORMAL)
+- ГЕЙТ: NORMAL (ship 6/7, tax 17%). Хендофф 09-11 = 4д протух (строка в owner-actions; пульс снят сам - платформа жива, блокированных нет). delegate_task снова мёртв (нет ANTHROPIC_TOKEN) - инлайн.
+- РАЗБОР АУДИТА дал измеренный leak: freitorsk (рег 09-12) - путь до домена nabeg.su succeeded, но перед этим chirping-kolyaska: 4 билда git_repo_id=NULL (gitops deleteAppGitRepo + FK SET NULL mig 116), 'load repo 0000' классифицировался platform_error, self-heal гонял attempt 1..6, юзер 4.5ч в "building", 3 ручных ретрая, autofix PR невидим (0505), DeleteApp. Тот же класс: instatic (kartov, 08-19), nav (yzfy).
+- 0504 ЗАКРЫТ 9e2ea98c: guard repo_detached в runner.run (uuid.Nil до LoadRepo), RequeueForRetry + RetryPlatformFailedBuilds отказывают git_repo_id IS NULL, миграция 155 закрывает in-flight зомби, 2 именных теста на реальной scratch-БД (155 миграций, снесена в цикле). Мутационная проверка: снятие гварда роняет тест с ожидаемым сообщением. Полный сьют db ok 94s, worker ok 12s, go vet + gofmt чисто. Rebase на 99e6ee56 (5 чужих agentruntime-коммитов), гейты перепрогнаны после rebase, push.
+- ДЖЕНКИНС #72 на 9e2ea98c - жду вердикт (авторитетный гейт), догружу в цикл.
+- Гипотезы: H02 (evidence - зомби-луп убивал активационный путь git-аппов; цикл двинул H02 через 0504). B2-дайджест не пора (>7д проверить на след. цикле).
