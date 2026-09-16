@@ -27,6 +27,7 @@ def GATEWAY_IMAGE         = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console
 def EMBED_GATEWAY_IMAGE   = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-grafana-embed-gateway"
 def TG_GATEWAY_IMAGE      = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-tg-gateway"
 def AGENT_RUNTIME_IMAGE   = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-agent-runtime"
+def KAGENT_APP_IMAGE      = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-kagent-app"
 // The body a box runs as (ADR-019). Not one of the console components: it is not
 // deployed, it is PULLED by box pods in the dada-boxes namespace, and it is pinned
 // by the boxcatalog entry rather than by the ArgoCD write-back below.
@@ -96,6 +97,11 @@ properties([
                         name: 'RUN_E2E_AUTHED',
                         defaultValue: false,
                         description: 'Run the authenticated + mutating Playwright e2e (provisions a real DB) against the disposable e2e project. Needs the e2e-console-user + e2e-project-id credentials.'
+                ),
+                booleanParam(
+                        name: 'BUILD_KAGENT_APP_IMAGE',
+                        defaultValue: false,
+                        description: 'Also build and push the patched kagent agent runtime (kagent-app/Dockerfile). Builds automatically when the commit touches kagent-app/; turn it ON to republish without a change there.'
                 ),
                 booleanParam(
                         name: 'BUILD_BOX_IMAGE',
@@ -462,6 +468,7 @@ spec:
         def currentStageName = 'bootstrap'
         def deployedThisBuild = false
         def writebackSha = ''
+        def kagentAppChanged = false
 
         def runStage = { String name, Closure body ->
             currentStageName = name
@@ -477,6 +484,15 @@ spec:
                 def tagOnHead = sh(script: 'git tag --points-at HEAD', returnStdout: true).trim()
                 resolvedTag   = tagOnHead ?: sha
                 env.RESOLVED_TAG = resolvedTag
+                kagentAppChanged = sh(script: 'git diff --name-only HEAD~1..HEAD -- kagent-app 2>/dev/null || true', returnStdout: true).trim() != ''
+                for (cs in currentBuild.changeSets) {
+                    for (entry in cs.items) {
+                        for (path in entry.affectedPaths) {
+                            if (path.startsWith('kagent-app/')) { kagentAppChanged = true }
+                        }
+                    }
+                }
+                echo "kagent-app changed: ${kagentAppChanged}"
                 echo "Image tag: ${resolvedTag}  (commit: ${sha})"
             }
 
@@ -916,6 +932,25 @@ ${PUSH_WITH_RETRY_SH}
                                     push_with_retry ${FRONTEND_IMAGE}:latest
                                     docker rmi ${FRONTEND_IMAGE}:${resolvedTag} || true
                                 """
+                            }
+                        }
+                    }
+
+                    if (params.BUILD_KAGENT_APP_IMAGE || kagentAppChanged) {
+                        branches['kagent-app'] = {
+                            sh """
+                                set -eux
+                                docker build -t ${KAGENT_APP_IMAGE}:${resolvedTag} -f kagent-app/Dockerfile kagent-app
+                            """
+                            if (shouldPush) {
+                                retry(2) {
+                                    sh """
+                                        set -eux
+${PUSH_WITH_RETRY_SH}
+                                        push_with_retry ${KAGENT_APP_IMAGE}:${resolvedTag}
+                                        docker rmi ${KAGENT_APP_IMAGE}:${resolvedTag} || true
+                                    """
+                                }
                             }
                         }
                     }
