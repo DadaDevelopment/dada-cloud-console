@@ -83,7 +83,10 @@ func closingSentence(text string) string {
 	return text
 }
 
-// nextCounters is the pure step: what the pair becomes after this reply.
+// nextCounters is the same step the SQL performs, kept as a pure function so
+// the rule (a question increments, anything else resets, the last
+// usedPhrasesKept closings are kept) can be read and tested without a
+// database. The store is the writer; this is the specification.
 func nextCounters(questionsInRow int, usedPhrases []string, reply string) (int, []string) {
 	if endsWithQuestion(reply) {
 		questionsInRow++
@@ -118,9 +121,10 @@ func (r *Runtime) recordTurnCounters(ctx context.Context, conv Conversation, rep
 	if !r.flags.QuestionBudget {
 		return
 	}
-	questions, phrases := turnCounters(conv)
-	questions, phrases = nextCounters(questions, phrases, reply)
-	if err := r.store.RecordTurnCounters(ctx, conv.ID, questions, phrases); err != nil {
+	// What this turn did, not what the pair should become: the arithmetic is
+	// the store's, done inside the UPDATE, so two turns finishing at once
+	// cannot both read the same counter and write the same successor.
+	if err := r.store.RecordTurnCounters(ctx, conv.ID, endsWithQuestion(reply), closingSentence(reply), usedPhrasesKept); err != nil {
 		log.Warn().Err(err).Str("conversation", conv.ID.String()).Msg("agentruntime: turn counters not recorded")
 	}
 }

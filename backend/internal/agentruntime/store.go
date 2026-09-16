@@ -138,10 +138,13 @@ type ConversationStore interface {
 	// ClearNarrowMode returns the conversation to the ordinary mode.
 	ClearNarrowMode(ctx context.Context, conversationID uuid.UUID) error
 
-	// RecordTurnCounters stores the runtime-owned pair of plan 3.4
-	// (questions_in_row, used_phrases) in the conversation metadata. The
-	// model has no path to these: they exist to limit it.
-	RecordTurnCounters(ctx context.Context, conversationID uuid.UUID, questionsInRow int, usedPhrases []string) error
+	// RecordTurnCounters advances the runtime-owned pair of plan 3.4 in the
+	// conversation metadata: questions_in_row is incremented inside the
+	// statement (or reset to zero), and closing is appended to used_phrases,
+	// keeping at most keep entries. The model has no path to these: they
+	// exist to limit it. Doing the arithmetic in SQL is what makes two turns
+	// finishing close together count to two rather than to one.
+	RecordTurnCounters(ctx context.Context, conversationID uuid.UUID, askedQuestion bool, closing string, keep int) error
 
 	// FinishConversation retires a conversation without deleting it: history and
 	// state rows stay for audit, but the identity tuple is released so the next
@@ -441,40 +444,75 @@ func (s *pgStore) ClearEscalationAck(ctx context.Context, conversationID uuid.UU
 // left alone: it is the idle scheduler's quiet-since clock, and a hand-off is
 // not customer activity.
 func (s *pgStore) EnterNarrowMode(ctx context.Context, conversationID uuid.UUID) error {
-	_, err := s.pool.Exec(ctx, `
+	tag, err := s.pool.Exec(ctx, `
 		UPDATE conversations SET metadata = jsonb_set(
 				COALESCE(metadata, '{}'::jsonb), '{`+narrowModeKey+`}',
 				to_jsonb(to_char(NOW() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')), true)
 		WHERE id = $1
 	`, conversationID)
-	return err
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("enter narrow mode: conversation %s not found", conversationID)
+	}
+	return nil
 }
 
 // ClearNarrowMode removes metadata.narrow_since.
 func (s *pgStore) ClearNarrowMode(ctx context.Context, conversationID uuid.UUID) error {
-	_, err := s.pool.Exec(ctx, `
+	tag, err := s.pool.Exec(ctx, `
 		UPDATE conversations
-		SET metadata = metadata - '`+narrowModeKey+`'
+		SET metadata = COALESCE(metadata, '{}'::jsonb) - '`+narrowModeKey+`'
 		WHERE id = $1
 	`, conversationID)
-	return err
-}
-
-// RecordTurnCounters writes both counters in one statement, next to the other
-// runtime-owned metadata keys. updated_at is left alone: this is bookkeeping
-// about a turn that already touched the conversation.
-func (s *pgStore) RecordTurnCounters(ctx context.Context, conversationID uuid.UUID, questionsInRow int, usedPhrases []string) error {
-	phrases, err := json.Marshal(usedPhrases)
 	if err != nil {
 		return err
 	}
-	_, err = s.pool.Exec(ctx, `
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("clear narrow mode: conversation %s not found", conversationID)
+	}
+	return nil
+}
+
+// RecordTurnCounters is one statement doing both halves of the arithmetic.
+// The read-modify-write it replaced could lose a turn: two turns finishing
+// close together both read 1 and both wrote 2. updated_at is left alone --
+// this is bookkeeping about a turn that already touched the conversation.
+//
+// used_phrases is appended and trimmed in SQL as well, so the array never
+// round-trips through the process and cannot be overwritten by a stale copy.
+func (s *pgStore) RecordTurnCounters(ctx context.Context, conversationID uuid.UUID, askedQuestion bool, closing string, keep int) error {
+	if keep < 1 {
+		keep = 1
+	}
+	tag, err := s.pool.Exec(ctx, `
 		UPDATE conversations SET metadata = jsonb_set(
-				jsonb_set(COALESCE(metadata, '{}'::jsonb), '{`+questionsInRowKey+`}', to_jsonb($2::int), true),
-				'{`+usedPhrasesKey+`}', $3::jsonb, true)
+				jsonb_set(COALESCE(metadata, '{}'::jsonb), '{`+questionsInRowKey+`}',
+					to_jsonb(CASE WHEN $2::bool
+						THEN COALESCE((metadata->>'`+questionsInRowKey+`')::int, 0) + 1
+						ELSE 0 END), true),
+				'{`+usedPhrasesKey+`}', COALESCE((
+					SELECT jsonb_agg(value ORDER BY ord)
+					FROM (
+						SELECT value, ord
+						FROM jsonb_array_elements(
+							COALESCE(metadata->'`+usedPhrasesKey+`', '[]'::jsonb)
+							|| CASE WHEN $3::text = '' THEN '[]'::jsonb ELSE jsonb_build_array($3::text) END
+						) WITH ORDINALITY AS elements(value, ord)
+						ORDER BY ord DESC
+						LIMIT $4::int
+					) AS kept
+				), '[]'::jsonb), true)
 		WHERE id = $1
-	`, conversationID, questionsInRow, string(phrases))
-	return err
+	`, conversationID, askedQuestion, closing, keep)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("record turn counters: conversation %s not found", conversationID)
+	}
+	return nil
 }
 
 // ClaimEscalationAck marks the ack as sent for the current pause. The WHERE
