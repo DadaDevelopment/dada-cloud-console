@@ -66,6 +66,11 @@ type runtimeFlags struct {
 	// itself.
 	NarrowTopics      []*regexp.Regexp
 	NarrowReturnAfter time.Duration
+
+	// SplitReply (AGENT_RUNTIME_SPLIT_REPLY, plan 3.1/3.2) lets a turn reach
+	// the customer as up to three messages and tells the prompt, through
+	// runtime_context.reply_split, that it may mark the seams.
+	SplitReply bool
 }
 
 func runtimeFlagsFromEnv() runtimeFlags {
@@ -74,5 +79,6 @@ func runtimeFlagsFromEnv() runtimeFlags {
 		NarrowEscalation:  envBool("AGENT_RUNTIME_NARROW_ESCALATION", false),
 		NarrowTopics:      ParseNarrowTopics(os.Getenv("AGENT_RUNTIME_NARROW_TOPICS")),
 		NarrowReturnAfter: time.Duration(envInt("AGENT_RUNTIME_NARROW_RETURN_HOURS", 0)) * time.Hour,
+		SplitReply:        envBool("AGENT_RUNTIME_SPLIT_REPLY", false),
 	}
 }

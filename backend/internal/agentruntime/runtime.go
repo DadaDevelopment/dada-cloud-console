@@ -71,8 +71,14 @@ type MessageRequest struct {
 // channel id of the LAST user message of the batch, so the gateway can send
 // the answer as a native Telegram reply to the right message. Empty when
 // the batch carried no channel ids (manual/system messages).
+// Messages is the same turn cut into the messages a person would have sent
+// (plan 3.1), newest gateway only: Text stays the whole turn glued with
+// spaces, so a gateway that does not know about series keeps working and the
+// transcript keeps one row per turn. Empty means "nothing to split" -- one
+// message, exactly as before.
 type MessageResponse struct {
 	Text                    string
+	Messages                []string
 	ReplyToChannelMessageID string
 	Suppressed              bool
 }
@@ -313,7 +319,7 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 		EndUserKey: conv.Channel + ":" + conv.ExternalID,
 		ConversationContext: AgentConversationContext{ConversationID: conv.ID.String(), Channel: conv.Channel,
 			ExternalID: conv.ExternalID, Username: conv.ActorUsername, State: state, AvailableSkills: skills,
-			SeamlessHandoff: r.flags.SeamlessHandoff}}
+			SeamlessHandoff: r.flags.SeamlessHandoff, ReplySplit: r.flags.SplitReply && !r.structuredAgents[conv.AgentName]}}
 	if r.structuredAgents[conv.AgentName] {
 		run.ConversationContext.ReplyFormat = structuredReplyFormat
 	}
@@ -378,6 +384,14 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 		run.ConversationContext.State = after
 		run.ConversationContext.ReplyError = contractErr.Error()
 	}
+	// Cutting the turn into messages happens here and nowhere else: after
+	// every guard above has seen the whole turn, before it is persisted. The
+	// structured-reply branch (reply_contract.go) is out of scope by
+	// decision, so it never splits.
+	var parts []string
+	if !r.structuredAgents[conv.AgentName] {
+		reply, parts = r.splitTurn(conv.ID.String(), conv.AgentName, reply)
+	}
 	if _, err := r.store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "assistant", Content: reply}); err != nil {
 		return MessageResponse{}, err
 	}
@@ -397,7 +411,7 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 		return MessageResponse{}, fmt.Errorf("runtime receipt storage is not configured")
 	}
 	r.mirrorState(ctx, conv, after, "")
-	return MessageResponse{Text: reply}, nil
+	return MessageResponse{Text: reply, Messages: parts}, nil
 }
 
 // linksToEntities converts gateway link metadata into the generic entity

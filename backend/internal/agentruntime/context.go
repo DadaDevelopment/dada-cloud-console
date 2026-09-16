@@ -29,6 +29,12 @@ type AgentConversationContext struct {
 	// (plan 4.2). Absent from the envelope while the flag is off, which is
 	// what keeps the old prompt branch the active one.
 	SeamlessHandoff bool `json:"seamless_handoff,omitempty"`
+
+	// ReplySplit tells the prompt that the runtime can cut a turn into
+	// messages, so it may write the "---" seams (plan 3.2). Absent while the
+	// flag is off: a prompt that sees no marker must not produce one, which
+	// is what keeps a new prompt safe against an old runtime.
+	ReplySplit bool `json:"reply_split,omitempty"`
 }
 
 // AgentRunRequest is one invocation of an agent.

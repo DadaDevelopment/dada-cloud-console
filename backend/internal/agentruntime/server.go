@@ -256,9 +256,17 @@ type inboundMessageJSON struct {
 }
 
 type messageResponse struct {
-	Suppressed              bool   `json:"suppressed,omitempty"`
-	Text                    string `json:"text"`
-	ReplyToChannelMessageID string `json:"reply_to_channel_message_id,omitempty"`
+	Suppressed bool   `json:"suppressed,omitempty"`
+	Text       string `json:"text"`
+	// Messages carries the same turn already cut into messages (plan 3.1).
+	// omitempty keeps the wire format identical while the split flag is off.
+	Messages                []string `json:"messages,omitempty"`
+	ReplyToChannelMessageID string   `json:"reply_to_channel_message_id,omitempty"`
+}
+
+func wireResponse(resp MessageResponse) messageResponse {
+	return messageResponse{Text: resp.Text, Messages: resp.Messages,
+		ReplyToChannelMessageID: resp.ReplyToChannelMessageID, Suppressed: resp.Suppressed}
 }
 
 func (s *Server) handleMessage(c *gin.Context) {
@@ -314,10 +322,10 @@ func (s *Server) handleMessage(c *gin.Context) {
 		return
 	}
 	if streaming {
-		emit(gin.H{"event": "result", "result": messageResponse{Text: resp.Text, ReplyToChannelMessageID: resp.ReplyToChannelMessageID, Suppressed: resp.Suppressed}})
+		emit(gin.H{"event": "result", "result": wireResponse(resp)})
 		return
 	}
-	c.JSON(http.StatusOK, messageResponse{Text: resp.Text, ReplyToChannelMessageID: resp.ReplyToChannelMessageID, Suppressed: resp.Suppressed})
+	c.JSON(http.StatusOK, wireResponse(resp))
 }
 
 func (s *Server) handleHealth(c *gin.Context) {
