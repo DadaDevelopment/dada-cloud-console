@@ -447,8 +447,7 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 	// seenConv is what "first message of the dialogue" means here: the first
 	// batch this poller handled for that chat. A restart forgets, which errs
 	// towards NOT adding a tail delay -- the safe direction for a new lead.
-	var seenMu sync.Mutex
-	seenConv := map[string]bool{}
+	seenConv := newSeenChats(seenChatsTTL, seenChatsMax)
 
 	// One line per poller, naming the agent and the settings that decide what
 	// it will do. Without it a bot that never speaks is indistinguishable from
@@ -480,10 +479,7 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		convKey := ConversationKey(batch[0])
 		inGroup := IsGroup(batch[0].ChatType)
 
-		seenMu.Lock()
-		firstOfDialogue := !seenConv[convKey]
-		seenConv[convKey] = true
-		seenMu.Unlock()
+		firstOfDialogue := seenConv.firstTime(convKey, time.Now())
 		// Decided before the agent is called so the number can travel with
 		// the turn (delay_s in runtime_context) instead of being guessed from
 		// timestamps later.
@@ -652,9 +648,9 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 			log.Info().Str("agent", b.AgentName).Str("conv", convKey).
 				Int("delay_s", int(extraDelay.Seconds())).Bool("first_of_dialogue", firstOfDialogue).
 				Msg("tggateway: extra pacing delay before the reply")
-			runs.markTail(convKey, true)
+			runs.markTail(convKey, runCtx, true)
 			sleepOrDone(runCtx, extraDelay)
-			runs.markTail(convKey, false)
+			runs.markTail(convKey, runCtx, false)
 			if runCtx.Err() != nil {
 				log.Warn().Str("agent", b.AgentName).Str("conv", convKey).Str("conversation", convKey).
 					Int("delay_s", int(extraDelay.Seconds())).Int("runes", len([]rune(sendText))).
@@ -681,8 +677,8 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		// already sent is never unsent, and the first part is never held back:
 		// by then the run has won its claim.
 		if len(parts) > 1 {
-			runs.markTail(convKey, true)
-			defer runs.markTail(convKey, false)
+			runs.markTail(convKey, runCtx, true)
+			defer runs.markTail(convKey, runCtx, false)
 		}
 		for i, part := range parts {
 			if i > 0 {
@@ -703,7 +699,7 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 				}
 			}
 			if i == len(parts)-1 && len(parts) > 1 {
-				runs.markTail(convKey, false)
+				runs.markTail(convKey, runCtx, false)
 			}
 			if pacing != nil {
 				stopTyping := startTyping(runCtx, tg, b.BotToken, chatID)

@@ -157,7 +157,15 @@ func (s *interruptState) claimReply(convKey string, runCtx context.Context) bool
 // markTail declares whether the run owning convKey still has unsent messages
 // of a series. Only a split reply ever sets it; a single-message run leaves
 // it false and behaves exactly as before.
-func (s *interruptState) markTail(convKey string, pending bool) {
+//
+// The generation is checked exactly as claimReply checks it: a superseded
+// run's deferred markTail(false) would otherwise clear the flag of the run
+// that replaced it, and the new run's tail would become uncancellable.
+func (s *interruptState) markTail(convKey string, runCtx context.Context, pending bool) {
+	gen, ok := runCtx.Value(runGenKey{}).(int)
+	if !ok {
+		return
+	}
 	s.mu.Lock()
 	run, ok := s.runs[convKey]
 	s.mu.Unlock()
@@ -165,8 +173,11 @@ func (s *interruptState) markTail(convKey string, pending bool) {
 		return
 	}
 	run.mu.Lock()
+	defer run.mu.Unlock()
+	if run.gen != gen {
+		return
+	}
 	run.tail = pending
-	run.mu.Unlock()
 }
 
 // cancelUnclaimed is the poll loop's half of the mid-generation restart: a

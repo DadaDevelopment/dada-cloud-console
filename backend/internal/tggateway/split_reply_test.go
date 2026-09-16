@@ -2,6 +2,7 @@ package tggateway
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -159,5 +160,61 @@ func TestRunPollerDebounced_ClientMidSeriesDropsTheTail(t *testing.T) {
 		if text == "два" || text == "три" {
 			t.Fatalf("the tail must not reach the chat, got %#v", tg.sent)
 		}
+	}
+}
+
+// Review M1: a superseded run's deferred markTail(false) must not clear the
+// tail of the run that replaced it, or the new series becomes uncancellable.
+func TestMarkTail_IgnoresASupersededGeneration(t *testing.T) {
+	s := newInterruptState()
+	ctx := context.Background()
+
+	oldCtx, oldDone, _, _ := s.begin("c1", ctx, nil)
+	if !s.claimReply("c1", oldCtx) {
+		t.Fatal("first run must win its claim")
+	}
+	s.markTail("c1", oldCtx, true)
+	oldDone()
+
+	newCtx, newDone, _, _ := s.begin("c1", ctx, nil)
+	defer newDone()
+	if !s.claimReply("c1", newCtx) {
+		t.Fatal("second run must win its claim")
+	}
+	s.markTail("c1", newCtx, true)
+
+	// The old run unwinding now: its deferred call names a generation that no
+	// longer exists and must change nothing.
+	s.markTail("c1", oldCtx, false)
+
+	if stale := s.cancelUnclaimed("c1"); stale != nil {
+		t.Fatalf("a claimed run carries no batch back, got %v", stale)
+	}
+	if newCtx.Err() == nil {
+		t.Fatal("the new run's tail must still be cancellable")
+	}
+}
+
+// Review M3: the first-message tracker is bounded, and forgetting a chat errs
+// towards "first" (no tail delay).
+func TestSeenChats_ExpiresAndStaysBounded(t *testing.T) {
+	now := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	s := newSeenChats(time.Hour, 4)
+
+	if !s.firstTime("a", now) {
+		t.Fatal("an unknown chat is first")
+	}
+	if s.firstTime("a", now.Add(time.Minute)) {
+		t.Fatal("a known chat is not first")
+	}
+	if !s.firstTime("a", now.Add(2*time.Hour)) {
+		t.Fatal("a chat older than the TTL counts as first again")
+	}
+
+	for i := 0; i < 50; i++ {
+		s.firstTime(fmt.Sprintf("chat-%d", i), now.Add(time.Duration(i)*time.Second))
+	}
+	if len(s.seen) > 4 {
+		t.Fatalf("tracker grew to %d entries, want at most 4", len(s.seen))
 	}
 }

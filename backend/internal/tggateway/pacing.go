@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -378,4 +379,66 @@ func (c *TailDelayConfig) ExtraDelay(now time.Time, firstOfDialogue bool) time.D
 		return min
 	}
 	return min + time.Duration(c.draw()*float64(max-min))
+}
+
+// seenChats answers one question, "is this the first batch this poller has
+// handled for that chat", without growing forever: a long-lived poller sees
+// tens of thousands of chats, and a plain map of every key ever seen is a
+// leak with no upper bound.
+//
+// Forgetting a chat only means the next message counts as "first", which
+// turns the tail delay OFF for it -- the safe direction.
+type seenChats struct {
+	mu   sync.Mutex
+	ttl  time.Duration
+	max  int
+	seen map[string]time.Time
+}
+
+const (
+	// seenChatsTTL is far longer than any dialogue's own rhythm and far
+	// shorter than a poller's lifetime.
+	seenChatsTTL = 24 * time.Hour
+	seenChatsMax = 10000
+)
+
+func newSeenChats(ttl time.Duration, max int) *seenChats {
+	return &seenChats{ttl: ttl, max: max, seen: map[string]time.Time{}}
+}
+
+// firstTime reports whether convKey is new and records it as seen.
+func (s *seenChats) firstTime(convKey string, now time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	last, known := s.seen[convKey]
+	first := !known || now.Sub(last) > s.ttl
+	s.seen[convKey] = now
+	if len(s.seen) > s.max {
+		s.evictLocked(now)
+	}
+	return first
+}
+
+// evictLocked drops everything past the TTL, and if that was not enough (a
+// burst of new chats inside one TTL window) everything but the newest half.
+func (s *seenChats) evictLocked(now time.Time) {
+	for key, at := range s.seen {
+		if now.Sub(at) > s.ttl {
+			delete(s.seen, key)
+		}
+	}
+	if len(s.seen) <= s.max {
+		return
+	}
+	times := make([]time.Time, 0, len(s.seen))
+	for _, at := range s.seen {
+		times = append(times, at)
+	}
+	sort.Slice(times, func(i, j int) bool { return times[i].Before(times[j]) })
+	cutoff := times[len(times)/2]
+	for key, at := range s.seen {
+		if at.Before(cutoff) {
+			delete(s.seen, key)
+		}
+	}
 }
