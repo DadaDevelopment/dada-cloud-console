@@ -444,6 +444,10 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 	// The reply tail (plan 5). The share defaults to zero, so
 	// tailDelay.ExtraDelay returns 0 on every turn unless it is set.
 	tailDelay := TailDelayFromEnv()
+	seriesGap := pacing
+	if seriesGap == nil {
+		seriesGap = SeriesGapFromEnv()
+	}
 	// seenConv is what "first message of the dialogue" means here: the first
 	// batch this poller handled for that chat. A restart forgets, which errs
 	// towards NOT adding a tail delay -- the safe direction for a new lead.
@@ -492,6 +496,19 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 				Msg("tggateway: superseded an in-flight run (interrupt: cancel_and_restart)")
 		}
 		batch = full
+
+		if extraDelay > 0 {
+			log.Info().Str("agent", b.AgentName).Str("conv", convKey).
+				Int("delay_s", int(extraDelay.Seconds())).Bool("first_of_dialogue", firstOfDialogue).
+				Msg("tggateway: extra pacing delay before the reply")
+			sleepOrDone(runCtx, extraDelay)
+			if runCtx.Err() != nil {
+				log.Info().Str("agent", b.AgentName).Str("conv", convKey).
+					Int("delay_s", int(extraDelay.Seconds())).
+					Msg("tggateway: client wrote during the extra delay; the batch is carried into the next run")
+				return
+			}
+		}
 
 		// Runtime admits a turn before announcing processing over the response
 		// stream. Paused and courtesy-only turns never start typing. With
@@ -632,33 +649,6 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 			}
 			return
 		}
-		// The chosen pause is taken here, after the reply exists and the claim
-		// is won, and it is announced in one line so the form gate can read
-		// delay_s without joining timestamps. A client message during the
-		// wait cancels the reply through the same tail mechanism a series
-		// uses: after eleven minutes, answering the previous message first
-		// would be the tell, not the fix.
-		//
-		// Known gap: the runtime persisted this reply before the gateway ever
-		// saw it, so a dropped one stays in the transcript as if it had been
-		// sent. Closing that needs a delivery receipt back into the runtime,
-		// which does not exist yet; the warning below is what makes the
-		// difference findable until it does.
-		if extraDelay > 0 {
-			log.Info().Str("agent", b.AgentName).Str("conv", convKey).
-				Int("delay_s", int(extraDelay.Seconds())).Bool("first_of_dialogue", firstOfDialogue).
-				Msg("tggateway: extra pacing delay before the reply")
-			runs.markTail(convKey, runCtx, true)
-			sleepOrDone(runCtx, extraDelay)
-			runs.markTail(convKey, runCtx, false)
-			if runCtx.Err() != nil {
-				log.Warn().Str("agent", b.AgentName).Str("conv", convKey).
-					Int("delay_s", int(extraDelay.Seconds())).Int("runes", len([]rune(sendText))).
-					Msg("tggateway: reply NOT sent: client wrote during the extra delay; it stays in the runtime transcript")
-				return
-			}
-		}
-
 		parts := []string{sendText}
 		if splitReply && !wantsButton {
 			if series := sendableParts(resp.Messages); len(series) > 1 {
@@ -672,39 +662,30 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 				anchor = lastBatchChannelID(batch)
 			}
 		}
-		// A series is announced to the interrupt state so a client message
-		// landing between two parts drops what has not gone out yet. What is
-		// already sent is never unsent, and the first part is never held back:
-		// by then the run has won its claim.
 		if len(parts) > 1 {
 			runs.markTail(convKey, runCtx, true)
 			defer runs.markTail(convKey, runCtx, false)
 		}
+		interrupted := false
 		for i, part := range parts {
-			if i > 0 {
+			if i > 0 && !interrupted {
+				sleepOrDone(runCtx, seriesGap.GapFor())
 				if runCtx.Err() != nil {
+					interrupted = true
 					log.Info().Str("agent", b.AgentName).Str("conv", convKey).Int("sent", i).Int("planned", len(parts)).
-						Msg("tggateway: client wrote mid-series, unsent tail dropped")
-					return
+						Msg("tggateway: client wrote mid-series, remaining parts sent without pacing")
 				}
-				gap := pacingGapMinDefault
-				if pacing != nil {
-					gap = pacing.GapFor()
-				}
-				sleepOrDone(runCtx, gap)
+			}
+			if pacing != nil && !interrupted {
+				stopTyping := startTyping(runCtx, tg, b.BotToken, chatID)
+				sleepOrDone(runCtx, pacing.TypingFor(part))
+				stopTyping()
 				if runCtx.Err() != nil {
-					log.Info().Str("agent", b.AgentName).Str("conv", convKey).Int("sent", i).Int("planned", len(parts)).
-						Msg("tggateway: client wrote mid-series, unsent tail dropped")
-					return
+					interrupted = true
 				}
 			}
 			if i == len(parts)-1 && len(parts) > 1 {
 				runs.markTail(convKey, runCtx, false)
-			}
-			if pacing != nil {
-				stopTyping := startTyping(runCtx, tg, b.BotToken, chatID)
-				sleepOrDone(runCtx, pacing.TypingFor(part))
-				stopTyping()
 			}
 			var sendErr error
 			switch {

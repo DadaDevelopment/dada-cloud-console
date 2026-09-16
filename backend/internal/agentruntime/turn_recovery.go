@@ -149,3 +149,8 @@ func isSilenceReply(text string) bool {
 	trimmed := strings.TrimRight(strings.TrimSpace(text), ".!…")
 	return trimmed == "" || strings.EqualFold(strings.TrimSpace(trimmed), "SKIP")
 }
+
+func isDeliberateSkip(text string) bool {
+	trimmed := strings.TrimRight(strings.TrimSpace(text), ".!…")
+	return trimmed != "" && strings.EqualFold(strings.TrimSpace(trimmed), "SKIP")
+}

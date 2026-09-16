@@ -385,7 +385,7 @@ func (s *Server) signalOperator(c *gin.Context, conv Conversation, reason, summa
 		c.JSON(http.StatusBadRequest, gin.H{"error": "state unavailable"})
 		return
 	}
-	claimed, err := s.runtime.store.ClaimEscalationSignal(ctx, conv.ID, narrowSignalKey(reason), escalationSignalWindow)
+	claimed, err := s.runtime.store.ClaimEscalationSignal(ctx, conv.ID, reason, escalationSignalWindow)
 	if err != nil {
 		log.Warn().Err(err).Str("conversation", conv.ID.String()).Str("reason", reason).Msg("agentruntime: escalation signal claim failed")
 		claimed = true
@@ -430,7 +430,7 @@ func (s *Server) narrowHandoff(c *gin.Context, conv Conversation, reason, summar
 	// and pages the operator twice for one event. A claim that cannot be
 	// read fails open, exactly as in signalOperator: a missed card is worse
 	// than a duplicate one.
-	claimed, err := s.runtime.store.ClaimEscalationSignal(ctx, conv.ID, reason, escalationSignalWindow)
+	claimed, err := s.runtime.store.ClaimEscalationSignal(ctx, conv.ID, narrowSignalKey(reason), escalationSignalWindow)
 	if err != nil {
 		log.Warn().Err(err).Str("conversation", conv.ID.String()).Str("reason", reason).Msg("agentruntime: narrow hand-off claim failed")
 		claimed = true

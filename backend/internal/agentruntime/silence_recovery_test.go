@@ -56,6 +56,10 @@ func TestIsSilenceReply(t *testing.T) {
 	require.True(t, isSilenceReply("SKIP"))
 	require.True(t, isSilenceReply("skip."))
 	require.False(t, isSilenceReply("Принял"))
+	require.True(t, isDeliberateSkip("SKIP"))
+	require.True(t, isDeliberateSkip("skip."))
+	require.False(t, isDeliberateSkip(""))
+	require.False(t, isDeliberateSkip("Принял"))
 }
 
 // Review L2: a recovered turn keeps the shape the runtime gave it.

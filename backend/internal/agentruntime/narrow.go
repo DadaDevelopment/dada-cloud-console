@@ -221,3 +221,18 @@ func (r *Runtime) narrowGate(ctx context.Context, conv Conversation, state Runti
 		Msg("agentruntime: narrow mode, question outside the white list, staying silent")
 	return MessageResponse{Suppressed: true}, true, nil
 }
+
+func (r *Runtime) narrowEnteredDuringTurn(ctx context.Context, conv Conversation, narrowAtEntry bool) (bool, error) {
+	if !r.flags.NarrowEscalation || narrowAtEntry {
+		return false, nil
+	}
+	fresh, err := r.store.GetConversation(ctx, conv.ID)
+	if err != nil {
+		return false, err
+	}
+	_, now := narrowSince(fresh)
+	if now {
+		log.Info().Str("conversation", conv.ID.String()).Msg("agentruntime: narrow hand-off happened inside the turn, model text suppressed")
+	}
+	return now, nil
+}

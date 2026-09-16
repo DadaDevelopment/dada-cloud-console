@@ -24,6 +24,7 @@ func TestSplitReplyParts(t *testing.T) {
 	require.Equal(t, []string{"один", "два"}, splitReplyParts("один\n  ----  \n\n\nдва\n"))
 	require.Empty(t, splitReplyParts("---\n---"))
 	require.Equal(t, []string{"тире - внутри строки не шов"}, splitReplyParts("тире - внутри строки не шов"))
+	require.Equal(t, []string{"один", "два"}, splitReplyParts("один\r\n---\r\nдва"))
 }
 
 func TestCapReplyParts_ExtraPartsFoldIntoTheLast(t *testing.T) {

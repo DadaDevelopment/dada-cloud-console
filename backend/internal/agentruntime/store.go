@@ -511,7 +511,8 @@ func (s *pgStore) RecordTurnCounters(ctx context.Context, conversationID uuid.UU
 		UPDATE conversations SET metadata = jsonb_set(
 				jsonb_set(COALESCE(metadata, '{}'::jsonb), '{`+questionsInRowKey+`}',
 					to_jsonb(CASE WHEN $2::bool
-						THEN COALESCE((metadata->>'`+questionsInRowKey+`')::int, 0) + 1
+						THEN COALESCE(CASE WHEN jsonb_typeof(metadata->'`+questionsInRowKey+`') = 'number'
+							THEN floor((metadata->>'`+questionsInRowKey+`')::numeric)::int END, 0) + 1
 						ELSE 0 END), true),
 				'{`+usedPhrasesKey+`}', COALESCE((
 					SELECT jsonb_agg(value ORDER BY ord)

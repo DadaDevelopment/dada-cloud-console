@@ -114,19 +114,17 @@ func TestRunPollerDebounced_SplitOnSendsThePartsInOrder(t *testing.T) {
 	}
 }
 
-// Plan 3.1a: a client message landing between two parts drops the unsent
-// tail, and what was already sent stays sent.
-func TestRunPollerDebounced_ClientMidSeriesDropsTheTail(t *testing.T) {
+// Plan 3.1a, revised: a client message landing between two parts hurries the
+// rest of the series out without pacing. The runtime already holds the whole
+// turn in the transcript, so dropping the tail would leave the model
+// remembering words the client never saw.
+func TestRunPollerDebounced_ClientMidSeriesFlushesTheTail(t *testing.T) {
 	t.Setenv("TG_GATEWAY_SPLIT_REPLY", "1")
 	tg := &timedTelegram{
 		sequentialTelegram: sequentialTelegram{batches: [][]TelegramUpdate{
 			{{UpdateID: 1, ChatID: 23, ChatType: "private", MessageID: 101, Text: "привет"}},
 			{{UpdateID: 2, ChatID: 23, ChatType: "private", MessageID: 102, Text: "стой, другое"}},
 		}},
-		// The second message has to land while the series is in flight. The
-		// pacing quiet window has a one-second floor (QuietFor), so the first
-		// part goes out a little after a second and the 2s gap to the next
-		// part is the window this message lands in.
 		gaps:  []time.Duration{0, 1500 * time.Millisecond},
 		scale: 1,
 	}
@@ -137,29 +135,27 @@ func TestRunPollerDebounced_ClientMidSeriesDropsTheTail(t *testing.T) {
 	defer cancel()
 	go runPollerDebounced(ctx, tg, fakeA2A{}, rt, Binding{AgentName: "agent-tail", BotToken: "tok"}, &cfg)
 
-	if !waitLong(t, 8*time.Second, func() bool { return tg.sentCount() == 2 }) {
+	if !waitLong(t, 8*time.Second, func() bool { return tg.sentCount() == 4 }) {
 		tg.mu.Lock()
 		got := append([]string(nil), tg.sent...)
 		tg.mu.Unlock()
-		t.Fatalf("expected the first part and the restarted answer, got %#v", got)
+		t.Fatalf("expected the whole series and the restarted answer, got %#v", got)
 	}
-	time.Sleep(3 * time.Second)
+	time.Sleep(time.Second)
 
 	tg.mu.Lock()
 	defer tg.mu.Unlock()
-	if len(tg.sent) != 2 {
-		t.Fatalf("want the first part plus the new answer, got %#v", tg.sent)
+	want := []string{"раз", "два", "три", "ответ на второе"}
+	if len(tg.sent) != len(want) {
+		t.Fatalf("want the whole series then the new answer, got %#v", tg.sent)
 	}
-	if tg.sent[0] != "раз" {
-		t.Fatalf("what was sent stays sent, got %#v", tg.sent)
-	}
-	if tg.sent[1] != "ответ на второе" {
-		t.Fatalf("the restarted run must answer the new message, got %#v", tg.sent)
-	}
-	for _, text := range tg.sent {
-		if text == "два" || text == "три" {
-			t.Fatalf("the tail must not reach the chat, got %#v", tg.sent)
+	for i := range want {
+		if tg.sent[i] != want[i] {
+			t.Fatalf("want %#v, got %#v", want, tg.sent)
 		}
+	}
+	if tg.at[2].Sub(tg.at[1]) > 500*time.Millisecond {
+		t.Fatalf("the hurried parts must go out without the %v gap, got %v", 2*time.Second, tg.at[2].Sub(tg.at[1]))
 	}
 }
 
@@ -216,5 +212,85 @@ func TestSeenChats_ExpiresAndStaysBounded(t *testing.T) {
 	}
 	if len(s.seen) > 4 {
 		t.Fatalf("tracker grew to %d entries, want at most 4", len(s.seen))
+	}
+}
+
+type holdRuntime struct {
+	mu    sync.Mutex
+	calls []RuntimeMessageRequest
+}
+
+func (r *holdRuntime) ProcessMessage(_ context.Context, req RuntimeMessageRequest) (RuntimeMessageResponse, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, req)
+	return RuntimeMessageResponse{Text: fmt.Sprintf("ответ %d", len(r.calls))}, nil
+}
+
+func (r *holdRuntime) callCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.calls)
+}
+
+// workingDayZone names an IANA zone in which the clock reads 14:00 right
+// now, so the tail hold is inside its working-day window whatever the host
+// clock says.
+func workingDayZone() string {
+	offset := (14 - time.Now().UTC().Hour() + 24) % 24
+	if offset > 12 {
+		return fmt.Sprintf("Etc/GMT+%d", 24-offset)
+	}
+	return fmt.Sprintf("Etc/GMT-%d", offset)
+}
+
+// Plan 5, review #2: the hold is taken before the agent is called. A client
+// message during the hold cancels the unclaimed run and carries its batch
+// into the next one, so the runtime sees the whole thought once and never
+// persists a reply the customer did not get.
+func TestRunPollerDebounced_TailHoldIsTakenBeforeTheRuntimeCall(t *testing.T) {
+	t.Setenv("TG_GATEWAY_PACING_TAIL_SHARE", "1")
+	t.Setenv("TG_GATEWAY_PACING_TAIL_MIN_MS", "1500")
+	t.Setenv("TG_GATEWAY_PACING_TAIL_MAX_MS", "1500")
+	t.Setenv("TG_GATEWAY_TZ", workingDayZone())
+	tg := &timedTelegram{
+		sequentialTelegram: sequentialTelegram{batches: [][]TelegramUpdate{
+			{{UpdateID: 1, ChatID: 24, ChatType: "private", MessageID: 101, Text: "привет"}},
+			{{UpdateID: 2, ChatID: 24, ChatType: "private", MessageID: 102, Text: "вопрос"}},
+			{{UpdateID: 3, ChatID: 24, ChatType: "private", MessageID: 103, Text: "ау, вы тут?"}},
+		}},
+		gaps:  []time.Duration{0, 300 * time.Millisecond, 500 * time.Millisecond},
+		scale: 1,
+	}
+	rt := &holdRuntime{}
+	cfg := DebounceConfig{QuietWindow: 20 * time.Millisecond, MaxWindow: time.Second}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go runPollerDebounced(ctx, tg, fakeA2A{}, rt, Binding{AgentName: "agent-hold", BotToken: "tok"}, &cfg)
+
+	if !waitLong(t, 8*time.Second, func() bool { return tg.sentCount() == 2 }) {
+		tg.mu.Lock()
+		got := append([]string(nil), tg.sent...)
+		tg.mu.Unlock()
+		t.Fatalf("expected the first answer and one answer to the held thought, got %#v", got)
+	}
+	time.Sleep(2 * time.Second)
+
+	if rt.callCount() != 2 {
+		t.Fatalf("the runtime must be called once per delivered answer, got %d calls", rt.callCount())
+	}
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.calls[0].DelaySeconds != 0 {
+		t.Fatalf("the first message of a dialogue is never held, got delay_s=%d", rt.calls[0].DelaySeconds)
+	}
+	if len(rt.calls[1].Messages) != 2 || rt.calls[1].Messages[0].Content != "вопрос" || rt.calls[1].Messages[1].Content != "ау, вы тут?" {
+		t.Fatalf("the message that landed during the hold must ride in the same batch, got %#v", rt.calls[1].Messages)
+	}
+	tg.mu.Lock()
+	defer tg.mu.Unlock()
+	if len(tg.sent) != 2 || tg.sent[0] != "ответ 1" || tg.sent[1] != "ответ 2" {
+		t.Fatalf("want one answer per thought, got %#v", tg.sent)
 	}
 }

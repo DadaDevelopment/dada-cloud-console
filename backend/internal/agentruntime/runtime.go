@@ -341,6 +341,7 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 	if opts.onProcessing != nil {
 		opts.onProcessing()
 	}
+	_, narrowAtEntry := narrowSince(conv)
 	var reply string
 	var after RuntimeState
 	for attempt := 0; attempt < 2; attempt++ {
@@ -354,6 +355,11 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 		}
 		if !after.AgentEnabled {
 			r.mirrorState(ctx, conv, after, "")
+			return MessageResponse{Suppressed: true}, nil
+		}
+		if entered, err := r.narrowEnteredDuringTurn(ctx, conv, narrowAtEntry); err != nil {
+			return MessageResponse{}, err
+		} else if entered {
 			return MessageResponse{Suppressed: true}, nil
 		}
 		if !r.structuredAgents[conv.AgentName] {
@@ -411,7 +417,7 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 	// Under AGENT_RUNTIME_SILENCE_RECOVERY it becomes a turnFailure, which
 	// leaves the input pending and puts the turn on the existing recovery
 	// ladder (30s, 90s, 240s) rather than building a second watchdog.
-	if r.flags.SilenceRecovery && isSilenceReply(reply) {
+	if r.flags.SilenceRecovery && isSilenceReply(reply) && !isDeliberateSkip(reply) {
 		return MessageResponse{}, &turnFailure{err: errors.New("agent turn produced no message")}
 	}
 	// Cutting the turn into messages happens here and nowhere else: after

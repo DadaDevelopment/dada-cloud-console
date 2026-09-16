@@ -301,6 +301,13 @@ func GatewayLocation() *time.Location {
 	return loc
 }
 
+func SeriesGapFromEnv() *PacingConfig {
+	return &PacingConfig{
+		GapMin: envDurationMS("TG_GATEWAY_PACING_GAP_MIN_MS", pacingGapMinDefault),
+		GapMax: envDurationMS("TG_GATEWAY_PACING_GAP_MAX_MS", pacingGapMaxDefault),
+	}
+}
+
 // TailDelayFromEnv is always non-nil: with the share at zero it is a config
 // that never adds a delay, which is what the gateway does today.
 func TailDelayFromEnv() *TailDelayConfig {

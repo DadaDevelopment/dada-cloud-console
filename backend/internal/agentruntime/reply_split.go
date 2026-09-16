@@ -33,7 +33,7 @@ const (
 // replySplitSeparator matches a line that is nothing but three or more
 // dashes. A dash inside a sentence, and an em dash the guard already
 // rewrote, are not seams.
-var replySplitSeparator = regexp.MustCompile(`(?m)^[ \t]*-{3,}[ \t]*$`)
+var replySplitSeparator = regexp.MustCompile(`(?m)^[ \t]*-{3,}[ \t]*\r?$`)
 
 var replySplitLink = regexp.MustCompile(`(?i)https?://\S+|\b[a-z0-9-]+\.(?:ru|com|org|net|io|me)\b\S*`)
 

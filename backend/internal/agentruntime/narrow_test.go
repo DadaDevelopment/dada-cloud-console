@@ -319,3 +319,35 @@ func TestNarrowSignalKey_DoesNotCollideWithAPlainSignal(t *testing.T) {
 	require.NotEqual(t, "E_OTHER", narrowSignalKey("E_OTHER"))
 	require.Equal(t, "narrow:E_OTHER", narrowSignalKey("E_OTHER"))
 }
+
+type narrowFlipStore struct {
+	ConversationStore
+	conv  Conversation
+	reads int
+}
+
+func (s *narrowFlipStore) GetConversation(context.Context, uuid.UUID) (Conversation, error) {
+	s.reads++
+	return s.conv, nil
+}
+
+func TestNarrowEnteredDuringTurn_SuppressesTheModelTextOnce(t *testing.T) {
+	store := &narrowFlipStore{conv: narrowConv("2026-09-16T10:00:00Z")}
+	rt, _ := narrowRuntime(t, store, 0)
+
+	entered, err := rt.narrowEnteredDuringTurn(context.Background(), narrowConv(""), false)
+	require.NoError(t, err)
+	require.True(t, entered, "the hand-off happened inside this turn, so the model text is a second message")
+	require.Equal(t, 1, store.reads)
+
+	entered, err = rt.narrowEnteredDuringTurn(context.Background(), store.conv, true)
+	require.NoError(t, err)
+	require.False(t, entered, "a turn that started in narrow mode is gated by narrowGate, not here")
+	require.Equal(t, 1, store.reads, "no re-read when the mode was already on")
+
+	rt.flags.NarrowEscalation = false
+	entered, err = rt.narrowEnteredDuringTurn(context.Background(), narrowConv(""), false)
+	require.NoError(t, err)
+	require.False(t, entered)
+	require.Equal(t, 1, store.reads, "flag off never touches the store")
+}
