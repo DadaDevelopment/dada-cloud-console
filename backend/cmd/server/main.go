@@ -168,6 +168,12 @@ func main() {
 		defer promptSourceCancel()
 		promptSourceInterval := time.Duration(cfg.AgentPromptSourcePollIntervalSecs) * time.Second
 		go func() {
+			tick := func() {
+				tickCtx, cancel := context.WithTimeout(promptSourceCtx, promptSourceInterval)
+				defer cancel()
+				apiHandler.RunAgentPromptSourceTick(tickCtx)
+			}
+			tick()
 			ticker := time.NewTicker(promptSourceInterval)
 			defer ticker.Stop()
 			for {
@@ -175,7 +181,7 @@ func main() {
 				case <-promptSourceCtx.Done():
 					return
 				case <-ticker.C:
-					apiHandler.RunAgentPromptSourceTick(promptSourceCtx)
+					tick()
 				}
 			}
 		}()
