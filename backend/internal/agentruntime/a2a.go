@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -33,10 +34,19 @@ type httpA2AClient struct {
 // built-in ask_user and called it with a placeholder; resuming that task keeps
 // the toolless turn and leaves a first-turn dialog without skills for its
 // whole life, while a fresh turn a few seconds later finds the new pod.
+// Both are overridable (plan 4.3): AGENT_RUNTIME_TASK_RETRY_PAUSE_MS and
+// AGENT_RUNTIME_TASK_RETRIES. The defaults are the numbers that were compiled
+// in before, so an unset environment behaves exactly as it did.
 const (
 	failedTaskRetryPause = 3 * time.Second
 	failedTaskRetries    = 3
 )
+
+// reRateLimited recognises the provider rate limit inside a failed task's
+// error text. It changes no behaviour: a burst that rate-limits every chat
+// looks exactly like a broken agent in the log otherwise, and the two need
+// very different responses from whoever is on call.
+var reRateLimited = regexp.MustCompile(`(?i)\b429\b|rate.?limit|too many requests|overloaded`)
 
 // endUserHeader and agentHeader carry caller identity to the agent, which
 // replays them onto its MCP calls when its claim lists them in allowedHeaders.
@@ -54,8 +64,8 @@ func NewA2AClient() A2AClient {
 		http:       &http.Client{},
 		endpoint:   kagentEndpoint,
 		timeout:    turnbudget.AgentCall(),
-		retryPause: failedTaskRetryPause,
-		retries:    failedTaskRetries,
+		retryPause: envDurationMS("AGENT_RUNTIME_TASK_RETRY_PAUSE_MS", failedTaskRetryPause),
+		retries:    envInt("AGENT_RUNTIME_TASK_RETRIES", failedTaskRetries),
 		pause:      pauseFor,
 	}
 }
@@ -131,7 +141,13 @@ func (c *httpA2AClient) Send(ctx context.Context, run AgentRunRequest) (string, 
 		entry := log.Warn().Str("agent", agentName).Str("context", run.ContextID).Str("task", task.ID).
 			Int("attempt", attempt+1).Dur("pause", wait)
 		if task.State == "failed" {
-			entry.Str("error", task.Error).Msg("agentruntime: agent task failed; retrying the turn")
+			rateLimited := reRateLimited.MatchString(task.Error)
+			entry = entry.Str("error", task.Error).Bool("rate_limited", rateLimited)
+			if rateLimited {
+				entry.Msg("agentruntime: agent task rate-limited by the model provider; retrying the turn")
+			} else {
+				entry.Msg("agentruntime: agent task failed; retrying the turn")
+			}
 		} else {
 			entry.Strs("questions", task.Questions).Msg("agentruntime: agent paused on ask_user; retrying the turn")
 		}

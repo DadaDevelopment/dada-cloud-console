@@ -81,6 +81,12 @@ type runtimeFlags struct {
 	// above which a reply to a bare confirmation is sent back for a rewrite.
 	// 0 (the default) is off.
 	AckLimit int
+
+	// SilenceRecovery (AGENT_RUNTIME_SILENCE_RECOVERY, plan 4.3) puts a turn
+	// that ended without a message and without a deliberate Suppressed on the
+	// existing turn_recovery ladder, instead of leaving the customer with
+	// silence and no error anywhere.
+	SilenceRecovery bool
 }
 
 func runtimeFlagsFromEnv() runtimeFlags {
@@ -92,5 +98,6 @@ func runtimeFlagsFromEnv() runtimeFlags {
 		SplitReply:        envBool("AGENT_RUNTIME_SPLIT_REPLY", false),
 		QuestionBudget:    envBool("AGENT_RUNTIME_QUESTION_BUDGET", false),
 		AckLimit:          envInt("AGENT_RUNTIME_ACK_LIMIT", 0),
+		SilenceRecovery:   envBool("AGENT_RUNTIME_SILENCE_RECOVERY", false),
 	}
 }

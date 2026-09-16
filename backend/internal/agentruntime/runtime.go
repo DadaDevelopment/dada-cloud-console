@@ -395,6 +395,15 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 		run.ConversationContext.State = after
 		run.ConversationContext.ReplyError = contractErr.Error()
 	}
+	// A turn that produced no text is not an error anywhere today: the
+	// runtime saves an empty assistant message, the gateway sends nothing,
+	// and the customer sees silence with no trace of why (QA 2026-09-15).
+	// Under AGENT_RUNTIME_SILENCE_RECOVERY it becomes a turnFailure, which
+	// leaves the input pending and puts the turn on the existing recovery
+	// ladder (30s, 90s, 240s) rather than building a second watchdog.
+	if r.flags.SilenceRecovery && isSilenceReply(reply) {
+		return MessageResponse{}, &turnFailure{err: errors.New("agent turn produced no message")}
+	}
 	// Cutting the turn into messages happens here and nowhere else: after
 	// every guard above has seen the whole turn, before it is persisted. The
 	// structured-reply branch (reply_contract.go) is out of scope by
