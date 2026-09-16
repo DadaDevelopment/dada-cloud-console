@@ -174,13 +174,12 @@ func TestDebouncer_PacingDrivesQuietWindowAndLiftsMaxWindow(t *testing.T) {
 	}
 }
 
-// Plan 5: the tail and the night window. Both knobs default to zero, and a
-// zero knob must never add a delay -- that is the whole "unset == today"
-// promise of this change.
-func TestTailNight_DefaultsAddNothing(t *testing.T) {
-	c := TailNightFromEnv()
-	if c.TailShare != 0 || c.NightMorningP != 0 {
-		t.Fatalf("defaults must be zero, got tail=%v night=%v", c.TailShare, c.NightMorningP)
+// Plan 5: the reply tail. The share defaults to zero, and a zero share must
+// never add a delay -- that is the whole "unset == today" promise.
+func TestTailDelay_DefaultsAddNothing(t *testing.T) {
+	c := TailDelayFromEnv()
+	if c.TailShare != 0 {
+		t.Fatalf("default share must be zero, got %v", c.TailShare)
 	}
 	if c.Loc != time.UTC {
 		t.Fatalf("default zone must be UTC, got %v", c.Loc)
@@ -193,7 +192,7 @@ func TestTailNight_DefaultsAddNothing(t *testing.T) {
 			}
 		}
 	}
-	var nilCfg *TailNightConfig
+	var nilCfg *TailDelayConfig
 	if d := nilCfg.ExtraDelay(time.Now(), false); d != 0 {
 		t.Fatalf("nil config must be silent, got %v", d)
 	}
@@ -210,17 +209,49 @@ func TestGatewayLocation_UnknownZoneFallsBackToUTC(t *testing.T) {
 	}
 }
 
-func TestTailNight_TailOnlyInTheWorkingDayAndNeverOnTheFirstMessage(t *testing.T) {
-	c := &TailNightConfig{TailShare: 1, TailMin: tailDelayMinDefault, TailMax: tailDelayMaxDefault, Loc: time.UTC}
+// A held reply lives in a goroutine, so the hold has a hard ceiling no
+// manifest can raise.
+func TestTailDelay_MaxIsCappedAtFifteenMinutes(t *testing.T) {
+	t.Setenv("TG_GATEWAY_PACING_TAIL_SHARE", "1")
+	t.Setenv("TG_GATEWAY_PACING_TAIL_MAX_MS", "3600000")
+	c := TailDelayFromEnv()
+	if c.TailMax != tailDelayMaxCap {
+		t.Fatalf("TailMax = %v, want the %v cap", c.TailMax, tailDelayMaxCap)
+	}
+	noon := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < 200; i++ {
+		if d := c.ExtraDelay(noon, false); d > tailDelayMaxCap {
+			t.Fatalf("delay %v exceeds the cap %v", d, tailDelayMaxCap)
+		}
+	}
+}
+
+func TestTailDelay_ShareIsClampedToAProbability(t *testing.T) {
+	t.Setenv("TG_GATEWAY_PACING_TAIL_SHARE", "30")
+	if got := TailDelayFromEnv().TailShare; got != 1 {
+		t.Fatalf("share = %v, want it clamped to 1", got)
+	}
+	t.Setenv("TG_GATEWAY_PACING_TAIL_SHARE", "-2")
+	if got := TailDelayFromEnv().TailShare; got != 0 {
+		t.Fatalf("share = %v, want it clamped to 0", got)
+	}
+	t.Setenv("TG_GATEWAY_PACING_TAIL_SHARE", "не число")
+	if got := TailDelayFromEnv().TailShare; got != 0 {
+		t.Fatalf("share = %v, want the default", got)
+	}
+}
+
+func TestTailDelay_OnlyInTheWorkingDayAndNeverOnTheFirstMessage(t *testing.T) {
+	c := &TailDelayConfig{TailShare: 1, TailMin: tailDelayMinDefault, TailMax: tailDelayMaxCap, Loc: time.UTC}
 
 	noon := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
-	if d := c.ExtraDelay(noon, false); d < tailDelayMinDefault || d > tailDelayMaxDefault {
+	if d := c.ExtraDelay(noon, false); d < tailDelayMinDefault || d > tailDelayMaxCap {
 		t.Fatalf("midday delay %v outside [5m, 15m]", d)
 	}
 	if d := c.ExtraDelay(noon, true); d != 0 {
 		t.Fatalf("the first message of a dialogue must never wait, got %v", d)
 	}
-	for _, hour := range []int{9, 22} {
+	for _, hour := range []int{3, 9, 22, 23} {
 		at := time.Date(2026, 9, 16, hour, 0, 0, 0, time.UTC)
 		if d := c.ExtraDelay(at, false); d != 0 {
 			t.Fatalf("hour %d is outside the 10-22 window, got %v", hour, d)
@@ -228,36 +259,8 @@ func TestTailNight_TailOnlyInTheWorkingDayAndNeverOnTheFirstMessage(t *testing.T
 	}
 }
 
-func TestTailNight_NightMessageIsHeldUntilTheMorningWindow(t *testing.T) {
-	msk, err := time.LoadLocation("Europe/Moscow")
-	if err != nil {
-		t.Skipf("zone database unavailable: %v", err)
-	}
-	c := &TailNightConfig{NightMorningP: 1, TailShare: 1, Loc: msk}
-
-	for _, tc := range []struct {
-		name     string
-		at       time.Time
-		wantDate int
-	}{
-		{"after midnight waits for this morning", time.Date(2026, 9, 16, 3, 0, 0, 0, msk), 16},
-		{"late evening waits for tomorrow", time.Date(2026, 9, 16, 23, 30, 0, 0, msk), 17},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			d := c.ExtraDelay(tc.at, false)
-			if d <= 0 {
-				t.Fatalf("night message must be held, got %v", d)
-			}
-			at := tc.at.Add(d).In(msk)
-			if at.Day() != tc.wantDate || at.Hour() < morningHour || at.Hour() >= morningHourLate {
-				t.Fatalf("reply lands at %v, want day %d between %d:00 and %d:00", at, tc.wantDate, morningHour, morningHourLate)
-			}
-		})
-	}
-}
-
-func TestTailNight_ShareIsRespectedAcrossManyTurns(t *testing.T) {
-	c := &TailNightConfig{TailShare: 0.3, TailMin: tailDelayMinDefault, TailMax: tailDelayMaxDefault, Loc: time.UTC}
+func TestTailDelay_ShareIsRespectedAcrossManyTurns(t *testing.T) {
+	c := &TailDelayConfig{TailShare: 0.3, TailMin: tailDelayMinDefault, TailMax: tailDelayMaxCap, Loc: time.UTC}
 	noon := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
 	delayed := 0
 	const n = 2000

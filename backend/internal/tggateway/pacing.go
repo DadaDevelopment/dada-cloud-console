@@ -243,28 +243,26 @@ func sendableParts(messages []string) []string {
 	return out
 }
 
-// Plan 5, the two holes the existing pacing does not cover.
+// Plan 5, the hole the existing pacing does not cover: a tail. The live
+// operator answers after more than ten minutes in 29.6% of turns, while
+// MaxQuiet cuts everything off at 90 seconds, so every bot reply lands inside
+// one narrow corridor no jitter can widen.
 //
-//   - A tail. The live operator answers after more than ten minutes in 29.6%
-//     of turns; MaxQuiet cuts the distribution off at 90 seconds, so the bot
-//     has no tail at all and every reply lands inside one narrow corridor.
-//   - A night. There is no 23-08 window anywhere in the gateway: a message at
-//     three in the morning gets the same twelve seconds as one at noon, which
-//     is the one timing tell no jitter can hide.
+// The night window (hold a 23-08 message until the morning) is deliberately
+// NOT here. It needs a delay of up to ten hours, and the only place this
+// gateway can hold a reply is a goroutine's memory: a restart during the wait
+// loses the reply while the runtime transcript already contains it. That
+// needs persistent scheduled delivery, which is its own change.
 //
-// Both are off by default (share 0, probability 0), and both are decided
-// BEFORE the agent is called, so the number can travel with the turn as
-// delay_s instead of being reconstructed from timestamps afterwards.
-type TailNightConfig struct {
-	// TailShare is TG_GATEWAY_PACING_TAIL_SHARE: the share of eligible turns
-	// that get an extra pause drawn uniformly from [TailMin, TailMax].
+// TailShare defaults to 0, so ExtraDelay returns 0 on every turn until it is
+// set, and the gateway behaves exactly as it does today.
+type TailDelayConfig struct {
+	// TailShare is TG_GATEWAY_PACING_TAIL_SHARE, clamped to [0, 1]: the share
+	// of eligible turns that wait an extra pause drawn uniformly from
+	// [TailMin, TailMax].
 	TailShare float64
 	TailMin   time.Duration
 	TailMax   time.Duration
-	// NightMorningP is TG_GATEWAY_NIGHT_MORNING_P: the probability that a
-	// message arriving in the night window is answered in the morning window
-	// instead of now.
-	NightMorningP float64
 	// Loc is TG_GATEWAY_TZ (default UTC). The gateway had no zone of its own
 	// before this: everything it did was zone-independent.
 	Loc *time.Location
@@ -275,18 +273,15 @@ type TailNightConfig struct {
 
 const (
 	tailDelayMinDefault = 5 * time.Minute
-	tailDelayMaxDefault = 15 * time.Minute
+	// tailDelayMaxCap is a hard ceiling, not just a default: a reply held in
+	// a goroutine is lost on restart, and fifteen minutes is the longest this
+	// gateway may risk without persistent delivery.
+	tailDelayMaxCap = 15 * time.Minute
 	// tailHourFrom/To bound the working day: a five-to-fifteen minute silence
 	// reads as a busy person at noon and as a broken bot at four in the
-	// morning, where the night rule owns the timing anyway.
+	// morning.
 	tailHourFrom = 10
 	tailHourTo   = 22
-	// nightHourFrom/To is the window whose messages may be held; morning
-	// Hour/Late is the window they are held until.
-	nightHourFrom   = 23
-	nightHourTo     = 8
-	morningHour     = 9
-	morningHourLate = 10
 )
 
 // GatewayLocation reads TG_GATEWAY_TZ. An unknown zone falls back to UTC with
@@ -305,27 +300,44 @@ func GatewayLocation() *time.Location {
 	return loc
 }
 
-// TailNightFromEnv is always non-nil: with both knobs at zero it is a config
+// TailDelayFromEnv is always non-nil: with the share at zero it is a config
 // that never adds a delay, which is what the gateway does today.
-func TailNightFromEnv() *TailNightConfig {
-	return &TailNightConfig{
-		TailShare:     envFloat("TG_GATEWAY_PACING_TAIL_SHARE", 0),
-		TailMin:       envDurationMS("TG_GATEWAY_PACING_TAIL_MIN_MS", tailDelayMinDefault),
-		TailMax:       envDurationMS("TG_GATEWAY_PACING_TAIL_MAX_MS", tailDelayMaxDefault),
-		NightMorningP: envFloat("TG_GATEWAY_NIGHT_MORNING_P", 0),
-		Loc:           GatewayLocation(),
+func TailDelayFromEnv() *TailDelayConfig {
+	c := &TailDelayConfig{
+		TailShare: envShare("TG_GATEWAY_PACING_TAIL_SHARE", 0),
+		TailMin:   envDurationMS("TG_GATEWAY_PACING_TAIL_MIN_MS", tailDelayMinDefault),
+		TailMax:   envDurationMS("TG_GATEWAY_PACING_TAIL_MAX_MS", tailDelayMaxCap),
+		Loc:       GatewayLocation(),
 	}
+	if c.TailMax > tailDelayMaxCap {
+		log.Warn().Dur("requested", c.TailMax).Dur("cap", tailDelayMaxCap).
+			Msg("tggateway: tail delay capped; a longer hold needs persistent delivery")
+		c.TailMax = tailDelayMaxCap
+	}
+	if c.TailMin > c.TailMax {
+		c.TailMin = c.TailMax
+	}
+	return c
 }
 
-func envFloat(name string, fallback float64) float64 {
+// envShare reads a probability and clamps it to [0, 1]: a share of 7 in a
+// manifest means somebody typed a percentage, and it must not turn into
+// "always".
+func envShare(name string, fallback float64) float64 {
 	v, err := strconv.ParseFloat(strings.TrimSpace(os.Getenv(name)), 64)
-	if err != nil || v < 0 {
+	if err != nil {
 		return fallback
+	}
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
 	}
 	return v
 }
 
-func (c *TailNightConfig) draw() float64 {
+func (c *TailDelayConfig) draw() float64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.rand == nil {
@@ -340,41 +352,27 @@ func (c *TailNightConfig) draw() float64 {
 // firstOfDialogue turns the tail off for the opening message: a lead who has
 // just written for the first time and waits eleven minutes is a lead who
 // leaves, and the plan excludes that case explicitly.
-func (c *TailNightConfig) ExtraDelay(now time.Time, firstOfDialogue bool) time.Duration {
-	if c == nil {
+func (c *TailDelayConfig) ExtraDelay(now time.Time, firstOfDialogue bool) time.Duration {
+	if c == nil || c.TailShare <= 0 || firstOfDialogue {
 		return 0
 	}
 	loc := c.Loc
 	if loc == nil {
 		loc = time.UTC
 	}
-	local := now.In(loc)
-	hour := local.Hour()
-
-	if hour >= nightHourFrom || hour < nightHourTo {
-		if c.NightMorningP <= 0 || c.draw() >= c.NightMorningP {
-			return 0
-		}
-		morning := time.Date(local.Year(), local.Month(), local.Day(), morningHour, 0, 0, 0, loc)
-		if hour >= nightHourFrom {
-			morning = morning.AddDate(0, 0, 1)
-		}
-		morning = morning.Add(time.Duration(c.draw() * float64(morningHourLate-morningHour) * float64(time.Hour)))
-		if d := morning.Sub(local); d > 0 {
-			return d
-		}
+	hour := now.In(loc).Hour()
+	if hour < tailHourFrom || hour >= tailHourTo {
 		return 0
 	}
-
-	if firstOfDialogue || hour < tailHourFrom || hour >= tailHourTo {
-		return 0
-	}
-	if c.TailShare <= 0 || c.draw() >= c.TailShare {
+	if c.draw() >= c.TailShare {
 		return 0
 	}
 	min, max := c.TailMin, c.TailMax
 	if min <= 0 {
 		min = tailDelayMinDefault
+	}
+	if max > tailDelayMaxCap {
+		max = tailDelayMaxCap
 	}
 	if max <= min {
 		return min
