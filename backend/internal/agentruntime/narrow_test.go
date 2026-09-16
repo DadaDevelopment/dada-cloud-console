@@ -279,3 +279,43 @@ func TestNarrowReturnHours_DefaultsToADayAndZeroStillMeansNever(t *testing.T) {
 	t.Setenv("AGENT_RUNTIME_NARROW_RETURN_HOURS", "3")
 	require.Equal(t, 3*time.Hour, runtimeFlagsFromEnv().NarrowReturnAfter)
 }
+
+// Review: narrow_since is the clock NARROW_RETURN_HOURS counts from, so a
+// second escalation must not push the return further away, and "already in
+// narrow mode" is not an error.
+func TestPGEnterNarrowMode_WritesTheMarkOnceAndKeepsIt(t *testing.T) {
+	store := pauseRetryTestStore(t)
+	ctx := context.Background()
+	conv, _, err := store.GetOrCreateConversation(ctx, "narrow-once-"+uuid.NewString(), "telegram", "9004", Actor{ExternalID: "9004"})
+	require.NoError(t, err)
+
+	require.NoError(t, store.EnterNarrowMode(ctx, conv.ID))
+	fresh, err := store.GetConversation(ctx, conv.ID)
+	require.NoError(t, err)
+	first, ok := narrowSince(fresh)
+	require.True(t, ok)
+
+	time.Sleep(1100 * time.Millisecond)
+	require.NoError(t, store.EnterNarrowMode(ctx, conv.ID), "a second hand-off is not a failure")
+	fresh, err = store.GetConversation(ctx, conv.ID)
+	require.NoError(t, err)
+	again, ok := narrowSince(fresh)
+	require.True(t, ok)
+	require.Equal(t, first, again, "the clock must not be pushed forward by a second escalation")
+
+	// A jsonb null in the key reads as "not in narrow mode" and must be
+	// writable again.
+	_, err = store.pool.Exec(ctx, `
+		UPDATE conversations SET metadata = jsonb_set(metadata, '{narrow_since}', 'null'::jsonb, true) WHERE id = $1`, conv.ID)
+	require.NoError(t, err)
+	require.NoError(t, store.EnterNarrowMode(ctx, conv.ID))
+	fresh, err = store.GetConversation(ctx, conv.ID)
+	require.NoError(t, err)
+	_, ok = narrowSince(fresh)
+	require.True(t, ok)
+}
+
+func TestNarrowSignalKey_DoesNotCollideWithAPlainSignal(t *testing.T) {
+	require.NotEqual(t, "E_OTHER", narrowSignalKey("E_OTHER"))
+	require.Equal(t, "narrow:E_OTHER", narrowSignalKey("E_OTHER"))
+}

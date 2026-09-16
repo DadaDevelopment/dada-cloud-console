@@ -88,8 +88,9 @@ func warnOnPartForm(conversationID, agentName string, parts []string) {
 	}
 }
 
-// splitTurn is the whole per-turn decision, and the caller invokes it ONLY
-// with AGENT_RUNTIME_SPLIT_REPLY on and outside the structured branch. With
+// splitForDelivery is the one place that decides whether this turn is cut at
+// all, so the decision exists once and a test can exercise the same code the
+// turn path runs. With
 // the flag off the reply is not touched at all -- not trimmed, not reglued,
 // not stripped of a stray line of dashes -- because "the default is exactly
 // today" has to mean the bytes, not just the shape.
@@ -97,6 +98,14 @@ func warnOnPartForm(conversationID, agentName string, parts []string) {
 // parts is what the gateway sends, nil when there is nothing to split; text
 // is what goes to the transcript and to any consumer that only understands
 // one message.
+func (r *Runtime) splitForDelivery(conv Conversation, reply string) (text string, parts []string) {
+	if !r.flags.SplitReply || r.structuredAgents[conv.AgentName] {
+		return reply, nil
+	}
+	return r.splitTurn(conv.ID.String(), conv.AgentName, reply)
+}
+
+// splitTurn is the cut itself; splitForDelivery owns the "should we" part.
 func (r *Runtime) splitTurn(conversationID, agentName, reply string) (text string, parts []string) {
 	pieces := splitReplyParts(reply)
 	if len(pieces) == 0 {

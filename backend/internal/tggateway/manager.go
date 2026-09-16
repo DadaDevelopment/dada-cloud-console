@@ -652,7 +652,7 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 			sleepOrDone(runCtx, extraDelay)
 			runs.markTail(convKey, runCtx, false)
 			if runCtx.Err() != nil {
-				log.Warn().Str("agent", b.AgentName).Str("conv", convKey).Str("conversation", convKey).
+				log.Warn().Str("agent", b.AgentName).Str("conv", convKey).
 					Int("delay_s", int(extraDelay.Seconds())).Int("runes", len([]rune(sendText))).
 					Msg("tggateway: reply NOT sent: client wrote during the extra delay; it stays in the runtime transcript")
 				return

@@ -26,6 +26,10 @@ import (
 // hand must still win.
 const narrowModeKey = "narrow_since"
 
+// narrowSignalKey namespaces the dedup claim of a narrow hand-off, so it
+// cannot collide with signalOperator's claim for the same reason code.
+func narrowSignalKey(reason string) string { return "narrow:" + reason }
+
 // narrowReturnHoursDefault is how long the curator owns the chat before the
 // agent goes back to answering everything. An explicit 0 still means never.
 const narrowReturnHoursDefault = 24

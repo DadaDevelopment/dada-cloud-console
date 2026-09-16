@@ -200,3 +200,28 @@ func TestPGNarrowMode_EnterAndClearReportAMissingConversation(t *testing.T) {
 	require.Error(t, store.EnterNarrowMode(ctx, uuid.New()))
 	require.Error(t, store.ClearNarrowMode(ctx, uuid.New()))
 }
+
+// Review, open item: metadata->'used_phrases' can hold the JSON literal null.
+// COALESCE does not catch it (the key IS present), and jsonb_array_elements
+// on null fails the whole statement, so the counter would stop advancing for
+// that conversation forever.
+func TestPGRecordTurnCounters_SurvivesAJsonbNullInUsedPhrases(t *testing.T) {
+	store := pauseRetryTestStore(t)
+	ctx := context.Background()
+	conv, _, err := store.GetOrCreateConversation(ctx, "counters-null-"+uuid.NewString(), "telegram", "9003", Actor{ExternalID: "9003"})
+	require.NoError(t, err)
+
+	_, err = store.pool.Exec(ctx, `
+		UPDATE conversations
+		SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{used_phrases}', 'null'::jsonb, true)
+		WHERE id = $1`, conv.ID)
+	require.NoError(t, err)
+
+	require.NoError(t, store.RecordTurnCounters(ctx, conv.ID, true, "Сколько планируете?", 3))
+
+	fresh, err := store.GetConversation(ctx, conv.ID)
+	require.NoError(t, err)
+	q, phrases := turnCounters(fresh)
+	require.Equal(t, 1, q)
+	require.Equal(t, []string{"Сколько планируете?"}, phrases)
+}

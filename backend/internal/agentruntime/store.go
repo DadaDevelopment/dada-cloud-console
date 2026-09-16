@@ -132,7 +132,9 @@ type ConversationStore interface {
 	// EnterNarrowMode marks the conversation as owned by a human curator
 	// while the agent stays enabled (plan 4.1): the timestamp goes into the
 	// same metadata JSONB idle_fired_at uses, so the mode costs no schema
-	// change. Re-entering an already narrow conversation refreshes the mark.
+	// change. The mark is written once and never refreshed: it is the clock
+	// AGENT_RUNTIME_NARROW_RETURN_HOURS counts from, so a second escalation
+	// must not push the return further away.
 	EnterNarrowMode(ctx context.Context, conversationID uuid.UUID) error
 
 	// ClearNarrowMode returns the conversation to the ordinary mode.
@@ -449,14 +451,29 @@ func (s *pgStore) EnterNarrowMode(ctx context.Context, conversationID uuid.UUID)
 				COALESCE(metadata, '{}'::jsonb), '{`+narrowModeKey+`}',
 				to_jsonb(to_char(NOW() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')), true)
 		WHERE id = $1
+		  AND COALESCE(NULLIF(metadata->'`+narrowModeKey+`', 'null'::jsonb), 'null'::jsonb) = 'null'::jsonb
 	`, conversationID)
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("enter narrow mode: conversation %s not found", conversationID)
+	if tag.RowsAffected() == 1 {
+		return nil
 	}
-	return nil
+	// Zero rows means either "already in narrow mode", which is the ordinary
+	// second call and not a failure, or "no such conversation", which is.
+	return s.requireConversation(ctx, conversationID, "enter narrow mode")
+}
+
+// requireConversation turns a zero-row write into the right answer: nil when
+// the row exists and the statement's own condition simply declined, an error
+// when the conversation is not there at all.
+func (s *pgStore) requireConversation(ctx context.Context, conversationID uuid.UUID, op string) error {
+	var exists bool
+	err := s.pool.QueryRow(ctx, `SELECT true FROM conversations WHERE id = $1`, conversationID).Scan(&exists)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("%s: conversation %s not found", op, conversationID)
+	}
+	return err
 }
 
 // ClearNarrowMode removes metadata.narrow_since.
@@ -482,6 +499,10 @@ func (s *pgStore) ClearNarrowMode(ctx context.Context, conversationID uuid.UUID)
 //
 // used_phrases is appended and trimmed in SQL as well, so the array never
 // round-trips through the process and cannot be overwritten by a stale copy.
+// The NULLIF is not decoration: metadata->'used_phrases' can hold the JSON
+// literal null (anything writing jsonb_set with 'null'), which COALESCE alone
+// does not catch because the value is present, and jsonb_array_elements on it
+// would fail the whole statement.
 func (s *pgStore) RecordTurnCounters(ctx context.Context, conversationID uuid.UUID, askedQuestion bool, closing string, keep int) error {
 	if keep < 1 {
 		keep = 1
@@ -497,7 +518,7 @@ func (s *pgStore) RecordTurnCounters(ctx context.Context, conversationID uuid.UU
 					FROM (
 						SELECT value, ord
 						FROM jsonb_array_elements(
-							COALESCE(metadata->'`+usedPhrasesKey+`', '[]'::jsonb)
+							COALESCE(NULLIF(metadata->'`+usedPhrasesKey+`', 'null'::jsonb), '[]'::jsonb)
 							|| CASE WHEN $3::text = '' THEN '[]'::jsonb ELSE jsonb_build_array($3::text) END
 						) WITH ORDINALITY AS elements(value, ord)
 						ORDER BY ord DESC
