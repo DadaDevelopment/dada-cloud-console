@@ -101,16 +101,21 @@ type Runtime struct {
 	syncPause        func(context.Context, Conversation) error
 	outbound         func(ctx context.Context, agentName, externalID, text, mediaURL string) error
 	runLocks         [256]sync.Mutex
+	recoveryDelays   []time.Duration
+	recoveryMu       sync.Mutex
+	recovering       map[uuid.UUID]bool
 }
 
 func NewRuntime(store ConversationStore, hooks HookExecutor, a2a A2AClient, domains DomainProvider) *Runtime {
 	states, _ := store.(StateStore)
 	return &Runtime{
-		states:  states,
-		store:   store,
-		hooks:   hooks,
-		a2a:     a2a,
-		domains: domains,
+		states:         states,
+		store:          store,
+		hooks:          hooks,
+		a2a:            a2a,
+		domains:        domains,
+		recoveryDelays: defaultRecoveryDelays,
+		recovering:     map[uuid.UUID]bool{},
 	}
 }
 
@@ -250,7 +255,27 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 		}
 		return MessageResponse{Suppressed: true}, nil
 	}
+	resp, err := r.runTurn(ctx, conv, state, pending, req.OnProcessing)
+	if err != nil {
+		var failure *turnFailure
+		if errors.As(err, &failure) {
+			r.scheduleRecovery(conv, err)
+		}
+		return MessageResponse{}, err
+	}
+	resp.ReplyToChannelMessageID = anchor
+	return resp, nil
+}
+
+// runTurn is the agent invocation shared by the inbound path and turn
+// recovery: skills, one a2a call with a bounded repair, persistence, the
+// completion hook and the runtime receipts. Agent-side failures (a2a errors,
+// a reply held back twice, a broken reply contract) come back wrapped in
+// turnFailure so the caller can tell them from hook failures, which pause
+// the conversation and must not be replayed.
+func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeState, pending []Message, onProcessing func()) (MessageResponse, error) {
 	var skills []string
+	var err error
 	if catalog, ok := r.domains.(DomainCatalog); ok {
 		skills, err = catalog.ListDomains(ctx, conv.AgentName)
 		if err != nil {
@@ -275,15 +300,15 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 	if r.structuredAgents[conv.AgentName] {
 		run.ConversationContext.ReplyFormat = structuredReplyFormat
 	}
-	if req.OnProcessing != nil {
-		req.OnProcessing()
+	if onProcessing != nil {
+		onProcessing()
 	}
 	var reply string
 	var after RuntimeState
 	for attempt := 0; attempt < 2; attempt++ {
 		reply, err = r.a2a.Send(ctx, run)
 		if err != nil {
-			return MessageResponse{}, fmt.Errorf("a2a send: %w", err)
+			return MessageResponse{}, &turnFailure{err: fmt.Errorf("a2a send: %w", err)}
 		}
 		after, err = r.states.GetState(ctx, conv.ID)
 		if err != nil {
@@ -305,7 +330,7 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 			log.Warn().Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Int("attempt", attempt).
 				Str("reason", reason).Int("runes", len([]rune(reply))).Msg("agentruntime: reply held back as internal monologue")
 			if attempt == 1 {
-				return MessageResponse{}, fmt.Errorf("agent reply leaked internal reasoning twice: %s", reason)
+				return MessageResponse{}, &turnFailure{err: fmt.Errorf("agent reply leaked internal reasoning twice: %s", reason)}
 			}
 			run.ConversationContext.State = after
 			run.ConversationContext.ReplyError = leakRepairMessage(reason)
@@ -317,7 +342,7 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 			break
 		}
 		if attempt == 1 {
-			return MessageResponse{}, contractErr
+			return MessageResponse{}, &turnFailure{err: contractErr}
 		}
 		// One bounded protocol repair, same agent/model/context. Never deliver the
 		// invalid draft, never restart lifecycle hooks or contact creation.
@@ -343,7 +368,7 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 		return MessageResponse{}, fmt.Errorf("runtime receipt storage is not configured")
 	}
 	r.mirrorState(ctx, conv, after, "")
-	return MessageResponse{Text: reply, ReplyToChannelMessageID: anchor}, nil
+	return MessageResponse{Text: reply}, nil
 }
 
 // linksToEntities converts gateway link metadata into the generic entity
