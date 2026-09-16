@@ -52,6 +52,8 @@ export function PromptSourceSection({
   const [error, setError] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<AgentPromptSourceSyncResult | null>(null);
   const [openSkill, setOpenSkill] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
     if (!editingExisting || !agentName) return;
@@ -59,10 +61,18 @@ export function PromptSourceSection({
     agentsApi.promptSource
       .get(projectId, envId, agentName)
       .then((data) => {
-        if (!cancelled) onSourceChange(data);
+        if (cancelled) return;
+        setLoadError(null);
+        onSourceChange(data);
       })
-      .catch(() => {
-        if (!cancelled) onSourceChange(null);
+      .catch((err: Error & { status?: number }) => {
+        if (cancelled) return;
+        if (err.status === 404) {
+          setLoadError(null);
+          onSourceChange(null);
+          return;
+        }
+        setLoadError(err.message || t("agents.modal.source.errorLoad"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -70,7 +80,7 @@ export function PromptSourceSection({
     return () => {
       cancelled = true;
     };
-  }, [projectId, envId, agentName, editingExisting, onSourceChange]);
+  }, [projectId, envId, agentName, editingExisting, onSourceChange, loadAttempt, t]);
 
   async function connect() {
     setBusy("connect");
@@ -141,6 +151,25 @@ export function PromptSourceSection({
           <Spinner size="sm" />
           {t("agents.modal.source.checking")}
         </div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div>
+        {label}
+        <p className="mt-1 text-xs text-red-600">{loadError}</p>
+        <button
+          type="button"
+          onClick={() => {
+            setLoading(true);
+            setLoadAttempt((n) => n + 1);
+          }}
+          className={`mt-2 ${buttonClass}`}
+        >
+          {t("agents.modal.source.retry")}
+        </button>
       </div>
     );
   }

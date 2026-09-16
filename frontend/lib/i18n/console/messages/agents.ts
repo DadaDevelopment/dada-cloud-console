@@ -125,6 +125,8 @@ export const agents: Messages = {
   "agents.modal.source.skills": { ru: "Навыки", en: "Skills" },
   "agents.modal.source.noSkills": { ru: "В domains/ нет файлов", en: "No files in domains/" },
   "agents.modal.source.bytes": { ru: "{bytes} Б", en: "{bytes} B" },
+  "agents.modal.source.errorLoad": { ru: "Не удалось проверить источник промпта", en: "Failed to check the prompt source" },
+  "agents.modal.source.retry": { ru: "Повторить", en: "Retry" },
   "agents.modal.source.errorSet": { ru: "Не удалось подключить источник", en: "Failed to connect the source" },
   "agents.modal.source.errorSync": { ru: "Не удалось синхронизировать", en: "Failed to sync" },
   "agents.modal.source.errorRemove": { ru: "Не удалось отключить источник", en: "Failed to disconnect the source" },
