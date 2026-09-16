@@ -2,6 +2,7 @@ package agentruntime
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,6 +41,7 @@ func TestPGDomainProviderServesSyncedSkills(t *testing.T) {
 	db := fakeSkillDB{rows: map[string]fakeSkillRow{
 		"synced": {skills: map[string]string{"withdrawal": "# W\n", "deposit": "# D\n", "": "bad"}},
 		"broken": {skills: map[string]string{"huge": strings.Repeat("x", MaxSkillContentBytes+1)}},
+		"legacy": {err: errors.New("connection refused")},
 	}}
 	root := t.TempDir()
 	dir := filepath.Join(root, "agents", "legacy", "domains")

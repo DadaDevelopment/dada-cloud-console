@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/rs/zerolog/log"
 )
 
 // SkillRowQuerier is the slice of pgxpool.Pool the database-backed skills
@@ -29,10 +30,11 @@ func NewPGDomainProvider(db SkillRowQuerier, fallback DomainProvider) DomainProv
 }
 
 const syncedSkillsSQL = `SELECT skills FROM agent_prompt_sources
-	WHERE agent_name = $1 AND synced_at IS NOT NULL
-	ORDER BY synced_at DESC
-	LIMIT 1`
+	WHERE agent_name = $1 AND synced_at IS NOT NULL`
 
+// synced returns the agent's synced skills. A database error is logged and
+// reported as "no synced source", so the turn falls back to the mounted files
+// instead of failing.
 func (p *pgDomainProvider) synced(ctx context.Context, agentName string) (map[string]string, bool, error) {
 	if !domainName.MatchString(agentName) {
 		return nil, false, fmt.Errorf("invalid agent name")
@@ -43,7 +45,8 @@ func (p *pgDomainProvider) synced(ctx context.Context, agentName string) (map[st
 		return nil, false, nil
 	}
 	if err != nil {
-		return nil, false, fmt.Errorf("skills unavailable")
+		log.Warn().Err(err).Str("agent", agentName).Msg("synced skills lookup failed, serving mounted files")
+		return nil, false, nil
 	}
 	return skills, true, nil
 }
