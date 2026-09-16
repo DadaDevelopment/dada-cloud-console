@@ -17,6 +17,7 @@ import {
   type AppAlert,
 } from "@/lib/app-alerts";
 import type { AppDiagnosis, AppVolume, ResourceSnapshot } from "@/lib/types";
+import { selectAutofixPrs } from "@/lib/autofix-pr";
 
 /**
  * Maps the watcher's raw container reason to the message key, so an
@@ -583,11 +584,7 @@ function CrashPullRequests({
       .list(projectId, envId, appName)
       .then((res) => {
         if (cancelled) return;
-        setPrs(
-          res.cloud_tasks
-            .filter((task) => !!task.pr_url)
-            .map((task) => ({ id: task.id, url: task.pr_url! })),
-        );
+        setPrs(selectAutofixPrs(res.cloud_tasks));
       })
       .catch(() => {
         if (!cancelled) setPrs([]);

@@ -1059,6 +1059,14 @@ export const apps: Messages = {
     ru: "Платформа уже открыла пул-реквест с исправлением:",
     en: "The platform already opened a pull request with a fix:",
   },
+  "apps.autofixPr.heading": {
+    ru: "Исправление уже готово — ждёт вас в пул-реквесте",
+    en: "A fix is ready and waiting in a pull request",
+  },
+  "apps.autofixPr.hint": {
+    ru: "Автофикс уже разобрал эту ошибку и предложил правку. Пересборка того же коммита ничего не изменит — сначала посмотрите и смержите пул-реквест, сборка запустится сама.",
+    en: "Auto-fix already analysed this failure and proposed a change. Rebuilding the same commit will not help — review and merge the pull request first, and the build will start on its own.",
+  },
   "apps.alerts.crash.cause.line": { ru: "Из логов:", en: "From the logs:" },
   "apps.alerts.crash.cta": { ru: "Смотреть логи", en: "View logs" },
   "apps.alerts.crash.diagnose": { ru: "Разобраться", en: "Diagnose" },

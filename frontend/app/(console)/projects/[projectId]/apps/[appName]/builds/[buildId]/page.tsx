@@ -16,6 +16,7 @@ import { trackUxEvent } from "@/lib/ux-telemetry";
 import { formatCommitLabel, resolveCommit } from "@/lib/build-commit";
 import { trackBuildStart } from "@/lib/build-watch";
 import { buildFailureDetail, buildFailureSummary, canOfferAutofix } from "@/lib/build-failure";
+import { AutofixPrNotice } from "@/components/deploy/autofix-pr-notice";
 import { getAppAlerts, type AppAlert } from "@/lib/app-alerts";
 
 /**
@@ -407,6 +408,16 @@ export default function BuildDetailPage() {
 
           {error && (
             <div className="mb-4 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">{error}</div>
+          )}
+
+          {build.status === "failed" && envId && (
+            <AutofixPrNotice
+              projectId={projectId}
+              envId={envId}
+              appName={appName}
+              surface="build_detail"
+              className="mb-4"
+            />
           )}
 
           {build.status === "success" && appCrashing && (

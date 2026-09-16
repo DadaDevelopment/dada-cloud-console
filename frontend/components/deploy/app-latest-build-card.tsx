@@ -17,6 +17,7 @@ import { useT } from "@/lib/i18n/console/context";
 import { trackUxEvent } from "@/lib/ux-telemetry";
 import { resolveCommit, formatCommitLabel } from "@/lib/build-commit";
 import { BuildProvenance } from "@/components/deploy/build-provenance";
+import { AutofixPrNotice } from "@/components/deploy/autofix-pr-notice";
 import { trackBuildStart } from "@/lib/build-watch";
 import { StarterNextStep } from "@/components/deploy/starter-next-step";
 import type { AppUrlStatus } from "@/lib/app-url-status";
@@ -381,6 +382,15 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appUrlSt
             </Link>
           </div>
         </div>
+        {envId && (
+          <AutofixPrNotice
+            projectId={projectId}
+            envId={envId}
+            appName={appName}
+            surface="app_card"
+            className="mt-3"
+          />
+        )}
         {stuck && (
           <div
             data-ux={`build_repeat_hint:${build.fail_reason ?? "unknown"}`}
