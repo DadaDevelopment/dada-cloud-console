@@ -30,15 +30,34 @@ func TestCapReplyParts_ExtraPartsFoldIntoTheLast(t *testing.T) {
 	require.Equal(t, []string{"a", "b"}, capReplyParts([]string{"a", "b"}))
 }
 
-func TestSplitTurn_FlagOffGluesAndNeverReportsParts(t *testing.T) {
+// With the flag off the turn must reach the customer byte for byte as the
+// model wrote it: splitTurn is not called at all, so nothing is trimmed,
+// reglued or stripped.
+func TestSplitTurn_FlagOffLeavesTheReplyUntouched(t *testing.T) {
 	rt := splitRuntime(t, false)
-	text, parts := rt.splitTurn("conv", "agent", "первое\n---\nвторое")
-	require.Equal(t, "первое второе", text)
-	require.Nil(t, parts, "an off flag must leave the gateway with exactly one message")
+	require.False(t, rt.flags.SplitReply)
 
-	text, parts = rt.splitTurn("conv", "agent", "обычный ответ без швов")
-	require.Equal(t, "обычный ответ без швов", text)
-	require.Nil(t, parts)
+	for _, reply := range []string{
+		"первое\n---\nвторое",
+		"  обычный ответ без швов  ",
+		"---",
+		"таблица\n---\n",
+	} {
+		reply := reply
+		text, parts := replyForDelivery(rt, "conv", "agent", reply)
+		require.Equal(t, reply, text, "an off flag must not touch a single byte")
+		require.Nil(t, parts, "an off flag must leave the gateway with exactly one message")
+	}
+}
+
+// replyForDelivery mirrors the one branch in runTurn that decides whether the
+// turn is cut at all, so the "off means untouched" promise is tested where it
+// is actually made.
+func replyForDelivery(r *Runtime, conversationID, agentName, reply string) (string, []string) {
+	if r.flags.SplitReply && !r.structuredAgents[agentName] {
+		return r.splitTurn(conversationID, agentName, reply)
+	}
+	return reply, nil
 }
 
 func TestSplitTurn_FlagOnCutsUpToThree(t *testing.T) {
@@ -56,12 +75,10 @@ func TestSplitTurn_FlagOnSingleMessageStaysSingle(t *testing.T) {
 }
 
 func TestSplitTurn_AllSeparatorsKeepTheOriginal(t *testing.T) {
-	for _, on := range []bool{false, true} {
-		rt := splitRuntime(t, on)
-		text, parts := rt.splitTurn("conv", "agent", "---")
-		require.Equal(t, "---", text)
-		require.Nil(t, parts)
-	}
+	rt := splitRuntime(t, true)
+	text, parts := rt.splitTurn("conv", "agent", "---")
+	require.Equal(t, "---", text)
+	require.Nil(t, parts)
 }
 
 func TestSplitTurn_LongPartAndMixedLinkOnlyWarn(t *testing.T) {

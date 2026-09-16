@@ -422,7 +422,7 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 	// structured-reply branch (reply_contract.go) is out of scope by
 	// decision, so it never splits.
 	var parts []string
-	if !r.structuredAgents[conv.AgentName] {
+	if r.flags.SplitReply && !r.structuredAgents[conv.AgentName] {
 		reply, parts = r.splitTurn(conv.ID.String(), conv.AgentName, reply)
 	}
 	if _, err := r.store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "assistant", Content: reply}); err != nil {

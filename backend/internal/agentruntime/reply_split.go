@@ -88,22 +88,21 @@ func warnOnPartForm(conversationID, agentName string, parts []string) {
 	}
 }
 
-// splitTurn is the whole per-turn decision. parts is what the gateway sends
-// (nil when there is nothing to split or the flag is off, so an unchanged
-// gateway and an unchanged envelope are exactly today's behaviour); text is
-// what goes to the transcript and to any consumer that only understands one
-// message.
+// splitTurn is the whole per-turn decision, and the caller invokes it ONLY
+// with AGENT_RUNTIME_SPLIT_REPLY on and outside the structured branch. With
+// the flag off the reply is not touched at all -- not trimmed, not reglued,
+// not stripped of a stray line of dashes -- because "the default is exactly
+// today" has to mean the bytes, not just the shape.
+//
+// parts is what the gateway sends, nil when there is nothing to split; text
+// is what goes to the transcript and to any consumer that only understands
+// one message.
 func (r *Runtime) splitTurn(conversationID, agentName, reply string) (text string, parts []string) {
 	pieces := splitReplyParts(reply)
 	if len(pieces) == 0 {
 		// Nothing but separators: keep the model's own text rather than
 		// silently turning the turn into a blank message.
 		return reply, nil
-	}
-	if !r.flags.SplitReply {
-		// native.45: the prompt does not mark seams, and a stray separator
-		// must not reach the customer as a line of dashes.
-		return glueReplyParts(pieces), nil
 	}
 	pieces = capReplyParts(pieces)
 	warnOnPartForm(conversationID, agentName, pieces)
