@@ -14,7 +14,7 @@ RUN printf '%s\n' \
       https://dl-cdn.alpinelinux.org/alpine/v3.19/main \
       https://dl-cdn.alpinelinux.org/alpine/v3.19/community \
       > /etc/apk/repositories \
- && { for i in 1 2 3; do apk add --no-cache ca-certificates openssh-client && exit 0; sleep 3; done; exit 1; }
+ && { for i in 1 2 3; do timeout 120 apk add --no-cache ca-certificates openssh-client && exit 0; sleep 3; done; exit 1; }
 
 COPY --from=terraform /bin/terraform /usr/local/bin/terraform
 COPY bin/portainer-agent /portainer-agent
