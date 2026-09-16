@@ -472,6 +472,10 @@ func SetupRouterWithHandler(pool *pgxpool.Pool, cfg *config.Config) (*gin.Engine
 		api.GET("/projects/:projectId/environments/:envId/agents", h.ListAgents)
 		api.POST("/projects/:projectId/environments/:envId/agents", h.SaveAgent)
 		api.DELETE("/projects/:projectId/environments/:envId/agents/:name", h.DeleteAgent)
+		api.GET("/projects/:projectId/environments/:envId/agents/:name/prompt-source", h.GetAgentPromptSource)
+		api.PUT("/projects/:projectId/environments/:envId/agents/:name/prompt-source", h.SetAgentPromptSource)
+		api.DELETE("/projects/:projectId/environments/:envId/agents/:name/prompt-source", h.DeleteAgentPromptSource)
+		api.POST("/projects/:projectId/environments/:envId/agents/:name/prompt-source/sync", h.SyncAgentPromptSource)
 
 		// AppServers (VM track)
 		api.GET("/projects/:projectId/app-servers", h.ListAppServers)

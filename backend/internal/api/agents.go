@@ -206,6 +206,11 @@ func (h *Handler) SaveAgent(c *gin.Context) {
 		return
 	}
 
+	promptFromSource := false
+	if prompt, version, ok := h.promptSourceOverride(c.Request.Context(), projectID, envID, req.Name); ok {
+		req.Prompt, req.PromptVersion, promptFromSource = prompt, version, true
+	}
+
 	if problems := validateAgentDraft(req); len(problems) > 0 {
 		reject(http.StatusBadRequest, "invalid_agent", gin.H{"valid": false, "errors": problems})
 		return
@@ -286,9 +291,10 @@ func (h *Handler) SaveAgent(c *gin.Context) {
 	}
 
 	audit(op.ID, auditOutcomeSuccess, map[string]any{
-		"prompt_version": req.PromptVersion,
-		"tools":          len(req.Tools),
-		"prompt_bytes":   len(req.Prompt),
+		"prompt_version":     req.PromptVersion,
+		"tools":              len(req.Tools),
+		"prompt_bytes":       len(req.Prompt),
+		"prompt_from_source": promptFromSource,
 	})
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "agent save queued"})
 }
