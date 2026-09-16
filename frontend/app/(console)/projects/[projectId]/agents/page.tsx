@@ -5,11 +5,13 @@ import { agentsApi } from "@/lib/api";
 import type {
   AgentDraft,
   AgentFieldError,
+  AgentPromptSource,
   AgentState,
   AgentTelegramBinding,
   AgentToolServer,
   ResourceSnapshot,
 } from "@/lib/types";
+import { PromptSourceSection } from "@/components/agents/prompt-source-section";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
@@ -72,6 +74,8 @@ export default function AgentsPage() {
   const [tgToken, setTgToken] = useState("");
   const [tgSubmitting, setTgSubmitting] = useState(false);
   const [tgError, setTgError] = useState<string | null>(null);
+  const [promptSource, setPromptSource] = useState<AgentPromptSource | null>(null);
+  const promptFromSource = promptSource !== null && promptSource.synced_at !== null;
 
   const load = useCallback(() => {
     return agentsApi.list(projectId, selectedEnvId).then((data) => setAgents(data.agents ?? []));
@@ -178,6 +182,7 @@ export default function AgentsPage() {
     setFieldErrors([]);
     setSubmitError(null);
     resetTelegramSection(false);
+    setPromptSource(null);
     setIsEditorOpen(true);
   }
 
@@ -187,6 +192,7 @@ export default function AgentsPage() {
     setFieldErrors([]);
     setSubmitError(null);
     resetTelegramSection(true);
+    setPromptSource(null);
     setIsEditorOpen(true);
   }
 
@@ -230,8 +236,8 @@ export default function AgentsPage() {
       name: form.name.trim(),
       display_name: form.display_name.trim() || undefined,
       description: form.description.trim() || undefined,
-      prompt: form.prompt,
-      prompt_version: form.prompt_version.trim() || undefined,
+      prompt: promptFromSource ? promptSource.prompt : form.prompt,
+      prompt_version: promptFromSource ? promptSource.prompt_version : form.prompt_version.trim() || undefined,
       model_config: form.model_config.trim() || undefined,
       tools: [...form.tools.map((name) => ({ name })), ...form.customTools.map(customToolToRef)],
       env: parseEnvLines(form.env),
@@ -498,33 +504,57 @@ export default function AgentsPage() {
             />
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-              {t("agents.modal.prompt")}
-            </label>
-            <textarea
-              value={form.prompt}
-              onChange={(e) => change("prompt", e.target.value)}
-              required
-              rows={8}
-              className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 font-mono text-sm"
-            />
-            <p className="mt-1 text-xs text-gray-400">{t("agents.modal.promptHint")}</p>
-            {errorFor("prompt") && <p className="mt-1 text-xs text-red-600">{errorFor("prompt")}</p>}
-          </div>
+          <PromptSourceSection
+            key={editingExisting ? form.name : ""}
+            projectId={projectId}
+            envId={selectedEnvId}
+            agentName={form.name}
+            editingExisting={editingExisting}
+            canWrite={canWrite}
+            source={promptSource}
+            onSourceChange={setPromptSource}
+          />
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          {promptFromSource ? (
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                {t("agents.modal.promptVersion")}
+                {t("agents.modal.prompt")}
               </label>
-              <input
-                value={form.prompt_version}
-                onChange={(e) => change("prompt_version", e.target.value)}
+              <p className="mt-1 text-xs text-gray-400">
+                {t("agents.modal.source.promptReadOnly", { path: promptSource.path, repo: promptSource.repo_full_name })}
+              </p>
+            </div>
+          ) : (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {t("agents.modal.prompt")}
+              </label>
+              <textarea
+                value={form.prompt}
+                onChange={(e) => change("prompt", e.target.value)}
+                required
+                rows={8}
                 className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 font-mono text-sm"
               />
-              <p className="mt-1 text-xs text-gray-400">{t("agents.modal.promptVersionHint")}</p>
+              <p className="mt-1 text-xs text-gray-400">{t("agents.modal.promptHint")}</p>
+              {errorFor("prompt") && <p className="mt-1 text-xs text-red-600">{errorFor("prompt")}</p>}
             </div>
+          )}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            {!promptFromSource && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {t("agents.modal.promptVersion")}
+                </label>
+                <input
+                  value={form.prompt_version}
+                  onChange={(e) => change("prompt_version", e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 font-mono text-sm"
+                />
+                <p className="mt-1 text-xs text-gray-400">{t("agents.modal.promptVersionHint")}</p>
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                 {t("agents.modal.modelConfig")}
