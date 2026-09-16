@@ -1,6 +1,8 @@
 package agentruntime
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -54,4 +56,30 @@ func TestIsSilenceReply(t *testing.T) {
 	require.True(t, isSilenceReply("SKIP"))
 	require.True(t, isSilenceReply("skip."))
 	require.False(t, isSilenceReply("Принял"))
+}
+
+// Review L2: a recovered turn keeps the shape the runtime gave it.
+func TestOutboundTexts_PrefersThePartsOverTheGluedTurn(t *testing.T) {
+	require.Equal(t, []string{"раз", "два"}, outboundTexts(MessageResponse{Text: "раз два", Messages: []string{"раз", "два"}}))
+	require.Equal(t, []string{"один ответ"}, outboundTexts(MessageResponse{Text: "один ответ"}))
+	require.Equal(t, []string{""}, outboundTexts(MessageResponse{}))
+}
+
+// The same through the real recovery path: the first turn fails, the retry
+// succeeds with a cut-up reply, and every part is delivered in order.
+func TestPGTurnRecovery_DeliversEveryPartOfARecoveredSeries(t *testing.T) {
+	t.Setenv("AGENT_RUNTIME_SPLIT_REPLY", "1")
+	f := newRecoveryFixture(t, func(calls int, _ AgentRunRequest) (string, error) {
+		if calls == 1 {
+			return "", errors.New("a2a task did not complete: failed: Error code: 429")
+		}
+		return "Принял.\n---\nСчёт открыли?", nil
+	})
+
+	_, err := f.srv.runtime.ProcessMessage(context.Background(), f.request("1", "готово"))
+	require.Error(t, err)
+
+	require.Eventually(t, func() bool { return len(f.delivered()) == 2 }, 5*time.Second, 10*time.Millisecond)
+	require.Equal(t, []string{"Принял.", "Счёт открыли?"}, f.delivered())
+	require.Equal(t, []string{"Принял. Счёт открыли?"}, f.assistantMessages(t), "the transcript keeps one row per turn")
 }

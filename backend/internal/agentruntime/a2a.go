@@ -37,6 +37,9 @@ type httpA2AClient struct {
 // Both are overridable (plan 4.3): AGENT_RUNTIME_TASK_RETRY_PAUSE_MS and
 // AGENT_RUNTIME_TASK_RETRIES. The defaults are the numbers that were compiled
 // in before, so an unset environment behaves exactly as it did.
+// AGENT_RUNTIME_TASK_RETRIES=0 switches the retries off entirely: the first
+// failed or ask_user task ends the turn, which then goes to turn_recovery
+// like any other agent-side failure.
 const (
 	failedTaskRetryPause = 3 * time.Second
 	failedTaskRetries    = 3
