@@ -86,9 +86,14 @@ type RuntimeActor struct {
 }
 
 type RuntimeMessageResponse struct {
-	Text                    string `json:"text"`
-	ReplyToChannelMessageID string `json:"reply_to_channel_message_id,omitempty"`
-	Suppressed              bool   `json:"suppressed,omitempty"`
+	Text string `json:"text"`
+	// Messages is the same turn already cut into the messages a person would
+	// have sent (agent-runtime plan 3.1). Absent unless the runtime's split
+	// flag is on; Text always carries the whole turn, so a gateway that
+	// ignores this field behaves exactly as before.
+	Messages                []string `json:"messages,omitempty"`
+	ReplyToChannelMessageID string   `json:"reply_to_channel_message_id,omitempty"`
+	Suppressed              bool     `json:"suppressed,omitempty"`
 }
 
 type httpRuntimeClient struct {

@@ -436,6 +436,11 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 	if cfg != nil {
 		pacing = cfg.Pacing
 	}
+	// TG_GATEWAY_SPLIT_REPLY[_<AGENT>]=1 lets a turn the runtime already cut
+	// into messages leave as a series (plan 3.1). Off, resp.Messages is
+	// ignored and the whole turn goes out as the single Text message, which
+	// is what happens today and what happens for a runtime that never cuts.
+	splitReply := envStrFor("TG_GATEWAY_SPLIT_REPLY", b.AgentName) == "1"
 
 	// One line per poller, naming the agent and the settings that decide what
 	// it will do. Without it a bot that never speaks is indistinguishable from
@@ -452,6 +457,7 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		Int("hourly_budget", policy.HourlyBudget).
 		Bool("observer", observer != nil).
 		Bool("pacing", pacing != nil).
+		Bool("split_reply", splitReply).
 		Str("vision_model", mediaCfg.VisionModel).
 		Str("whisper", mediaCfg.WhisperBaseURL).
 		Msg("tggateway: poller started")
@@ -610,32 +616,68 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 			}
 			return
 		}
-		if pacing != nil {
-			stopTyping := startTyping(runCtx, tg, b.BotToken, chatID)
-			sleepOrDone(runCtx, pacing.TypingFor(sendText))
-			stopTyping()
+		parts := []string{sendText}
+		if splitReply && !wantsButton {
+			if series := sendableParts(resp.Messages); len(series) > 1 {
+				parts = series
+			}
 		}
-		var sendErr error
-		switch {
-		case wantsButton:
-			sendErr = tg.SendMessageWithLocationButton(ctx, b.BotToken, chatID, sendText)
-		default:
-			anchor := ""
-			if inGroup {
-				anchor = resp.ReplyToChannelMessageID
-				if anchor == "" {
-					anchor = lastBatchChannelID(batch)
+		anchor := ""
+		if inGroup {
+			anchor = resp.ReplyToChannelMessageID
+			if anchor == "" {
+				anchor = lastBatchChannelID(batch)
+			}
+		}
+		// A series is announced to the interrupt state so a client message
+		// landing between two parts drops what has not gone out yet. What is
+		// already sent is never unsent, and the first part is never held back:
+		// by then the run has won its claim.
+		if len(parts) > 1 {
+			runs.markTail(convKey, true)
+			defer runs.markTail(convKey, false)
+		}
+		for i, part := range parts {
+			if i > 0 {
+				if runCtx.Err() != nil {
+					log.Info().Str("agent", b.AgentName).Str("conv", convKey).Int("sent", i).Int("planned", len(parts)).
+						Msg("tggateway: client wrote mid-series, unsent tail dropped")
+					return
+				}
+				gap := pacingGapMinDefault
+				if pacing != nil {
+					gap = pacing.GapFor()
+				}
+				sleepOrDone(runCtx, gap)
+				if runCtx.Err() != nil {
+					log.Info().Str("agent", b.AgentName).Str("conv", convKey).Int("sent", i).Int("planned", len(parts)).
+						Msg("tggateway: client wrote mid-series, unsent tail dropped")
+					return
 				}
 			}
-			if replyTo, parseErr := strconv.ParseInt(anchor, 10, 64); parseErr == nil && replyTo > 0 {
-				sendErr = tg.SendMessageReply(ctx, b.BotToken, chatID, replyTo, sendText)
-			} else {
-				sendErr = tg.SendMessage(ctx, b.BotToken, chatID, sendText)
+			if i == len(parts)-1 && len(parts) > 1 {
+				runs.markTail(convKey, false)
 			}
-		}
-		if sendErr != nil {
-			log.Warn().Err(sendErr).Str("agent", b.AgentName).Msg("tggateway: reply send failed")
-			return
+			if pacing != nil {
+				stopTyping := startTyping(runCtx, tg, b.BotToken, chatID)
+				sleepOrDone(runCtx, pacing.TypingFor(part))
+				stopTyping()
+			}
+			var sendErr error
+			switch {
+			case wantsButton:
+				sendErr = tg.SendMessageWithLocationButton(ctx, b.BotToken, chatID, part)
+			default:
+				if replyTo, parseErr := strconv.ParseInt(anchor, 10, 64); parseErr == nil && replyTo > 0 && i == 0 {
+					sendErr = tg.SendMessageReply(ctx, b.BotToken, chatID, replyTo, part)
+				} else {
+					sendErr = tg.SendMessage(ctx, b.BotToken, chatID, part)
+				}
+			}
+			if sendErr != nil {
+				log.Warn().Err(sendErr).Str("agent", b.AgentName).Int("part", i+1).Msg("tggateway: reply send failed")
+				return
+			}
 		}
 		if inGroup {
 			policy.Charge(convKey)

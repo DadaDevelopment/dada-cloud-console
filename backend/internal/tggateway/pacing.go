@@ -41,6 +41,8 @@ type PacingConfig struct {
 	MinTyping      time.Duration
 	MaxTyping      time.Duration
 	JitterSigma    float64
+	GapMin         time.Duration
+	GapMax         time.Duration
 
 	mu   sync.Mutex
 	rand *rand.Rand
@@ -55,6 +57,12 @@ const (
 	pacingJitterSigmaDefault = 0.45
 	pacingJitterFloor        = 0.4
 	pacingJitterCeiling      = 2.5
+	// pacingGapMin/Max bound the silence BETWEEN the messages of one split
+	// turn (plan 3.1). It is not the quiet window: the client is not typing,
+	// the bot is finishing a thought, and the live line's own within-series
+	// gaps sit in this range.
+	pacingGapMinDefault = 10 * time.Second
+	pacingGapMaxDefault = 40 * time.Second
 )
 
 var (
@@ -84,6 +92,8 @@ func PacingFromEnv() *PacingConfig {
 		MinTyping:      pacingMinTypingDefault,
 		MaxTyping:      envDurationMS("TG_GATEWAY_PACING_MAX_TYPING_MS", pacingMaxTypingDefault),
 		JitterSigma:    pacingJitterSigmaDefault,
+		GapMin:         envDurationMS("TG_GATEWAY_PACING_GAP_MIN_MS", pacingGapMinDefault),
+		GapMax:         envDurationMS("TG_GATEWAY_PACING_GAP_MAX_MS", pacingGapMaxDefault),
 	}
 	if cpm, err := strconv.Atoi(os.Getenv("TG_GATEWAY_PACING_CPM")); err == nil && cpm > 0 {
 		p.CharsPerMinute = cpm
@@ -165,6 +175,30 @@ func (p *PacingConfig) TypingFor(reply string) time.Duration {
 	return typing
 }
 
+// GapFor is the pause between two messages of one split turn: uniform over
+// [GapMin, GapMax]. Uniform rather than log-normal on purpose -- the point of
+// the gap is that no two series look alike, and a heavy tail here would leave
+// half a thought hanging for minutes.
+func (p *PacingConfig) GapFor() time.Duration {
+	min, max := p.GapMin, p.GapMax
+	if min <= 0 {
+		min = pacingGapMinDefault
+	}
+	if max <= min {
+		max = min
+	}
+	if max == min {
+		return min
+	}
+	p.mu.Lock()
+	if p.rand == nil {
+		p.rand = rand.New(rand.NewSource(time.Now().UnixNano()))
+	}
+	span := p.rand.Int63n(int64(max - min))
+	p.mu.Unlock()
+	return min + time.Duration(span)
+}
+
 // jitter draws a log-normal multiplier clamped to [pacingJitterFloor,
 // pacingJitterCeiling]: the live line's spread is what keeps replies out of
 // one predictable corridor, but a x10 outlier on a "да" would read as a
@@ -189,4 +223,20 @@ func (p *PacingConfig) jitter() float64 {
 		return pacingJitterCeiling
 	}
 	return factor
+}
+
+// sendableParts cleans the runtime's series the same way a single reply is
+// cleaned, and drops the parts that end up empty (a silence marker, a part
+// that was only whitespace). Fewer than two usable parts means there is no
+// series to send and the caller falls back to the whole turn.
+func sendableParts(messages []string) []string {
+	out := make([]string, 0, len(messages))
+	for _, m := range messages {
+		text, _ := splitLocationButtonMarker(sanitizeModelReply(m))
+		if isSilence(text) || strings.TrimSpace(text) == "" {
+			continue
+		}
+		out = append(out, text)
+	}
+	return out
 }

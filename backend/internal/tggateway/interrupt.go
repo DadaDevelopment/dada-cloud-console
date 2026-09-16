@@ -25,7 +25,12 @@ type runGenKey struct{}
 // run is answering, handed back by cancelUnclaimed so a message that lands
 // mid-generation restarts the run over the whole thought instead of
 // losing its first half. claimed flips once the run has won the right to
-// send: from then on a new message can no longer unsend it.
+// send: from then on a new message can no longer unsend it. tail is the one
+// exception (plan 3.1a): while a claimed run is still sending the later
+// messages of a series, a new client message cancels what has not gone out
+// yet -- the client has moved on, and a person would not keep typing out the
+// rest of a thought the client already answered. What was already sent is
+// never unsent.
 type chatRun struct {
 	mu      sync.Mutex
 	gen     int
@@ -33,6 +38,7 @@ type chatRun struct {
 	doneCh  chan struct{}
 	batch   []TelegramUpdate
 	claimed bool
+	tail    bool
 }
 
 // interruptState is the per-poller run tracking that implements the
@@ -99,6 +105,7 @@ func (s *interruptState) begin(convKey string, parent context.Context, batch []T
 	run.doneCh = make(chan struct{})
 	run.batch = full
 	run.claimed = false
+	run.tail = false
 	myGen := run.gen
 	myCh := run.doneCh
 	run.mu.Unlock()
@@ -147,6 +154,21 @@ func (s *interruptState) claimReply(convKey string, runCtx context.Context) bool
 	return true
 }
 
+// markTail declares whether the run owning convKey still has unsent messages
+// of a series. Only a split reply ever sets it; a single-message run leaves
+// it false and behaves exactly as before.
+func (s *interruptState) markTail(convKey string, pending bool) {
+	s.mu.Lock()
+	run, ok := s.runs[convKey]
+	s.mu.Unlock()
+	if !ok {
+		return
+	}
+	run.mu.Lock()
+	run.tail = pending
+	run.mu.Unlock()
+}
+
 // cancelUnclaimed is the poll loop's half of the mid-generation restart: a
 // new message for a chat whose run is still at the agent cancels that run
 // and takes its batch back, so the caller can enqueue the old messages
@@ -165,7 +187,17 @@ func (s *interruptState) cancelUnclaimed(convKey string) []TelegramUpdate {
 
 	run.mu.Lock()
 	defer run.mu.Unlock()
-	if run.cancel == nil || run.claimed {
+	if run.cancel == nil {
+		return nil
+	}
+	if run.claimed {
+		// A claimed run mid-series: drop the unsent tail, but do not carry
+		// its batch back -- part of the answer is already in the chat, and
+		// re-running the whole thought would duplicate it.
+		if run.tail {
+			run.tail = false
+			run.cancel()
+		}
 		return nil
 	}
 	run.cancel()
