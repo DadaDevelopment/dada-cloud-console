@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/gin-gonic/gin"
@@ -32,6 +33,28 @@ var escalationReasons = map[string]string{
 	"E_SECOND_PERSON":       "в диалоге второй человек",
 	"E_OTHER":               "другое",
 }
+
+// escalationHandsOff lists the reasons where a person genuinely takes the
+// chat over (the curator after a deposit or a referral check, money in
+// flight, a stranger on the account): the agent pauses and client_message is
+// its last line. Every other reason is a signal: the operator gets the same
+// card, but the agent keeps the dialogue alive. QA 2026-09-15 showed the
+// paused state as a polite dead end ("Коллега уже в курсе, ответит здесь"
+// on every further question) while no second line was actually answering,
+// and both dead chats that day were E_DISTRUST.
+var escalationHandsOff = map[string]bool{
+	"E_DEPOSIT_HANDOFF":     true,
+	"E_PAYMENT_UNCONFIRMED": true,
+	"E_SECOND_PERSON":       true,
+	"E_OTHER":               true,
+}
+
+// escalationSignalWindow is how long one signalled reason stays claimed:
+// the same customer pushing on the same point within the window does not
+// page the operator again.
+const escalationSignalWindow = 6 * time.Hour
+
+const escalationSignalNext = "Operator notified, agent stays live. Answer the customer yourself now: a fact from the KB, an honest refusal, or note the question and return to the deal. Do not promise a colleague."
 
 // clientMessageFeminineVerbs is the same list qa/tools/corpus_voice.py's FEM
 // regex flags in the main reply channel (S92 class): the agent's persona is
@@ -213,6 +236,10 @@ func (n *OperatorNotifier) Notify(ctx context.Context, conv Conversation, text s
 // the model wrote, then the facts and open questions the runtime holds so a
 // thin model summary still leaves the operator with the state.
 func escalationCard(title string, conv Conversation, reason, summary string, state RuntimeState) string {
+	return escalationCardWithFooter(title, conv, reason, summary, state, "Агент на паузе, дальше пишет человек.")
+}
+
+func escalationCardWithFooter(title string, conv Conversation, reason, summary string, state RuntimeState, footer string) string {
 	var b strings.Builder
 	b.WriteString(title)
 	b.WriteString("\n")
@@ -251,7 +278,7 @@ func escalationCard(title string, conv Conversation, reason, summary string, sta
 			b.WriteString("- " + line + "\n")
 		}
 	}
-	b.WriteString("\nАгент на паузе, дальше пишет человек.")
+	b.WriteString("\n" + footer)
 	return b.String()
 }
 
@@ -311,6 +338,10 @@ func (s *Server) handleEscalate(c *gin.Context) {
 		rejectControl(c, "empty_summary", "empty escalation summary", "Write for the operator: what the customer wants, what is known, what is unclear, what you tried, how the customer feels.")
 		return
 	}
+	if !escalationHandsOff[req.ReasonCode] {
+		s.signalOperator(c, conv, req.ReasonCode, req.Summary)
+		return
+	}
 	req.ClientMessage = fixClientMessageGender(req.ClientMessage)
 	if clientMessageEchoesSummary(req.ClientMessage, req.Summary) {
 		rejectControl(c, "client_message_echoes_summary", "client_message duplicates the operator summary",
@@ -337,6 +368,34 @@ func (s *Server) handleEscalate(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"agent_enabled": false, "client_notified": clientTold, "operator_notified": notified, "crm_status_sync": state.CRMStatusSync, "state_version": state.Version})
+}
+
+// signalOperator is the non-pausing branch of handleEscalate: the card goes
+// to the operator once per reason per window, the summary is mirrored to the
+// CRM, and the reply the model writes after this call reaches the customer
+// as usual because the conversation stays enabled.
+func (s *Server) signalOperator(c *gin.Context, conv Conversation, reason, summary string) {
+	ctx := c.Request.Context()
+	state, err := s.runtime.states.GetState(ctx, conv.ID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "state unavailable"})
+		return
+	}
+	claimed, err := s.runtime.store.ClaimEscalationSignal(ctx, conv.ID, reason, escalationSignalWindow)
+	if err != nil {
+		log.Warn().Err(err).Str("conversation", conv.ID.String()).Str("reason", reason).Msg("agentruntime: escalation signal claim failed")
+		claimed = true
+	}
+	notified := false
+	if claimed && s.operator != nil {
+		card := escalationCardWithFooter("🔔 Сигнал оператору", conv, reason, summary, state, "Агент продолжает диалог сам; пауза только вручную.")
+		notified = s.operator.Notify(ctx, conv, card) == nil
+	}
+	s.runtime.mirrorState(ctx, conv, state, summary)
+	log.Info().Str("conversation", conv.ID.String()).Str("reason", reason).Bool("claimed", claimed).Bool("operator_notified", notified).
+		Msg("agentruntime: escalation signal, agent stays live")
+	c.JSON(http.StatusOK, gin.H{"agent_enabled": true, "mode": "signal", "client_notified": false, "operator_notified": notified,
+		"already_signalled": !claimed, "next": escalationSignalNext, "state_version": state.Version})
 }
 
 const escalationClientLine = "По этому вопросу вам напишет коллега"

@@ -123,6 +123,12 @@ type ConversationStore interface {
 	// the current pause.
 	ClaimEscalationAck(ctx context.Context, conversationID uuid.UUID) (bool, error)
 
+	// ClaimEscalationSignal records that the operator was signalled about
+	// reason for a conversation that stays live. true means this caller won
+	// the claim and sends the card; false means the same reason was already
+	// signalled within the dedup window, so the operator is not paged again.
+	ClaimEscalationSignal(ctx context.Context, conversationID uuid.UUID, reason string, window time.Duration) (bool, error)
+
 	// FinishConversation retires a conversation without deleting it: history and
 	// state rows stay for audit, but the identity tuple is released so the next
 	// inbound message from the same user opens a fresh conversation.
@@ -427,6 +433,26 @@ func (s *pgStore) ClaimEscalationAck(ctx context.Context, conversationID uuid.UU
 				to_jsonb(to_char(NOW() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')), true)
 		WHERE id = $1 AND COALESCE(metadata->>'escalation_ack_sent_at', '') = ''
 	`, conversationID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// ClaimEscalationSignal keeps one timestamp per reason under
+// metadata.escalation_signals; the WHERE clause is the claim, same pattern
+// as ClaimEscalationAck.
+func (s *pgStore) ClaimEscalationSignal(ctx context.Context, conversationID uuid.UUID, reason string, window time.Duration) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE conversations SET metadata = jsonb_set(
+				jsonb_set(COALESCE(metadata, '{}'::jsonb), '{escalation_signals}',
+					COALESCE(metadata->'escalation_signals', '{}'::jsonb), true),
+				ARRAY['escalation_signals', $2],
+				to_jsonb(to_char(NOW() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')), true)
+		WHERE id = $1 AND (
+			COALESCE(metadata->'escalation_signals'->>$2, '') = ''
+			OR (metadata->'escalation_signals'->>$2)::timestamptz < NOW() - $3 * interval '1 second')
+	`, conversationID, reason, window.Seconds())
 	if err != nil {
 		return false, err
 	}
