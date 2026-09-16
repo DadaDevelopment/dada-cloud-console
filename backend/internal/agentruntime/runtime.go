@@ -271,11 +271,8 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 		}
 		return MessageResponse{Suppressed: true}, nil
 	}
-	if r.flags.NarrowEscalation {
-		resp, handled, err := r.narrowGate(ctx, conv, state, pending)
-		if handled || err != nil {
-			return resp, err
-		}
+	if resp, handled, err := r.narrowStage(ctx, conv, state, pending); handled || err != nil {
+		return resp, err
 	}
 	resp, err := r.runTurn(ctx, conv, state, pending, turnOptions{onProcessing: req.OnProcessing, delaySeconds: req.DelaySeconds})
 	if err != nil {

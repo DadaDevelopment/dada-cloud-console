@@ -26,6 +26,10 @@ import (
 // hand must still win.
 const narrowModeKey = "narrow_since"
 
+// narrowReturnHoursDefault is how long the curator owns the chat before the
+// agent goes back to answering everything. An explicit 0 still means never.
+const narrowReturnHoursDefault = 24
+
 // narrowTopicPatterns is the white list from plan 4.1: commission/fees,
 // withdrawal, MT5 and verification/KYC. These are the questions whose answer
 // is a fixed fact from the KB, so answering them cannot contradict whatever
@@ -129,6 +133,33 @@ func (r *Runtime) markPendingHandled(ctx context.Context, convID uuid.UUID) erro
 // narrowCardFooter is what the operator reads under a card raised by a
 // message the agent deliberately did not answer.
 const narrowCardFooter = "Агент в узком режиме: отвечает сам только по списку тем, остальное ждёт вас."
+
+// liftNarrowMode is the other half of the flag being a real switch: with
+// AGENT_RUNTIME_NARROW_ESCALATION off, narrowGate never runs, so a
+// conversation marked while the flag was on would stay marked forever and
+// silently take the gate again the moment anyone turned the flag back on.
+// Turning the flag off therefore clears the mark on the conversation's next
+// turn.
+func (r *Runtime) liftNarrowMode(ctx context.Context, conv Conversation) {
+	if _, ok := narrowSince(conv); !ok {
+		return
+	}
+	if err := r.store.ClearNarrowMode(ctx, conv.ID); err != nil {
+		log.Warn().Err(err).Str("conversation", conv.ID.String()).Msg("agentruntime: narrow mode not lifted after the flag went off")
+		return
+	}
+	log.Info().Str("conversation", conv.ID.String()).Msg("agentruntime: narrow escalation is off, narrow mode lifted")
+}
+
+// narrowStage is what both the inbound path and the recovery replay call:
+// the gate while the flag is on, the cleanup while it is off.
+func (r *Runtime) narrowStage(ctx context.Context, conv Conversation, state RuntimeState, pending []Message) (MessageResponse, bool, error) {
+	if !r.flags.NarrowEscalation {
+		r.liftNarrowMode(ctx, conv)
+		return MessageResponse{}, false, nil
+	}
+	return r.narrowGate(ctx, conv, state, pending)
+}
 
 // narrowGate is the inbound half of the narrow mode. handled=true means the
 // turn is over: the customer's message is recorded and shown to the operator,

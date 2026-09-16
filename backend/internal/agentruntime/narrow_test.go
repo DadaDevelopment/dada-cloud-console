@@ -65,7 +65,7 @@ func TestRuntimeFlags_NarrowDefaultsAreTodaysBehaviour(t *testing.T) {
 	f := runtimeFlagsFromEnv()
 	require.False(t, f.NarrowEscalation)
 	require.False(t, f.SeamlessHandoff)
-	require.Zero(t, f.NarrowReturnAfter)
+	require.Equal(t, narrowReturnHoursDefault*time.Hour, f.NarrowReturnAfter)
 	require.NotEmpty(t, f.NarrowTopics)
 }
 
@@ -249,4 +249,33 @@ func TestPGNarrowHandoff_SecondEscalateDoesNotRepeatTheClientLine(t *testing.T) 
 	require.NoError(t, err)
 	_, inNarrow := narrowSince(conv)
 	require.True(t, inNarrow)
+}
+
+// Review M4: turning the flag off must actually turn the mode off, not just
+// stop the gate from looking at it.
+func TestNarrowStage_FlagOffLiftsAMarkLeftBehind(t *testing.T) {
+	store := &narrowStore{}
+	rt := &Runtime{store: store, flags: runtimeFlags{NarrowEscalation: false}}
+
+	_, handled, err := rt.narrowStage(context.Background(), narrowConv("2026-09-16T10:00:00Z"), RuntimeState{}, []Message{{Content: "ну что там"}})
+	require.NoError(t, err)
+	require.False(t, handled, "with the flag off the turn is answered as usual")
+	require.Equal(t, 1, store.cleared)
+
+	_, handled, err = rt.narrowStage(context.Background(), narrowConv(""), RuntimeState{}, []Message{{Content: "ну что там"}})
+	require.NoError(t, err)
+	require.False(t, handled)
+	require.Equal(t, 1, store.cleared, "a conversation that was never narrow is not written to")
+}
+
+func TestNarrowReturnHours_DefaultsToADayAndZeroStillMeansNever(t *testing.T) {
+	require.Equal(t, 24*time.Hour, runtimeFlagsFromEnv().NarrowReturnAfter)
+
+	t.Setenv("AGENT_RUNTIME_NARROW_RETURN_HOURS", "0")
+	require.Zero(t, runtimeFlagsFromEnv().NarrowReturnAfter)
+	since := time.Date(2026, 9, 16, 10, 0, 0, 0, time.UTC)
+	require.False(t, narrowExpired(since, since.Add(10000*time.Hour), 0))
+
+	t.Setenv("AGENT_RUNTIME_NARROW_RETURN_HOURS", "3")
+	require.Equal(t, 3*time.Hour, runtimeFlagsFromEnv().NarrowReturnAfter)
 }

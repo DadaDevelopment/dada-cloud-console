@@ -62,8 +62,10 @@ type runtimeFlags struct {
 	NarrowEscalation bool
 	// NarrowTopics is the white list (AGENT_RUNTIME_NARROW_TOPICS overrides
 	// the built-in one); NarrowReturnAfter is
-	// AGENT_RUNTIME_NARROW_RETURN_HOURS, 0 meaning the mode never lifts by
-	// itself.
+	// AGENT_RUNTIME_NARROW_RETURN_HOURS, defaulting to a day. A mode that
+	// never lifts by itself is a chat that goes quiet forever if the curator
+	// forgets it, so "never" has to be typed out as an explicit 0 rather than
+	// arrived at by leaving a variable unset.
 	NarrowTopics      []*regexp.Regexp
 	NarrowReturnAfter time.Duration
 
@@ -94,7 +96,7 @@ func runtimeFlagsFromEnv() runtimeFlags {
 		SeamlessHandoff:   envBool("AGENT_RUNTIME_SEAMLESS_HANDOFF", false),
 		NarrowEscalation:  envBool("AGENT_RUNTIME_NARROW_ESCALATION", false),
 		NarrowTopics:      ParseNarrowTopics(os.Getenv("AGENT_RUNTIME_NARROW_TOPICS")),
-		NarrowReturnAfter: time.Duration(envInt("AGENT_RUNTIME_NARROW_RETURN_HOURS", 0)) * time.Hour,
+		NarrowReturnAfter: time.Duration(envInt("AGENT_RUNTIME_NARROW_RETURN_HOURS", narrowReturnHoursDefault)) * time.Hour,
 		SplitReply:        envBool("AGENT_RUNTIME_SPLIT_REPLY", false),
 		QuestionBudget:    envBool("AGENT_RUNTIME_QUESTION_BUDGET", false),
 		AckLimit:          envInt("AGENT_RUNTIME_ACK_LIMIT", 0),
