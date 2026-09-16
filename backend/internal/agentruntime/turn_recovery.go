@@ -102,6 +102,14 @@ func (r *Runtime) recoverTurn(convID uuid.UUID, attempt int) (bool, error) {
 	if len(pending) == 0 {
 		return true, nil
 	}
+	// A recovery replay goes through the same narrow-mode gate an inbound
+	// turn does: while a curator owns the chat, a retry must not become the
+	// one path that speaks past the white list.
+	if r.flags.NarrowEscalation {
+		if _, handled, gateErr := r.narrowGate(ctx, conv, state, pending); handled || gateErr != nil {
+			return true, gateErr
+		}
+	}
 	resp, err := r.runTurn(ctx, conv, state, pending, turnOptions{})
 	if err != nil {
 		var failure *turnFailure

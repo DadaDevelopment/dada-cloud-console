@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 )
 
@@ -99,6 +100,30 @@ func narrowSince(conv Conversation) (time.Time, bool) {
 // not the runtime's guess.
 func narrowExpired(since, now time.Time, returnAfter time.Duration) bool {
 	return returnAfter > 0 && !since.IsZero() && now.Sub(since) >= returnAfter
+}
+
+// markPendingHandled drains the inbox for a turn the runtime has answered by
+// other means than a model reply. Without it a hand-off followed by a silent
+// model turn leaves the input pending, and AGENT_RUNTIME_SILENCE_RECOVERY
+// replays it: a second client line and a second operator card for one event.
+func (r *Runtime) markPendingHandled(ctx context.Context, convID uuid.UUID) error {
+	inbox, ok := r.store.(interface {
+		PendingRuntimeMessages(context.Context, uuid.UUID) ([]Message, error)
+	})
+	receipts, hasReceipts := r.store.(interface {
+		MarkRuntimeHandled(context.Context, []Message) error
+	})
+	if !ok || !hasReceipts {
+		return errors.New("runtime pending input storage is not configured")
+	}
+	pending, err := inbox.PendingRuntimeMessages(ctx, convID)
+	if err != nil {
+		return err
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+	return receipts.MarkRuntimeHandled(ctx, pending)
 }
 
 // narrowCardFooter is what the operator reads under a card raised by a

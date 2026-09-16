@@ -2,6 +2,7 @@ package agentruntime
 
 import (
 	"context"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -169,4 +170,83 @@ func TestNarrowGate_UnexpiredModeWithReturnHoursStaysSilent(t *testing.T) {
 	require.True(t, handled)
 	require.Zero(t, store.cleared)
 	require.Len(t, *cards, 1)
+}
+
+// pendingStore is a narrowStore that also holds an inbox, so the drain can be
+// tested without a database.
+type pendingStore struct {
+	narrowStore
+	pending []Message
+	err     error
+}
+
+func (s *pendingStore) PendingRuntimeMessages(context.Context, uuid.UUID) ([]Message, error) {
+	return s.pending, s.err
+}
+
+func TestMarkPendingHandled_DrainsTheInboxOnce(t *testing.T) {
+	store := &pendingStore{pending: []Message{{Content: "готово"}, {Content: "и ещё"}}}
+	rt := &Runtime{store: store}
+
+	require.NoError(t, rt.markPendingHandled(context.Background(), uuid.New()))
+	require.Equal(t, 1, store.handled)
+	require.Len(t, store.messages, 2)
+
+	store.pending = nil
+	require.NoError(t, rt.markPendingHandled(context.Background(), uuid.New()))
+	require.Equal(t, 1, store.handled, "an empty inbox must not write a receipt")
+}
+
+func TestMarkPendingHandled_WithoutInboxStorageIsAnError(t *testing.T) {
+	rt := &Runtime{store: &narrowStore{}}
+	require.Error(t, rt.markPendingHandled(context.Background(), uuid.New()))
+}
+
+// Plan 4.1 plus review H2: the hand-off answers the turn itself, so the input
+// must not stay pending for AGENT_RUNTIME_SILENCE_RECOVERY to replay, and a
+// second escalate inside the dedup window must not tell the customer twice.
+func TestPGNarrowHandoff_SecondEscalateDoesNotRepeatTheClientLine(t *testing.T) {
+	t.Setenv("AGENT_RUNTIME_NARROW_ESCALATION", "1")
+	store := pauseRetryTestStore(t)
+	ctx := context.Background()
+	agent := "narrow-test-" + uuid.NewString()
+	client, _, err := store.GetOrCreateConversation(ctx, agent, "telegram", "3001", Actor{ExternalID: "3001", Username: "client"})
+	require.NoError(t, err)
+	t.Setenv("AGENT_RUNTIME_TOKEN", testRuntimeToken)
+	srv := NewServer(store.pool, t.TempDir())
+	srv.pauseCRM = pauseFunc(func(context.Context, Conversation, string) error { return nil })
+	out := &recordingOutbound{}
+	srv.outbound = out
+	httpServer := httptest.NewServer(srv.Handler())
+	defer httpServer.Close()
+	token, err := issueContextToken([]byte(testRuntimeToken), client, time.Now().Add(time.Minute))
+	require.NoError(t, err)
+
+	body := map[string]any{
+		"context_token":  token,
+		"reason_code":    "E_DEPOSIT_HANDOFF",
+		"summary":        "Пополнил 500, реквизиты дал сам.",
+		"client_message": "Принял, дальше веду по шагам",
+	}
+	status, result := postRuntime(t, httpServer.URL, "/tools/escalate", body, testRuntimeToken)
+	require.Equal(t, 200, status, result)
+	require.Equal(t, "narrow", result["mode"])
+	require.Equal(t, true, result["agent_enabled"], "narrow mode must not pause the agent")
+	require.Equal(t, true, result["client_notified"])
+
+	status, result = postRuntime(t, httpServer.URL, "/tools/escalate", body, testRuntimeToken)
+	require.Equal(t, 200, status, result)
+	require.Equal(t, true, result["already_signalled"])
+	require.Equal(t, false, result["client_notified"])
+	require.Len(t, out.texts, 1, "the customer hears about the hand-off exactly once")
+
+	state, err := store.GetState(ctx, client.ID)
+	require.NoError(t, err)
+	require.True(t, state.AgentEnabled)
+	require.Empty(t, state.PauseReason)
+
+	conv, err := store.GetConversation(ctx, client.ID)
+	require.NoError(t, err)
+	_, inNarrow := narrowSince(conv)
+	require.True(t, inNarrow)
 }

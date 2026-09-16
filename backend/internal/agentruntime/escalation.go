@@ -422,17 +422,37 @@ func (s *Server) narrowHandoff(c *gin.Context, conv Conversation, reason, summar
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "narrow mode not recorded"})
 		return
 	}
-	clientTold := s.tellClient(ctx, conv, clientMessage)
-	notified := false
-	if s.operator != nil {
-		card := escalationCardWithFooter(escalationTitle(reason), conv, reason, summary, state, narrowCardFooter)
-		notified = s.operator.Notify(ctx, conv, card) == nil
+	// Same claim signalOperator uses: one client line and one card per reason
+	// per window. Without it a model that escalates again on the replayed
+	// turn (silence recovery, a retried tool call) tells the customer twice
+	// and pages the operator twice for one event. A claim that cannot be
+	// read fails open, exactly as in signalOperator: a missed card is worse
+	// than a duplicate one.
+	claimed, err := s.runtime.store.ClaimEscalationSignal(ctx, conv.ID, reason, escalationSignalWindow)
+	if err != nil {
+		log.Warn().Err(err).Str("conversation", conv.ID.String()).Str("reason", reason).Msg("agentruntime: narrow hand-off claim failed")
+		claimed = true
+	}
+	clientTold, notified := false, false
+	if claimed {
+		clientTold = s.tellClient(ctx, conv, clientMessage)
+		if s.operator != nil {
+			card := escalationCardWithFooter(escalationTitle(reason), conv, reason, summary, state, narrowCardFooter)
+			notified = s.operator.Notify(ctx, conv, card) == nil
+		}
+	}
+	// The hand-off IS the answer to this turn. Leaving the input pending
+	// would let AGENT_RUNTIME_SILENCE_RECOVERY replay it when the model
+	// finishes without a message, which is the common shape of this tool
+	// call.
+	if err := s.runtime.markPendingHandled(ctx, conv.ID); err != nil {
+		log.Warn().Err(err).Str("conversation", conv.ID.String()).Msg("agentruntime: narrow hand-off could not drain the pending inbox")
 	}
 	s.runtime.mirrorState(ctx, conv, state, summary)
-	log.Info().Str("conversation", conv.ID.String()).Str("reason", reason).Bool("operator_notified", notified).
+	log.Info().Str("conversation", conv.ID.String()).Str("reason", reason).Bool("claimed", claimed).Bool("operator_notified", notified).
 		Msg("agentruntime: narrow hand-off, agent stays live on a white list")
 	c.JSON(http.StatusOK, gin.H{"agent_enabled": true, "mode": "narrow", "client_notified": clientTold,
-		"operator_notified": notified, "next": escalationNarrowNext, "state_version": state.Version})
+		"operator_notified": notified, "already_signalled": !claimed, "next": escalationNarrowNext, "state_version": state.Version})
 }
 
 const escalationNarrowNext = "Curator owns the chat now, you are not paused. Answer only commission, withdrawal, MT5 and verification questions from the KB; on anything else stay silent and the operator gets the customer's line."
