@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/config"
 	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/dada-tuda/console/backend/internal/promptsource"
@@ -82,7 +83,7 @@ func stubPromptSourceMint(t *testing.T) {
 	promptSourceMintToken = func(ctx context.Context, appID, pem string, installationID int64, repos []string) (string, time.Time, error) {
 		return "tok-" + repos[0], time.Now().Add(time.Hour), nil
 	}
-	promptSourceTokens.tokens = map[int64]cachedInstallToken{}
+	promptSourceTokens.tokens = map[installTokenKey]cachedInstallToken{}
 	t.Cleanup(func() { promptSourceMintToken = old })
 }
 
@@ -174,11 +175,21 @@ func TestAgentPromptSourceLifecycle(t *testing.T) {
 		}
 	})
 
-	t.Run("saveAgent keeps the synced prompt", func(t *testing.T) {
-		c, rec := newAgentCtx(t, http.MethodPost, params(projectID, envID), godClaims(userID))
-		reqBody, _ := json.Marshal(saveAgentRequest{Name: agent, Prompt: "hand edited", PromptVersion: "hand", ModelConfig: "gpt"})
-		c.Request = httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(reqBody))
-		c.Request.Header.Set("Content-Type", "application/json")
+	t.Run("saveAgent refuses a prompt that differs from the synced one", func(t *testing.T) {
+		c, rec := saveAgentCtx(t, projectID, envID, userID, saveAgentRequest{Name: agent, Prompt: "hand edited", PromptVersion: "hand", ModelConfig: "gpt"})
+		h.SaveAgent(c)
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+		}
+		var out map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		if out["code"] != "prompt_owned_by_source" || out["repo_full_name"] != "acme/agents" || out["prompt_version"] != "2026-09-16.native.46" {
+			t.Fatalf("body = %s", rec.Body.String())
+		}
+	})
+
+	t.Run("saveAgent with the synced prompt passes and keeps the source version", func(t *testing.T) {
+		c, rec := saveAgentCtx(t, projectID, envID, userID, saveAgentRequest{Name: agent, Prompt: promptSourceCore, PromptVersion: "hand", ModelConfig: "gpt"})
 		h.SaveAgent(c)
 		if rec.Code != http.StatusAccepted {
 			t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
@@ -194,7 +205,7 @@ func TestAgentPromptSourceLifecycle(t *testing.T) {
 		}
 	})
 
-	t.Run("a broken commit is reported and the last good prompt stays", func(t *testing.T) {
+	t.Run("a broken commit is reported once and the last good prompt stays", func(t *testing.T) {
 		repo.sha = "bbbb222"
 		repo.files["agents/roman/domains/big.md"] = strings.Repeat("x", 9000)
 		h.RunAgentPromptSourceTick(context.Background())
@@ -202,7 +213,19 @@ func TestAgentPromptSourceLifecycle(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if row.LastSyncStatus != "error" || !strings.Contains(row.LastSyncError, "big.md") || row.ResolvedSHA != "aaaa111" || row.Prompt != promptSourceCore {
+		if row.LastSyncStatus != "error" || !strings.Contains(row.LastSyncError, "big.md") || row.ResolvedSHA != "aaaa111" || row.CheckedSHA != "bbbb222" || row.Prompt != promptSourceCore {
+			t.Fatalf("row = %+v", row)
+		}
+		fetches, failures := repo.calls["git"], countPromptSourceAudit(t, pool, projectID, agent, auditOutcomeFailure)
+		h.RunAgentPromptSourceTick(context.Background())
+		if repo.calls["git"] != fetches {
+			t.Fatalf("an already examined broken commit must not be fetched again")
+		}
+		if got := countPromptSourceAudit(t, pool, projectID, agent, auditOutcomeFailure); got != failures {
+			t.Fatalf("an already examined broken commit must not add audit failures: %d -> %d", failures, got)
+		}
+		row, _, _ = h.loadPromptSource(context.Background(), projectID, envID, agent)
+		if row.LastSyncStatus != "error" || row.ResolvedSHA != "aaaa111" {
 			t.Fatalf("row = %+v", row)
 		}
 	})
@@ -228,6 +251,54 @@ func TestAgentPromptSourceLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("a concurrent sync of the same agent is refused", func(t *testing.T) {
+		tx, err := pool.Begin(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback(context.Background()) }()
+		if _, err := tx.Exec(context.Background(), `SELECT pg_advisory_xact_lock(hashtext($1))`,
+			projectID.String()+"/"+envID.String()+"/"+agent); err != nil {
+			t.Fatal(err)
+		}
+		c, rec := promptSourceCtx(t, http.MethodPost, projectID, envID, agent, nil, userID)
+		h.SyncAgentPromptSource(c)
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "sync_in_progress") {
+			t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("the installation cannot be removed while a source points at it", func(t *testing.T) {
+		_, err := pool.Exec(context.Background(), `DELETE FROM git_app_installations WHERE org_id = $1`, org)
+		if err == nil || !strings.Contains(err.Error(), "agent_prompt_sources") {
+			t.Fatalf("delete must be refused by the foreign key, got %v", err)
+		}
+	})
+
+	t.Run("the same agent name in another project cannot attach", func(t *testing.T) {
+		otherProject := seedInstallBindProject(t, pool, org)
+		var otherEnv uuid.UUID
+		if err := pool.QueryRow(context.Background(),
+			`INSERT INTO environments (project_id, name, namespace, type) VALUES ($1, 'prod', $2, 'prod') RETURNING id`,
+			otherProject, "ns-"+uuid.NewString()[:8]).Scan(&otherEnv); err != nil {
+			t.Fatal(err)
+		}
+		seedManagedAgentSnapshot(t, pool, otherProject, otherEnv, agent)
+		c, rec := promptSourceCtx(t, http.MethodPut, otherProject, otherEnv, agent, body, userID)
+		h.SetAgentPromptSource(c)
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "agent_name_attached_elsewhere") {
+			t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("a repository name outside owner/name is refused", func(t *testing.T) {
+		c, rec := promptSourceCtx(t, http.MethodPut, projectID, envID, agent, setAgentPromptSourceRequest{RepoFullName: "acme/agents/nested"}, userID)
+		h.SetAgentPromptSource(c)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+		}
+	})
+
 	t.Run("detach frees the prompt", func(t *testing.T) {
 		c, rec := promptSourceCtx(t, http.MethodDelete, projectID, envID, agent, nil, userID)
 		h.DeleteAgentPromptSource(c)
@@ -239,8 +310,96 @@ func TestAgentPromptSourceLifecycle(t *testing.T) {
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("status = %d", rec.Code)
 		}
-		if _, _, ok := h.promptSourceOverride(context.Background(), projectID, envID, agent); ok {
-			t.Fatal("override must be gone after detach")
+		if _, owned, err := h.promptSourceOverride(context.Background(), projectID, envID, agent); owned || err != nil {
+			t.Fatalf("override must be gone after detach: owned=%v err=%v", owned, err)
 		}
 	})
+
+	t.Run("deleting the agent drops its source", func(t *testing.T) {
+		c, rec := promptSourceCtx(t, http.MethodPut, projectID, envID, agent, body, userID)
+		h.SetAgentPromptSource(c)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("re-attach status = %d body = %s", rec.Code, rec.Body.String())
+		}
+		c, rec = promptSourceCtx(t, http.MethodDelete, projectID, envID, agent, nil, userID)
+		h.DeleteAgent(c)
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+		}
+		if _, found, err := h.loadPromptSource(context.Background(), projectID, envID, agent); found || err != nil {
+			t.Fatalf("source row must go with the agent: found=%v err=%v", found, err)
+		}
+	})
+}
+
+func saveAgentCtx(t *testing.T, projectID, envID, userID uuid.UUID, req saveAgentRequest) (*gin.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+	c, rec := newAgentCtx(t, http.MethodPost, params(projectID, envID), godClaims(userID))
+	reqBody, _ := json.Marshal(req)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(reqBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	return c, rec
+}
+
+func countPromptSourceAudit(t *testing.T, pool *pgxpool.Pool, projectID uuid.UUID, agent, outcome string) int {
+	t.Helper()
+	var n int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM audit_events WHERE project_id = $1 AND resource_name = $2 AND action = 'SyncAgentPromptSource' AND outcome = $3`,
+		projectID, agent, outcome).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestAgentPromptSourcePermissions(t *testing.T) {
+	pool := testOptimisticPool(t)
+	org := "prompt-source-perm-" + uuid.NewString()[:8]
+	projectID := seedInstallBindProject(t, pool, org)
+	var envID uuid.UUID
+	if err := pool.QueryRow(context.Background(),
+		`INSERT INTO environments (project_id, name, namespace, type) VALUES ($1, 'prod', $2, 'prod') RETURNING id`,
+		projectID, "ns-"+uuid.NewString()[:8]).Scan(&envID); err != nil {
+		t.Fatalf("seed env: %v", err)
+	}
+	userID := seedUser(t, pool)
+	h := &Handler{pool: pool, cfg: &config.Config{GithubAppID: "1", GithubAppPrivateKey: "pem"}}
+	agent := "roman-" + uuid.NewString()[:8]
+	body := setAgentPromptSourceRequest{RepoFullName: "acme/agents"}
+	nobody := &auth.Claims{UserID: userID}
+	reader := &auth.Claims{UserID: userID, Groups: []string{"/orgs/" + org + "/projects/" + projectID.String() + "/ReadOnly"}}
+
+	call := func(t *testing.T, claims *auth.Claims, method string, handler func(*gin.Context), reqBody any) int {
+		t.Helper()
+		c, _ := newAgentCtx(t, method, append(params(projectID, envID), gin.Param{Key: "name", Value: agent}), claims)
+		var payload []byte
+		if reqBody != nil {
+			payload, _ = json.Marshal(reqBody)
+		}
+		c.Request = httptest.NewRequest(method, "/", bytes.NewReader(payload))
+		c.Request.Header.Set("Content-Type", "application/json")
+		handler(c)
+		return c.Writer.Status()
+	}
+
+	for name, tc := range map[string]struct {
+		method  string
+		handler func(*gin.Context)
+		body    any
+		reader  int
+	}{
+		"get":    {http.MethodGet, h.GetAgentPromptSource, nil, http.StatusNotFound},
+		"set":    {http.MethodPut, h.SetAgentPromptSource, body, http.StatusForbidden},
+		"sync":   {http.MethodPost, h.SyncAgentPromptSource, nil, http.StatusForbidden},
+		"delete": {http.MethodDelete, h.DeleteAgentPromptSource, nil, http.StatusForbidden},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := call(t, nobody, tc.method, tc.handler, tc.body); got != http.StatusNotFound {
+				t.Fatalf("non-member: status = %d, want 404", got)
+			}
+			if got := call(t, reader, tc.method, tc.handler, tc.body); got != tc.reader {
+				t.Fatalf("read-only member: status = %d, want %d", got, tc.reader)
+			}
+		})
+	}
 }
