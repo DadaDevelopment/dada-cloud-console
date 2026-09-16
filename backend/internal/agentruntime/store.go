@@ -129,6 +129,15 @@ type ConversationStore interface {
 	// signalled within the dedup window, so the operator is not paged again.
 	ClaimEscalationSignal(ctx context.Context, conversationID uuid.UUID, reason string, window time.Duration) (bool, error)
 
+	// EnterNarrowMode marks the conversation as owned by a human curator
+	// while the agent stays enabled (plan 4.1): the timestamp goes into the
+	// same metadata JSONB idle_fired_at uses, so the mode costs no schema
+	// change. Re-entering an already narrow conversation refreshes the mark.
+	EnterNarrowMode(ctx context.Context, conversationID uuid.UUID) error
+
+	// ClearNarrowMode returns the conversation to the ordinary mode.
+	ClearNarrowMode(ctx context.Context, conversationID uuid.UUID) error
+
 	// FinishConversation retires a conversation without deleting it: history and
 	// state rows stay for audit, but the identity tuple is released so the next
 	// inbound message from the same user opens a fresh conversation.
@@ -418,6 +427,29 @@ func (s *pgStore) ClearEscalationAck(ctx context.Context, conversationID uuid.UU
 	_, err := s.pool.Exec(ctx, `
 		UPDATE conversations
 		SET metadata = metadata - 'escalation_ack_sent_at'
+		WHERE id = $1
+	`, conversationID)
+	return err
+}
+
+// EnterNarrowMode writes metadata.narrow_since. updated_at is deliberately
+// left alone: it is the idle scheduler's quiet-since clock, and a hand-off is
+// not customer activity.
+func (s *pgStore) EnterNarrowMode(ctx context.Context, conversationID uuid.UUID) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE conversations SET metadata = jsonb_set(
+				COALESCE(metadata, '{}'::jsonb), '{`+narrowModeKey+`}',
+				to_jsonb(to_char(NOW() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')), true)
+		WHERE id = $1
+	`, conversationID)
+	return err
+}
+
+// ClearNarrowMode removes metadata.narrow_since.
+func (s *pgStore) ClearNarrowMode(ctx context.Context, conversationID uuid.UUID) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE conversations
+		SET metadata = metadata - '`+narrowModeKey+`'
 		WHERE id = $1
 	`, conversationID)
 	return err

@@ -348,6 +348,10 @@ func (s *Server) handleEscalate(c *gin.Context) {
 			"client_message is the line the customer reads, addressed to them directly (вы): do not repeat summary's third-person facts about them. Write 1-2 short sentences in the dialogue's own voice.")
 		return
 	}
+	if s.runtime.flags.NarrowEscalation {
+		s.narrowHandoff(c, conv, req.ReasonCode, req.Summary, req.ClientMessage)
+		return
+	}
 	state, err := s.runtime.states.PauseAgent(c.Request.Context(), conv.ID, "escalated: "+req.ReasonCode)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "pause rejected"})
@@ -397,6 +401,41 @@ func (s *Server) signalOperator(c *gin.Context, conv Conversation, reason, summa
 	c.JSON(http.StatusOK, gin.H{"agent_enabled": true, "mode": "signal", "client_notified": false, "operator_notified": notified,
 		"already_signalled": !claimed, "next": escalationSignalNext, "state_version": state.Version})
 }
+
+// narrowHandoff is the hands-off branch under AGENT_RUNTIME_NARROW_ESCALATION
+// (plan 4.1): the curator takes the chat over, but the agent is not paused.
+// It keeps answering the white-listed factual questions and stays silent on
+// everything else (narrowGate), so a curator who goes quiet for three hours
+// no longer turns the chat into a polite dead end. The client line still goes
+// out, because it is the model's own continuation of the dialogue; the
+// one-shot escalation ack is not armed, since nothing is paused and the
+// customer is not waiting on a receipt.
+func (s *Server) narrowHandoff(c *gin.Context, conv Conversation, reason, summary, clientMessage string) {
+	ctx := c.Request.Context()
+	state, err := s.runtime.states.GetState(ctx, conv.ID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "state unavailable"})
+		return
+	}
+	if err := s.runtime.store.EnterNarrowMode(ctx, conv.ID); err != nil {
+		log.Warn().Err(err).Str("conversation", conv.ID.String()).Msg("agentruntime: narrow mode not recorded")
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "narrow mode not recorded"})
+		return
+	}
+	clientTold := s.tellClient(ctx, conv, clientMessage)
+	notified := false
+	if s.operator != nil {
+		card := escalationCardWithFooter(escalationTitle(reason), conv, reason, summary, state, narrowCardFooter)
+		notified = s.operator.Notify(ctx, conv, card) == nil
+	}
+	s.runtime.mirrorState(ctx, conv, state, summary)
+	log.Info().Str("conversation", conv.ID.String()).Str("reason", reason).Bool("operator_notified", notified).
+		Msg("agentruntime: narrow hand-off, agent stays live on a white list")
+	c.JSON(http.StatusOK, gin.H{"agent_enabled": true, "mode": "narrow", "client_notified": clientTold,
+		"operator_notified": notified, "next": escalationNarrowNext, "state_version": state.Version})
+}
+
+const escalationNarrowNext = "Curator owns the chat now, you are not paused. Answer only commission, withdrawal, MT5 and verification questions from the KB; on anything else stay silent and the operator gets the customer's line."
 
 const escalationClientLine = "По этому вопросу вам напишет коллега"
 

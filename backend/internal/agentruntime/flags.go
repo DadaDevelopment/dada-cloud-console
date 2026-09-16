@@ -2,6 +2,7 @@ package agentruntime
 
 import (
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -54,10 +55,24 @@ type runtimeFlags struct {
 	// authors, and tells the model through runtime_context that it should
 	// drop it too.
 	SeamlessHandoff bool
+
+	// NarrowEscalation (AGENT_RUNTIME_NARROW_ESCALATION, plan 4.1) replaces
+	// the pause on a hands-off escalation with the narrow mode: the agent
+	// stays enabled, answers only NarrowTopics and is silent otherwise.
+	NarrowEscalation bool
+	// NarrowTopics is the white list (AGENT_RUNTIME_NARROW_TOPICS overrides
+	// the built-in one); NarrowReturnAfter is
+	// AGENT_RUNTIME_NARROW_RETURN_HOURS, 0 meaning the mode never lifts by
+	// itself.
+	NarrowTopics      []*regexp.Regexp
+	NarrowReturnAfter time.Duration
 }
 
 func runtimeFlagsFromEnv() runtimeFlags {
 	return runtimeFlags{
-		SeamlessHandoff: envBool("AGENT_RUNTIME_SEAMLESS_HANDOFF", false),
+		SeamlessHandoff:   envBool("AGENT_RUNTIME_SEAMLESS_HANDOFF", false),
+		NarrowEscalation:  envBool("AGENT_RUNTIME_NARROW_ESCALATION", false),
+		NarrowTopics:      ParseNarrowTopics(os.Getenv("AGENT_RUNTIME_NARROW_TOPICS")),
+		NarrowReturnAfter: time.Duration(envInt("AGENT_RUNTIME_NARROW_RETURN_HOURS", 0)) * time.Hour,
 	}
 }

@@ -99,12 +99,16 @@ type Runtime struct {
 	factSkills       map[string]string
 	linkAllowlist    []string
 	syncPause        func(context.Context, Conversation) error
-	outbound         func(ctx context.Context, agentName, externalID, text, mediaURL string) error
-	runLocks         [256]sync.Mutex
-	flags            runtimeFlags
-	recoveryDelays   []time.Duration
-	recoveryMu       sync.Mutex
-	recovering       map[uuid.UUID]bool
+	// notifyOperator raises the operator card from inside the runtime (the
+	// narrow mode's only way out of a silent turn). nil = no operator
+	// configured, which logs instead of failing the turn.
+	notifyOperator func(ctx context.Context, conv Conversation, text string) error
+	outbound       func(ctx context.Context, agentName, externalID, text, mediaURL string) error
+	runLocks       [256]sync.Mutex
+	flags          runtimeFlags
+	recoveryDelays []time.Duration
+	recoveryMu     sync.Mutex
+	recovering     map[uuid.UUID]bool
 }
 
 func NewRuntime(store ConversationStore, hooks HookExecutor, a2a A2AClient, domains DomainProvider) *Runtime {
@@ -256,6 +260,12 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 			return MessageResponse{}, err
 		}
 		return MessageResponse{Suppressed: true}, nil
+	}
+	if r.flags.NarrowEscalation {
+		resp, handled, err := r.narrowGate(ctx, conv, state, pending)
+		if handled || err != nil {
+			return resp, err
+		}
 	}
 	resp, err := r.runTurn(ctx, conv, state, pending, req.OnProcessing)
 	if err != nil {
