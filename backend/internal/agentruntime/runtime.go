@@ -59,11 +59,15 @@ type InboundMessage struct {
 // single-message shortcut used to carry (Content etc) are folded into
 // Messages by the server layer.
 type MessageRequest struct {
-	AgentName    string
-	Channel      string
-	ExternalID   string
-	Actor        Actor
-	Messages     []InboundMessage
+	AgentName  string
+	Channel    string
+	ExternalID string
+	Actor      Actor
+	Messages   []InboundMessage
+	// DelaySeconds is the extra pause the gateway chose for this turn; it
+	// travels into runtime_context as delay_s and changes nothing in the
+	// runtime's own timing.
+	DelaySeconds int
 	OnProcessing func() // transport presence; called only after reply admission
 }
 
@@ -273,7 +277,7 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 			return resp, err
 		}
 	}
-	resp, err := r.runTurn(ctx, conv, state, pending, req.OnProcessing)
+	resp, err := r.runTurn(ctx, conv, state, pending, turnOptions{onProcessing: req.OnProcessing, delaySeconds: req.DelaySeconds})
 	if err != nil {
 		var failure *turnFailure
 		if errors.As(err, &failure) {
@@ -291,7 +295,15 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 // a reply held back twice, a broken reply contract) come back wrapped in
 // turnFailure so the caller can tell them from hook failures, which pause
 // the conversation and must not be replayed.
-func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeState, pending []Message, onProcessing func()) (MessageResponse, error) {
+// turnOptions carries what the caller knows about this particular turn and
+// the runTurn body does not: the transport presence callback and the
+// gateway's chosen pause. Recovery passes the zero value.
+type turnOptions struct {
+	onProcessing func()
+	delaySeconds int
+}
+
+func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeState, pending []Message, opts turnOptions) (MessageResponse, error) {
 	var skills []string
 	var err error
 	if catalog, ok := r.domains.(DomainCatalog); ok {
@@ -328,8 +340,9 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 	if r.structuredAgents[conv.AgentName] {
 		run.ConversationContext.ReplyFormat = structuredReplyFormat
 	}
-	if onProcessing != nil {
-		onProcessing()
+	run.ConversationContext.DelaySeconds = opts.delaySeconds
+	if opts.onProcessing != nil {
+		opts.onProcessing()
 	}
 	var reply string
 	var after RuntimeState

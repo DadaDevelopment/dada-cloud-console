@@ -102,7 +102,7 @@ func (r *Runtime) recoverTurn(convID uuid.UUID, attempt int) (bool, error) {
 	if len(pending) == 0 {
 		return true, nil
 	}
-	resp, err := r.runTurn(ctx, conv, state, pending, nil)
+	resp, err := r.runTurn(ctx, conv, state, pending, turnOptions{})
 	if err != nil {
 		var failure *turnFailure
 		return !errors.As(err, &failure), err

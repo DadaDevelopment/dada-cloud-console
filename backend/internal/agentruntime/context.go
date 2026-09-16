@@ -43,6 +43,12 @@ type AgentConversationContext struct {
 	// while AGENT_RUNTIME_QUESTION_BUDGET is off.
 	NoQuestionThisTurn bool     `json:"no_question_this_turn,omitempty"`
 	UsedPhrases        []string `json:"used_phrases,omitempty"`
+
+	// DelaySeconds is the extra pause the channel gateway chose before this
+	// reply is sent (plan 5.4). It is the gateway's own number, passed
+	// through so the form gate reads delay_s instead of reconstructing the
+	// rhythm from timestamps. Absent when the gateway added no pause.
+	DelaySeconds int `json:"delay_s,omitempty"`
 }
 
 // AgentRunRequest is one invocation of an agent.

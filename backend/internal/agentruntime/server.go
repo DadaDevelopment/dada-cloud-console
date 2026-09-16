@@ -237,6 +237,9 @@ type messageRequest struct {
 	SourceSentAt            *time.Time           `json:"source_sent_at"`
 	ReplyToChannelMessageID string               `json:"reply_to_channel_message_id"`
 	Messages                []inboundMessageJSON `json:"messages"`
+	// DelaySeconds is the gateway's chosen extra pause for this turn (plan
+	// 5.4). Absent from older gateways, which simply means no extra pause.
+	DelaySeconds int `json:"delay_s,omitempty"`
 }
 
 type actorRequest struct {
@@ -310,6 +313,7 @@ func (s *Server) handleMessage(c *gin.Context) {
 			Metadata:   req.Actor.Metadata,
 		},
 		Messages:     messages,
+		DelaySeconds: req.DelaySeconds,
 		OnProcessing: onProcessing,
 	})
 	if err != nil {

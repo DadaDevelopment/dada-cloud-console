@@ -441,6 +441,14 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 	// ignored and the whole turn goes out as the single Text message, which
 	// is what happens today and what happens for a runtime that never cuts.
 	splitReply := envStrFor("TG_GATEWAY_SPLIT_REPLY", b.AgentName) == "1"
+	// The tail and the night window (plan 5). Both knobs default to zero, so
+	// tailNight.ExtraDelay returns 0 on every turn unless they are set.
+	tailNight := TailNightFromEnv()
+	// seenConv is what "first message of the dialogue" means here: the first
+	// batch this poller handled for that chat. A restart forgets, which errs
+	// towards NOT adding a tail delay -- the safe direction for a new lead.
+	var seenMu sync.Mutex
+	seenConv := map[string]bool{}
 
 	// One line per poller, naming the agent and the settings that decide what
 	// it will do. Without it a bot that never speaks is indistinguishable from
@@ -458,6 +466,9 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		Bool("observer", observer != nil).
 		Bool("pacing", pacing != nil).
 		Bool("split_reply", splitReply).
+		Float64("tail_share", tailNight.TailShare).
+		Float64("night_morning_p", tailNight.NightMorningP).
+		Str("tz", tailNight.Loc.String()).
 		Str("vision_model", mediaCfg.VisionModel).
 		Str("whisper", mediaCfg.WhisperBaseURL).
 		Msg("tggateway: poller started")
@@ -469,6 +480,15 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		chatID := batch[0].ChatID
 		convKey := ConversationKey(batch[0])
 		inGroup := IsGroup(batch[0].ChatType)
+
+		seenMu.Lock()
+		firstOfDialogue := !seenConv[convKey]
+		seenConv[convKey] = true
+		seenMu.Unlock()
+		// Decided before the agent is called so the number can travel with
+		// the turn (delay_s in runtime_context) instead of being guessed from
+		// timestamps later.
+		extraDelay := tailNight.ExtraDelay(time.Now(), firstOfDialogue)
 
 		runCtx, done, full, superseded := runs.begin(convKey, ctx, batch)
 		defer done()
@@ -488,9 +508,10 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		}
 
 		req := RuntimeMessageRequest{
-			AgentName:  b.AgentName,
-			Channel:    "telegram",
-			ExternalID: convKey,
+			AgentName:    b.AgentName,
+			Channel:      "telegram",
+			ExternalID:   convKey,
+			DelaySeconds: int(extraDelay.Seconds()),
 			Actor: RuntimeActor{
 				ExternalID: fmt.Sprintf("%d", batch[0].UserID),
 				Username:   batch[0].Username,
@@ -616,6 +637,26 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 			}
 			return
 		}
+		// The chosen pause is taken here, after the reply exists and the claim
+		// is won, and it is announced in one line so the form gate can read
+		// delay_s without joining timestamps. A client message during the
+		// wait cancels the reply through the same tail mechanism a series
+		// uses: after eleven minutes, or a night, answering the previous
+		// message first would be the tell, not the fix.
+		if extraDelay > 0 {
+			log.Info().Str("agent", b.AgentName).Str("conv", convKey).
+				Int("delay_s", int(extraDelay.Seconds())).Bool("first_of_dialogue", firstOfDialogue).
+				Msg("tggateway: extra pacing delay before the reply")
+			runs.markTail(convKey, true)
+			sleepOrDone(runCtx, extraDelay)
+			runs.markTail(convKey, false)
+			if runCtx.Err() != nil {
+				log.Info().Str("agent", b.AgentName).Str("conv", convKey).
+					Msg("tggateway: client wrote during the extra delay, reply dropped for the restarted run")
+				return
+			}
+		}
+
 		parts := []string{sendText}
 		if splitReply && !wantsButton {
 			if series := sendableParts(resp.Messages); len(series) > 1 {

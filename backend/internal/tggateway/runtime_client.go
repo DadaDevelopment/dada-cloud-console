@@ -34,6 +34,12 @@ type RuntimeMessageRequest struct {
 	SourceSentAt            *time.Time              `json:"source_sent_at,omitempty"`
 	ReplyToChannelMessageID string                  `json:"reply_to_channel_message_id,omitempty"`
 	Messages                []RuntimeInboundMessage `json:"messages,omitempty"`
+	// DelaySeconds is the extra pause the gateway chose for this turn before
+	// calling the agent (plan 5.4): the runtime puts it in runtime_context as
+	// delay_s, so the form gate reads the number the gateway actually used
+	// instead of reconstructing it from message timestamps. 0 = no extra
+	// pause, which is every turn until the tail or night knobs are set.
+	DelaySeconds int `json:"delay_s,omitempty"`
 }
 
 // RuntimeAttachment mirrors TelegramAttachment across the HTTP contract:

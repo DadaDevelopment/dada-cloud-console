@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 // PacingConfig makes the bot's timing look like a person's instead of a
@@ -239,4 +241,143 @@ func sendableParts(messages []string) []string {
 		out = append(out, text)
 	}
 	return out
+}
+
+// Plan 5, the two holes the existing pacing does not cover.
+//
+//   - A tail. The live operator answers after more than ten minutes in 29.6%
+//     of turns; MaxQuiet cuts the distribution off at 90 seconds, so the bot
+//     has no tail at all and every reply lands inside one narrow corridor.
+//   - A night. There is no 23-08 window anywhere in the gateway: a message at
+//     three in the morning gets the same twelve seconds as one at noon, which
+//     is the one timing tell no jitter can hide.
+//
+// Both are off by default (share 0, probability 0), and both are decided
+// BEFORE the agent is called, so the number can travel with the turn as
+// delay_s instead of being reconstructed from timestamps afterwards.
+type TailNightConfig struct {
+	// TailShare is TG_GATEWAY_PACING_TAIL_SHARE: the share of eligible turns
+	// that get an extra pause drawn uniformly from [TailMin, TailMax].
+	TailShare float64
+	TailMin   time.Duration
+	TailMax   time.Duration
+	// NightMorningP is TG_GATEWAY_NIGHT_MORNING_P: the probability that a
+	// message arriving in the night window is answered in the morning window
+	// instead of now.
+	NightMorningP float64
+	// Loc is TG_GATEWAY_TZ (default UTC). The gateway had no zone of its own
+	// before this: everything it did was zone-independent.
+	Loc *time.Location
+
+	mu   sync.Mutex
+	rand *rand.Rand
+}
+
+const (
+	tailDelayMinDefault = 5 * time.Minute
+	tailDelayMaxDefault = 15 * time.Minute
+	// tailHourFrom/To bound the working day: a five-to-fifteen minute silence
+	// reads as a busy person at noon and as a broken bot at four in the
+	// morning, where the night rule owns the timing anyway.
+	tailHourFrom = 10
+	tailHourTo   = 22
+	// nightHourFrom/To is the window whose messages may be held; morning
+	// Hour/Late is the window they are held until.
+	nightHourFrom   = 23
+	nightHourTo     = 8
+	morningHour     = 9
+	morningHourLate = 10
+)
+
+// GatewayLocation reads TG_GATEWAY_TZ. An unknown zone falls back to UTC with
+// a warning rather than failing the poller: a mistyped zone must not take the
+// bot off the air.
+func GatewayLocation() *time.Location {
+	name := strings.TrimSpace(os.Getenv("TG_GATEWAY_TZ"))
+	if name == "" {
+		return time.UTC
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		log.Warn().Err(err).Str("tz", name).Msg("tggateway: TG_GATEWAY_TZ is not a known zone, using UTC")
+		return time.UTC
+	}
+	return loc
+}
+
+// TailNightFromEnv is always non-nil: with both knobs at zero it is a config
+// that never adds a delay, which is what the gateway does today.
+func TailNightFromEnv() *TailNightConfig {
+	return &TailNightConfig{
+		TailShare:     envFloat("TG_GATEWAY_PACING_TAIL_SHARE", 0),
+		TailMin:       envDurationMS("TG_GATEWAY_PACING_TAIL_MIN_MS", tailDelayMinDefault),
+		TailMax:       envDurationMS("TG_GATEWAY_PACING_TAIL_MAX_MS", tailDelayMaxDefault),
+		NightMorningP: envFloat("TG_GATEWAY_NIGHT_MORNING_P", 0),
+		Loc:           GatewayLocation(),
+	}
+}
+
+func envFloat(name string, fallback float64) float64 {
+	v, err := strconv.ParseFloat(strings.TrimSpace(os.Getenv(name)), 64)
+	if err != nil || v < 0 {
+		return fallback
+	}
+	return v
+}
+
+func (c *TailNightConfig) draw() float64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.rand == nil {
+		c.rand = rand.New(rand.NewSource(time.Now().UnixNano()))
+	}
+	return c.rand.Float64()
+}
+
+// ExtraDelay is the whole decision: how much longer than the ordinary pacing
+// this turn waits. Zero means "exactly as today".
+//
+// firstOfDialogue turns the tail off for the opening message: a lead who has
+// just written for the first time and waits eleven minutes is a lead who
+// leaves, and the plan excludes that case explicitly.
+func (c *TailNightConfig) ExtraDelay(now time.Time, firstOfDialogue bool) time.Duration {
+	if c == nil {
+		return 0
+	}
+	loc := c.Loc
+	if loc == nil {
+		loc = time.UTC
+	}
+	local := now.In(loc)
+	hour := local.Hour()
+
+	if hour >= nightHourFrom || hour < nightHourTo {
+		if c.NightMorningP <= 0 || c.draw() >= c.NightMorningP {
+			return 0
+		}
+		morning := time.Date(local.Year(), local.Month(), local.Day(), morningHour, 0, 0, 0, loc)
+		if hour >= nightHourFrom {
+			morning = morning.AddDate(0, 0, 1)
+		}
+		morning = morning.Add(time.Duration(c.draw() * float64(morningHourLate-morningHour) * float64(time.Hour)))
+		if d := morning.Sub(local); d > 0 {
+			return d
+		}
+		return 0
+	}
+
+	if firstOfDialogue || hour < tailHourFrom || hour >= tailHourTo {
+		return 0
+	}
+	if c.TailShare <= 0 || c.draw() >= c.TailShare {
+		return 0
+	}
+	min, max := c.TailMin, c.TailMax
+	if min <= 0 {
+		min = tailDelayMinDefault
+	}
+	if max <= min {
+		return min
+	}
+	return min + time.Duration(c.draw()*float64(max-min))
 }
