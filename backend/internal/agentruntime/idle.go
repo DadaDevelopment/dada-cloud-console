@@ -11,9 +11,30 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// idleScanIntervalDefault is the scheduler tick. Overridable via
-// AGENT_RUNTIME_IDLE_TICK_SECONDS; 0 disables the scheduler entirely.
+// idleScanIntervalDefault is the scheduler tick used when
+// AGENT_RUNTIME_IDLE_TICK_SECONDS is unset or unparseable. A tick <= 0 is not
+// a 60s tick: it means "do not start the scheduler", and the gate for that
+// lives in IdleEnabled / Server.StartIdleScheduler, not here. NewIdleScheduler
+// still clamps a non-positive interval because a time.Ticker panics on one,
+// and a scheduler that was constructed anyway must not take the process down.
 const idleScanIntervalDefault = 60 * time.Second
+
+// IdleEnabled decides whether the proactive follow-up scheduler runs at all.
+//
+// enabled is AGENT_RUNTIME_IDLE_ENABLED. Unset (the default) keeps today's
+// behaviour exactly: the tick alone decides, and a tick <= 0 disables. Set, it
+// wins in both directions, so the rollback switch works without touching the
+// tick: "0"/"false"/"off"/"no" force the scheduler off, "1"/"true"/"on"/"yes"
+// force it on (with the default tick when the tick is not a positive number).
+func IdleEnabled(enabled string, tickSeconds int) bool {
+	switch strings.ToLower(strings.TrimSpace(enabled)) {
+	case "0", "false", "off", "no":
+		return false
+	case "1", "true", "on", "yes":
+		return true
+	}
+	return tickSeconds > 0
+}
 
 // idleHookRow is one conversation.idle hook joined with its due
 // conversation. ConversationID identifies what to invoke; AgentName and

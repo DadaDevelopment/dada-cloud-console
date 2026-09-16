@@ -233,3 +233,43 @@ func require_NoError(t *testing.T, err error) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+// TestIdleEnabled pins the rollback switch from plan 4.4: the tick alone keeps
+// deciding while AGENT_RUNTIME_IDLE_ENABLED is unset (today's behaviour), and
+// a tick of 0 really means "off" rather than "60s".
+func TestIdleEnabled(t *testing.T) {
+	cases := []struct {
+		name string
+		env  string
+		tick int
+		want bool
+	}{
+		{"unset tick 60 stays on", "", 60, true},
+		{"unset tick 0 is off", "", 0, false},
+		{"unset negative tick is off", "", -5, false},
+		{"explicit 0 wins over a positive tick", "0", 60, false},
+		{"explicit false wins over a positive tick", "false", 60, false},
+		{"explicit off wins over a positive tick", "OFF", 60, false},
+		{"explicit 1 wins over a zero tick", "1", 0, true},
+		{"explicit true wins over a zero tick", " True ", 0, true},
+		{"unknown value falls back to the tick", "maybe", 0, false},
+		{"unknown value falls back to the tick, on", "maybe", 30, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IdleEnabled(tc.env, tc.tick); got != tc.want {
+				t.Fatalf("IdleEnabled(%q, %d) = %v, want %v", tc.env, tc.tick, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestNewIdleSchedulerClampsInterval documents why the clamp stays: a
+// time.Ticker panics on a non-positive interval, so a scheduler constructed
+// despite the gate must still be safe.
+func TestNewIdleSchedulerClampsInterval(t *testing.T) {
+	s := NewIdleScheduler(nil, nil, nil, nil, 0)
+	if s.interval != idleScanIntervalDefault {
+		t.Fatalf("interval = %v, want %v", s.interval, idleScanIntervalDefault)
+	}
+}

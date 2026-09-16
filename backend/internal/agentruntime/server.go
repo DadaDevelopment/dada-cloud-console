@@ -70,12 +70,17 @@ func NewServer(pool *pgxpool.Pool, gitopsBasePath string) *Server {
 }
 
 // StartIdleScheduler launches the proactive-invocation loop. idleTickSeconds
-// <= 0 disables it. outboundURL empty = persist-only mode (follow-ups are
-// saved but not delivered; each one logs that).
+// <= 0 disables it, and AGENT_RUNTIME_IDLE_ENABLED overrides that in either
+// direction (see IdleEnabled) so the follow-ups have a kill switch of their
+// own. outboundURL empty = persist-only mode (follow-ups are saved but not
+// delivered; each one logs that).
 func (s *Server) StartIdleScheduler(ctx context.Context, idleTickSeconds int, outboundURL string) {
-	if idleTickSeconds <= 0 {
-		log.Info().Msg("agentruntime: idle scheduler disabled")
+	if !IdleEnabled(os.Getenv("AGENT_RUNTIME_IDLE_ENABLED"), idleTickSeconds) {
+		log.Info().Int("tick_seconds", idleTickSeconds).Msg("agentruntime: idle scheduler disabled")
 		return
+	}
+	if idleTickSeconds <= 0 {
+		idleTickSeconds = int(idleScanIntervalDefault / time.Second)
 	}
 	var outbound ChannelOutbound
 	if outboundURL != "" {
