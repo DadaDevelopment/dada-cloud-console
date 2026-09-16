@@ -47,6 +47,7 @@ Migration `156_agent_prompt_sources.sql`, table `agent_prompt_sources`, one row 
 | `installation_id` | `git_app_installations.id` that reaches the repo (org-scoped, same resolution as `connectGitRepo`) |
 | `repo_full_name`, `ref`, `path` | `owner/name`, branch (default `main`), directory (default `agents/<agent-name>`) |
 | `resolved_sha`, `synced_at` | commit the current prompt and skills came from, and when |
+| `checked_sha` | last commit the sync examined; equals `resolved_sha` after a good sync, stays ahead of it while the head fails validation |
 | `last_checked_at`, `last_sync_status`, `last_sync_error` | `ok` / `error` / `pending` and the message the UI shows |
 | `prompt`, `prompt_title`, `prompt_version` | parsed `core.md` |
 | `skills` JSONB | `{"<skill>": "<content>"}` |
@@ -62,10 +63,14 @@ table to extend: an agent is a `resource_snapshots` row mirroring the claim.
 
 1. Mint an installation token with `github.MintInstallTokenForRepos` narrowed to
    the one repo, using the App id and key the backend already holds for cloud
-   tasks. Tokens are cached per installation until 5 minutes before expiry.
+   tasks. Tokens are cached per (installation, repository) until 5 minutes
+   before expiry; a token is narrowed to one repository, so two sources in
+   different repositories under one installation never share a token.
 2. `GET /repos/{repo}/commits/{ref}` gives the head sha. If it equals
-   `resolved_sha` and the last sync was `ok`, the sync ends here (idempotent, the
-   poller does this every tick and writes only `last_checked_at`).
+   `checked_sha`, the sync ends here whatever the last status was (idempotent,
+   the poller does this every tick and writes only `last_checked_at`). A commit
+   that fails validation is therefore fetched, logged and audited once, not on
+   every tick; `resolved_sha` still names the last good commit.
 3. `GET /repos/{repo}/git/trees/{sha}?recursive=1`, keep the entries under
    `path`, `GET /repos/{repo}/git/blobs/{sha}` for `core.md` and `domains/*.md`.
 4. Parse and validate (section above). Any problem: row gets `error` and the
@@ -80,13 +85,29 @@ table to extend: an agent is a `resource_snapshots` row mirroring the claim.
 7. Audit row `SyncAgentPromptSource` and a log line with agent, sha, file count
    and bytes.
 
+The whole sync runs in one transaction holding
+`pg_try_advisory_xact_lock(hashtext(project/env/agent))`. A manual sync that
+finds the lock taken by the poller (or the reverse) returns `changed: false`
+with `sync_in_progress`; the sync endpoint answers 409.
+
 A source can be attached only to an agent that already exists as a ManagedAgent
 claim. Attaching one to a name without a claim would enqueue a create with no
 modelConfig, which is the outage class this feature removes.
 
-While a source is attached, `saveAgent` replaces `prompt` and `prompt_version` in
-the request with the synced ones: a hand edit cannot desync the claim from the
-repo. The MCP `saveAgent` keeps working for tools, env and model.
+While a source is attached, `saveAgent` refuses a `prompt` that differs from the
+synced one with 409 `prompt_owned_by_source` (the body names the repository,
+ref, path and synced version); the same prompt passes and takes the synced
+version, so tools, env and model stay editable in the console and through MCP.
+Deleting the agent deletes its source row in the same transaction as the delete
+operation, so a later agent with the same name starts without a repository. The
+source keeps a `RESTRICT` foreign key on the installation: the installation
+cannot be removed while a source points at it (no console endpoint removes
+installations today; the constraint guards direct database work).
+
+Agent names are unique across projects (`UNIQUE (agent_name)`): every agent lands
+in the one kagent namespace and the runtime looks skills up by name alone.
+Attaching a name that another project already syncs answers 409
+`agent_name_attached_elsewhere`.
 
 ### Skills delivery
 
@@ -104,6 +125,12 @@ mountable; and extending the claim with `spec.skills` needs an XRD change in
 argo-infra, which this PR does not touch. The database copy is live on the next
 turn, keeps the 8192 byte cap, and the git history of the client repo is the
 audit trail (`resolved_sha` on the row, sha in the operation payload).
+
+Two delivery clocks: skills are live from Postgres on the agent's next turn;
+the prompt lands only after the gitops-agent commits the claim and Argo syncs it
+(minutes). A commit that changes both leaves a short window with the new skills
+under the old prompt. Keep skill files compatible with the previous prompt for
+that window, or split the change into two commits with the prompt first.
 
 The `agentRuntime.agentSkills` values keep working for agents without a source and
 can be removed per agent once its source is attached.
