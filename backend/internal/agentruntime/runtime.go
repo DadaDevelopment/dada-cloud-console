@@ -365,6 +365,12 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 					run.ConversationContext.ReplyError = languageRepairHint
 					continue
 				}
+				if soft := ackLimitReason(reply, pending, after, r.flags.AckLimit); soft != "" && attempt == 0 {
+					log.Warn().Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Str("reason", soft).Msg("agentruntime: reply sent back for a rewrite")
+					run.ConversationContext.State = after
+					run.ConversationContext.ReplyError = ackRepairHint(r.flags.AckLimit)
+					continue
+				}
 				break
 			}
 			log.Warn().Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Int("attempt", attempt).

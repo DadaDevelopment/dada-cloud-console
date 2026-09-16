@@ -76,6 +76,11 @@ type runtimeFlags struct {
 	// runtime-owned questions_in_row / used_phrases counters and tells the
 	// prompt to skip its question when the budget is spent.
 	QuestionBudget bool
+
+	// AckLimit (AGENT_RUNTIME_ACK_LIMIT, plan 3.3) is the length in runes
+	// above which a reply to a bare confirmation is sent back for a rewrite.
+	// 0 (the default) is off.
+	AckLimit int
 }
 
 func runtimeFlagsFromEnv() runtimeFlags {
@@ -86,5 +91,6 @@ func runtimeFlagsFromEnv() runtimeFlags {
 		NarrowReturnAfter: time.Duration(envInt("AGENT_RUNTIME_NARROW_RETURN_HOURS", 0)) * time.Hour,
 		SplitReply:        envBool("AGENT_RUNTIME_SPLIT_REPLY", false),
 		QuestionBudget:    envBool("AGENT_RUNTIME_QUESTION_BUDGET", false),
+		AckLimit:          envInt("AGENT_RUNTIME_ACK_LIMIT", 0),
 	}
 }
