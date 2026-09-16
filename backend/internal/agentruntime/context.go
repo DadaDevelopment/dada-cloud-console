@@ -23,6 +23,12 @@ type AgentConversationContext struct {
 	AvailableSkills []string     `json:"available_skills"`
 	Now             string       `json:"now,omitempty"`
 	TimeZone        string       `json:"time_zone,omitempty"`
+
+	// SeamlessHandoff tells the prompt that the runtime no longer announces a
+	// colleague, so client_message must read as the conversation continuing
+	// (plan 4.2). Absent from the envelope while the flag is off, which is
+	// what keeps the old prompt branch the active one.
+	SeamlessHandoff bool `json:"seamless_handoff,omitempty"`
 }
 
 // AgentRunRequest is one invocation of an agent.

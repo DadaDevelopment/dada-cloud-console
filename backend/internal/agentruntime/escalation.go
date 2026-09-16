@@ -400,6 +400,21 @@ func (s *Server) signalOperator(c *gin.Context, conv Conversation, reason, summa
 
 const escalationClientLine = "По этому вопросу вам напишет коллега"
 
+// escalationClientLineSeamless is the same fallback with the hand-off taken
+// out. Under AGENT_RUNTIME_SEAMLESS_HANDOFF the curator picks the chat up
+// under the same name, so the customer must not be told anybody is changing;
+// the model's own client_message says that already, and this line only has to
+// hold the place when the model wrote nothing.
+const escalationClientLineSeamless = "Принято, зафиксировал"
+
+// clientHandoffLine picks the fallback for the current flag state.
+func (r *Runtime) clientHandoffLine() string {
+	if r.flags.SeamlessHandoff {
+		return escalationClientLineSeamless
+	}
+	return escalationClientLine
+}
+
 // tellClient is the last line the client gets from the agent: the model's
 // own reply is suppressed once the agent is paused (runtime.go re-reads the
 // state after the run), so the hand-off sentence has to leave through the
@@ -408,7 +423,7 @@ const escalationClientLine = "По этому вопросу вам напише
 // is saved to history before delivery so a later operator sees it.
 func (s *Server) tellClient(ctx context.Context, conv Conversation, text string) bool {
 	if text = strings.TrimSpace(text); text == "" {
-		text = escalationClientLine
+		text = s.runtime.clientHandoffLine()
 	}
 	if _, err := s.runtime.store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "assistant", Content: text}); err != nil {
 		log.Warn().Err(err).Str("conversation", conv.ID.String()).Msg("agentruntime: escalation client line not saved")

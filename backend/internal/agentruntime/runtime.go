@@ -101,6 +101,7 @@ type Runtime struct {
 	syncPause        func(context.Context, Conversation) error
 	outbound         func(ctx context.Context, agentName, externalID, text, mediaURL string) error
 	runLocks         [256]sync.Mutex
+	flags            runtimeFlags
 	recoveryDelays   []time.Duration
 	recoveryMu       sync.Mutex
 	recovering       map[uuid.UUID]bool
@@ -110,6 +111,7 @@ func NewRuntime(store ConversationStore, hooks HookExecutor, a2a A2AClient, doma
 	states, _ := store.(StateStore)
 	return &Runtime{
 		states:         states,
+		flags:          runtimeFlagsFromEnv(),
 		store:          store,
 		hooks:          hooks,
 		a2a:            a2a,
@@ -300,7 +302,8 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 	run := AgentRunRequest{AgentName: conv.AgentName, ContextID: "runtime-" + conv.ID.String(), Messages: pending,
 		EndUserKey: conv.Channel + ":" + conv.ExternalID,
 		ConversationContext: AgentConversationContext{ConversationID: conv.ID.String(), Channel: conv.Channel,
-			ExternalID: conv.ExternalID, Username: conv.ActorUsername, State: state, AvailableSkills: skills}}
+			ExternalID: conv.ExternalID, Username: conv.ActorUsername, State: state, AvailableSkills: skills,
+			SeamlessHandoff: r.flags.SeamlessHandoff}}
 	if r.structuredAgents[conv.AgentName] {
 		run.ConversationContext.ReplyFormat = structuredReplyFormat
 	}
@@ -455,6 +458,21 @@ func (r *Runtime) pauseAfterHookFailure(ctx context.Context, conv Conversation, 
 
 const escalationSilenceAck = "Коллега уже в курсе, ответит здесь."
 
+// escalationSilenceAckSeamless is the same receipt without the hand-off: the
+// customer still learns their message arrived, but nobody is announced. Used
+// when AGENT_RUNTIME_SEAMLESS_HANDOFF is on (plan 4.2), where the curator
+// continues in the same chat under the same name and "a colleague will
+// answer here" would name a second person the customer never sees.
+const escalationSilenceAckSeamless = "Принято, зафиксировал."
+
+// silenceAckLine picks the receipt for the current flag state.
+func (r *Runtime) silenceAckLine() string {
+	if r.flags.SeamlessHandoff {
+		return escalationSilenceAckSeamless
+	}
+	return escalationSilenceAck
+}
+
 var errOutboundNotConfigured = errors.New("agentruntime: outbound channel not configured")
 
 // A conversation paused by a genuine escalation (PauseReason "escalated:
@@ -480,7 +498,8 @@ func (r *Runtime) maybeAckEscalationSilence(ctx context.Context, conv Conversati
 	if !claimed {
 		return
 	}
-	if _, err := r.store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "assistant", Content: escalationSilenceAck}); err != nil {
+	ack := r.silenceAckLine()
+	if _, err := r.store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "assistant", Content: ack}); err != nil {
 		log.Warn().Err(err).Str("conversation", conv.ID.String()).Msg("agentruntime: escalation ack not saved")
 		return
 	}
@@ -488,7 +507,7 @@ func (r *Runtime) maybeAckEscalationSilence(ctx context.Context, conv Conversati
 		log.Info().Str("conversation", conv.ID.String()).Msg("agentruntime: escalation ack persisted but no outbound configured")
 		return
 	}
-	if err := r.outbound(ctx, conv.AgentName, conv.ExternalID, escalationSilenceAck, ""); err != nil {
+	if err := r.outbound(ctx, conv.AgentName, conv.ExternalID, ack, ""); err != nil {
 		if errors.Is(err, errOutboundNotConfigured) {
 			log.Info().Str("conversation", conv.ID.String()).Msg("agentruntime: escalation ack persisted but no outbound configured")
 			return

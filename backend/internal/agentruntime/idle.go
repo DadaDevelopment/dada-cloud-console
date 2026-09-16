@@ -236,7 +236,8 @@ func (s *IdleScheduler) invoke(ctx context.Context, r idleHookRow) {
 		EndUserKey: conv.Channel + ":" + conv.ExternalID,
 		ConversationContext: AgentConversationContext{ConversationID: conv.ID.String(),
 			Channel: conv.Channel, ExternalID: conv.ExternalID, Username: conv.ActorUsername,
-			State: state, AvailableSkills: skills},
+			State: state, AvailableSkills: skills,
+			SeamlessHandoff: s.runtime.flags.SeamlessHandoff},
 	})
 	if err != nil {
 		log.Warn().Err(err).Str("conversation", convID).Msg("agentruntime: idle invoke: a2a")
