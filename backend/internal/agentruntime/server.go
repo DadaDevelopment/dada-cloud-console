@@ -66,16 +66,27 @@ func NewServer(pool *pgxpool.Pool, gitopsBasePath string) *Server {
 		return srv.outbound.SendOutbound(ctx, agentName, externalID, text, mediaURL)
 	}
 	runtime.syncPause = func(ctx context.Context, conv Conversation) error { _, err := srv.syncPausedCRM(ctx, conv); return err }
+	runtime.notifyOperator = func(ctx context.Context, conv Conversation, text string) error {
+		if srv.operator == nil {
+			return nil
+		}
+		return srv.operator.Notify(ctx, conv, text)
+	}
 	return srv
 }
 
 // StartIdleScheduler launches the proactive-invocation loop. idleTickSeconds
-// <= 0 disables it. outboundURL empty = persist-only mode (follow-ups are
-// saved but not delivered; each one logs that).
+// <= 0 disables it, and AGENT_RUNTIME_IDLE_ENABLED overrides that in either
+// direction (see IdleEnabled) so the follow-ups have a kill switch of their
+// own. outboundURL empty = persist-only mode (follow-ups are saved but not
+// delivered; each one logs that).
 func (s *Server) StartIdleScheduler(ctx context.Context, idleTickSeconds int, outboundURL string) {
-	if idleTickSeconds <= 0 {
-		log.Info().Msg("agentruntime: idle scheduler disabled")
+	if !IdleEnabled(os.Getenv("AGENT_RUNTIME_IDLE_ENABLED"), idleTickSeconds) {
+		log.Info().Int("tick_seconds", idleTickSeconds).Msg("agentruntime: idle scheduler disabled")
 		return
+	}
+	if idleTickSeconds <= 0 {
+		idleTickSeconds = int(idleScanIntervalDefault / time.Second)
 	}
 	var outbound ChannelOutbound
 	if outboundURL != "" {
@@ -226,6 +237,9 @@ type messageRequest struct {
 	SourceSentAt            *time.Time           `json:"source_sent_at"`
 	ReplyToChannelMessageID string               `json:"reply_to_channel_message_id"`
 	Messages                []inboundMessageJSON `json:"messages"`
+	// DelaySeconds is the gateway's chosen extra pause for this turn (plan
+	// 5.4). Absent from older gateways, which simply means no extra pause.
+	DelaySeconds int `json:"delay_s,omitempty"`
 }
 
 type actorRequest struct {
@@ -245,9 +259,17 @@ type inboundMessageJSON struct {
 }
 
 type messageResponse struct {
-	Suppressed              bool   `json:"suppressed,omitempty"`
-	Text                    string `json:"text"`
-	ReplyToChannelMessageID string `json:"reply_to_channel_message_id,omitempty"`
+	Suppressed bool   `json:"suppressed,omitempty"`
+	Text       string `json:"text"`
+	// Messages carries the same turn already cut into messages (plan 3.1).
+	// omitempty keeps the wire format identical while the split flag is off.
+	Messages                []string `json:"messages,omitempty"`
+	ReplyToChannelMessageID string   `json:"reply_to_channel_message_id,omitempty"`
+}
+
+func wireResponse(resp MessageResponse) messageResponse {
+	return messageResponse{Text: resp.Text, Messages: resp.Messages,
+		ReplyToChannelMessageID: resp.ReplyToChannelMessageID, Suppressed: resp.Suppressed}
 }
 
 func (s *Server) handleMessage(c *gin.Context) {
@@ -291,6 +313,7 @@ func (s *Server) handleMessage(c *gin.Context) {
 			Metadata:   req.Actor.Metadata,
 		},
 		Messages:     messages,
+		DelaySeconds: req.DelaySeconds,
 		OnProcessing: onProcessing,
 	})
 	if err != nil {
@@ -303,10 +326,10 @@ func (s *Server) handleMessage(c *gin.Context) {
 		return
 	}
 	if streaming {
-		emit(gin.H{"event": "result", "result": messageResponse{Text: resp.Text, ReplyToChannelMessageID: resp.ReplyToChannelMessageID, Suppressed: resp.Suppressed}})
+		emit(gin.H{"event": "result", "result": wireResponse(resp)})
 		return
 	}
-	c.JSON(http.StatusOK, messageResponse{Text: resp.Text, ReplyToChannelMessageID: resp.ReplyToChannelMessageID, Suppressed: resp.Suppressed})
+	c.JSON(http.StatusOK, wireResponse(resp))
 }
 
 func (s *Server) handleHealth(c *gin.Context) {

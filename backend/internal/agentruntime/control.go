@@ -80,7 +80,13 @@ func (s *Server) controlConversation(c *gin.Context, token string) (Conversation
 }
 
 func (s *Server) rejectIdentity(c *gin.Context, reason, agent, endUser string) {
-	log.Warn().Str("reason", reason).Str("agent", agent).Str("end_user", endUser).Str("route", c.FullPath()).Msg("agentruntime: runtime tool call rejected: invalid runtime context")
+	// error_code and status are the same two values the caller gets back, so
+	// a 403 the agent swallows on its side is still findable here (plan 4.3):
+	// today a tool call rejected this way leaves no searchable trace and the
+	// procedure is simply lost.
+	log.Warn().Str("reason", reason).Str("error_code", reason).Int("status", http.StatusForbidden).
+		Str("agent", agent).Str("end_user", endUser).Str("route", c.FullPath()).
+		Msg("agentruntime: runtime tool call rejected: invalid runtime context")
 	c.JSON(http.StatusForbidden, gin.H{"error": "invalid runtime context", "error_code": reason})
 }
 

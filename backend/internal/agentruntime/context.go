@@ -23,6 +23,32 @@ type AgentConversationContext struct {
 	AvailableSkills []string     `json:"available_skills"`
 	Now             string       `json:"now,omitempty"`
 	TimeZone        string       `json:"time_zone,omitempty"`
+
+	// SeamlessHandoff tells the prompt that the runtime no longer announces a
+	// colleague, so client_message must read as the conversation continuing
+	// (plan 4.2). Absent from the envelope while the flag is off, which is
+	// what keeps the old prompt branch the active one.
+	SeamlessHandoff bool `json:"seamless_handoff,omitempty"`
+
+	// ReplySplit tells the prompt that the runtime can cut a turn into
+	// messages, so it may write the "---" seams (plan 3.2). Absent while the
+	// flag is off: a prompt that sees no marker must not produce one, which
+	// is what keeps a new prompt safe against an old runtime.
+	ReplySplit bool `json:"reply_split,omitempty"`
+
+	// NoQuestionThisTurn is the spent question budget (plan 3.4): the agent
+	// has closed on a question twice running and the amount slot is already
+	// filled, so this turn answers without asking. UsedPhrases carries the
+	// last closings so the same one is not reached for again. Both absent
+	// while AGENT_RUNTIME_QUESTION_BUDGET is off.
+	NoQuestionThisTurn bool     `json:"no_question_this_turn,omitempty"`
+	UsedPhrases        []string `json:"used_phrases,omitempty"`
+
+	// DelaySeconds is the extra pause the channel gateway chose before this
+	// reply is sent (plan 5.4). It is the gateway's own number, passed
+	// through so the form gate reads delay_s instead of reconstructing the
+	// rhythm from timestamps. Absent when the gateway added no pause.
+	DelaySeconds int `json:"delay_s,omitempty"`
 }
 
 // AgentRunRequest is one invocation of an agent.

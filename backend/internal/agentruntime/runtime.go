@@ -59,11 +59,15 @@ type InboundMessage struct {
 // single-message shortcut used to carry (Content etc) are folded into
 // Messages by the server layer.
 type MessageRequest struct {
-	AgentName    string
-	Channel      string
-	ExternalID   string
-	Actor        Actor
-	Messages     []InboundMessage
+	AgentName  string
+	Channel    string
+	ExternalID string
+	Actor      Actor
+	Messages   []InboundMessage
+	// DelaySeconds is the extra pause the gateway chose for this turn; it
+	// travels into runtime_context as delay_s and changes nothing in the
+	// runtime's own timing.
+	DelaySeconds int
 	OnProcessing func() // transport presence; called only after reply admission
 }
 
@@ -71,8 +75,14 @@ type MessageRequest struct {
 // channel id of the LAST user message of the batch, so the gateway can send
 // the answer as a native Telegram reply to the right message. Empty when
 // the batch carried no channel ids (manual/system messages).
+// Messages is the same turn cut into the messages a person would have sent
+// (plan 3.1), newest gateway only: Text stays the whole turn glued with
+// spaces, so a gateway that does not know about series keeps working and the
+// transcript keeps one row per turn. Empty means "nothing to split" -- one
+// message, exactly as before.
 type MessageResponse struct {
 	Text                    string
+	Messages                []string
 	ReplyToChannelMessageID string
 	Suppressed              bool
 }
@@ -99,17 +109,23 @@ type Runtime struct {
 	factSkills       map[string]string
 	linkAllowlist    []string
 	syncPause        func(context.Context, Conversation) error
-	outbound         func(ctx context.Context, agentName, externalID, text, mediaURL string) error
-	runLocks         [256]sync.Mutex
-	recoveryDelays   []time.Duration
-	recoveryMu       sync.Mutex
-	recovering       map[uuid.UUID]bool
+	// notifyOperator raises the operator card from inside the runtime (the
+	// narrow mode's only way out of a silent turn). nil = no operator
+	// configured, which logs instead of failing the turn.
+	notifyOperator func(ctx context.Context, conv Conversation, text string) error
+	outbound       func(ctx context.Context, agentName, externalID, text, mediaURL string) error
+	runLocks       [256]sync.Mutex
+	flags          runtimeFlags
+	recoveryDelays []time.Duration
+	recoveryMu     sync.Mutex
+	recovering     map[uuid.UUID]bool
 }
 
 func NewRuntime(store ConversationStore, hooks HookExecutor, a2a A2AClient, domains DomainProvider) *Runtime {
 	states, _ := store.(StateStore)
 	return &Runtime{
 		states:         states,
+		flags:          runtimeFlagsFromEnv(),
 		store:          store,
 		hooks:          hooks,
 		a2a:            a2a,
@@ -255,7 +271,10 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 		}
 		return MessageResponse{Suppressed: true}, nil
 	}
-	resp, err := r.runTurn(ctx, conv, state, pending, req.OnProcessing)
+	if resp, handled, err := r.narrowStage(ctx, conv, state, pending); handled || err != nil {
+		return resp, err
+	}
+	resp, err := r.runTurn(ctx, conv, state, pending, turnOptions{onProcessing: req.OnProcessing, delaySeconds: req.DelaySeconds})
 	if err != nil {
 		var failure *turnFailure
 		if errors.As(err, &failure) {
@@ -273,7 +292,15 @@ func (r *Runtime) ProcessMessage(ctx context.Context, req MessageRequest) (Messa
 // a reply held back twice, a broken reply contract) come back wrapped in
 // turnFailure so the caller can tell them from hook failures, which pause
 // the conversation and must not be replayed.
-func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeState, pending []Message, onProcessing func()) (MessageResponse, error) {
+// turnOptions carries what the caller knows about this particular turn and
+// the runTurn body does not: the transport presence callback and the
+// gateway's chosen pause. Recovery passes the zero value.
+type turnOptions struct {
+	onProcessing func()
+	delaySeconds int
+}
+
+func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeState, pending []Message, opts turnOptions) (MessageResponse, error) {
 	var skills []string
 	var err error
 	if catalog, ok := r.domains.(DomainCatalog); ok {
@@ -300,13 +327,21 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 	run := AgentRunRequest{AgentName: conv.AgentName, ContextID: "runtime-" + conv.ID.String(), Messages: pending,
 		EndUserKey: conv.Channel + ":" + conv.ExternalID,
 		ConversationContext: AgentConversationContext{ConversationID: conv.ID.String(), Channel: conv.Channel,
-			ExternalID: conv.ExternalID, Username: conv.ActorUsername, State: state, AvailableSkills: skills}}
+			ExternalID: conv.ExternalID, Username: conv.ActorUsername, State: state, AvailableSkills: skills,
+			SeamlessHandoff: r.flags.SeamlessHandoff, ReplySplit: r.flags.SplitReply && !r.structuredAgents[conv.AgentName]}}
+	if r.flags.QuestionBudget {
+		questions, phrases := turnCounters(conv)
+		run.ConversationContext.NoQuestionThisTurn = questionBudgetSpent(questions, state)
+		run.ConversationContext.UsedPhrases = phrases
+	}
 	if r.structuredAgents[conv.AgentName] {
 		run.ConversationContext.ReplyFormat = structuredReplyFormat
 	}
-	if onProcessing != nil {
-		onProcessing()
+	run.ConversationContext.DelaySeconds = opts.delaySeconds
+	if opts.onProcessing != nil {
+		opts.onProcessing()
 	}
+	_, narrowAtEntry := narrowSince(conv)
 	var reply string
 	var after RuntimeState
 	for attempt := 0; attempt < 2; attempt++ {
@@ -320,6 +355,11 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 		}
 		if !after.AgentEnabled {
 			r.mirrorState(ctx, conv, after, "")
+			return MessageResponse{Suppressed: true}, nil
+		}
+		if entered, err := r.narrowEnteredDuringTurn(ctx, conv, narrowAtEntry); err != nil {
+			return MessageResponse{}, err
+		} else if entered {
 			return MessageResponse{Suppressed: true}, nil
 		}
 		if !r.structuredAgents[conv.AgentName] {
@@ -339,6 +379,12 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 					log.Warn().Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Str("reason", soft).Msg("agentruntime: reply sent back for a rewrite")
 					run.ConversationContext.State = after
 					run.ConversationContext.ReplyError = languageRepairHint
+					continue
+				}
+				if soft := ackLimitReason(reply, pending, after, r.flags.AckLimit); soft != "" && attempt == 0 {
+					log.Warn().Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Str("reason", soft).Msg("agentruntime: reply sent back for a rewrite")
+					run.ConversationContext.State = after
+					run.ConversationContext.ReplyError = ackRepairHint(r.flags.AckLimit)
 					continue
 				}
 				break
@@ -365,6 +411,20 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 		run.ConversationContext.State = after
 		run.ConversationContext.ReplyError = contractErr.Error()
 	}
+	// A turn that produced no text is not an error anywhere today: the
+	// runtime saves an empty assistant message, the gateway sends nothing,
+	// and the customer sees silence with no trace of why (QA 2026-09-15).
+	// Under AGENT_RUNTIME_SILENCE_RECOVERY it becomes a turnFailure, which
+	// leaves the input pending and puts the turn on the existing recovery
+	// ladder (30s, 90s, 240s) rather than building a second watchdog.
+	if r.flags.SilenceRecovery && isSilenceReply(reply) && !isDeliberateSkip(reply) {
+		return MessageResponse{}, &turnFailure{err: errors.New("agent turn produced no message")}
+	}
+	// Cutting the turn into messages happens here and nowhere else: after
+	// every guard above has seen the whole turn, before it is persisted. The
+	// structured-reply branch (reply_contract.go) is out of scope by
+	// decision, so it never splits.
+	reply, parts := r.splitForDelivery(conv, reply)
 	if _, err := r.store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "assistant", Content: reply}); err != nil {
 		return MessageResponse{}, err
 	}
@@ -383,8 +443,9 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 	} else {
 		return MessageResponse{}, fmt.Errorf("runtime receipt storage is not configured")
 	}
+	r.recordTurnCounters(ctx, conv, reply)
 	r.mirrorState(ctx, conv, after, "")
-	return MessageResponse{Text: reply}, nil
+	return MessageResponse{Text: reply, Messages: parts}, nil
 }
 
 // linksToEntities converts gateway link metadata into the generic entity
@@ -455,6 +516,21 @@ func (r *Runtime) pauseAfterHookFailure(ctx context.Context, conv Conversation, 
 
 const escalationSilenceAck = "Коллега уже в курсе, ответит здесь."
 
+// escalationSilenceAckSeamless is the same receipt without the hand-off: the
+// customer still learns their message arrived, but nobody is announced. Used
+// when AGENT_RUNTIME_SEAMLESS_HANDOFF is on (plan 4.2), where the curator
+// continues in the same chat under the same name and "a colleague will
+// answer here" would name a second person the customer never sees.
+const escalationSilenceAckSeamless = "Принято, зафиксировал."
+
+// silenceAckLine picks the receipt for the current flag state.
+func (r *Runtime) silenceAckLine() string {
+	if r.flags.SeamlessHandoff {
+		return escalationSilenceAckSeamless
+	}
+	return escalationSilenceAck
+}
+
 var errOutboundNotConfigured = errors.New("agentruntime: outbound channel not configured")
 
 // A conversation paused by a genuine escalation (PauseReason "escalated:
@@ -480,7 +556,8 @@ func (r *Runtime) maybeAckEscalationSilence(ctx context.Context, conv Conversati
 	if !claimed {
 		return
 	}
-	if _, err := r.store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "assistant", Content: escalationSilenceAck}); err != nil {
+	ack := r.silenceAckLine()
+	if _, err := r.store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "assistant", Content: ack}); err != nil {
 		log.Warn().Err(err).Str("conversation", conv.ID.String()).Msg("agentruntime: escalation ack not saved")
 		return
 	}
@@ -488,7 +565,7 @@ func (r *Runtime) maybeAckEscalationSilence(ctx context.Context, conv Conversati
 		log.Info().Str("conversation", conv.ID.String()).Msg("agentruntime: escalation ack persisted but no outbound configured")
 		return
 	}
-	if err := r.outbound(ctx, conv.AgentName, conv.ExternalID, escalationSilenceAck, ""); err != nil {
+	if err := r.outbound(ctx, conv.AgentName, conv.ExternalID, ack, ""); err != nil {
 		if errors.Is(err, errOutboundNotConfigured) {
 			log.Info().Str("conversation", conv.ID.String()).Msg("agentruntime: escalation ack persisted but no outbound configured")
 			return

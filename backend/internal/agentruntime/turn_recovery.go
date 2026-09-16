@@ -102,7 +102,13 @@ func (r *Runtime) recoverTurn(convID uuid.UUID, attempt int) (bool, error) {
 	if len(pending) == 0 {
 		return true, nil
 	}
-	resp, err := r.runTurn(ctx, conv, state, pending, nil)
+	// A recovery replay goes through the same narrow-mode gate an inbound
+	// turn does: while a curator owns the chat, a retry must not become the
+	// one path that speaks past the white list.
+	if _, handled, gateErr := r.narrowStage(ctx, conv, state, pending); handled || gateErr != nil {
+		return true, gateErr
+	}
+	resp, err := r.runTurn(ctx, conv, state, pending, turnOptions{})
 	if err != nil {
 		var failure *turnFailure
 		return !errors.As(err, &failure), err
@@ -116,13 +122,35 @@ func (r *Runtime) recoverTurn(convID uuid.UUID, attempt int) (bool, error) {
 		log.Info().Str("conversation", convID.String()).Msg("agentruntime: recovered reply persisted but no outbound configured")
 		return true, nil
 	}
-	if err := r.outbound(ctx, conv.AgentName, conv.ExternalID, resp.Text, ""); err != nil {
-		log.Warn().Err(err).Str("conversation", convID.String()).Msg("agentruntime: recovered reply delivery failed (reply persisted)")
+	for i, text := range outboundTexts(resp) {
+		if err := r.outbound(ctx, conv.AgentName, conv.ExternalID, text, ""); err != nil {
+			log.Warn().Err(err).Str("conversation", convID.String()).Int("part", i+1).
+				Msg("agentruntime: recovered reply delivery failed (reply persisted)")
+			break
+		}
 	}
 	return true, nil
+}
+
+// outboundTexts is what a recovered turn actually sends. /outbound has no
+// notion of a series and no pacing, but a turn the runtime already cut must
+// not be reassembled into one wall of text here either: the customer would
+// get a different shape from a retry than from a first attempt. Parts go out
+// back to back in order; with no parts it is the single Text, exactly as
+// before.
+func outboundTexts(resp MessageResponse) []string {
+	if len(resp.Messages) > 0 {
+		return resp.Messages
+	}
+	return []string{resp.Text}
 }
 
 func isSilenceReply(text string) bool {
 	trimmed := strings.TrimRight(strings.TrimSpace(text), ".!…")
 	return trimmed == "" || strings.EqualFold(strings.TrimSpace(trimmed), "SKIP")
+}
+
+func isDeliberateSkip(text string) bool {
+	trimmed := strings.TrimRight(strings.TrimSpace(text), ".!…")
+	return trimmed != "" && strings.EqualFold(strings.TrimSpace(trimmed), "SKIP")
 }

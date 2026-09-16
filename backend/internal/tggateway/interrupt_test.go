@@ -219,6 +219,7 @@ type sequentialTelegram struct {
 	batches   [][]TelegramUpdate
 	i         int
 	sent      []string
+	at        []time.Time
 	repliedTo []int64
 }
 
@@ -238,6 +239,7 @@ func (s *sequentialTelegram) SendMessage(_ context.Context, _ string, _ int64, t
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sent = append(s.sent, text)
+	s.at = append(s.at, time.Now())
 	return nil
 }
 

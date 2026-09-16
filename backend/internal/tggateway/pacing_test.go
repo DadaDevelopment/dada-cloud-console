@@ -173,3 +173,104 @@ func TestDebouncer_PacingDrivesQuietWindowAndLiftsMaxWindow(t *testing.T) {
 		t.Fatalf("dispatched after %v, before the paced quiet window", elapsed)
 	}
 }
+
+// Plan 5: the reply tail. The share defaults to zero, and a zero share must
+// never add a delay -- that is the whole "unset == today" promise.
+func TestTailDelay_DefaultsAddNothing(t *testing.T) {
+	c := TailDelayFromEnv()
+	if c.TailShare != 0 {
+		t.Fatalf("default share must be zero, got %v", c.TailShare)
+	}
+	if c.Loc != time.UTC {
+		t.Fatalf("default zone must be UTC, got %v", c.Loc)
+	}
+	for hour := 0; hour < 24; hour++ {
+		now := time.Date(2026, 9, 16, hour, 30, 0, 0, time.UTC)
+		for _, first := range []bool{true, false} {
+			if d := c.ExtraDelay(now, first); d != 0 {
+				t.Fatalf("hour %d first=%v: delay %v, want 0", hour, first, d)
+			}
+		}
+	}
+	var nilCfg *TailDelayConfig
+	if d := nilCfg.ExtraDelay(time.Now(), false); d != 0 {
+		t.Fatalf("nil config must be silent, got %v", d)
+	}
+}
+
+func TestGatewayLocation_UnknownZoneFallsBackToUTC(t *testing.T) {
+	t.Setenv("TG_GATEWAY_TZ", "Mars/Olympus")
+	if loc := GatewayLocation(); loc != time.UTC {
+		t.Fatalf("unknown zone must fall back to UTC, got %v", loc)
+	}
+	t.Setenv("TG_GATEWAY_TZ", "Europe/Moscow")
+	if loc := GatewayLocation(); loc.String() != "Europe/Moscow" {
+		t.Fatalf("zone = %v, want Europe/Moscow", loc)
+	}
+}
+
+// A held reply lives in a goroutine, so the hold has a hard ceiling no
+// manifest can raise.
+func TestTailDelay_MaxIsCappedAtFifteenMinutes(t *testing.T) {
+	t.Setenv("TG_GATEWAY_PACING_TAIL_SHARE", "1")
+	t.Setenv("TG_GATEWAY_PACING_TAIL_MAX_MS", "3600000")
+	c := TailDelayFromEnv()
+	if c.TailMax != tailDelayMaxCap {
+		t.Fatalf("TailMax = %v, want the %v cap", c.TailMax, tailDelayMaxCap)
+	}
+	noon := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < 200; i++ {
+		if d := c.ExtraDelay(noon, false); d > tailDelayMaxCap {
+			t.Fatalf("delay %v exceeds the cap %v", d, tailDelayMaxCap)
+		}
+	}
+}
+
+func TestTailDelay_ShareIsClampedToAProbability(t *testing.T) {
+	t.Setenv("TG_GATEWAY_PACING_TAIL_SHARE", "30")
+	if got := TailDelayFromEnv().TailShare; got != 1 {
+		t.Fatalf("share = %v, want it clamped to 1", got)
+	}
+	t.Setenv("TG_GATEWAY_PACING_TAIL_SHARE", "-2")
+	if got := TailDelayFromEnv().TailShare; got != 0 {
+		t.Fatalf("share = %v, want it clamped to 0", got)
+	}
+	t.Setenv("TG_GATEWAY_PACING_TAIL_SHARE", "не число")
+	if got := TailDelayFromEnv().TailShare; got != 0 {
+		t.Fatalf("share = %v, want the default", got)
+	}
+}
+
+func TestTailDelay_OnlyInTheWorkingDayAndNeverOnTheFirstMessage(t *testing.T) {
+	c := &TailDelayConfig{TailShare: 1, TailMin: tailDelayMinDefault, TailMax: tailDelayMaxCap, Loc: time.UTC}
+
+	noon := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	if d := c.ExtraDelay(noon, false); d < tailDelayMinDefault || d > tailDelayMaxCap {
+		t.Fatalf("midday delay %v outside [5m, 15m]", d)
+	}
+	if d := c.ExtraDelay(noon, true); d != 0 {
+		t.Fatalf("the first message of a dialogue must never wait, got %v", d)
+	}
+	for _, hour := range []int{3, 9, 22, 23} {
+		at := time.Date(2026, 9, 16, hour, 0, 0, 0, time.UTC)
+		if d := c.ExtraDelay(at, false); d != 0 {
+			t.Fatalf("hour %d is outside the 10-22 window, got %v", hour, d)
+		}
+	}
+}
+
+func TestTailDelay_ShareIsRespectedAcrossManyTurns(t *testing.T) {
+	c := &TailDelayConfig{TailShare: 0.3, TailMin: tailDelayMinDefault, TailMax: tailDelayMaxCap, Loc: time.UTC}
+	noon := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	delayed := 0
+	const n = 2000
+	for i := 0; i < n; i++ {
+		if c.ExtraDelay(noon, false) > 0 {
+			delayed++
+		}
+	}
+	share := float64(delayed) / n
+	if share < 0.24 || share > 0.36 {
+		t.Fatalf("delayed share %.3f, want about 0.3", share)
+	}
+}

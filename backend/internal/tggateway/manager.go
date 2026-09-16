@@ -436,6 +436,22 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 	if cfg != nil {
 		pacing = cfg.Pacing
 	}
+	// TG_GATEWAY_SPLIT_REPLY[_<AGENT>]=1 lets a turn the runtime already cut
+	// into messages leave as a series (plan 3.1). Off, resp.Messages is
+	// ignored and the whole turn goes out as the single Text message, which
+	// is what happens today and what happens for a runtime that never cuts.
+	splitReply := envStrFor("TG_GATEWAY_SPLIT_REPLY", b.AgentName) == "1"
+	// The reply tail (plan 5). The share defaults to zero, so
+	// tailDelay.ExtraDelay returns 0 on every turn unless it is set.
+	tailDelay := TailDelayFromEnv()
+	seriesGap := pacing
+	if seriesGap == nil {
+		seriesGap = SeriesGapFromEnv()
+	}
+	// seenConv is what "first message of the dialogue" means here: the first
+	// batch this poller handled for that chat. A restart forgets, which errs
+	// towards NOT adding a tail delay -- the safe direction for a new lead.
+	seenConv := newSeenChats(seenChatsTTL, seenChatsMax)
 
 	// One line per poller, naming the agent and the settings that decide what
 	// it will do. Without it a bot that never speaks is indistinguishable from
@@ -452,6 +468,9 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		Int("hourly_budget", policy.HourlyBudget).
 		Bool("observer", observer != nil).
 		Bool("pacing", pacing != nil).
+		Bool("split_reply", splitReply).
+		Float64("tail_share", tailDelay.TailShare).
+		Str("tz", tailDelay.Loc.String()).
 		Str("vision_model", mediaCfg.VisionModel).
 		Str("whisper", mediaCfg.WhisperBaseURL).
 		Msg("tggateway: poller started")
@@ -464,6 +483,12 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		convKey := ConversationKey(batch[0])
 		inGroup := IsGroup(batch[0].ChatType)
 
+		firstOfDialogue := seenConv.firstTime(convKey, time.Now())
+		// Decided before the agent is called so the number can travel with
+		// the turn (delay_s in runtime_context) instead of being guessed from
+		// timestamps later.
+		extraDelay := tailDelay.ExtraDelay(time.Now(), firstOfDialogue)
+
 		runCtx, done, full, superseded := runs.begin(convKey, ctx, batch)
 		defer done()
 		if superseded {
@@ -471,6 +496,19 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 				Msg("tggateway: superseded an in-flight run (interrupt: cancel_and_restart)")
 		}
 		batch = full
+
+		if extraDelay > 0 {
+			log.Info().Str("agent", b.AgentName).Str("conv", convKey).
+				Int("delay_s", int(extraDelay.Seconds())).Bool("first_of_dialogue", firstOfDialogue).
+				Msg("tggateway: extra pacing delay before the reply")
+			sleepOrDone(runCtx, extraDelay)
+			if runCtx.Err() != nil {
+				log.Info().Str("agent", b.AgentName).Str("conv", convKey).
+					Int("delay_s", int(extraDelay.Seconds())).
+					Msg("tggateway: client wrote during the extra delay; the batch is carried into the next run")
+				return
+			}
+		}
 
 		// Runtime admits a turn before announcing processing over the response
 		// stream. Paused and courtesy-only turns never start typing. With
@@ -482,9 +520,10 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		}
 
 		req := RuntimeMessageRequest{
-			AgentName:  b.AgentName,
-			Channel:    "telegram",
-			ExternalID: convKey,
+			AgentName:    b.AgentName,
+			Channel:      "telegram",
+			ExternalID:   convKey,
+			DelaySeconds: int(extraDelay.Seconds()),
 			Actor: RuntimeActor{
 				ExternalID: fmt.Sprintf("%d", batch[0].UserID),
 				Username:   batch[0].Username,
@@ -610,32 +649,59 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 			}
 			return
 		}
-		if pacing != nil {
-			stopTyping := startTyping(runCtx, tg, b.BotToken, chatID)
-			sleepOrDone(runCtx, pacing.TypingFor(sendText))
-			stopTyping()
+		parts := []string{sendText}
+		if splitReply && !wantsButton {
+			if series := sendableParts(resp.Messages); len(series) > 1 {
+				parts = series
+			}
 		}
-		var sendErr error
-		switch {
-		case wantsButton:
-			sendErr = tg.SendMessageWithLocationButton(ctx, b.BotToken, chatID, sendText)
-		default:
-			anchor := ""
-			if inGroup {
-				anchor = resp.ReplyToChannelMessageID
-				if anchor == "" {
-					anchor = lastBatchChannelID(batch)
+		anchor := ""
+		if inGroup {
+			anchor = resp.ReplyToChannelMessageID
+			if anchor == "" {
+				anchor = lastBatchChannelID(batch)
+			}
+		}
+		if len(parts) > 1 {
+			runs.markTail(convKey, runCtx, true)
+			defer runs.markTail(convKey, runCtx, false)
+		}
+		interrupted := false
+		for i, part := range parts {
+			if i > 0 && !interrupted {
+				sleepOrDone(runCtx, seriesGap.GapFor())
+				if runCtx.Err() != nil {
+					interrupted = true
+					log.Info().Str("agent", b.AgentName).Str("conv", convKey).Int("sent", i).Int("planned", len(parts)).
+						Msg("tggateway: client wrote mid-series, remaining parts sent without pacing")
 				}
 			}
-			if replyTo, parseErr := strconv.ParseInt(anchor, 10, 64); parseErr == nil && replyTo > 0 {
-				sendErr = tg.SendMessageReply(ctx, b.BotToken, chatID, replyTo, sendText)
-			} else {
-				sendErr = tg.SendMessage(ctx, b.BotToken, chatID, sendText)
+			if pacing != nil && !interrupted {
+				stopTyping := startTyping(runCtx, tg, b.BotToken, chatID)
+				sleepOrDone(runCtx, pacing.TypingFor(part))
+				stopTyping()
+				if runCtx.Err() != nil {
+					interrupted = true
+				}
 			}
-		}
-		if sendErr != nil {
-			log.Warn().Err(sendErr).Str("agent", b.AgentName).Msg("tggateway: reply send failed")
-			return
+			if i == len(parts)-1 && len(parts) > 1 {
+				runs.markTail(convKey, runCtx, false)
+			}
+			var sendErr error
+			switch {
+			case wantsButton:
+				sendErr = tg.SendMessageWithLocationButton(ctx, b.BotToken, chatID, part)
+			default:
+				if replyTo, parseErr := strconv.ParseInt(anchor, 10, 64); parseErr == nil && replyTo > 0 && i == 0 {
+					sendErr = tg.SendMessageReply(ctx, b.BotToken, chatID, replyTo, part)
+				} else {
+					sendErr = tg.SendMessage(ctx, b.BotToken, chatID, part)
+				}
+			}
+			if sendErr != nil {
+				log.Warn().Err(sendErr).Str("agent", b.AgentName).Int("part", i+1).Msg("tggateway: reply send failed")
+				return
+			}
 		}
 		if inGroup {
 			policy.Charge(convKey)

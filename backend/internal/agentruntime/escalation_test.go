@@ -148,6 +148,11 @@ func TestPGEscalate_SignalKeepsAgentLiveAndPagesOperatorOnce(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, state.AgentEnabled)
 	require.Empty(t, state.PauseReason)
+	fresh, err := store.GetConversation(ctx, client.ID)
+	require.NoError(t, err)
+	signals, _ := fresh.Metadata["escalation_signals"].(map[string]any)
+	require.Contains(t, signals, "E_DISTRUST", "a plain signal claims the bare reason key")
+	require.NotContains(t, signals, narrowSignalKey("E_DISTRUST"))
 
 	status, result = postRuntime(t, httpServer.URL, "/tools/escalate", map[string]any{"context_token": token, "reason_code": "E_DISTRUST", "summary": "Снова требует стейтмент."}, testRuntimeToken)
 	require.Equal(t, 200, status, result)
