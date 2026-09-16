@@ -9363,7 +9363,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Queues the git write for one agent (prompt, tools, model). Async: returns 202 with an operation; poll until terminal. Re-posting the same name updates that agent; a field left out keeps its current value, so a prompt-only save does not drop the model, runtime or tools.",
+                "description": "Queues the git write for one agent (prompt, tools, model). Async: returns 202 with an operation; poll until terminal. Re-posting the same name updates that agent; a field left out keeps its current value, so a prompt-only save does not drop the model, runtime or tools. When the agent's prompt is synced from a git repository (prompt source), a prompt that differs from the synced one is refused with 409 prompt_owned_by_source; pass the synced prompt unchanged to edit the other fields.",
                 "consumes": [
                     "application/json"
                 ],
@@ -9435,6 +9435,15 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -9861,6 +9870,15 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "sync_in_progress: another sync of this agent holds the lock",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {

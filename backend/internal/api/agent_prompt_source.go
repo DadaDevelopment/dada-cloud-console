@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -20,6 +20,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/rs/zerolog/log"
 )
 
 // Sync statuses of a prompt source. The agent's prompt and skills are read
@@ -44,6 +46,7 @@ type agentPromptSourceRow struct {
 	Ref            string
 	Path           string
 	ResolvedSHA    string
+	CheckedSHA     string
 	SyncedAt       *time.Time
 	LastCheckedAt  *time.Time
 	LastSyncStatus string
@@ -53,6 +56,8 @@ type agentPromptSourceRow struct {
 	PromptVersion  string
 	Skills         map[string]string
 }
+
+var promptSourceRepoName = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 
 // AgentPromptSourceSkill is one synced skill file as the console shows it.
 type AgentPromptSourceSkill struct {
@@ -130,13 +135,13 @@ type syncAgentPromptSourceResult struct {
 }
 
 const promptSourceColumns = `project_id, environment_id, agent_name, installation_id, repo_full_name, ref, path,
-	resolved_sha, synced_at, last_checked_at, last_sync_status, last_sync_error,
+	resolved_sha, checked_sha, synced_at, last_checked_at, last_sync_status, last_sync_error,
 	prompt, prompt_title, prompt_version, skills`
 
 func scanPromptSource(row pgx.Row) (agentPromptSourceRow, error) {
 	var r agentPromptSourceRow
 	err := row.Scan(&r.ProjectID, &r.EnvironmentID, &r.AgentName, &r.InstallationID, &r.RepoFullName, &r.Ref, &r.Path,
-		&r.ResolvedSHA, &r.SyncedAt, &r.LastCheckedAt, &r.LastSyncStatus, &r.LastSyncError,
+		&r.ResolvedSHA, &r.CheckedSHA, &r.SyncedAt, &r.LastCheckedAt, &r.LastSyncStatus, &r.LastSyncError,
 		&r.Prompt, &r.PromptTitle, &r.PromptVersion, &r.Skills)
 	return r, err
 }
@@ -155,14 +160,18 @@ func (h *Handler) loadPromptSource(ctx context.Context, projectID, envID uuid.UU
 	return r, true, nil
 }
 
-// promptSourceOverride hands saveAgent the synced prompt when the agent has a
-// source, so a hand edit or an MCP call cannot desync the claim from the repo.
-func (h *Handler) promptSourceOverride(ctx context.Context, projectID, envID uuid.UUID, name string) (prompt, version string, ok bool) {
+// promptSourceOverride tells saveAgent which prompt the agent's repository
+// owns, so a hand edit or an MCP call cannot desync the claim from the repo.
+// ok is false when the agent has no synced source.
+func (h *Handler) promptSourceOverride(ctx context.Context, projectID, envID uuid.UUID, name string) (agentPromptSourceRow, bool, error) {
 	r, found, err := h.loadPromptSource(ctx, projectID, envID, name)
-	if err != nil || !found || r.SyncedAt == nil {
-		return "", "", false
+	if err != nil {
+		return agentPromptSourceRow{}, false, err
 	}
-	return r.Prompt, r.PromptVersion, true
+	if !found || r.SyncedAt == nil {
+		return agentPromptSourceRow{}, false, nil
+	}
+	return r, true, nil
 }
 
 // GetAgentPromptSource returns the repository the agent's prompt and skills are synced from.
@@ -254,7 +263,7 @@ func (h *Handler) SetAgentPromptSource(c *gin.Context) {
 		return
 	}
 	repo := strings.TrimSpace(req.RepoFullName)
-	if _, ok := repoScopeName(repo); !ok {
+	if !promptSourceRepoName.MatchString(repo) {
 		respondError(c, http.StatusBadRequest, "repo_full_name must be owner/name")
 		return
 	}
@@ -293,9 +302,15 @@ func (h *Handler) SetAgentPromptSource(c *gin.Context) {
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		 ON CONFLICT (project_id, environment_id, agent_name) DO UPDATE SET
 		   installation_id = EXCLUDED.installation_id, repo_full_name = EXCLUDED.repo_full_name,
-		   ref = EXCLUDED.ref, path = EXCLUDED.path, resolved_sha = '',
+		   ref = EXCLUDED.ref, path = EXCLUDED.path, resolved_sha = '', checked_sha = '',
 		   last_sync_status = 'pending', last_sync_error = '', updated_at = NOW()`,
 		projectID, envID, name, installationID, repo, ref, dir, claims.UserID)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		respondErrorCode(c, http.StatusConflict, "agent_name_attached_elsewhere",
+			"an agent with this name in another project already syncs from a repository; agent names are shared across projects")
+		return
+	}
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to store prompt source")
 		return
@@ -364,6 +379,7 @@ func (h *Handler) promptSourceInstallation(c *gin.Context, projectID uuid.UUID, 
 // @Failure     401       {object} map[string]string
 // @Failure     403       {object} map[string]string
 // @Failure     404       {object} map[string]string
+// @Failure     409       {object} map[string]string "sync_in_progress: another sync of this agent holds the lock"
 // @Router      /projects/{projectId}/environments/{envId}/agents/{name}/prompt-source/sync [post]
 func (h *Handler) SyncAgentPromptSource(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
@@ -396,6 +412,10 @@ func (h *Handler) SyncAgentPromptSource(c *gin.Context) {
 		return
 	}
 	result := h.syncPromptSource(ctx, row, req.Force, claims.UserID)
+	if result.Error == promptSourceErrSyncInProgress {
+		respondErrorCode(c, http.StatusConflict, promptSourceErrSyncInProgress, "another sync of this agent is running; try again in a moment")
+		return
+	}
 	row, _, err = h.loadPromptSource(ctx, projectID, envID, row.AgentName)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to load prompt source")
@@ -452,11 +472,18 @@ func (h *Handler) DeleteAgentPromptSource(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// installTokenCache keeps one token per installation until shortly before it
-// expires, so the poller does not mint a token per agent per tick.
+// installTokenCache keeps one token per installation and repository until
+// shortly before it expires, so the poller does not mint a token per agent per
+// tick. Tokens are minted narrowed to one repository, so two sources in
+// different repositories under one installation cannot share a token.
 type installTokenCache struct {
 	mu     sync.Mutex
-	tokens map[int64]cachedInstallToken
+	tokens map[installTokenKey]cachedInstallToken
+}
+
+type installTokenKey struct {
+	installationID int64
+	repo           string
 }
 
 type cachedInstallToken struct {
@@ -464,7 +491,7 @@ type cachedInstallToken struct {
 	expires time.Time
 }
 
-var promptSourceTokens = &installTokenCache{tokens: map[int64]cachedInstallToken{}}
+var promptSourceTokens = &installTokenCache{tokens: map[installTokenKey]cachedInstallToken{}}
 
 // promptSourceMintToken is swapped by tests; it is gh.MintInstallTokenForRepos in production.
 var promptSourceMintToken = gh.MintInstallTokenForRepos
@@ -479,92 +506,125 @@ func (h *Handler) promptSourceToken(ctx context.Context, installationID uuid.UUI
 	if !ok {
 		return "", fmt.Errorf("repository must be owner/name")
 	}
+	key := installTokenKey{installationID: providerInstallID, repo: repoName}
 	promptSourceTokens.mu.Lock()
 	defer promptSourceTokens.mu.Unlock()
-	if cached, ok := promptSourceTokens.tokens[providerInstallID]; ok && time.Until(cached.expires) > 5*time.Minute {
+	if cached, ok := promptSourceTokens.tokens[key]; ok && time.Until(cached.expires) > 5*time.Minute {
 		return cached.token, nil
 	}
 	token, expires, err := promptSourceMintToken(ctx, h.cfg.GithubAppID, h.cfg.GithubAppPrivateKey, providerInstallID, []string{repoName})
 	if err != nil {
 		return "", fmt.Errorf("git app could not read %s: %w", repo, err)
 	}
-	promptSourceTokens.tokens[providerInstallID] = cachedInstallToken{token: token, expires: expires}
+	promptSourceTokens.tokens[key] = cachedInstallToken{token: token, expires: expires}
 	return token, nil
 }
 
-// syncPromptSource is one sync of one agent: resolve head, skip when nothing
-// moved, otherwise fetch, validate, store and queue the prompt into the claim.
-// It never returns an error: the outcome lands in the row for the UI and in
-// the result for the caller, and a failed sync leaves the last good prompt in
-// force.
+// promptSourceErrSyncInProgress is the result error when another sync of the
+// same agent holds the row's advisory lock.
+const promptSourceErrSyncInProgress = "sync_in_progress"
+
+// syncPromptSource is one sync of one agent inside one transaction that holds
+// a per-agent advisory lock: resolve head, skip when that head was already
+// examined, otherwise fetch, validate, store and queue the prompt into the
+// claim. It never returns an error: the outcome lands in the row and in the
+// result, and a failed sync leaves the last good prompt in force.
 func (h *Handler) syncPromptSource(ctx context.Context, row agentPromptSourceRow, force bool, actorID uuid.UUID) syncAgentPromptSourceResult {
-	fail := func(err error) syncAgentPromptSourceResult {
+	logger := log.With().Str("agent", row.AgentName).Str("repo", row.RepoFullName).Str("ref", row.Ref).Logger()
+	unchanged := syncAgentPromptSourceResult{SHA: row.ResolvedSHA, Version: row.PromptVersion, Files: 1 + len(row.Skills)}
+
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		logger.Warn().Err(err).Msg("prompt source sync: begin failed")
+		return syncAgentPromptSourceResult{SHA: row.ResolvedSHA, Version: row.PromptVersion, Error: "failed to store the sync"}
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var locked bool
+	if err = tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtext($1))`,
+		row.ProjectID.String()+"/"+row.EnvironmentID.String()+"/"+row.AgentName).Scan(&locked); err != nil {
+		logger.Warn().Err(err).Msg("prompt source sync: lock failed")
+		return syncAgentPromptSourceResult{SHA: row.ResolvedSHA, Version: row.PromptVersion, Error: "failed to store the sync"}
+	}
+	if !locked {
+		unchanged.Error = promptSourceErrSyncInProgress
+		return unchanged
+	}
+
+	fail := func(sha string, err error) syncAgentPromptSourceResult {
 		msg := err.Error()
-		_, dbErr := h.pool.Exec(ctx,
-			`UPDATE agent_prompt_sources SET last_checked_at = NOW(), last_sync_status = 'error', last_sync_error = $4, updated_at = NOW()
+		_, dbErr := tx.Exec(ctx,
+			`UPDATE agent_prompt_sources SET checked_sha = $4, last_checked_at = NOW(), last_sync_status = 'error', last_sync_error = $5, updated_at = NOW()
 			 WHERE project_id = $1 AND environment_id = $2 AND agent_name = $3`,
-			row.ProjectID, row.EnvironmentID, row.AgentName, msg)
-		if dbErr != nil {
-			log.Printf("prompt source %s: record error: %v", row.AgentName, dbErr)
+			row.ProjectID, row.EnvironmentID, row.AgentName, sha, msg)
+		if dbErr == nil {
+			dbErr = tx.Commit(ctx)
 		}
-		log.Printf("prompt source sync agent=%s repo=%s ref=%s status=error err=%q", row.AgentName, row.RepoFullName, row.Ref, msg)
+		if dbErr != nil {
+			logger.Warn().Err(dbErr).Msg("prompt source sync: record error failed")
+		}
+		logger.Warn().Str("status", "error").Str("error", msg).Msg("prompt source sync failed")
 		h.writeAudit(ctx, promptSourceActor(actorID), auditEntry{
 			ProjectID: row.ProjectID, EnvironmentID: row.EnvironmentID, Action: "SyncAgentPromptSource",
 			ResourceKind: "ManagedAgent", ResourceName: row.AgentName, Outcome: auditOutcomeFailure,
-			Metadata: map[string]any{"repo": row.RepoFullName, "ref": row.Ref, "error": msg},
+			Metadata: map[string]any{"repo": row.RepoFullName, "ref": row.Ref, "sha": sha, "error": msg},
 		})
 		return syncAgentPromptSourceResult{SHA: row.ResolvedSHA, Version: row.PromptVersion, Error: msg}
 	}
 
 	token, err := h.promptSourceToken(ctx, row.InstallationID, row.RepoFullName)
 	if err != nil {
-		return fail(err)
+		return fail(row.CheckedSHA, err)
 	}
 	fetcher := promptsource.Fetcher{Token: token}
 	sha, err := fetcher.HeadSHA(ctx, row.RepoFullName, row.Ref)
 	if err != nil {
-		return fail(err)
+		return fail(row.CheckedSHA, err)
 	}
-	if !force && sha == row.ResolvedSHA && row.LastSyncStatus == promptSourceStatusOK {
-		_, err = h.pool.Exec(ctx,
+	if !force && sha == row.CheckedSHA {
+		_, err = tx.Exec(ctx,
 			`UPDATE agent_prompt_sources SET last_checked_at = NOW() WHERE project_id = $1 AND environment_id = $2 AND agent_name = $3`,
 			row.ProjectID, row.EnvironmentID, row.AgentName)
-		if err != nil {
-			log.Printf("prompt source %s: record check: %v", row.AgentName, err)
+		if err == nil {
+			err = tx.Commit(ctx)
 		}
-		return syncAgentPromptSourceResult{SHA: sha, Version: row.PromptVersion, Files: 1 + len(row.Skills)}
+		if err != nil {
+			logger.Warn().Err(err).Msg("prompt source sync: record check failed")
+		}
+		unchanged.SHA = sha
+		if row.LastSyncStatus == promptSourceStatusError {
+			unchanged.SHA = row.ResolvedSHA
+			unchanged.Error = row.LastSyncError
+		}
+		return unchanged
 	}
 
 	files, err := fetcher.Fetch(ctx, row.RepoFullName, sha, row.Path)
 	if err != nil {
-		return fail(err)
+		return fail(sha, err)
 	}
 	bundle, err := promptsource.Build(files, sha)
 	if err != nil {
-		return fail(err)
+		return fail(sha, err)
 	}
 	skillsJSON, err := json.Marshal(bundle.SkillMap())
 	if err != nil {
-		return fail(err)
+		return fail(sha, err)
 	}
-
 	payload, err := json.Marshal(models.SaveAgentPayload{Name: row.AgentName, Prompt: bundle.Prompt, PromptVersion: bundle.Version})
 	if err != nil {
-		return fail(err)
+		return fail(sha, err)
 	}
-	tx, err := h.pool.Begin(ctx)
-	if err != nil {
-		return fail(fmt.Errorf("failed to store the sync"))
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
+
 	_, err = tx.Exec(ctx,
-		`UPDATE agent_prompt_sources SET resolved_sha = $4, synced_at = NOW(), last_checked_at = NOW(),
+		`UPDATE agent_prompt_sources SET resolved_sha = $4, checked_sha = $4, synced_at = NOW(), last_checked_at = NOW(),
 		   last_sync_status = 'ok', last_sync_error = '', prompt = $5, prompt_title = $6, prompt_version = $7,
 		   skills = $8, updated_at = NOW()
 		 WHERE project_id = $1 AND environment_id = $2 AND agent_name = $3`,
 		row.ProjectID, row.EnvironmentID, row.AgentName, sha, bundle.Prompt, bundle.Title, bundle.Version, skillsJSON)
 	if err != nil {
-		return fail(fmt.Errorf("failed to store the sync"))
+		logger.Warn().Err(err).Msg("prompt source sync: store failed")
+		return syncAgentPromptSourceResult{SHA: row.ResolvedSHA, Version: row.PromptVersion, Error: "failed to store the sync"}
 	}
 	var opID uuid.UUID
 	err = tx.QueryRow(ctx,
@@ -572,15 +632,17 @@ func (h *Handler) syncPromptSource(ctx context.Context, row agentPromptSourceRow
 		 VALUES ($1, $2, $3, 'UpdateAgent', 'ManagedAgent', $4, 'Created', $5) RETURNING id`,
 		promptSourceActor(actorID), row.ProjectID, row.EnvironmentID, row.AgentName, payload).Scan(&opID)
 	if err != nil {
-		return fail(fmt.Errorf("failed to queue the prompt update"))
+		logger.Warn().Err(err).Msg("prompt source sync: queue failed")
+		return syncAgentPromptSourceResult{SHA: row.ResolvedSHA, Version: row.PromptVersion, Error: "failed to queue the prompt update"}
 	}
 	if err = tx.Commit(ctx); err != nil {
-		return fail(fmt.Errorf("failed to store the sync"))
+		logger.Warn().Err(err).Msg("prompt source sync: commit failed")
+		return syncAgentPromptSourceResult{SHA: row.ResolvedSHA, Version: row.PromptVersion, Error: "failed to store the sync"}
 	}
 
 	fileCount := 1 + len(bundle.Skills)
-	log.Printf("prompt source sync agent=%s repo=%s ref=%s sha=%s version=%s files=%d bytes=%d op=%s",
-		row.AgentName, row.RepoFullName, row.Ref, sha, bundle.Version, fileCount, bundle.Bytes(), opID)
+	logger.Info().Str("sha", sha).Str("version", bundle.Version).Int("files", fileCount).Int("bytes", bundle.Bytes()).
+		Str("op", opID.String()).Msg("prompt source synced")
 	h.writeAudit(ctx, promptSourceActor(actorID), auditEntry{
 		ProjectID: row.ProjectID, EnvironmentID: row.EnvironmentID, OperationID: opID, Action: "SyncAgentPromptSource",
 		ResourceKind: "ManagedAgent", ResourceName: row.AgentName, Outcome: auditOutcomeSuccess,
@@ -607,7 +669,7 @@ func (h *Handler) RunAgentPromptSourceTick(ctx context.Context) {
 	runWithAdvisoryLock(ctx, h.pool, lockKeyAgentPromptSource, "agent-prompt-source", func(ctx context.Context) {
 		rows, err := h.pool.Query(ctx, `SELECT `+promptSourceColumns+` FROM agent_prompt_sources ORDER BY agent_name`)
 		if err != nil {
-			log.Printf("prompt source poll: list: %v", err)
+			log.Warn().Err(err).Msg("prompt source poll: list failed")
 			return
 		}
 		var sources []agentPromptSourceRow
@@ -615,7 +677,7 @@ func (h *Handler) RunAgentPromptSourceTick(ctx context.Context) {
 			r, err := scanPromptSource(rows)
 			if err != nil {
 				rows.Close()
-				log.Printf("prompt source poll: scan: %v", err)
+				log.Warn().Err(err).Msg("prompt source poll: scan failed")
 				return
 			}
 			sources = append(sources, r)
