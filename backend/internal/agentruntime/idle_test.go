@@ -90,6 +90,52 @@ func TestIdleScheduler_InvokesOncePerIdlePeriod(t *testing.T) {
 	}
 }
 
+func TestIdleScheduler_SkipsConversationsQuietLongerThanReach(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	pool := store.(*pgStoreAlias).pool
+
+	agentName := "idle-reach-" + uuid.NewString()[:8]
+	stale, _, err := store.GetOrCreateConversation(ctx, agentName, "telegram", "chat-stale", Actor{ExternalID: "u1"})
+	require_NoError(t, err)
+	fresh, _, err := store.GetOrCreateConversation(ctx, agentName, "telegram", "chat-fresh", Actor{ExternalID: "u2"})
+	require_NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM conversations WHERE agent_name = $1`, agentName)
+		_, _ = pool.Exec(ctx, `DELETE FROM lifecycle_hooks WHERE agent_name = $1`, agentName)
+	})
+	_, err = pool.Exec(ctx, `UPDATE conversations SET updated_at = NOW() - interval '3 days' WHERE id = $1`, stale.ID)
+	require_NoError(t, err)
+	_, err = pool.Exec(ctx, `UPDATE conversations SET updated_at = NOW() - interval '3 hours' WHERE id = $1`, fresh.ID)
+	require_NoError(t, err)
+	_, err = pool.Exec(ctx, `
+		INSERT INTO lifecycle_hooks (agent_name, name, trigger_event, trigger_config, action_type, action_config)
+		VALUES ($1, 'follow-up', 'conversation.idle', '{"idle_minutes":120}', 'schedule', '{}')
+	`, agentName)
+	require_NoError(t, err)
+
+	var chats []string
+	outbound := &fakeOutbound{onSend: func(agent, chat, text string) { chats = append(chats, chat) }}
+	rt := NewRuntime(store, &noopHooks{}, fakeA2AIdle{reply: "Получилось зарегистрироваться?"}, nil)
+	rt.contextKey = []byte(testRuntimeToken)
+	sched := NewIdleScheduler(pool, rt, fakeA2AIdle{reply: "Получилось зарегистрироваться?"}, outbound, time.Second)
+	if err := sched.Tick(ctx); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if len(chats) != 1 || chats[0] != "chat-fresh" {
+		t.Fatalf("only the conversation inside the 24h reach may get a follow-up, got %v", chats)
+	}
+
+	_, err = pool.Exec(ctx, `UPDATE lifecycle_hooks SET trigger_config = '{"idle_minutes":120,"max_idle_minutes":10080}' WHERE agent_name = $1`, agentName)
+	require_NoError(t, err)
+	if err := sched.Tick(ctx); err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	if len(chats) != 2 || chats[1] != "chat-stale" {
+		t.Fatalf("a wider max_idle_minutes must reach the older conversation, got %v", chats)
+	}
+}
+
 func TestClearIdleFlag(t *testing.T) {
 	store := setupTestStore(t)
 	ctx := context.Background()

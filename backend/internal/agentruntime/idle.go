@@ -78,9 +78,14 @@ func (s *IdleScheduler) Run(ctx context.Context) {
 	}
 }
 
+// idleMaxMinutesDefault bounds how far back a hook reaches when it is first
+// enabled: a conversation quiet longer than this is a lost lead, not a
+// follow-up candidate. Overridable per hook via trigger_config.max_idle_minutes.
+const idleMaxMinutesDefault = "1440"
+
 // dueIdleHooks joins enabled conversation.idle hooks with conversations that
-// have been quiet past the threshold and are not already claimed by a newer
-// idle_fired_at mark.
+// have been quiet past the threshold, no longer than the hook's reach, and are
+// not already claimed by a newer idle_fired_at mark.
 const dueIdleHooksSQL = `
 SELECT h.id::text, h.agent_name, c.id::text, c.external_id, c.actor_username,
        COALESCE((h.trigger_config->>'idle_minutes')::int, 30),
@@ -90,6 +95,7 @@ JOIN conversations c
   ON c.agent_name = h.agent_name
  AND c.status = 'active'
  AND c.updated_at < NOW() - make_interval(mins => COALESCE((h.trigger_config->>'idle_minutes')::int, 30))
+ AND c.updated_at > NOW() - make_interval(mins => COALESCE((h.trigger_config->>'max_idle_minutes')::int, ` + idleMaxMinutesDefault + `))
  AND COALESCE(c.metadata->>'idle_fired_at', '') = ''
 WHERE h.trigger_event = 'conversation.idle'
   AND h.enabled = true

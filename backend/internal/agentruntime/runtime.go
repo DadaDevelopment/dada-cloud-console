@@ -293,6 +293,10 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 	if !state.AgentEnabled {
 		return MessageResponse{Suppressed: true}, nil
 	}
+	history, err := r.store.GetRecentMessages(ctx, conv.ID, 10)
+	if err != nil {
+		return MessageResponse{}, err
+	}
 	run := AgentRunRequest{AgentName: conv.AgentName, ContextID: "runtime-" + conv.ID.String(), Messages: pending,
 		EndUserKey: conv.Channel + ":" + conv.ExternalID,
 		ConversationContext: AgentConversationContext{ConversationID: conv.ID.String(), Channel: conv.Channel,
@@ -325,6 +329,18 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 				reason = linkLeakReason(reply, r.linkAllowlist)
 			}
 			if reason == "" {
+				if soft := repeatedHookReason(reply, history); soft != "" && attempt == 0 {
+					log.Warn().Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Str("reason", soft).Msg("agentruntime: reply sent back for a rewrite")
+					run.ConversationContext.State = after
+					run.ConversationContext.ReplyError = repeatRepairHint
+					continue
+				}
+				if soft := languageMismatchReason(reply, pending); soft != "" && attempt == 0 {
+					log.Warn().Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Str("reason", soft).Msg("agentruntime: reply sent back for a rewrite")
+					run.ConversationContext.State = after
+					run.ConversationContext.ReplyError = languageRepairHint
+					continue
+				}
 				break
 			}
 			log.Warn().Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Int("attempt", attempt).
