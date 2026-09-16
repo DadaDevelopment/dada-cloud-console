@@ -138,6 +138,11 @@ type ConversationStore interface {
 	// ClearNarrowMode returns the conversation to the ordinary mode.
 	ClearNarrowMode(ctx context.Context, conversationID uuid.UUID) error
 
+	// RecordTurnCounters stores the runtime-owned pair of plan 3.4
+	// (questions_in_row, used_phrases) in the conversation metadata. The
+	// model has no path to these: they exist to limit it.
+	RecordTurnCounters(ctx context.Context, conversationID uuid.UUID, questionsInRow int, usedPhrases []string) error
+
 	// FinishConversation retires a conversation without deleting it: history and
 	// state rows stay for audit, but the identity tuple is released so the next
 	// inbound message from the same user opens a fresh conversation.
@@ -452,6 +457,23 @@ func (s *pgStore) ClearNarrowMode(ctx context.Context, conversationID uuid.UUID)
 		SET metadata = metadata - '`+narrowModeKey+`'
 		WHERE id = $1
 	`, conversationID)
+	return err
+}
+
+// RecordTurnCounters writes both counters in one statement, next to the other
+// runtime-owned metadata keys. updated_at is left alone: this is bookkeeping
+// about a turn that already touched the conversation.
+func (s *pgStore) RecordTurnCounters(ctx context.Context, conversationID uuid.UUID, questionsInRow int, usedPhrases []string) error {
+	phrases, err := json.Marshal(usedPhrases)
+	if err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx, `
+		UPDATE conversations SET metadata = jsonb_set(
+				jsonb_set(COALESCE(metadata, '{}'::jsonb), '{`+questionsInRowKey+`}', to_jsonb($2::int), true),
+				'{`+usedPhrasesKey+`}', $3::jsonb, true)
+		WHERE id = $1
+	`, conversationID, questionsInRow, string(phrases))
 	return err
 }
 

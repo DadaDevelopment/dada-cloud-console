@@ -35,6 +35,14 @@ type AgentConversationContext struct {
 	// flag is off: a prompt that sees no marker must not produce one, which
 	// is what keeps a new prompt safe against an old runtime.
 	ReplySplit bool `json:"reply_split,omitempty"`
+
+	// NoQuestionThisTurn is the spent question budget (plan 3.4): the agent
+	// has closed on a question twice running and the amount slot is already
+	// filled, so this turn answers without asking. UsedPhrases carries the
+	// last closings so the same one is not reached for again. Both absent
+	// while AGENT_RUNTIME_QUESTION_BUDGET is off.
+	NoQuestionThisTurn bool     `json:"no_question_this_turn,omitempty"`
+	UsedPhrases        []string `json:"used_phrases,omitempty"`
 }
 
 // AgentRunRequest is one invocation of an agent.

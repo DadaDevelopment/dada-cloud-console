@@ -71,6 +71,11 @@ type runtimeFlags struct {
 	// the customer as up to three messages and tells the prompt, through
 	// runtime_context.reply_split, that it may mark the seams.
 	SplitReply bool
+
+	// QuestionBudget (AGENT_RUNTIME_QUESTION_BUDGET, plan 3.4) keeps the
+	// runtime-owned questions_in_row / used_phrases counters and tells the
+	// prompt to skip its question when the budget is spent.
+	QuestionBudget bool
 }
 
 func runtimeFlagsFromEnv() runtimeFlags {
@@ -80,5 +85,6 @@ func runtimeFlagsFromEnv() runtimeFlags {
 		NarrowTopics:      ParseNarrowTopics(os.Getenv("AGENT_RUNTIME_NARROW_TOPICS")),
 		NarrowReturnAfter: time.Duration(envInt("AGENT_RUNTIME_NARROW_RETURN_HOURS", 0)) * time.Hour,
 		SplitReply:        envBool("AGENT_RUNTIME_SPLIT_REPLY", false),
+		QuestionBudget:    envBool("AGENT_RUNTIME_QUESTION_BUDGET", false),
 	}
 }

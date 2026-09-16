@@ -320,6 +320,11 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 		ConversationContext: AgentConversationContext{ConversationID: conv.ID.String(), Channel: conv.Channel,
 			ExternalID: conv.ExternalID, Username: conv.ActorUsername, State: state, AvailableSkills: skills,
 			SeamlessHandoff: r.flags.SeamlessHandoff, ReplySplit: r.flags.SplitReply && !r.structuredAgents[conv.AgentName]}}
+	if r.flags.QuestionBudget {
+		questions, phrases := turnCounters(conv)
+		run.ConversationContext.NoQuestionThisTurn = questionBudgetSpent(questions, state)
+		run.ConversationContext.UsedPhrases = phrases
+	}
 	if r.structuredAgents[conv.AgentName] {
 		run.ConversationContext.ReplyFormat = structuredReplyFormat
 	}
@@ -410,6 +415,7 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 	} else {
 		return MessageResponse{}, fmt.Errorf("runtime receipt storage is not configured")
 	}
+	r.recordTurnCounters(ctx, conv, reply)
 	r.mirrorState(ctx, conv, after, "")
 	return MessageResponse{Text: reply, Messages: parts}, nil
 }
