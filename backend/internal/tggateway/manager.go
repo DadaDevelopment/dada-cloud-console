@@ -433,8 +433,14 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 	policy := NewGroupPolicyForAgent(b.BotUsername, b.AgentName)
 	observer := NewObserverForAgent(b.AgentName)
 	var pacing *PacingConfig
+	var night *NightConfig
+	var reactionRules []ReactionRule
 	if cfg != nil {
 		pacing = cfg.Pacing
+		if cfg.Night.Covers(b.AgentName) {
+			night = cfg.Night
+		}
+		reactionRules = cfg.Reactions.RulesFor(b.AgentName)
 	}
 	// TG_GATEWAY_SPLIT_REPLY[_<AGENT>]=1 lets a turn the runtime already cut
 	// into messages leave as a series (plan 3.1). Off, resp.Messages is
@@ -471,6 +477,7 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		Bool("split_reply", splitReply).
 		Float64("tail_share", tailDelay.TailShare).
 		Str("tz", tailDelay.Loc.String()).
+		Bool("night", night != nil).
 		Str("vision_model", mediaCfg.VisionModel).
 		Str("whisper", mediaCfg.WhisperBaseURL).
 		Msg("tggateway: poller started")
@@ -718,10 +725,22 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 
 	backoff := time.Second
 	const maxBackoff = 30 * time.Second
+	var wakeAt time.Time
 
 	for {
 		if ctx.Err() != nil {
 			return
+		}
+
+		if now := time.Now(); night != nil {
+			if wakeAt.IsZero() || !now.Before(wakeAt) {
+				wakeAt = night.WakeAt(now)
+			}
+			if !wakeAt.IsZero() && now.Before(wakeAt) {
+				log.Info().Str("agent", b.AgentName).Time("wake_at", wakeAt).Msg("tggateway: night, not fetching updates")
+				sleepOrDone(ctx, wakeAt.Sub(now))
+				continue
+			}
 		}
 
 		updates, err := tg.GetUpdates(ctx, b.BotToken, offset, getUpdatesTimeoutSec)
@@ -754,6 +773,7 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 			}
 			log.Info().Str("agent", b.AgentName).Str("conv", ConversationKey(u)).
 				Str("reason", decision.Reason).Msg("tggateway: update engaged")
+			fireReaction(ctx, tg, b.BotToken, u, reactionRules)
 			batch = append(batch, u)
 		}
 		if len(batch) == 0 {
@@ -856,4 +876,22 @@ func sentAtOrNil(t time.Time) *time.Time {
 		return nil
 	}
 	return &t
+}
+
+// lastInboundAt is when the client's last message of the batch was sent,
+// the moment the pacing target counts from. Telegram's message.date is
+// second-precise and server-side, so it also covers the quiet window the
+// debouncer already spent; a batch without dates (or with a clock ahead of
+// ours) counts from the run's start instead.
+func lastInboundAt(batch []TelegramUpdate, fallback time.Time) time.Time {
+	var last time.Time
+	for _, u := range batch {
+		if u.SentAt.After(last) {
+			last = u.SentAt
+		}
+	}
+	if last.IsZero() || last.After(fallback) {
+		return fallback
+	}
+	return last
 }

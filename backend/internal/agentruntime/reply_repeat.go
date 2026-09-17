@@ -6,14 +6,17 @@ import (
 	"unicode"
 )
 
-const repeatHookLookback = 2
-
 const repeatHookMinWords = 3
 
-// closingQuestion returns the last sentence of a reply when it is a question,
-// normalised for comparison: lower case, letters and digits only.
+// closingQuestion returns the hook of a reply, normalised for comparison:
+// lower case, letters and digits only. The hook is the last sentence of the
+// last blank-line part that ends with a question mark, so a series that
+// closes with a link or a button after its question still carries the hook.
 func closingQuestion(text string) string {
 	text = strings.TrimSpace(text)
+	for strings.Contains(text, "\n\n") && !strings.HasSuffix(text, "?") && !strings.HasSuffix(text, "？") {
+		text = strings.TrimSpace(text[:strings.LastIndex(text, "\n\n")])
+	}
 	if !strings.HasSuffix(text, "?") && !strings.HasSuffix(text, "？") {
 		return ""
 	}
@@ -40,21 +43,19 @@ func closingQuestion(text string) string {
 }
 
 // repeatedHookReason reports a reply whose closing question is the same
-// question, word for word (an added lead-in word does not count), that one of
-// the last assistant messages already ended with. Operators never ask an
-// unanswered slot twice in the same words; the model does, and clients read
-// that as a script.
+// question, word for word (an added lead-in word does not count), that any
+// assistant message in the recent history already ended with. Operators never
+// ask a slot twice in the same words within one dialog; the model does, and
+// clients read that as a script.
 func repeatedHookReason(reply string, history []Message) string {
 	question := closingQuestion(reply)
 	if question == "" {
 		return ""
 	}
-	seen := 0
-	for i := len(history) - 1; i >= 0 && seen < repeatHookLookback; i-- {
+	for i := len(history) - 1; i >= 0; i-- {
 		if history[i].Role != "assistant" {
 			continue
 		}
-		seen++
 		if earlier := closingQuestion(history[i].Content); earlier != "" && (strings.HasSuffix(question, earlier) || strings.HasSuffix(earlier, question)) {
 			return "closing question repeats an earlier message word for word"
 		}

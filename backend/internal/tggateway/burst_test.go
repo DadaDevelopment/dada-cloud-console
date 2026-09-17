@@ -54,13 +54,14 @@ func waitLong(t *testing.T, patience time.Duration, cond func() bool) bool {
 }
 
 // TestPacing_OwnerBurstNeverSplitsAtProductionNumbers is the arithmetic
-// guarantee with the live configuration: with TG_GATEWAY_PACING=1 and the
-// live 20 s base, the SHORTEST quiet window any message of the burst can
-// draw (worst-case jitter floor) is still longer than the gap to the next
-// message, so the Debouncer cannot flush between them.
+// guarantee with the env-driven configuration: with TG_GATEWAY_PACING=1 and
+// the live 6 s base, the quiet window drawn for every message of the burst
+// is longer than the gap to the next message, so the Debouncer cannot flush
+// between them. The quiet window carries no jitter by design, so this is
+// exact, not a floor.
 func TestPacing_OwnerBurstNeverSplitsAtProductionNumbers(t *testing.T) {
 	t.Setenv("TG_GATEWAY_PACING", "1")
-	t.Setenv("TG_GATEWAY_PACING_BASE_MS", "20000")
+	t.Setenv("TG_GATEWAY_PACING_BASE_MS", "6000")
 	t.Setenv("TG_GATEWAY_PACING_MAX_QUIET_MS", "")
 	p := PacingFromEnv()
 	if p == nil {
@@ -69,10 +70,10 @@ func TestPacing_OwnerBurstNeverSplitsAtProductionNumbers(t *testing.T) {
 	p.JitterSigma = 0
 	for i := 0; i+1 < len(ownerBurst); i++ {
 		u := TelegramUpdate{Text: ownerBurst[i].text}
-		floor := time.Duration(float64(p.QuietFor([]TelegramUpdate{u})) * pacingJitterFloor)
+		quiet := p.QuietFor([]TelegramUpdate{u})
 		next := ownerBurst[i+1].gap
-		if floor <= next {
-			t.Fatalf("%q: shortest quiet %v must exceed the %v gap to %q", u.Text, floor, next, ownerBurst[i+1].text)
+		if quiet <= next {
+			t.Fatalf("%q: quiet %v must exceed the %v gap to %q", u.Text, quiet, next, ownerBurst[i+1].text)
 		}
 	}
 }

@@ -15,9 +15,12 @@ func TestClosingQuestionNormalisesTheLastSentence(t *testing.T) {
 	require.Equal(t, "", closingQuestion("Сколько сейчас свободных денег на заход? Жду"), "question in the middle is not a hook")
 	require.Equal(t, "", closingQuestion("Стартуем?"), "short closes are allowed to repeat")
 	require.Equal(t, "", closingQuestion("Договорились, жду"))
+	require.Equal(t, "сколькосейчассвободныхденегназаход", closingQuestion("Вход от 300 USD.\n\nСколько сейчас свободных денег на заход?\n\n[[REQUEST_LOCATION_BUTTON]]"), "series: hook lives in the part before the button")
+	require.Equal(t, "сколькосейчассвободныхденегназаход", closingQuestion("Сколько сейчас свободных денег на заход?\n\nhttps://direct.fxpro.com/ib/ru/usd/ABCDEFGH"), "series: hook before the link")
+	require.Equal(t, "", closingQuestion("Вход от 300 USD.\n\nЖду"), "series without a question has no hook")
 }
 
-func TestRepeatedHookReasonLooksAtTheLastTwoAssistantMessages(t *testing.T) {
+func TestRepeatedHookReasonLooksAtEveryAssistantMessageInHistory(t *testing.T) {
 	history := []Message{
 		{Role: "assistant", Content: "Порог 300 USD. Сколько сейчас свободных денег на заход?"},
 		{Role: "user", Content: "а что за группа"},
@@ -29,7 +32,9 @@ func TestRepeatedHookReasonLooksAtTheLastTwoAssistantMessages(t *testing.T) {
 	require.Equal(t, "", repeatedHookReason("Без проблем. Какую сумму готовы выделить на первый депозит?", history))
 	require.Equal(t, "", repeatedHookReason("Жду", history))
 	older := append([]Message{{Role: "assistant", Content: "Был опыт на форексе или с нуля?"}, {Role: "user", Content: "нет"}}, history...)
-	require.Equal(t, "", repeatedHookReason("Был опыт на форексе или с нуля?", older), "three messages back is out of the window")
+	require.Contains(t, repeatedHookReason("Был опыт на форексе или с нуля?", older), "word for word", "a hook from three messages back is still the same dialog")
+	require.Contains(t, repeatedHookReason("Вход от 300 USD.\n\nСколько сейчас свободных денег на заход?\n\n[[REQUEST_LOCATION_BUTTON]]", history), "word for word", "series hook repeats an earlier hook")
+	require.Equal(t, "", repeatedHookReason("Ок, пиши как решишь", history))
 }
 
 func TestLanguageMismatchReasonFollowsTheClientBatch(t *testing.T) {

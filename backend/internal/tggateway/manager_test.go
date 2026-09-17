@@ -81,6 +81,10 @@ func (fakeTelegram) SendMessageWithLocationButton(context.Context, string, int64
 
 func (fakeTelegram) SendChatAction(context.Context, string, int64, string) error { return nil }
 
+func (fakeTelegram) SendMessageReaction(context.Context, string, int64, int64, string) error {
+	return nil
+}
+
 type fakeA2A struct{}
 
 func (fakeA2A) Send(context.Context, string, string) (string, error) { return "ok", nil }

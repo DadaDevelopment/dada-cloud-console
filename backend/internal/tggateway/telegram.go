@@ -88,6 +88,7 @@ type TelegramClient interface {
 	SendMessageReply(ctx context.Context, token string, chatID int64, replyToMessageID int64, text string) error
 	SendMessageWithLocationButton(ctx context.Context, token string, chatID int64, text string) error
 	SendChatAction(ctx context.Context, token string, chatID int64, action string) error
+	SendMessageReaction(ctx context.Context, token string, chatID int64, messageID int64, emoji string) error
 }
 
 // httpTelegramClient talks to the real Telegram Bot API (or a fake serving
@@ -489,6 +490,20 @@ func (c *httpTelegramClient) SendMessageReply(ctx context.Context, token string,
 		},
 	}
 	return c.call(ctx, token, "sendMessage", body, nil)
+}
+
+// SendMessageReaction sets an emoji reaction on messageID via setMessageReaction.
+// It replaces any previous reaction from this bot rather than adding to it,
+// which is what we want: at most one instant ack per message.
+func (c *httpTelegramClient) SendMessageReaction(ctx context.Context, token string, chatID int64, messageID int64, emoji string) error {
+	body := map[string]any{
+		"chat_id":    strconv.FormatInt(chatID, 10),
+		"message_id": messageID,
+		"reaction": []map[string]any{
+			{"type": "emoji", "emoji": emoji},
+		},
+	}
+	return c.call(ctx, token, "setMessageReaction", body, nil)
 }
 
 // locationRequestKeyboard is a Telegram ReplyKeyboardMarkup with one button

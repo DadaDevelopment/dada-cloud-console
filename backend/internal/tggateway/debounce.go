@@ -15,6 +15,8 @@ func DebounceConfigFromEnv() *DebounceConfig {
 		QuietWindow: envDurationMS("TG_GATEWAY_DEBOUNCE_QUIET_MS", 0),
 		MaxWindow:   envDurationMS("TG_GATEWAY_DEBOUNCE_MAX_MS", 0),
 		Pacing:      PacingFromEnv(),
+		Night:       NightFromEnv(),
+		Reactions:   ReactionConfigFromEnv(),
 	}
 }
 
@@ -34,11 +36,14 @@ const (
 // replaces the fixed QuietWindow with a per-batch one drawn from the
 // client's last message (see PacingConfig) and lifts MaxWindow to at least
 // Pacing.MaxQuiet, since a quiet window the cap always cuts short is no
-// window at all.
+// window at all. Night, when set, is the sleep window of the agents it
+// names (see NightConfig); the poller checks it before every getUpdates.
 type DebounceConfig struct {
 	QuietWindow time.Duration
 	MaxWindow   time.Duration
 	Pacing      *PacingConfig
+	Night       *NightConfig
+	Reactions   *ReactionConfig
 }
 
 // debouncedBatch is one chat's open buffer: the messages so far plus the two
