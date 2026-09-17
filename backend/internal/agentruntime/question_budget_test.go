@@ -225,3 +225,45 @@ func TestPGRecordTurnCounters_SurvivesAJsonbNullInUsedPhrases(t *testing.T) {
 	require.Equal(t, 1, q)
 	require.Equal(t, []string{"Сколько планируете?"}, phrases)
 }
+
+func TestQuestionBudgetReason_OnlyWhenTheBudgetIsSpentAndTheDraftAsks(t *testing.T) {
+	require.Empty(t, questionBudgetReason(false, "Счёт у FxPro уже есть?"))
+	require.Empty(t, questionBudgetReason(true, "Первый шаг, регистрация счёта, вот ссылка"))
+	require.NotEmpty(t, questionBudgetReason(true, "Вот ссылка для новой регистрации. Сначала уточню: счёт у FxPro раньше не открывали?"))
+}
+
+// QA human_v1 2026-09-17: the prompt sees no_question_this_turn and asks
+// anyway. The runtime sends the draft back once with the hint, then delivers
+// whatever comes back, the same budget every other soft guard has.
+func TestPGSpentQuestionBudgetIsRewrittenOnceThenDelivered(t *testing.T) {
+	t.Setenv("AGENT_RUNTIME_QUESTION_BUDGET", "on")
+	store := setupTestStore(t).(*pgStore)
+	ctx := context.Background()
+	agent := "budget-" + uuid.NewString()
+	conv, _, err := store.GetOrCreateConversation(ctx, agent, "telegram", "7", Actor{ExternalID: "7"})
+	require.NoError(t, err)
+	source, err := store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "user", Content: "500 долларов"})
+	require.NoError(t, err)
+	_, err = store.ApplyState(ctx, conv.ID, 0, StatePatch{ReportedFacts: map[string]ReportedFact{amountFactKey: {Value: "500 долларов", SourceMessageID: source.ID}}})
+	require.NoError(t, err)
+	require.NoError(t, store.RecordTurnCounters(ctx, conv.ID, true, "Сколько планируете?", usedPhrasesKept))
+	require.NoError(t, store.RecordTurnCounters(ctx, conv.ID, true, "Счёт у FxPro есть?", usedPhrasesKept))
+
+	asks := "Вот ссылка для новой регистрации. Сначала уточню: счёт у FxPro раньше не открывали?"
+	calls := 0
+	rt := NewRuntime(store, testHooks{}, runFunc(func(ctx context.Context, run AgentRunRequest) (string, error) {
+		calls++
+		require.True(t, run.ConversationContext.NoQuestionThisTurn)
+		if calls == 1 {
+			require.Empty(t, run.ConversationContext.ReplyError)
+			return asks, nil
+		}
+		require.Equal(t, questionBudgetRepairHint, run.ConversationContext.ReplyError)
+		return asks, nil
+	}), nil)
+	rt.contextKey = []byte(testRuntimeToken)
+	out, err := rt.ProcessMessage(ctx, MessageRequest{AgentName: agent, Channel: "telegram", ExternalID: "7", Messages: []InboundMessage{{Content: "давайте ссылку", ChannelMessageID: "1"}}})
+	require.NoError(t, err)
+	require.Equal(t, 2, calls, "one rewrite, then the draft is delivered even if it still asks")
+	require.Equal(t, asks, out.Text)
+}

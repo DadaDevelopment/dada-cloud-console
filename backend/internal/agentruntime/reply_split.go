@@ -37,6 +37,40 @@ var replySplitSeparator = regexp.MustCompile(`(?m)^[ \t]*-{3,}[ \t]*\r?$`)
 
 var replySplitLink = regexp.MustCompile(`(?i)https?://\S+|\b[a-z0-9-]+\.(?:ru|com|org|net|io|me)\b\S*`)
 
+// replySplitParagraph is a blank line. The prompt forbids one inside a
+// message, so when the model leaves one anyway it meant a second message and
+// simply skipped the marker (QA human_v1 2026-09-17: glm-5.3-flash never
+// wrote "---" in 20 turns, but did leave blank lines).
+var replySplitParagraph = regexp.MustCompile(`\n[ \t]*\r?\n`)
+
+// replySplitFactRunes is the prompt's own rule: a question is its own
+// message when the fact before it is longer than this.
+const replySplitFactRunes = 80
+
+// fallbackSeams finds the seams the model was told to mark and did not: a
+// blank line between paragraphs, or a closing question after a fact long
+// enough to stand alone. One part back means no seam was found.
+func fallbackSeams(text string) []string {
+	var paras []string
+	for _, p := range replySplitParagraph.Split(text, -1) {
+		if p = strings.TrimSpace(p); p != "" {
+			paras = append(paras, p)
+		}
+	}
+	if len(paras) > 1 {
+		return paras
+	}
+	if !endsWithQuestion(text) {
+		return []string{text}
+	}
+	question := closingSentence(text)
+	head := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(text), question))
+	if head == "" || question == "" || len([]rune(head)) < replySplitFactRunes {
+		return []string{text}
+	}
+	return []string{head, question}
+}
+
 // splitReplyParts cuts the turn on separator lines and drops the empties. A
 // turn with no separator comes back as one part; an all-separator turn comes
 // back empty, and the caller keeps the original text.
@@ -112,6 +146,9 @@ func (r *Runtime) splitTurn(conversationID, agentName, reply string) (text strin
 		// Nothing but separators: keep the model's own text rather than
 		// silently turning the turn into a blank message.
 		return reply, nil
+	}
+	if len(pieces) == 1 {
+		pieces = fallbackSeams(pieces[0])
 	}
 	pieces = capReplyParts(pieces)
 	warnOnPartForm(conversationID, agentName, pieces)

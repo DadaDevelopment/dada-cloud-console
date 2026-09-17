@@ -387,6 +387,15 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 					run.ConversationContext.ReplyError = ackRepairHint(r.flags.AckLimit)
 					continue
 				}
+				if soft := questionBudgetReason(run.ConversationContext.NoQuestionThisTurn, reply); soft != "" {
+					if attempt == 0 {
+						log.Warn().Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Str("reason", soft).Msg("agentruntime: reply sent back for a rewrite")
+						run.ConversationContext.State = after
+						run.ConversationContext.ReplyError = questionBudgetRepairHint
+						continue
+					}
+					log.Warn().Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Str("reason", soft).Msg("agentruntime: rewrite still asks, delivering as is")
+				}
 				break
 			}
 			log.Warn().Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Int("attempt", attempt).

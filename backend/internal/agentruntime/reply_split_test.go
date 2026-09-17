@@ -133,3 +133,31 @@ func TestReplySplitEnvelopeMarker(t *testing.T) {
 	require.NotContains(t, render(false), "reply_split")
 	require.Contains(t, render(true), `"reply_split":true`)
 }
+
+func TestSplitTurn_BlankLineIsASeamTheModelForgotToMark(t *testing.T) {
+	rt := splitRuntime(t, true)
+	text, parts := rt.splitTurn("conv", "agent", "Первый шаг, регистрация счёта, вот ссылка: https://example.com/x\n\nПару минут займёт, ожидаю обратной связи")
+	require.Equal(t, []string{"Первый шаг, регистрация счёта, вот ссылка: https://example.com/x", "Пару минут займёт, ожидаю обратной связи"}, parts)
+	require.Equal(t, "Первый шаг, регистрация счёта, вот ссылка: https://example.com/x Пару минут займёт, ожидаю обратной связи", text)
+}
+
+func TestSplitTurn_QuestionAfterALongFactIsItsOwnMessage(t *testing.T) {
+	rt := splitRuntime(t, true)
+	fact := "С вашими 500 долларов вход открыт, торговать будете сами у FxPro, сигналы и куратор от нас."
+	require.GreaterOrEqual(t, len([]rune(fact)), replySplitFactRunes)
+	_, parts := rt.splitTurn("conv", "agent", fact+" Счёт у FxPro уже есть?")
+	require.Equal(t, []string{fact, "Счёт у FxPro уже есть?"}, parts)
+}
+
+func TestSplitTurn_ShortFactKeepsItsQuestion(t *testing.T) {
+	rt := splitRuntime(t, true)
+	text, parts := rt.splitTurn("conv", "agent", "Дальше верификация в Профиле, потом пополнение\nВерификацию прошли?")
+	require.Nil(t, parts)
+	require.Equal(t, "Дальше верификация в Профиле, потом пополнение\nВерификацию прошли?", text)
+}
+
+func TestSplitTurn_LoneQuestionStaysSingle(t *testing.T) {
+	rt := splitRuntime(t, true)
+	_, parts := rt.splitTurn("conv", "agent", "На какой доход в месяц ориентируетесь?")
+	require.Nil(t, parts)
+}
