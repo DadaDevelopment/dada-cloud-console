@@ -14,6 +14,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
+
+	"github.com/dada-tuda/console/backend/internal/langfuse"
 )
 
 type Server struct {
@@ -52,6 +54,7 @@ func NewServer(pool *pgxpool.Pool, gitopsBasePath string) *Server {
 
 	runtime.factSkills = ParseFactSkills(os.Getenv("AGENT_FACT_SKILLS"))
 	runtime.linkAllowlist = ParseLinkAllowlist(os.Getenv("AGENT_REPLY_LINK_ALLOWLIST"))
+	runtime.judge = langfuse.New(os.Getenv("LANGFUSE_HOST"), os.Getenv("AGENT_LANGFUSE_PUBLIC_KEY"), os.Getenv("AGENT_LANGFUSE_SECRET_KEY"), true)
 	token := os.Getenv("AGENT_RUNTIME_TOKEN")
 	runtime.contextKey = []byte(token)
 	srv := &Server{runtime: runtime, pool: pool, a2a: a2a, token: token, pauseCRM: NewHTTPPauseCRM(os.Getenv("AGENT_PAUSE_CRM_URL"), os.Getenv("AGENT_PAUSE_CRM_TOKEN"), os.Getenv("AGENT_PAUSE_CRM_STATUS"))}

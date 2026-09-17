@@ -395,6 +395,7 @@ func (s *Server) signalOperator(c *gin.Context, conv Conversation, reason, summa
 		card := escalationCardWithFooter("🔔 Сигнал оператору", conv, reason, summary, state, "Агент продолжает диалог сам; пауза только вручную.")
 		notified = s.operator.Notify(ctx, conv, card) == nil
 	}
+	s.runtime.noteEscalation(conv.ID, reason, summary)
 	s.runtime.mirrorState(ctx, conv, state, summary)
 	log.Info().Str("conversation", conv.ID.String()).Str("reason", reason).Bool("claimed", claimed).Bool("operator_notified", notified).
 		Msg("agentruntime: escalation signal, agent stays live")
@@ -435,6 +436,7 @@ func (s *Server) narrowHandoff(c *gin.Context, conv Conversation, reason, summar
 		log.Warn().Err(err).Str("conversation", conv.ID.String()).Str("reason", reason).Msg("agentruntime: narrow hand-off claim failed")
 		claimed = true
 	}
+	s.runtime.noteEscalation(conv.ID, reason, summary)
 	clientTold, notified := false, false
 	if claimed {
 		clientTold = s.tellClient(ctx, conv, clientMessage)

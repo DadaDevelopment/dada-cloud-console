@@ -10,6 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+
+	"github.com/dada-tuda/console/backend/internal/langfuse"
 )
 
 // RuntimeLinkMeta mirrors tggateway.RuntimeLinkMeta: one URL found in a
@@ -119,6 +121,9 @@ type Runtime struct {
 	recoveryDelays []time.Duration
 	recoveryMu     sync.Mutex
 	recovering     map[uuid.UUID]bool
+	judge          *langfuse.Client
+	judgeMu        sync.Mutex
+	judgeEscal     map[uuid.UUID]JudgeEscal
 }
 
 func NewRuntime(store ConversationStore, hooks HookExecutor, a2a A2AClient, domains DomainProvider) *Runtime {
@@ -438,6 +443,7 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 	if _, err := r.store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "assistant", Content: reply}); err != nil {
 		return MessageResponse{}, err
 	}
+	r.emitJudgeTurn(conv, history, pending, after, run, parts)
 	if err := r.hooks.Execute(ctx, "agent.run.completed", conv, nil); err != nil {
 		return r.pauseAfterHookFailure(ctx, conv, "agent.run.completed", err)
 	}
