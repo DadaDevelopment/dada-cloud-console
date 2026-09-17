@@ -24,40 +24,11 @@ const (
 // round-trip latency for a purely cosmetic defect.
 var emDashPattern = regexp.MustCompile(`\s*—\s*`)
 
-// spacedHyphenPattern matches a plain hyphen doing an em dash's job between
-// two words ("Развод - это когда деньги уходят"): the same canned-line tell,
-// typed with the key the model reaches for once the em dash is banned. The
-// left side also allows a closing bracket, because the reply's own ")" smiley
-// ends a clause the same way a word does.
-//
-// What it must not touch: a numeric range ("300 - 500"), a compound word
-// ("e-mail", "не-не") and a bullet at the start of a line, so the separator is
-// horizontal space only and both sides must be letters.
-var spacedHyphenPattern = regexp.MustCompile(`(\p{L}|\))[ \t]+-[ \t]+(\p{L})`)
-
-// replaceSpacedHyphens rewrites every spaced hyphen, not just every other one:
-// a single pass consumes the letter after the dash, so "a - b - c" would keep
-// its second dash. Each pass strictly removes at least one hyphen and adds
-// none, so the loop terminates.
-func replaceSpacedHyphens(text string) string {
-	for {
-		next := spacedHyphenPattern.ReplaceAllString(text, "$1, $2")
-		if next == text {
-			return text
-		}
-		text = next
-	}
-}
-
 func stripEmDash(text string) string {
-	replaced := text
-	if strings.Contains(replaced, "—") {
-		replaced = emDashPattern.ReplaceAllString(replaced, ", ")
-	}
-	replaced = replaceSpacedHyphens(replaced)
-	if replaced == text {
+	if !strings.Contains(text, "—") {
 		return text
 	}
+	replaced := emDashPattern.ReplaceAllString(text, ", ")
 	replaced = strings.TrimLeft(replaced, ", ")
 	for _, pair := range [][2]string{
 		{", .", "."}, {", ,", ","}, {", ?", "?"}, {", !", "!"}, {",  ", ", "},
@@ -83,7 +54,7 @@ var leakEnglishFillers = []string{"continue to", "hmm", "okay,", "fine.", "let m
 
 var leakMarkerPattern = regexp.MustCompile(`(?i)\b(kb|skill|placeholder|internal)\b`)
 
-var leakIdentifierPattern = regexp.MustCompile(`(?i:\b(discovery|price|offer|objection|continuity|registration|phrasing|voice|signals|learning|such)\b)|\bdeposit\b`)
+var leakIdentifierPattern = regexp.MustCompile(`(?i:\b(discovery|price|offer|objection|continuity|registration|phrasing|signals|learning|such)\b)|\bdeposit\b`)
 
 var leakLinks = regexp.MustCompile(`https?:\/\/\S+|\S+@\S+\.\S+|@\w+`)
 
