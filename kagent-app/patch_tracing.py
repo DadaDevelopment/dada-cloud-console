@@ -18,7 +18,10 @@ After the patch:
     endpoint is Langfuse (see ``_dada.exporter_headers``);
   * the A2A executor shapes each turn for Langfuse v4 (user/session from the
     caller's ``dada.*`` message metadata, readable root name, root
-    input/output, prompt link, release) through ``kagent.core.tracing._dada``;
+    input/output, prompt link, release) through ``kagent.core.tracing._dada``,
+    and ``_dada.TurnSpanProcessor`` fills the io of ADK's own
+    ``invocation``/``invoke_agent`` spans so no observation in the tree is
+    blank;
   * the ``static`` CLI command hands the system prompt it booted with to
     ``_dada.register_prompt`` so the pod publishes it to Langfuse once per
     rollout and every span links to that prompt version.
@@ -74,6 +77,22 @@ PATCHED_EXPORTER = (
     "            )\n"
 )
 
+ANCHOR_PROCESSOR_EXISTING = "            current_provider.add_span_processor(KagentAttributesSpanProcessor())\n"
+PATCHED_PROCESSOR_EXISTING = (
+    "            current_provider.add_span_processor(KagentAttributesSpanProcessor())\n"
+    "            current_provider.add_span_processor(TurnSpanProcessor())\n"
+)
+ANCHOR_PROCESSOR_NEW = "            tracer_provider.add_span_processor(KagentAttributesSpanProcessor())\n"
+PATCHED_PROCESSOR_NEW = (
+    "            tracer_provider.add_span_processor(KagentAttributesSpanProcessor())\n"
+    "            tracer_provider.add_span_processor(TurnSpanProcessor())\n"
+)
+ANCHOR_UTILS_IMPORT = "from ._span_processor import KagentAttributesSpanProcessor\n"
+PATCHED_UTILS_IMPORT = (
+    "from ._dada import TurnSpanProcessor\n"
+    "from ._span_processor import KagentAttributesSpanProcessor\n"
+)
+
 ANCHOR_CLI_IMPORT = "from kagent.core import KAgentConfig, configure_logging, configure_tracing\n"
 PATCHED_CLI_IMPORT = (
     "from kagent.core import KAgentConfig, configure_logging, configure_tracing\n"
@@ -98,6 +117,11 @@ ANCHOR_EXEC_BEGIN = "        context_token = set_kagent_span_attributes(span_att
 PATCHED_EXEC_BEGIN = (
     "        dada_tracing.begin_turn(context, run_args, span_attributes)\n"
     "        context_token = set_kagent_span_attributes(span_attributes)\n"
+)
+ANCHOR_EXEC_EVENT = "                        task_result_aggregator.process_event(a2a_event)\n"
+PATCHED_EXEC_EVENT = (
+    "                        task_result_aggregator.process_event(a2a_event)\n"
+    "                        dada_tracing.note_event(task_result_aggregator.task_status_message)\n"
 )
 ANCHOR_EXEC_END = "        # publish the task result event - this is final\n"
 PATCHED_EXEC_END = (
@@ -172,6 +196,9 @@ def main() -> None:
             (ANCHOR_FASTAPI, PATCHED_FASTAPI),
             (ANCHOR_OPENAI, PATCHED_OPENAI),
             (ANCHOR_EXPORTER, PATCHED_EXPORTER),
+            (ANCHOR_UTILS_IMPORT, PATCHED_UTILS_IMPORT),
+            (ANCHOR_PROCESSOR_EXISTING, PATCHED_PROCESSOR_EXISTING),
+            (ANCHOR_PROCESSOR_NEW, PATCHED_PROCESSOR_NEW),
         ],
     )
     patch_file(
@@ -179,6 +206,7 @@ def main() -> None:
         [
             (ANCHOR_EXEC_IMPORT, PATCHED_EXEC_IMPORT),
             (ANCHOR_EXEC_BEGIN, PATCHED_EXEC_BEGIN),
+            (ANCHOR_EXEC_EVENT, PATCHED_EXEC_EVENT),
             (ANCHOR_EXEC_END, PATCHED_EXEC_END),
             (ANCHOR_EXEC_FAIL, PATCHED_EXEC_FAIL),
         ],

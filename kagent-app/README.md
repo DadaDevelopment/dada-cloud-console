@@ -47,8 +47,10 @@ user_id, username, first_name, thread_id, trigger) to Langfuse: user id is
 `@<chat_id>` for group chats and `#<thread_id>` for forum threads, trace name is
 `<agent> <channel> <trigger>`. The FastAPI root span is renamed the same way and
 gets `observation.type=agent`, the user text as input, the final task text as
-output, the task state, token usage and ERROR level on failure. For
-`generate_content` input/output the cluster also sets
+output, the task state, token usage and ERROR level on failure. ADK's own
+`invocation` and `invoke_agent` spans get the same user text as input when they
+start and the latest answer text as output while the executor drains events, so
+no observation in the tree is blank. For `generate_content` input/output the cluster also sets
 `OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental` and
 `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=SPAN_ONLY` (argo-infra
 composition `baselineEnv`); without them ADK sends message content to OTel logs.

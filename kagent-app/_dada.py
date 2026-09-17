@@ -13,7 +13,11 @@ v4 ingestion reads:
   also set directly on the root span, which started before the context did;
 * the root span gets a readable name, ``langfuse.observation.type=agent``,
   the user text as input, the final answer as output, and level ERROR on a
-  failed task.
+  failed task;
+* the ADK ``invocation`` and ``invoke_agent`` spans, which ADK leaves without
+  io, get the same input at start (``TurnSpanProcessor``) and the latest
+  answer text as output while the executor drains events (``note_event``),
+  before ADK closes them.
 
 ``begin_turn`` runs before the ADK runner starts, ``end_turn``/``fail_turn``
 when the executor publishes the final task event. The turn state lives in a
@@ -43,7 +47,9 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from opentelemetry import context as otel_context
 from opentelemetry import trace
+from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +62,35 @@ class DadaTurn:
     agent: str
     channel: str
     trigger: str
+    input: str = ""
     attributes: dict[str, Any] = field(default_factory=dict)
+    adk_spans: list[trace.Span] = field(default_factory=list)
+
+
+ADK_TURN_SPAN_PREFIXES = ("invocation", "invoke_agent")
+
+
+class TurnSpanProcessor(SpanProcessor):
+    """Give ADK's invocation/invoke_agent spans the turn's input and remember them for the output."""
+
+    def on_start(self, span: Span, parent_context: Optional[otel_context.Context] = None) -> None:
+        turn = _current_turn.get()
+        if turn is None or not span.name.startswith(ADK_TURN_SPAN_PREFIXES):
+            return
+        try:
+            span.set_attribute("langfuse.observation.input", turn.input)
+            turn.adk_spans.append(span)
+        except Exception:
+            logger.warning("dada tracing: on_start failed", exc_info=True)
+
+    def on_end(self, span: ReadableSpan) -> None:
+        pass
+
+    def shutdown(self) -> None:
+        pass
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return True
 
 
 _current_turn: contextvars.ContextVar[Optional[DadaTurn]] = contextvars.ContextVar("dada_turn", default=None)
@@ -230,17 +264,41 @@ def begin_turn(context: Any, run_args: dict[str, Any], span_attributes: dict[str
         )
         span_attributes.update(attrs)
         root = trace.get_current_span()
-        turn = DadaTurn(root=root, agent=agent, channel=meta.get("channel", "a2a"), trigger=meta.get("trigger", "turn"), attributes=attrs)
+        user_text = _message_text(getattr(context, "message", None)) or "(no text)"
+        turn = DadaTurn(
+            root=root,
+            agent=agent,
+            channel=meta.get("channel", "a2a"),
+            trigger=meta.get("trigger", "turn"),
+            input=user_text,
+            attributes=attrs,
+        )
         if root.is_recording():
             root.update_name(attrs["langfuse.trace.name"])
             root.set_attributes(attrs)
             root.set_attribute("langfuse.observation.type", "agent")
-            root.set_attribute("langfuse.observation.input", _message_text(getattr(context, "message", None)) or "(no text)")
+            root.set_attribute("langfuse.observation.input", user_text)
         _current_turn.set(turn)
         return turn
     except Exception:
         logger.warning("dada tracing: begin_turn failed", exc_info=True)
         return None
+
+
+def note_event(status_message: Any) -> None:
+    """Stamp the answer text seen so far on the ADK spans that are still open."""
+    turn = _current_turn.get()
+    if turn is None:
+        return
+    try:
+        output = _message_text(status_message)
+        if not output:
+            return
+        for span in turn.adk_spans:
+            if span.is_recording():
+                span.set_attribute("langfuse.observation.output", output)
+    except Exception:
+        logger.warning("dada tracing: note_event failed", exc_info=True)
 
 
 def end_turn(task_state: Any, status_message: Any, run_metadata: Optional[dict[str, Any]] = None) -> None:

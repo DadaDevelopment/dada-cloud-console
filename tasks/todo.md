@@ -41,10 +41,36 @@
       gitops-agent `syncLangfusePrompt` removed. Failure = warn + no link.
 - [x] E. v4 migration of console: `backend/internal/langfuse` Ingest -> OTLP JSON to
       `/api/public/otel/v1/traces` (same Event API for callers); `push_scores.py` -> `POST /api/public/scores`.
-- [ ] F. Cost: `scripts/langfuse/ensure_models.py` + `models.json` (glm-5.3-flash etc.) -> `POST /api/public/models`
+- [x] F. Cost: `scripts/langfuse/ensure_models.py` + `models.json` (glm-5.3-flash etc.) -> `POST /api/public/models`
       per project; run for support-agent project (sandbox agent) now.
-- [ ] G. Verify in agent-sandbox (tg-exchange-support): send TG message, check Langfuse trace: root name,
+- [x] G. Verify in agent-sandbox (tg-exchange-support): send TG message, check Langfuse trace: root name,
       user/session, prompt link, cost, no nulls. Docs: kagent-app/README env table.
+- [ ] H. Blank `invocation`/`invoke_agent` spans (found in G): `_dada.TurnSpanProcessor` stamps the turn input
+      on them at start, executor loop calls `note_event` with the latest answer text before ADK closes them.
+      Needs image roll (Jenkins -> argo-infra `kagent.agentImage.tag`) + re-check.
+
+## Review (2026-09-18)
+
+Delivery chain, all live:
+- Jenkins `dada-cloud-console/main` #95 SUCCESS on `3226c3e3` (kagent-app changed, image pushed).
+- argo-infra `console-migration` `987cab5cc`: `kagent.agentImage.tag` `f74abba2` -> `3226c3e3`
+  (manual pin, no console lever, `DADA_MANUAL_OK=1`). Argo synced, agents rolled.
+- Pod log: `prompt tg-exchange-support 2026-09-16.native.46 is Langfuse version 1`; Langfuse
+  `GET /api/public/v2/prompts/tg-exchange-support` -> version 1, labels production/latest,
+  commitMessage = native version. Before the roll the same GET was 404.
+- Synthetic Telegram-shaped A2A turn (user `dada_langfuse_probe`) -> one tree, trace `21c87f40`:
+  root AGENT `tg-exchange-support telegram turn`, userId/sessionId `@dada_langfuse_probe`,
+  environment `prod`, root input/output present; `call_llm` + `generate_content glm-5.3-flash`
+  generations with io, cost ~0.00167 each, prompt link `tg-exchange-support` v1; tools with io;
+  no `openai.chat` layer.
+- Langfuse v4 facts learned: org created after 2026-09-16, so legacy `GET /api/public/traces`
+  returns `LEGACY_API_UNAVAILABLE_FOR_NEW_ORGANIZATION`; only `v2/observations` with explicit
+  `fields=` groups (prompt link needs `prompt`, cost needs `cost`); the endpoint often takes
+  >60s. Prompt link and cost are resolved only on GENERATION observations even though the
+  attributes sit on every span.
+- Residual found in G: ADK `invocation` (SPAN) and `invoke_agent` (AGENT) had null io -> item H,
+  verified locally in the patched image with an in-memory exporter (both spans carry
+  `hello`/`world`), awaiting the next image roll for a live re-check.
 
 ## Decisions to confirm
 - session.id = `@username` (private chat) / `@username@<chat_id>` (group); one Langfuse session per user
