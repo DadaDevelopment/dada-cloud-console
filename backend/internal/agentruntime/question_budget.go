@@ -117,6 +117,20 @@ func questionBudgetSpent(questionsInRow int, state RuntimeState) bool {
 // with the budget on, so an off flag writes nothing at all and the metadata
 // column stays exactly as it is today. A failure is logged, never fatal: a
 // missed counter is a slightly more repetitive bot, a failed turn is silence.
+// questionBudgetReason reports a draft that closes on a question in the turn
+// the budget said must not ask one. The prompt carries the same rule; this is
+// the backstop for a model that reads the marker and asks anyway (QA human_v1
+// 2026-09-17: 2 of 3 marked turns still ended with "?").
+func questionBudgetReason(noQuestionThisTurn bool, reply string) string {
+	if noQuestionThisTurn && endsWithQuestion(reply) {
+		return "reply ends with a question in a turn whose question budget is spent"
+	}
+	return ""
+}
+
+// questionBudgetRepairHint is written in the same voice as repeatRepairHint.
+const questionBudgetRepairHint = "Предыдущий черновик клиенту не отправлен: два хода подряд заканчивались вопросом, и в этом ходе вопроса быть не должно. Ответь на реплику клиента фактом или следующим шагом без единого вопросительного знака, к слоту вернёшься следующим ходом."
+
 func (r *Runtime) recordTurnCounters(ctx context.Context, conv Conversation, reply string) {
 	if !r.flags.QuestionBudget {
 		return
