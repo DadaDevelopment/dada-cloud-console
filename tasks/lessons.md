@@ -985,3 +985,8 @@ Rule: after a bounded delivery verification, do not spend the design task on inf
 ## 2026-09-12 — 35% is not a successful redesign
 
 User rated the first Cloud redesign35%: styling improved, but the experience remained too close to the old text-heavy landing. Rule: inspect and rewrite the information architecture and product-page copy, not only shared styles. Give each screen one decision, show its result visually, and remove repeated explanations. Do not call a typography pass a finished redesign. User now explicitly authorizes substantial cuts and marketing design changes; familiar console workflows remain protected.
+
+## 2026-09-18 — staged file carried a concurrent session's lines, main went red (#91)
+- `git add <path>` on a file BOTH sessions edited stages the foreign hunks too. Compiled locally only because their untracked `judge.go` sat in the tree.
+- Before commit: `git diff --cached` per file, grep for symbols not defined in tracked files; or verify from `git archive HEAD` in docker (clean tree), not from the working tree.
+- Fix without touching the shared tree: `git hash-object -w` + `git update-index --cacheinfo` → commit from index; their WIP stays as unstaged diff.
