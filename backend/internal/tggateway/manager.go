@@ -460,6 +460,12 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 	// poller it is checking on. The rate and the observer sink are here
 	// because they are per-agent env keys -- reading them off the running
 	// process is otherwise a guess.
+	// ack_quiet_ms is the one pacing number that is invisible otherwise: zero
+	// says the ack window is off and the bot waits exactly as it did before.
+	ackQuietMS := int64(0)
+	if pacing != nil {
+		ackQuietMS = pacing.AckQuiet.Milliseconds()
+	}
 	log.Info().
 		Str("agent", b.AgentName).
 		Str("bot", b.BotUsername).
@@ -469,6 +475,7 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 		Bool("observer", observer != nil).
 		Bool("pacing", pacing != nil).
 		Bool("split_reply", splitReply).
+		Int64("ack_quiet_ms", ackQuietMS).
 		Float64("tail_share", tailDelay.TailShare).
 		Str("tz", tailDelay.Loc.String()).
 		Str("vision_model", mediaCfg.VisionModel).

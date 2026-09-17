@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 	_ "time/tzdata"
+	"unicode"
 
 	"github.com/rs/zerolog/log"
 )
@@ -39,7 +40,14 @@ import (
 // read through readBusinessMessage on a business connection, a plain bot
 // cannot control the check marks in its own chats.
 type PacingConfig struct {
-	BaseQuiet      time.Duration
+	BaseQuiet time.Duration
+	// AckQuiet is TG_GATEWAY_PACING_ACK_MS: an ABSOLUTE ceiling on the quiet
+	// window after a bare acknowledgement ("ок", "спасибо", "👍"), not a
+	// factor on BaseQuiet. Absolute on purpose: BaseQuiet is the debounce
+	// window, and a change to it must not silently move the ack window too.
+	// Zero (the default, the unset variable) means the ack class gets exactly
+	// today's window, byte for byte.
+	AckQuiet       time.Duration
 	MaxQuiet       time.Duration
 	CharsPerMinute int
 	MinTyping      time.Duration
@@ -67,7 +75,25 @@ const (
 	// gaps sit in this range.
 	pacingGapMinDefault = 10 * time.Second
 	pacingGapMaxDefault = 40 * time.Second
+	// ackQuietFloor is not cosmetic. The quiet window is also the debounce
+	// window that glues a client's consecutive messages into one turn, and
+	// below five seconds it starts cutting client series in half -- the very
+	// defect that kept BASE_MS out of this change.
+	ackQuietFloor = 5 * time.Second
 )
+
+// pacingAckWords is the bare-confirmation vocabulary: a word that closes the
+// previous turn and asks for nothing. Anything else in the message, even
+// inside three words, takes the message out of the class.
+var pacingAckWords = map[string]bool{
+	"ок": true, "окей": true, "ok": true, "окай": true,
+	"спасибо": true, "готово": true, "сделал": true, "сделала": true,
+	"понял": true, "поняла": true, "ага": true, "да": true, "хорошо": true,
+}
+
+// reAckNonLetters strips the punctuation and the emoji off a word, so "Ок)",
+// "ок." and "ОК" are one token.
+var reAckNonLetters = regexp.MustCompile(`[^\p{L}]+`)
 
 var (
 	rePacingTechnical = regexp.MustCompile(`(?i)ошибк|не работает|не открыва|не приход|не могу|отклонил|не груз|vpn|впн|недоступ|не пускает|не заход|не получается войти|зависа`)
@@ -91,6 +117,7 @@ func PacingFromEnv() *PacingConfig {
 	}
 	p := &PacingConfig{
 		BaseQuiet:      envDurationMS("TG_GATEWAY_PACING_BASE_MS", pacingBaseQuietDefault),
+		AckQuiet:       envDurationMS("TG_GATEWAY_PACING_ACK_MS", 0),
 		MaxQuiet:       envDurationMS("TG_GATEWAY_PACING_MAX_QUIET_MS", pacingMaxQuietDefault),
 		CharsPerMinute: pacingCharsPerMinDefault,
 		MinTyping:      pacingMinTypingDefault,
@@ -143,6 +170,69 @@ func StimulusFactor(u TelegramUpdate) float64 {
 	return stimulusPlain
 }
 
+// IsBareAck classifies the client's last message as a bare acknowledgement:
+// at most three words, no question mark, every word from pacingAckWords -- or
+// no words at all and an emoji instead ("👍").
+//
+// The class is read off the text, not off len(batch) == 1: at the moment "ок"
+// arrives the batch holds one message on every single turn, so the batch size
+// would make every turn an ack.
+func IsBareAck(u TelegramUpdate) bool {
+	if u.Attachment != nil || u.HasLocation {
+		return false
+	}
+	text := strings.TrimSpace(u.Text)
+	if text == "" || strings.Contains(text, "?") {
+		return false
+	}
+	fields := strings.Fields(text)
+	if len(fields) == 0 || len(fields) > 3 {
+		return false
+	}
+	words := 0
+	for _, f := range fields {
+		w := strings.ToLower(reAckNonLetters.ReplaceAllString(f, ""))
+		if w == "" {
+			continue
+		}
+		words++
+		if !pacingAckWords[w] {
+			return false
+		}
+	}
+	if words == 0 {
+		return hasEmoji(text)
+	}
+	return true
+}
+
+func hasEmoji(text string) bool {
+	for _, r := range text {
+		if unicode.Is(unicode.So, r) {
+			return true
+		}
+	}
+	return false
+}
+
+// capAck applies the ack ceiling: min(AckQuiet, the ordinary window), with
+// AckQuiet itself lifted to ackQuietFloor first. Both directions matter -- the
+// edit may only shorten a wait, never lengthen one, and it may not shorten it
+// past the floor that protects the debounce.
+func (p *PacingConfig) capAck(last TelegramUpdate, quiet time.Duration) time.Duration {
+	if p.AckQuiet <= 0 || !IsBareAck(last) {
+		return quiet
+	}
+	ack := p.AckQuiet
+	if ack < ackQuietFloor {
+		ack = ackQuietFloor
+	}
+	if ack < quiet {
+		return ack
+	}
+	return quiet
+}
+
 // QuietFor is the silent window after the batch's last message. It is
 // recomputed on every new message, so a series keeps the bot quiet for
 // as long as the client keeps writing.
@@ -150,7 +240,8 @@ func (p *PacingConfig) QuietFor(batch []TelegramUpdate) time.Duration {
 	if len(batch) == 0 {
 		return p.BaseQuiet
 	}
-	factor := StimulusFactor(batch[len(batch)-1]) * p.jitter()
+	last := batch[len(batch)-1]
+	factor := StimulusFactor(last) * p.jitter()
 	quiet := time.Duration(float64(p.BaseQuiet) * factor)
 	if quiet > p.MaxQuiet {
 		quiet = p.MaxQuiet
@@ -158,7 +249,7 @@ func (p *PacingConfig) QuietFor(batch []TelegramUpdate) time.Duration {
 	if quiet < time.Second {
 		quiet = time.Second
 	}
-	return quiet
+	return p.capAck(last, quiet)
 }
 
 // TypingFor is how long "typing..." shows before this reply is sent: the

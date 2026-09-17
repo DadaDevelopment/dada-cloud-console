@@ -274,3 +274,173 @@ func TestTailDelay_ShareIsRespectedAcrossManyTurns(t *testing.T) {
 		t.Fatalf("delayed share %.3f, want about 0.3", share)
 	}
 }
+
+// Plan 6.3: the bare-acknowledgement class. It is read off the text, so a
+// one-message batch is not enough to be an ack and three words of real
+// content are not one either.
+func TestIsBareAck_ReadsTheTextNotTheBatch(t *testing.T) {
+	cases := []struct {
+		name string
+		u    TelegramUpdate
+		want bool
+	}{
+		{"ок", TelegramUpdate{Text: "ок"}, true},
+		{"case and bracket", TelegramUpdate{Text: "Ок)"}, true},
+		{"trailing dot", TelegramUpdate{Text: "окей."}, true},
+		{"thumbs up", TelegramUpdate{Text: "👍"}, true},
+		{"two ack words", TelegramUpdate{Text: "да, понял"}, true},
+		{"ack with emoji", TelegramUpdate{Text: "спасибо 🙏"}, true},
+		{"spaces around", TelegramUpdate{Text: "  готово  "}, true},
+		{"question is never an ack", TelegramUpdate{Text: "ок?"}, false},
+		{"three words of content", TelegramUpdate{Text: "уже пополнил счёт"}, false},
+		{"ack plus content", TelegramUpdate{Text: "спасибо большое"}, false},
+		{"four words", TelegramUpdate{Text: "да да да да"}, false},
+		{"bare punctuation is not an emoji", TelegramUpdate{Text: "..."}, false},
+		{"empty", TelegramUpdate{}, false},
+		{"attachment", TelegramUpdate{Text: "ок", Attachment: &TelegramAttachment{Kind: "photo"}}, false},
+		{"location", TelegramUpdate{Text: "ок", HasLocation: true}, false},
+	}
+	for _, c := range cases {
+		if got := IsBareAck(c.u); got != c.want {
+			t.Errorf("%s: got %v want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// The unset variable is the whole compatibility promise: every class keeps
+// today's window byte for byte. Jitter is zeroed so the two configs are
+// comparable at all.
+func TestQuietFor_UnsetAckVariableChangesNothing(t *testing.T) {
+	batches := [][]TelegramUpdate{
+		nil,
+		{{Text: "ок"}},
+		{{Text: "👍"}},
+		{{Text: "да"}},
+		{{Text: "я вчера пополнил счёт на триста долларов"}},
+		{{Text: "а сколько минимум?"}},
+		{{Text: strings.Repeat("а ", 45) + "как это работает?"}},
+		{{Text: "не могу войти, ошибка при входе"}},
+		{{Attachment: &TelegramAttachment{Kind: "photo"}}},
+		{{Text: "не могу войти"}, {Text: "ок"}},
+	}
+	base, withAck := deterministicPacing(), deterministicPacing()
+	withAck.AckQuiet = 0
+	for i, batch := range batches {
+		if got, want := withAck.QuietFor(batch), base.QuietFor(batch); got != want {
+			t.Errorf("batch %d: got %v want %v", i, got, want)
+		}
+	}
+}
+
+func TestQuietFor_AckWindowOnlyShortensTheAckClass(t *testing.T) {
+	base, withAck := deterministicPacing(), deterministicPacing()
+	withAck.AckQuiet = 6 * time.Second
+
+	// The ack class: 10s x 0.8 = 8s today, 6s with the variable.
+	ack := []TelegramUpdate{{Text: "ок"}}
+	if got := base.QuietFor(ack); got != 8*time.Second {
+		t.Fatalf("today's ack window: got %v want 8s", got)
+	}
+	if got := withAck.QuietFor(ack); got != 6*time.Second {
+		t.Fatalf("capped ack window: got %v want 6s", got)
+	}
+
+	// Every other class is untouched, including "да", which shares the short
+	// reply factor but is followed by a question here.
+	for _, batch := range [][]TelegramUpdate{
+		{{Text: "ок?"}},
+		{{Text: "я вчера пополнил счёт на триста долларов"}},
+		{{Text: "не могу войти, ошибка при входе"}},
+		{{Text: strings.Repeat("а ", 45) + "как это работает?"}},
+		{{Attachment: &TelegramAttachment{Kind: "photo"}}},
+	} {
+		if got, want := withAck.QuietFor(batch), base.QuietFor(batch); got != want {
+			t.Errorf("%q: got %v want %v", batch[0].Text, got, want)
+		}
+	}
+}
+
+// Two clamps in one: the variable may never lengthen a wait, and it may never
+// take the window below the five-second floor the debounce needs.
+func TestQuietFor_AckWindowNeverLengthensAndKeepsTheFloor(t *testing.T) {
+	p := deterministicPacing()
+	ack := []TelegramUpdate{{Text: "👍"}}
+
+	p.AckQuiet = 20 * time.Second
+	if got := p.QuietFor(ack); got != 8*time.Second {
+		t.Fatalf("a larger ack window must not lengthen the wait: got %v want 8s", got)
+	}
+
+	p.AckQuiet = time.Second
+	if got := p.QuietFor(ack); got != ackQuietFloor {
+		t.Fatalf("below the floor: got %v want %v", got, ackQuietFloor)
+	}
+
+	// The floor is a ceiling on the ack window, not a new minimum for the
+	// class: a base that already pays less than five seconds keeps paying it.
+	p.BaseQuiet = 2 * time.Second
+	if got := p.QuietFor(ack); got != 1600*time.Millisecond {
+		t.Fatalf("short base must stay short: got %v want 1.6s", got)
+	}
+}
+
+func TestPacingFromEnv_AckWindowIsOffUnlessSet(t *testing.T) {
+	t.Setenv("TG_GATEWAY_PACING", "1")
+	if got := PacingFromEnv().AckQuiet; got != 0 {
+		t.Fatalf("unset variable must leave AckQuiet zero, got %v", got)
+	}
+	t.Setenv("TG_GATEWAY_PACING_ACK_MS", "5000")
+	if got := PacingFromEnv().AckQuiet; got != 5*time.Second {
+		t.Fatalf("AckQuiet = %v, want 5s", got)
+	}
+}
+
+// The reason the floor exists: the quiet window is also the debounce window.
+// The client writes "ок", then a second message four seconds later, and both
+// must still arrive as one turn.
+func TestDebouncer_AckWindowStillGluesAFourSecondGap(t *testing.T) {
+	pacing := deterministicPacing()
+	pacing.AckQuiet = time.Second // lifted to the 5s floor
+	var mu sync.Mutex
+	var dispatched [][]TelegramUpdate
+	deb := NewDebouncer(DebounceConfig{QuietWindow: 2 * time.Second, MaxWindow: time.Minute, Pacing: pacing}, func(key string, batch []TelegramUpdate) {
+		mu.Lock()
+		defer mu.Unlock()
+		dispatched = append(dispatched, batch)
+	})
+	defer deb.Close()
+	if got := deb.quietFor([]TelegramUpdate{{Text: "ок"}}); got != ackQuietFloor {
+		t.Fatalf("paced ack window: got %v want %v", got, ackQuietFloor)
+	}
+
+	const key = "agent=a chat=1"
+	deb.Enqueue(key, TelegramUpdate{UpdateID: 1, ChatID: 1, MessageID: 1, Text: "ок"})
+	time.Sleep(4 * time.Second)
+	mu.Lock()
+	early := len(dispatched)
+	mu.Unlock()
+	if early != 0 {
+		t.Fatalf("the batch flushed inside the four-second gap: %d dispatches", early)
+	}
+	deb.Enqueue(key, TelegramUpdate{UpdateID: 2, ChatID: 1, MessageID: 2, Text: "и что дальше делать"})
+	deb.flush(key)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(dispatched)
+		mu.Unlock()
+		if n == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(dispatched) != 1 {
+		t.Fatalf("expected 1 dispatch, got %d", len(dispatched))
+	}
+	if len(dispatched[0]) != 2 {
+		t.Fatalf("both messages must land in one batch, got %d", len(dispatched[0]))
+	}
+}
