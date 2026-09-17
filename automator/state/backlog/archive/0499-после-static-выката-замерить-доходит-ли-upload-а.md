@@ -1,12 +1,15 @@
 ---
 id: 0499
-status: open
+status: closed
 prio: P1
 stream: 1
 hypothesis: H11
 title: После static-выката: замерить, доходит ли upload-архив без манифеста до живого URL
 created: 2026-09-10
 sess: sess-0910b
+closed_at: 2026-09-17
+closed_commit: 7f59ca7f
+closed_note: ЗАМЕР [live psql 09-17]: builds WHERE archive_framework=static = 0 строк за всё время (знаменатель), fail_reason framework_undetected по этому классу не появлялся. Ноль = никто не грузил статику с шипа 86d64424 (6 дней), не поломка. Фича ждёт трафика; мониторинг остаётся через тот же SQL. Ловушка из тела пункта сработала: ноль прочитан как ноль-трафика.
 ---
 Отгружено 86d64424: Detect распознаёт статику (index.html без манифестов), UploadSourceArchive вписывает сгенерённый Dockerfile (nginx:1.27-alpine, EXPOSE 80) прямо в архив, web-root становится корнем контекста.
 
