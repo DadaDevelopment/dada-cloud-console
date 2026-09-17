@@ -45,7 +45,7 @@
       per project; run for support-agent project (sandbox agent) now.
 - [x] G. Verify in agent-sandbox (tg-exchange-support): send TG message, check Langfuse trace: root name,
       user/session, prompt link, cost, no nulls. Docs: kagent-app/README env table.
-- [ ] H. Blank `invocation`/`invoke_agent` spans (found in G): `_dada.TurnSpanProcessor` stamps the turn input
+- [x] H. Blank `invocation`/`invoke_agent` spans (found in G): `_dada.TurnSpanProcessor` stamps the turn input
       on them at start, executor loop calls `note_event` with the latest answer text before ADK closes them.
       Needs image roll (Jenkins -> argo-infra `kagent.agentImage.tag`) + re-check.
 
@@ -70,7 +70,13 @@ Delivery chain, all live:
   attributes sit on every span.
 - Residual found in G: ADK `invocation` (SPAN) and `invoke_agent` (AGENT) had null io -> item H,
   verified locally in the patched image with an in-memory exporter (both spans carry
-  `hello`/`world`), awaiting the next image roll for a live re-check.
+  `hello`/`world`). Live re-check after Jenkins built `caaeeb7b` and argo-infra `0a4bebc25` pinned
+  it (all four agents on `caaeeb7b` at 23:39Z): probe turn -> trace `46aec3e3`, 8 observations, every
+  one with input+output, user/session `@dada_langfuse_probe`, env `prod`; generations carry prompt
+  `tg-exchange-support` v1 and cost 0.00172/0.00174. The only other root in the window was my own
+  readiness `GET /.well-known/agent.json` (legacy card path, no production caller; upstream already
+  excludes `agent-card.json`). Older `POST /` roots with `openai.chat` children (22:48Z) predate the
+  `3226c3e3` roll at 23:10Z.
 
 ## Decisions to confirm
 - session.id = `@username` (private chat) / `@username@<chat_id>` (group); one Langfuse session per user
