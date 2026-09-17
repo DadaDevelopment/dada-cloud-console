@@ -42,6 +42,7 @@ func TestLeakReasonCatchesMonologues(t *testing.T) {
 		"S437 skill name as a section":           "Посмотрите в кабинете, какие варианты кроме карты предлагает deposit-раздел, и напишите, что там есть",
 		"S250 bare skill name":                   "Загрузите price? Цель 800 в месяц требует не половины той суммы, стартуйте с 2000.",
 		"phrasing skill named in reply":          "Держу phrasing в голове, так что коротко: какую сумму готовы выделить на первый депозит?",
+		"voice skill named in reply":             "По voice подскажу так: кружок писать не нужно, достаточно текста. Счёт у FxPro уже есть?",
 		"phr06 third person about the client":    "Размер зафиксирован, сумму он назвал сам, стартуем с 3000. Счёт у FxPro уже есть?",
 		"third person client":                    "Клиент хочет начать с 500, но дно 300, так что ок. Счёт открыт?",
 	}
