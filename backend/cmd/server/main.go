@@ -161,6 +161,33 @@ func main() {
 			Str("branch", cfg.PulseExportBranch).Msg("pulse export started")
 	}
 
+	if cfg.AgentPromptSourcePollIntervalSecs <= 0 {
+		log.Info().Msg("agent prompt source poller disabled: AGENT_PROMPT_SOURCE_POLL_INTERVAL_SECS is 0")
+	} else {
+		promptSourceCtx, promptSourceCancel := context.WithCancel(context.Background())
+		defer promptSourceCancel()
+		promptSourceInterval := time.Duration(cfg.AgentPromptSourcePollIntervalSecs) * time.Second
+		go func() {
+			tick := func() {
+				tickCtx, cancel := context.WithTimeout(promptSourceCtx, promptSourceInterval)
+				defer cancel()
+				apiHandler.RunAgentPromptSourceTick(tickCtx)
+			}
+			tick()
+			ticker := time.NewTicker(promptSourceInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-promptSourceCtx.Done():
+					return
+				case <-ticker.C:
+					tick()
+				}
+			}
+		}()
+		log.Info().Dur("interval", promptSourceInterval).Msg("agent prompt source poller started")
+	}
+
 	if cfg.BillingEnabled {
 		billingPlans, planErr := billing.LoadPlans("")
 		if planErr != nil {

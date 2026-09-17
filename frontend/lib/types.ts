@@ -2526,3 +2526,57 @@ export interface AgentTelegramBinding {
 export interface AgentTelegramBindResponse {
   bot_username: string;
 }
+
+/** One skill file synced from the agent's git directory. */
+export interface AgentPromptSourceSkill {
+  name: string;
+  bytes: number;
+  content: string;
+}
+
+/**
+ * Where an agent's prompt and skills come from, read from
+ * `GET .../agents/{name}/prompt-source`. `synced_at` is null until the first
+ * sync succeeds; `last_sync_error` is the message the sync left when it did not.
+ */
+export interface AgentPromptSource {
+  agent_name: string;
+  installation_id: string;
+  repo_full_name: string;
+  ref: string;
+  path: string;
+  resolved_sha: string;
+  synced_at: string | null;
+  last_checked_at: string | null;
+  last_sync_status: "pending" | "ok" | "error";
+  last_sync_error: string;
+  prompt: string;
+  prompt_title: string;
+  prompt_version: string;
+  prompt_bytes: number;
+  skills: AgentPromptSourceSkill[];
+}
+
+/** Body of `PUT .../agents/{name}/prompt-source`. */
+export interface AgentPromptSourceDraft {
+  repo_full_name: string;
+  ref?: string;
+  path?: string;
+  installation_id?: string;
+}
+
+/** Outcome of one sync; `changed: false` with no error means the sha did not move. */
+export interface AgentPromptSourceSyncResult {
+  changed: boolean;
+  sha: string;
+  version: string;
+  files: number;
+  bytes: number;
+  operation_id?: string;
+  error?: string;
+}
+
+export interface AgentPromptSourceResponse {
+  source: AgentPromptSource;
+  sync: AgentPromptSourceSyncResult;
+}

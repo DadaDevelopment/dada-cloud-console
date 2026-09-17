@@ -1,5 +1,49 @@
 basePath: /api/v1
 definitions:
+  api.AgentPromptSource:
+    properties:
+      agent_name:
+        type: string
+      installation_id:
+        type: string
+      last_checked_at:
+        type: string
+      last_sync_error:
+        type: string
+      last_sync_status:
+        type: string
+      path:
+        type: string
+      prompt:
+        type: string
+      prompt_bytes:
+        type: integer
+      prompt_title:
+        type: string
+      prompt_version:
+        type: string
+      ref:
+        type: string
+      repo_full_name:
+        type: string
+      resolved_sha:
+        type: string
+      skills:
+        items:
+          $ref: '#/definitions/api.AgentPromptSourceSkill'
+        type: array
+      synced_at:
+        type: string
+    type: object
+  api.AgentPromptSourceSkill:
+    properties:
+      bytes:
+        type: integer
+      content:
+        type: string
+      name:
+        type: string
+    type: object
   api.DeleteImpact:
     properties:
       app:
@@ -1253,6 +1297,7 @@ definitions:
     properties:
       metrics:
         additionalProperties:
+          format: float64
           type: number
         type: object
       source:
@@ -1608,6 +1653,23 @@ definitions:
     required:
     - mode
     type: object
+  api.setAgentPromptSourceRequest:
+    properties:
+      installation_id:
+        example: c0ffee00-0000-4000-8000-000000000000
+        type: string
+      path:
+        example: agents/tg-exchange-support
+        type: string
+      ref:
+        example: main
+        type: string
+      repo_full_name:
+        example: DadaDevelopment/tg-agent-tools
+        type: string
+    required:
+    - repo_full_name
+    type: object
   api.setEnvVarRequest:
     properties:
       dry_run:
@@ -1654,6 +1716,11 @@ definitions:
         type: string
       route:
         type: string
+    type: object
+  api.syncAgentPromptSourceRequest:
+    properties:
+      force:
+        type: boolean
     type: object
   api.updateAppImageRequest:
     properties:
@@ -1763,6 +1830,7 @@ definitions:
   cloudtask.StepResult:
     properties:
       durationMs:
+        format: int64
         type: integer
       error:
         type: string
@@ -8396,7 +8464,10 @@ paths:
       description: 'Queues the git write for one agent (prompt, tools, model). Async:
         returns 202 with an operation; poll until terminal. Re-posting the same name
         updates that agent; a field left out keeps its current value, so a prompt-only
-        save does not drop the model, runtime or tools.'
+        save does not drop the model, runtime or tools. When the agent''s prompt is
+        synced from a git repository (prompt source), a prompt that differs from the
+        synced one is refused with 409 prompt_owned_by_source; pass the synced prompt
+        unchanged to edit the other fields.'
       operationId: saveAgent
       parameters:
       - description: Project UUID
@@ -8442,6 +8513,12 @@ paths:
             type: object
         "409":
           description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
           schema:
             additionalProperties:
               type: string
@@ -8507,6 +8584,253 @@ paths:
       security:
       - BearerAuth: []
       summary: Delete an agent
+      tags:
+      - agents
+  /projects/{projectId}/environments/{envId}/agents/{name}/prompt-source:
+    delete:
+      description: Stops syncing. The last synced prompt stays in the agent claim
+        and the prompt becomes editable by hand again; skills served from the source
+        are gone on the next turn. Requires write access.
+      operationId: deleteAgentPromptSource
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Agent name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: detached
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Detach an agent's prompt source
+      tags:
+      - agents
+    get:
+      description: Returns the repository, branch and directory the agent's prompt
+        and skills are read from, the last synced commit, the parsed prompt with its
+        version, the skills with their sizes, and the status of the last sync. 404
+        when the agent has no source and its prompt is edited by hand.
+      operationId: getAgentPromptSource
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Agent name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.AgentPromptSource'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get an agent's prompt source
+      tags:
+      - agents
+    put:
+      consumes:
+      - application/json
+      description: 'Stores the repository (owner/name), branch (default main) and
+        directory (default agents/<name>) the agent''s prompt and skills are read
+        from, then syncs once. The directory must hold core.md with a "# title, middle
+        dot, version" first line and domains/*.md skills of at most 8192 bytes each;
+        see docs/agent-prompt-source.md. The agent must already exist as a console-managed
+        agent: the sync writes only the prompt into the claim and keeps model, tools
+        and env as they are. While a source is attached the prompt cannot be edited
+        by hand. Requires write access.'
+      operationId: setAgentPromptSource
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Agent name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Repository, branch and directory
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.setAgentPromptSourceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: source and sync result
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Attach a git prompt source to an agent
+      tags:
+      - agents
+  /projects/{projectId}/environments/{envId}/agents/{name}/prompt-source/sync:
+    post:
+      consumes:
+      - application/json
+      description: 'Resolves the branch head, and when it moved (or force is set)
+        downloads core.md and domains/*.md, validates them, stores them and queues
+        the prompt into the agent claim. Idempotent: an unchanged head only updates
+        the checked-at time. Requires write access.'
+      operationId: syncAgentPromptSource
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Agent name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Set force to re-queue the claim even when the commit did not
+          change
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/api.syncAgentPromptSourceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: source and sync result
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: 'sync_in_progress: another sync of this agent holds the lock'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Sync an agent's prompt and skills from git now
       tags:
       - agents
   /projects/{projectId}/environments/{envId}/apps:

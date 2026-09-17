@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -219,8 +220,10 @@ func TestSweepReactivation_ConversionCountsOnlyBuildsAfterTheLetter(t *testing.T
 	}
 }
 
+var ginTestModeOnce sync.Once
+
 func newGrowthCtx(method, target, body string) (*gin.Context, *httptest.ResponseRecorder) {
-	gin.SetMode(gin.TestMode)
+	ginTestModeOnce.Do(func() { gin.SetMode(gin.TestMode) })
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(method, target, strings.NewReader(body))

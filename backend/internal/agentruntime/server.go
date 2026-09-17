@@ -32,7 +32,7 @@ func NewServer(pool *pgxpool.Pool, gitopsBasePath string) *Server {
 	store := NewPGStore(pool)
 	hooks := NewHookExecutor(pool)
 	a2a := NewA2AClient()
-	domains := NewFileDomainProvider(gitopsBasePath)
+	domains := NewPGDomainProvider(pool, NewFileDomainProvider(gitopsBasePath))
 
 	runtime := NewRuntime(store, hooks, a2a, domains)
 	runtime.contacts = contactSyncFromEnv(store.(*pgStore))

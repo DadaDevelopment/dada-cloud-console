@@ -67,6 +67,8 @@ type Config struct {
 	PulseExportToken        string // PULSE_EXPORT_TOKEN, falls back to GITOPS_DEFAULT_TOKEN
 	PulseExportIntervalSecs int    // PULSE_EXPORT_INTERVAL_SECS
 
+	AgentPromptSourcePollIntervalSecs int
+
 	// Identity provider selection. AuthMode defaults to "local" → the existing
 	// HS256 local-JWT path (POST /auth/login + GinMiddleware). Set AUTH_MODE
 	// to "keycloak" to validate Keycloak RS256 access tokens via JWKS instead;
@@ -1053,6 +1055,8 @@ func Load() (*Config, error) {
 		BoxClusterPullSecret:     getEnv("BOX_CLUSTER_PULL_SECRET", ""),
 		BoxClusterStorageClass:   getEnv("BOX_CLUSTER_STORAGE_CLASS", "longhorn-box"),
 		BoxClusterTLSSecret:      getEnv("BOX_CLUSTER_TLS_SECRET", "box-wildcard-tls"),
+
+		AgentPromptSourcePollIntervalSecs: getEnvInt("AGENT_PROMPT_SOURCE_POLL_INTERVAL_SECS", 60),
 	}
 
 	if cfg.DBURL == "" {

@@ -152,7 +152,7 @@ func (h *Handler) ListAgents(c *gin.Context) {
 //
 // @ID          saveAgent
 // @Summary     Create or update an agent
-// @Description Queues the git write for one agent (prompt, tools, model). Async: returns 202 with an operation; poll until terminal. Re-posting the same name updates that agent; a field left out keeps its current value, so a prompt-only save does not drop the model, runtime or tools.
+// @Description Queues the git write for one agent (prompt, tools, model). Async: returns 202 with an operation; poll until terminal. Re-posting the same name updates that agent; a field left out keeps its current value, so a prompt-only save does not drop the model, runtime or tools. When the agent's prompt is synced from a git repository (prompt source), a prompt that differs from the synced one is refused with 409 prompt_owned_by_source; pass the synced prompt unchanged to edit the other fields.
 // @Tags        agents
 // @Accept      json
 // @Produce     json
@@ -165,6 +165,7 @@ func (h *Handler) ListAgents(c *gin.Context) {
 // @Failure     401       {object} map[string]string
 // @Failure     403       {object} map[string]string
 // @Failure     409       {object} map[string]string
+// @Failure     503       {object} map[string]string
 // @Router      /projects/{projectId}/environments/{envId}/agents [post]
 func (h *Handler) SaveAgent(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
@@ -232,6 +233,30 @@ func (h *Handler) SaveAgent(c *gin.Context) {
 		action = "UpdateAgent"
 	}
 
+	promptFromSource := false
+	if existingKind == managedAgentKind {
+		source, owned, err := h.promptSourceOverride(c.Request.Context(), projectID, envID, req.Name)
+		if err != nil {
+			reject(http.StatusServiceUnavailable, "prompt_source_unavailable", gin.H{"error": "failed to look up the agent's prompt source"})
+			return
+		}
+		if owned && req.Prompt != source.Prompt {
+			reject(http.StatusConflict, "prompt_owned_by_source", gin.H{
+				"error":          "prompt_owned_by_source",
+				"code":           "prompt_owned_by_source",
+				"message":        "this agent's prompt is synced from " + source.RepoFullName + " (" + source.Ref + "/" + source.Path + "); edit core.md there or detach the source first",
+				"repo_full_name": source.RepoFullName,
+				"ref":            source.Ref,
+				"path":           source.Path,
+				"prompt_version": source.PromptVersion,
+			})
+			return
+		}
+		if owned {
+			req.PromptVersion, promptFromSource = source.PromptVersion, true
+		}
+	}
+
 	payload := models.SaveAgentPayload{
 		Name:          req.Name,
 		DisplayName:   req.DisplayName,
@@ -286,9 +311,10 @@ func (h *Handler) SaveAgent(c *gin.Context) {
 	}
 
 	audit(op.ID, auditOutcomeSuccess, map[string]any{
-		"prompt_version": req.PromptVersion,
-		"tools":          len(req.Tools),
-		"prompt_bytes":   len(req.Prompt),
+		"prompt_version":     req.PromptVersion,
+		"tools":              len(req.Tools),
+		"prompt_bytes":       len(req.Prompt),
+		"prompt_from_source": promptFromSource,
 	})
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "agent save queued"})
 }
@@ -367,8 +393,25 @@ func (h *Handler) DeleteAgent(c *gin.Context) {
 		return
 	}
 
+	tx, err := h.pool.Begin(c.Request.Context())
+	if err != nil {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "operation_begin_failed"})
+		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		return
+	}
+	defer func() { _ = tx.Rollback(c.Request.Context()) }()
+
+	sourceTag, err := tx.Exec(c.Request.Context(),
+		`DELETE FROM agent_prompt_sources WHERE project_id = $1 AND environment_id = $2 AND agent_name = $3`,
+		projectID, envID, name)
+	if err != nil {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "prompt_source_delete_failed"})
+		respondError(c, http.StatusInternalServerError, "failed to detach prompt source")
+		return
+	}
+
 	var op models.Operation
-	row := h.pool.QueryRow(c.Request.Context(),
+	row := tx.QueryRow(c.Request.Context(),
 		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
 		 VALUES ($1, $2, $3, 'DeleteAgent', 'ManagedAgent', $4, 'Created', $5)
 		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
@@ -381,8 +424,13 @@ func (h *Handler) DeleteAgent(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "failed to create operation")
 		return
 	}
+	if err = tx.Commit(c.Request.Context()); err != nil {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "operation_commit_failed"})
+		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		return
+	}
 
-	audit(op.ID, auditOutcomeSuccess, nil)
+	audit(op.ID, auditOutcomeSuccess, map[string]any{"prompt_source_detached": sourceTag.RowsAffected() > 0})
 
 	if h.tgGateway != nil {
 		if err := h.tgGateway.Unbind(c.Request.Context(), name); err != nil {

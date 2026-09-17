@@ -25,6 +25,9 @@ import type {
   AgentState,
   AgentTelegramBinding,
   AgentTelegramBindResponse,
+  AgentPromptSource,
+  AgentPromptSourceDraft,
+  AgentPromptSourceResponse,
   CreateS3BucketResponse,
   S3BucketCredentialsResponse,
   DatabaseCredentialsResponse,
@@ -521,6 +524,37 @@ export const agentsApi = {
 
     get: (name: string) =>
       apiFetch<AgentTelegramBinding>(`/api/v1/agents/${encodeURIComponent(name)}/telegram`),
+  },
+
+  /**
+   * Prompt and skills read from the client's git repo. `get` answers 404 for an
+   * agent without a source, which the page treats as "not connected", not as an
+   * error. `set` runs the first sync before answering, so the response already
+   * says whether the repo directory parsed.
+   */
+  promptSource: {
+    get: (projectId: string, envId: string, name: string) =>
+      apiFetch<AgentPromptSource>(
+        `/api/v1/projects/${projectId}/environments/${envId}/agents/${encodeURIComponent(name)}/prompt-source`,
+      ),
+
+    set: (projectId: string, envId: string, name: string, draft: AgentPromptSourceDraft) =>
+      apiFetch<AgentPromptSourceResponse>(
+        `/api/v1/projects/${projectId}/environments/${envId}/agents/${encodeURIComponent(name)}/prompt-source`,
+        { method: "PUT", body: draft },
+      ),
+
+    sync: (projectId: string, envId: string, name: string, force = false) =>
+      apiFetch<AgentPromptSourceResponse>(
+        `/api/v1/projects/${projectId}/environments/${envId}/agents/${encodeURIComponent(name)}/prompt-source/sync`,
+        { method: "POST", body: { force } },
+      ),
+
+    remove: (projectId: string, envId: string, name: string) =>
+      apiFetch<Record<string, never>>(
+        `/api/v1/projects/${projectId}/environments/${envId}/agents/${encodeURIComponent(name)}/prompt-source`,
+        { method: "DELETE" },
+      ),
   },
 };
 
