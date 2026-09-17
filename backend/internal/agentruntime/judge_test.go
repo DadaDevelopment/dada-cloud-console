@@ -56,25 +56,24 @@ func TestBuildJudgeEventsShape(t *testing.T) {
 	conv := Conversation{ID: uuid.New(), AgentName: "tg-exchange-support", Channel: "telegram", ExternalID: "42"}
 	in := JudgeInput{Turn: "t1", History: []JudgeMsg{}, Incoming: []string{"салам"}, Escalation: &JudgeEscal{Code: "E_LOST_MONEY", Summary: "s"}, State: map[string]string{}}
 	events := buildJudgeEvents(conv, in, []string{"И вам салам"}, time.Unix(0, 0))
-	if len(events) != 2 {
-		t.Fatalf("want trace+span, got %d", len(events))
+	if len(events) != 1 || events[0].Type != langfuse.EventTypeTraceCreate {
+		t.Fatalf("want exactly one trace-create (root span carries io), got %+v", events)
 	}
 	trace := events[0].Body.(langfuse.TraceBody)
-	span := events[1].Body.(langfuse.ObservationBody)
-	if trace.Name != "judge_turn" || span.Name != "judge_turn" || span.Type != langfuse.ObservationTypeSpan {
-		t.Fatalf("names/type: %+v %+v", trace, span)
+	if trace.Name != "judge_turn" {
+		t.Fatalf("name: %+v", trace)
 	}
 	if trace.SessionID != "runtime-"+conv.ID.String() || trace.UserID != "telegram:42" {
 		t.Fatalf("session/user: %+v", trace)
 	}
-	if span.TraceID != trace.ID || span.ParentObservationID != "" {
-		t.Fatalf("span must be root of its trace: %+v", span)
+	if trace.Metadata["escalation_code"] != "E_LOST_MONEY" {
+		t.Fatalf("escalation_code missing: %+v", trace.Metadata)
 	}
-	if span.Metadata["escalation_code"] != "E_LOST_MONEY" {
-		t.Fatalf("escalation_code missing: %+v", span.Metadata)
+	if got, ok := trace.Input.(JudgeInput); !ok || got.Turn != "t1" {
+		t.Fatalf("input must be JudgeInput: %#v", trace.Input)
 	}
-	if out, ok := span.Output.([]string); !ok || out[0] != "И вам салам" {
-		t.Fatalf("output must be delivered parts: %#v", span.Output)
+	if out, ok := trace.Output.([]string); !ok || out[0] != "И вам салам" {
+		t.Fatalf("output must be delivered parts: %#v", trace.Output)
 	}
 }
 
@@ -94,7 +93,7 @@ func TestEmitJudgeTurnShipsAndConsumesEscalation(t *testing.T) {
 	after := RuntimeState{ReportedFacts: map[string]ReportedFact{"experience": {Value: "lost"}}}
 	run := AgentRunRequest{ConversationContext: AgentConversationContext{NoQuestionThisTurn: true}}
 
-	r.emitJudgeTurn(conv, pending, pending, after, run, []string{"Понимаю", "Сколько свободно?"})
+	r.emitJudgeTurn(conv, pending, pending, after, run, "Понимаю\n\nСколько свободно?", []string{"Понимаю", "Сколько свободно?"})
 
 	select {
 	case body := <-bodies:
@@ -115,9 +114,35 @@ func TestEmitJudgeTurnShipsAndConsumesEscalation(t *testing.T) {
 	}
 }
 
+func TestEmitJudgeTurnWholeReplyWhenNotSplit(t *testing.T) {
+	bodies := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		bodies <- string(raw)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	r := &Runtime{judge: langfuse.New(srv.URL, "pk", "sk", true)}
+	conv := Conversation{ID: uuid.New(), AgentName: "tg-exchange-support", Channel: "telegram", ExternalID: "42"}
+	r.emitJudgeTurn(conv, nil, nil, RuntimeState{}, AgentRunRequest{}, "На какой доход ориентируетесь?", nil)
+
+	select {
+	case body := <-bodies:
+		if !strings.Contains(body, "На какой доход ориентируетесь?") {
+			t.Fatalf("whole reply must be the delivered output when parts is nil:\n%s", body)
+		}
+		if strings.Contains(body, `"output":"[]"`) || strings.Contains(body, `\"output\":[]`) {
+			t.Fatalf("output must not be empty:\n%s", body)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("judge_turn never shipped")
+	}
+}
+
 func TestEmitJudgeTurnNoClientIsNoop(t *testing.T) {
 	r := &Runtime{}
-	r.emitJudgeTurn(Conversation{ID: uuid.New()}, nil, nil, RuntimeState{}, AgentRunRequest{}, nil)
+	r.emitJudgeTurn(Conversation{ID: uuid.New()}, nil, nil, RuntimeState{}, AgentRunRequest{}, "", nil)
 	r.judge = langfuse.New("", "", "", true)
-	r.emitJudgeTurn(Conversation{ID: uuid.New()}, nil, nil, RuntimeState{}, AgentRunRequest{}, nil)
+	r.emitJudgeTurn(Conversation{ID: uuid.New()}, nil, nil, RuntimeState{}, AgentRunRequest{}, "", nil)
 }

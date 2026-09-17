@@ -115,12 +115,14 @@ func judgeState(state RuntimeState) map[string]string {
 	return out
 }
 
-// buildJudgeEvents renders one trace with one root span named judge_turn.
+// buildJudgeEvents renders one trace whose root span is the judge_turn
+// observation: the OTLP client turns a trace-create into the root span and
+// copies trace input/output onto it, so a separate observation event would
+// only add a second span with the same name for the rule to fire on twice.
 // sessionId matches the kagent run ContextID so the verdict lands in the
 // same Langfuse session as the model trace of the turn.
 func buildJudgeEvents(conv Conversation, in JudgeInput, delivered []string, now time.Time) []langfuse.Event {
 	ts := langfuse.FormatTime(now)
-	traceID := uuid.NewString()
 	metadata := map[string]any{
 		"agent":           conv.AgentName,
 		"escalation_code": "",
@@ -135,40 +137,31 @@ func buildJudgeEvents(conv Conversation, in JudgeInput, delivered []string, now 
 			Type:      langfuse.EventTypeTraceCreate,
 			Timestamp: ts,
 			Body: langfuse.TraceBody{
-				ID:        traceID,
+				ID:        uuid.NewString(),
 				Timestamp: ts,
 				Name:      judgeObservationName,
 				UserID:    conv.Channel + ":" + conv.ExternalID,
 				SessionID: "runtime-" + conv.ID.String(),
-				Metadata:  metadata,
-				Tags:      []string{"judge"},
-			},
-		},
-		{
-			ID:        uuid.NewString(),
-			Type:      langfuse.EventTypeObservationCreate,
-			Timestamp: ts,
-			Body: langfuse.ObservationBody{
-				ID:        uuid.NewString(),
-				TraceID:   traceID,
-				Type:      langfuse.ObservationTypeSpan,
-				Name:      judgeObservationName,
-				StartTime: ts,
-				EndTime:   ts,
 				Input:     in,
 				Output:    delivered,
 				Metadata:  metadata,
+				Tags:      []string{"judge"},
 			},
 		},
 	}
 }
 
-// emitJudgeTurn ships the judge_turn observation for a delivered turn. No
-// client configured = no-op; ingest errors are logged by the client and
-// never touch the turn.
-func (r *Runtime) emitJudgeTurn(conv Conversation, history, pending []Message, after RuntimeState, run AgentRunRequest, delivered []string) {
+// emitJudgeTurn ships the judge_turn observation for a delivered turn. parts
+// is nil when splitForDelivery kept the reply whole, so the delivered text
+// is then the reply itself. No client configured = no-op; ingest errors are
+// logged by the client and never touch the turn.
+func (r *Runtime) emitJudgeTurn(conv Conversation, history, pending []Message, after RuntimeState, run AgentRunRequest, reply string, parts []string) {
 	if r.judge == nil || !r.judge.Configured() {
 		return
+	}
+	delivered := parts
+	if len(delivered) == 0 {
+		delivered = []string{reply}
 	}
 	incoming := make([]string, 0, len(pending))
 	for _, m := range pending {

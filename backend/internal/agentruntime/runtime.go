@@ -443,7 +443,7 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 	if _, err := r.store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "assistant", Content: reply}); err != nil {
 		return MessageResponse{}, err
 	}
-	r.emitJudgeTurn(conv, history, pending, after, run, parts)
+	r.emitJudgeTurn(conv, history, pending, after, run, reply, parts)
 	if err := r.hooks.Execute(ctx, "agent.run.completed", conv, nil); err != nil {
 		return r.pauseAfterHookFailure(ctx, conv, "agent.run.completed", err)
 	}
