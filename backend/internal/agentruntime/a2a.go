@@ -91,11 +91,42 @@ type a2aPart struct {
 }
 
 type a2aMessage struct {
-	ContextID string    `json:"contextId,omitempty"`
-	TaskID    string    `json:"taskId,omitempty"`
-	Role      string    `json:"role"`
-	MessageID string    `json:"messageId"`
-	Parts     []a2aPart `json:"parts"`
+	ContextID string         `json:"contextId,omitempty"`
+	TaskID    string         `json:"taskId,omitempty"`
+	Role      string         `json:"role"`
+	MessageID string         `json:"messageId"`
+	Parts     []a2aPart      `json:"parts"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+}
+
+// a2aMetadata is the structured caller identity the runtime maps onto the
+// trace (Langfuse user, session, trace name). The prompt envelope carries the
+// same facts as text, which the runtime cannot read back.
+func a2aMetadata(run AgentRunRequest) map[string]any {
+	cc := run.ConversationContext
+	meta := map[string]any{}
+	if cc.Channel != "" {
+		meta["dada.channel"] = cc.Channel
+	}
+	if cc.ExternalID != "" {
+		meta["dada.chat_id"] = cc.ExternalID
+	}
+	if cc.Username != "" {
+		meta["dada.username"] = cc.Username
+	}
+	if cc.ConversationID != "" {
+		meta["dada.conversation_id"] = cc.ConversationID
+	}
+	if name, _ := run.ActorMetadata["first_name"].(string); name != "" {
+		meta["dada.first_name"] = name
+	}
+	if run.Trigger != "" {
+		meta["dada.trigger"] = run.Trigger
+	}
+	if len(meta) == 0 {
+		return nil
+	}
+	return meta
 }
 
 type a2aRequest struct {
@@ -206,6 +237,9 @@ func (c *httpA2AClient) call(ctx context.Context, run AgentRunRequest, message a
 	}
 	agentName := run.AgentName
 	reqBody := a2aRequest{JSONRPC: "2.0", ID: "agentruntime", Method: "message/send"}
+	if message.Metadata == nil {
+		message.Metadata = a2aMetadata(run)
+	}
 	reqBody.Params.Message = message
 	payload, err := json.Marshal(reqBody)
 	if err != nil {

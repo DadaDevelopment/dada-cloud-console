@@ -7,13 +7,16 @@ on the trace answers "why did this case fail" -- one click from a 0 in
 `grounding` to the prompt, the tool calls and the arguments that produced it.
 
 The link is the turn's own trace id: run_eval.py --trace records it from the
-SSE trace event, and it IS the Langfuse trace id (see agent_chat_trace.go), so
-nothing has to be correlated by timestamp. A run made without --trace has no
-ids to attach to and this script refuses it rather than inventing traces.
+SSE trace event, and the console ships it to Langfuse over OTLP (see
+agent_chat_trace.go and langfuse/otlp.go), where a UUID becomes the same 16
+bytes as 32 hex digits. That mapping is repeated here so nothing has to be
+correlated by timestamp. A run made without --trace has no ids to attach to
+and this script refuses it rather than inventing traces.
 
 Score ids are derived from (trace id, score name), so re-judging a run and
 pushing again overwrites the previous verdict instead of stacking a second one
-next to it.
+next to it. Scores go through POST /api/public/scores one at a time: the batch
+ingestion endpoint is the legacy v3 path and is closed to newer organisations.
 
     export LANGFUSE_PUBLIC_KEY=... LANGFUSE_SECRET_KEY=...
     python3 scripts/agent-eval/push_scores.py runs/20260803-101500
@@ -27,7 +30,7 @@ import sys
 import urllib.error
 import urllib.request
 from base64 import b64encode
-from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 from uuid import uuid5, NAMESPACE_URL
 
@@ -37,11 +40,9 @@ from common import eprint, load_jsonl
 
 DEFAULT_HOST = "https://cloud.langfuse.com"
 
-INGEST_PATH = "/api/public/ingestion"
+SCORES_PATH = "/api/public/scores"
 
 CRITERIA = ("grounding", "action", "safety", "navigation", "tone")
-
-BATCH_SIZE = 100
 
 
 def credentials():
@@ -59,11 +60,23 @@ def credentials():
     return host.rstrip("/"), public, secret
 
 
+def langfuse_trace_id(trace_id):
+    """The id Langfuse stores for a trace the console sent over OTLP.
+
+    Mirrors otlpTraceID in backend/internal/langfuse/otlp.go: a UUID keeps its
+    bytes and loses the dashes, anything else is hashed down to 16 bytes.
+    """
+    compact = trace_id.replace("-", "").lower()
+    if len(compact) == 32 and all(c in "0123456789abcdef" for c in compact):
+        return compact
+    return sha256(trace_id.encode("utf-8")).hexdigest()[:32]
+
+
 def score_id(trace_id, name):
     return str(uuid5(NAMESPACE_URL, "dada-eval/%s/%s" % (trace_id, name)))
 
 
-def score_event(trace_id, name, value, data_type, comment, stamp):
+def score_body(trace_id, name, value, data_type, comment):
     body = {
         "id": score_id(trace_id, name),
         "traceId": trace_id,
@@ -73,56 +86,51 @@ def score_event(trace_id, name, value, data_type, comment, stamp):
     }
     if comment:
         body["comment"] = str(comment)[:1000]
-    return {"id": str(uuid5(NAMESPACE_URL, body["id"])), "type": "score-create", "timestamp": stamp, "body": body}
+    return body
 
 
-def events_for(judged, trace_id, stamp):
+def scores_for(judged, trace_id):
     """Every score one judged case contributes: criteria, total, verdict, gates."""
     out = []
     for criterion in CRITERIA:
         entry = judged["scores"].get(criterion) or {}
         if entry.get("score") is None:
             continue
-        out.append(score_event(trace_id, criterion, entry["score"], "NUMERIC", entry.get("evidence", ""), stamp))
+        out.append(score_body(trace_id, criterion, entry["score"], "NUMERIC", entry.get("evidence", "")))
 
     if judged.get("total") is not None:
-        out.append(score_event(trace_id, "total", judged["total"], "NUMERIC", "; ".join(judged.get("gate_notes") or []), stamp))
+        out.append(score_body(trace_id, "total", judged["total"], "NUMERIC", "; ".join(judged.get("gate_notes") or [])))
 
     if judged.get("passed") is not None:
-        out.append(score_event(trace_id, "passed", 1 if judged["passed"] else 0, "BOOLEAN", judged.get("transport_error", ""), stamp))
+        out.append(score_body(trace_id, "passed", 1 if judged["passed"] else 0, "BOOLEAN", judged.get("transport_error", "")))
 
     gates = judged.get("gates") or {}
     if gates.get("safety_violation") is not None:
         out.append(
-            score_event(
+            score_body(
                 trace_id,
                 "safety_violation",
                 1 if gates["safety_violation"] else 0,
                 "BOOLEAN",
                 gates.get("write_without_card") or "",
-                stamp,
             )
         )
     return out
 
 
-def post_batch(host, public, secret, batch, timeout):
-    payload = json.dumps({"batch": batch}).encode("utf-8")
-    req = urllib.request.Request(host + INGEST_PATH, data=payload, method="POST")
+def post_score(host, public, secret, score, timeout):
+    payload = json.dumps(score).encode("utf-8")
+    req = urllib.request.Request(host + SCORES_PATH, data=payload, method="POST")
     req.add_header("Content-Type", "application/json")
     req.add_header("Authorization", "Basic " + b64encode(("%s:%s" % (public, secret)).encode("utf-8")).decode("ascii"))
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            parsed = json.loads(resp.read().decode("utf-8"))
+            resp.read()
     except urllib.error.HTTPError as exc:
-        return 0, ["HTTP %d: %s" % (exc.code, exc.read().decode("utf-8", "replace")[:400])]
+        return "%s/%s: HTTP %d: %s" % (score["traceId"], score["name"], exc.code, exc.read().decode("utf-8", "replace")[:400])
     except Exception as exc:
-        return 0, [str(exc)]
-
-    errors = []
-    for item in parsed.get("errors") or []:
-        errors.append("%s: %s %s" % (item.get("id"), item.get("message"), str(item.get("error"))[:300]))
-    return len(parsed.get("successes") or []), errors
+        return "%s/%s: %s" % (score["traceId"], score["name"], exc)
+    return None
 
 
 def main() -> int:
@@ -153,8 +161,7 @@ def main() -> int:
         )
         return 1
 
-    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    batch = []
+    scores = []
     matched = 0
     missing = []
     for judged in load_jsonl(judged_path):
@@ -164,29 +171,31 @@ def main() -> int:
             missing.append("%s r%s" % key)
             continue
         matched += 1
-        batch.extend(events_for(judged, trace_id, stamp))
+        scores.extend(scores_for(judged, langfuse_trace_id(trace_id)))
 
     if missing:
         eprint("%d judged case(s) had no trace id and were skipped: %s" % (len(missing), ", ".join(missing[:10])))
 
-    if not batch:
+    if not scores:
         eprint("nothing to push")
         return 1
 
     if args.dry_run:
-        print(json.dumps({"batch": batch}, ensure_ascii=False, indent=2))
-        print("dry run: %d score(s) for %d case(s), nothing sent" % (len(batch), matched))
+        print(json.dumps({"scores": scores}, ensure_ascii=False, indent=2))
+        print("dry run: %d score(s) for %d case(s), nothing sent" % (len(scores), matched))
         return 0
 
     host, public, secret = credentials()
     sent = 0
     failures = []
-    for start in range(0, len(batch), BATCH_SIZE):
-        ok, errors = post_batch(host, public, secret, batch[start : start + BATCH_SIZE], args.timeout)
-        sent += ok
-        failures.extend(errors)
+    for score in scores:
+        error = post_score(host, public, secret, score, args.timeout)
+        if error:
+            failures.append(error)
+        else:
+            sent += 1
 
-    print("pushed %d/%d score(s) for %d case(s) to %s" % (sent, len(batch), matched, host))
+    print("pushed %d/%d score(s) for %d case(s) to %s" % (sent, len(scores), matched, host))
     if failures:
         eprint("%d score(s) rejected:" % len(failures))
         for failure in failures[:10]:

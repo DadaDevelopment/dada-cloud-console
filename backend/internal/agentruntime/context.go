@@ -64,6 +64,8 @@ type AgentRunRequest struct {
 	EndUserKey          string
 	Messages            []Message
 	ConversationContext AgentConversationContext
+	ActorMetadata       map[string]any
+	Trigger             string
 }
 type contextClaims struct {
 	ConversationID uuid.UUID `json:"conversation_id"`

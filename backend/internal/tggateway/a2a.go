@@ -89,10 +89,55 @@ type a2aPart struct {
 }
 
 type a2aMessage struct {
-	Role      string    `json:"role"`
-	MessageID string    `json:"messageId"`
-	ContextID string    `json:"contextId,omitempty"`
-	Parts     []a2aPart `json:"parts"`
+	Role      string         `json:"role"`
+	MessageID string         `json:"messageId"`
+	ContextID string         `json:"contextId,omitempty"`
+	Parts     []a2aPart      `json:"parts"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+}
+
+// A2AMetadata is the structured caller identity that rides in the A2A
+// message's metadata field. The runtime maps it onto the trace (Langfuse
+// user/session/trace name), which the prompt-text identity line cannot do.
+// It travels in the context so the A2AClient interface and its test fakes
+// stay untouched.
+type A2AMetadata map[string]any
+
+type a2aMetadataKey struct{}
+
+// WithA2AMetadata attaches identity metadata for every A2A send made with ctx.
+func WithA2AMetadata(ctx context.Context, meta A2AMetadata) context.Context {
+	if len(meta) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, a2aMetadataKey{}, meta)
+}
+
+func a2aMetadataFrom(ctx context.Context) A2AMetadata {
+	meta, _ := ctx.Value(a2aMetadataKey{}).(A2AMetadata)
+	return meta
+}
+
+// TelegramA2AMetadata builds the metadata for one Telegram sender. Keys are
+// the platform's, not Langfuse's, so the runtime owns the mapping.
+func TelegramA2AMetadata(u TelegramUpdate) A2AMetadata {
+	meta := A2AMetadata{
+		"dada.channel": "telegram",
+		"dada.chat_id": fmt.Sprintf("%d", u.ChatID),
+	}
+	if u.UserID != 0 {
+		meta["dada.user_id"] = fmt.Sprintf("%d", u.UserID)
+	}
+	if u.Username != "" {
+		meta["dada.username"] = u.Username
+	}
+	if u.FirstName != "" {
+		meta["dada.first_name"] = u.FirstName
+	}
+	if u.ThreadID != 0 {
+		meta["dada.thread_id"] = fmt.Sprintf("%d", u.ThreadID)
+	}
+	return meta
 }
 
 type a2aRequest struct {
@@ -125,7 +170,7 @@ func (c *httpA2AClient) Send(ctx context.Context, agentName string, text string)
 // each call gets a new server-generated context.
 func (c *httpA2AClient) SendWithContext(ctx context.Context, agentName string, contextID string, text string) (string, error) {
 	reqBody := a2aRequest{JSONRPC: "2.0", ID: "tg-gateway", Method: "message/send"}
-	reqBody.Params.Message = a2aMessage{Role: "user", MessageID: uuid.NewString(), Parts: []a2aPart{{Kind: "text", Text: text}}}
+	reqBody.Params.Message = a2aMessage{Role: "user", MessageID: uuid.NewString(), Parts: []a2aPart{{Kind: "text", Text: text}}, Metadata: a2aMetadataFrom(ctx)}
 	if contextID != "" {
 		reqBody.Params.Message.ContextID = contextID
 	}

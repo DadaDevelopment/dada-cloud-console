@@ -47,35 +47,76 @@ func newLangfuseTestServer(t *testing.T, traces []map[string]any) *langfuseTestS
 		}
 
 		switch r.URL.Path {
-		case "/api/public/ingestion":
+		case "/api/public/otel/v1/traces":
+			if r.Header.Get("x-langfuse-ingestion-version") != "4" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
 			var body struct {
-				Batch []struct {
-					Body map[string]any `json:"body"`
-				} `json:"batch"`
+				ResourceSpans []struct {
+					ScopeSpans []struct {
+						Spans []struct {
+							ParentSpanID string `json:"parentSpanId"`
+							Attributes   []struct {
+								Key   string         `json:"key"`
+								Value map[string]any `json:"value"`
+							} `json:"attributes"`
+						} `json:"spans"`
+					} `json:"scopeSpans"`
+				} `json:"resourceSpans"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
 			lf.mu.Lock()
-			for _, ev := range body.Batch {
-				lf.ingested = append(lf.ingested, ev.Body)
+			for _, rs := range body.ResourceSpans {
+				for _, ss := range rs.ScopeSpans {
+					for _, span := range ss.Spans {
+						if span.ParentSpanID != "" {
+							continue
+						}
+						flat := map[string]any{"metadata": map[string]any{}}
+						for _, a := range span.Attributes {
+							str, _ := a.Value["stringValue"].(string)
+							switch {
+							case a.Key == "langfuse.trace.name":
+								flat["name"] = str
+							case a.Key == "langfuse.user.id":
+								flat["userId"] = str
+							case a.Key == "langfuse.session.id":
+								flat["sessionId"] = str
+							case a.Key == "langfuse.trace.output":
+								var out any
+								if err := json.Unmarshal([]byte(str), &out); err != nil {
+									out = str
+								}
+								flat["output"] = out
+							case strings.HasPrefix(a.Key, "langfuse.trace.metadata."):
+								flat["metadata"].(map[string]any)[strings.TrimPrefix(a.Key, "langfuse.trace.metadata.")] = str
+							}
+						}
+						lf.ingested = append(lf.ingested, flat)
+					}
+				}
 			}
 			lf.mu.Unlock()
-			w.Write([]byte(`{"successes":[],"errors":[]}`))
-		case "/api/public/traces":
+			w.Write([]byte(`{"partialSuccess":{}}`))
+		case "/api/public/v2/observations":
 			lf.mu.Lock()
 			lf.traceRequests = append(lf.traceRequests, r.URL.RawQuery)
 			lf.mu.Unlock()
-			page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-			if page < 1 {
-				page = 1
+			q := r.URL.Query()
+			if q.Get("fromStartTime") == "" || q.Get("toStartTime") == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(`{"message":"fromStartTime and toStartTime are required"}`))
+				return
 			}
-			limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-			if limit < 1 {
+			start, _ := strconv.Atoi(q.Get("cursor"))
+			limit, _ := strconv.Atoi(q.Get("limit"))
+			if limit < 1 || limit > 1000 {
 				limit = 50
 			}
-			start := (page - 1) * limit
 			end := start + limit
 			if start > len(traces) {
 				start = len(traces)
@@ -83,18 +124,13 @@ func newLangfuseTestServer(t *testing.T, traces []map[string]any) *langfuseTestS
 			if end > len(traces) {
 				end = len(traces)
 			}
-			totalPages := (len(traces) + limit - 1) / limit
-			if totalPages == 0 {
-				totalPages = 1
+			cursor := ""
+			if end < len(traces) {
+				cursor = strconv.Itoa(end)
 			}
 			json.NewEncoder(w).Encode(map[string]any{
 				"data": traces[start:end],
-				"meta": map[string]any{
-					"page":       page,
-					"limit":      limit,
-					"totalItems": len(traces),
-					"totalPages": totalPages,
-				},
+				"meta": map[string]any{"cursor": cursor},
 			})
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -106,9 +142,12 @@ func newLangfuseTestServer(t *testing.T, traces []map[string]any) *langfuseTestS
 
 func langfuseTraceFixture(role, content string, meta map[string]any) map[string]any {
 	tr := map[string]any{
-		"id":     uuid.NewString(),
-		"name":   agentChatMessageTracePrefix + role,
-		"output": content,
+		"id":                uuid.NewString(),
+		"traceId":           uuid.NewString(),
+		"traceName":         agentChatMessageTracePrefix + role,
+		"name":              agentChatMessageTracePrefix + role,
+		"output":            content,
+		"isRootObservation": true,
 	}
 	if meta != nil {
 		tr["metadata"] = meta
@@ -170,7 +209,7 @@ func TestLangfuseChatStoreSessionMessagesKeepsNewestUnderLimit(t *testing.T) {
 
 func TestLangfuseChatStoreSessionMessagesIgnoresForeignTraces(t *testing.T) {
 	lf := newLangfuseTestServer(t, []map[string]any{
-		{"id": uuid.NewString(), "name": "agent-chat-turn", "output": "not a message"},
+		{"id": uuid.NewString(), "traceId": uuid.NewString(), "traceName": "agent-chat-turn", "name": "agent-chat-turn", "output": "not a message", "isRootObservation": true},
 		langfuseTraceFixture("system", "injected", nil),
 		langfuseTraceFixture("user", "real", nil),
 	})
@@ -187,8 +226,8 @@ func TestLangfuseChatStoreSessionMessagesIgnoresForeignTraces(t *testing.T) {
 
 func TestLangfuseChatStoreSessionMessagesPaginates(t *testing.T) {
 	var traces []map[string]any
-	for i := 0; i < 150; i++ {
-		traces = append(traces, langfuseTraceFixture("user", fmt.Sprintf("m%d", 149-i), nil))
+	for i := 0; i < 600; i++ {
+		traces = append(traces, langfuseTraceFixture("user", fmt.Sprintf("m%d", 599-i), nil))
 	}
 	lf := newLangfuseTestServer(t, traces)
 	h := newLangfuseStoreHandler(lf.URL)
@@ -197,11 +236,11 @@ func TestLangfuseChatStoreSessionMessagesPaginates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SessionMessages: %v", err)
 	}
-	if len(got) != 150 {
-		t.Fatalf("want all 150 messages across pages, got %d", len(got))
+	if len(got) != agentChatStoreMaxMessages {
+		t.Fatalf("want the newest %d messages across pages, got %d", agentChatStoreMaxMessages, len(got))
 	}
-	if got[0].Content != "m0" || got[149].Content != "m149" {
-		t.Fatalf("pagination reordered the conversation: first=%q last=%q", got[0].Content, got[149].Content)
+	if got[0].Content != "m100" || got[499].Content != "m599" {
+		t.Fatalf("pagination reordered the conversation: first=%q last=%q", got[0].Content, got[499].Content)
 	}
 	if len(lf.queries()) != 2 {
 		t.Fatalf("want 2 page requests, got %d: %v", len(lf.queries()), lf.queries())
@@ -238,7 +277,7 @@ func TestLangfuseChatStoreDailyCountAsksForUserMessagesOnly(t *testing.T) {
 		t.Fatalf("the cap must cost exactly one request, got %d", len(lf.queries()))
 	}
 	query := lf.queries()[0]
-	for _, want := range []string{"userId=user-1", "name=chat-message-user", "limit=1", "fields=core", "fromTimestamp="} {
+	for _, want := range []string{"userId=user-1", "name=chat-message-user", "isRootObservation=true", "limit=1000", "fields=core&", "fromStartTime=", "toStartTime="} {
 		if !strings.Contains(query, want) {
 			t.Fatalf("query %q is missing %q", query, want)
 		}

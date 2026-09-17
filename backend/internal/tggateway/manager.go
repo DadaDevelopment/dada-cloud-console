@@ -538,6 +538,7 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 			},
 		}
 		a2aTexts := make([]string, 0, len(batch))
+		runCtx = WithA2AMetadata(runCtx, TelegramA2AMetadata(batch[0]))
 		for _, u := range batch {
 			var attachment *RuntimeAttachment
 			if u.Attachment != nil {

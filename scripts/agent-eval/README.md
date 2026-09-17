@@ -119,8 +119,9 @@ event carrying `gateway_calls`, `prompt_tokens`, `completion_tokens`, `total_tok
 "steps to result" as the tool calls it saw, which is a floor rather than the real round
 count, and the report says out loud that it asked for nothing.
 
-That `trace_id` is also the Langfuse trace id, so `push_scores.py` attaches every criterion
-score to the turn it grades. A 0 in `grounding` in a local JSONL file says a case failed;
+That `trace_id` is the Langfuse trace id with its dashes removed (the console ships traces
+over OTLP, where a UUID becomes 32 hex digits), so `push_scores.py` attaches every criterion
+score to the turn it grades through `POST /api/public/scores`. A 0 in `grounding` in a local JSONL file says a case failed;
 the same 0 on the trace is one click from the prompt, the tool calls and the arguments that
 produced it. Score ids are derived from (trace id, score name), so re-judging and pushing
 again replaces the verdict instead of stacking a second one beside it.

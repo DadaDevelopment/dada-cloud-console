@@ -19,11 +19,12 @@ func sampleBatch() []Event {
 	}
 }
 
-func TestIngestSendsBasicAuthAndBatch(t *testing.T) {
+func TestIngestSendsBasicAuthAndOTLPSpans(t *testing.T) {
 	type capture struct {
 		user, pass string
 		ok         bool
 		path       string
+		version    string
 		body       map[string]any
 	}
 	got := make(chan capture, 1)
@@ -33,10 +34,10 @@ func TestIngestSendsBasicAuthAndBatch(t *testing.T) {
 		raw, _ := io.ReadAll(r.Body)
 		var parsed map[string]any
 		_ = json.Unmarshal(raw, &parsed)
-		got <- capture{user: u, pass: p, ok: ok, path: r.URL.Path, body: parsed}
+		got <- capture{user: u, pass: p, ok: ok, path: r.URL.Path, version: r.Header.Get(ingestionVersionHeader), body: parsed}
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusMultiStatus)
-		_, _ = w.Write([]byte(`{"successes":[{"id":"e1","status":201},{"id":"e2","status":201}],"errors":[]}`))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"partialSuccess":{}}`))
 	}))
 	defer srv.Close()
 
@@ -55,49 +56,105 @@ func TestIngestSendsBasicAuthAndBatch(t *testing.T) {
 	if c1.path != ingestPath {
 		t.Fatalf("path = %q, want %q (trailing slash on host must be trimmed)", c1.path, ingestPath)
 	}
+	if c1.version != ingestionVersion {
+		t.Fatalf("%s = %q, want %q", ingestionVersionHeader, c1.version, ingestionVersion)
+	}
 
-	rawBatch, ok := c1.body["batch"].([]any)
-	if !ok {
-		t.Fatalf("request body has no batch array: %v", c1.body)
+	spans := otlpSpans(t, c1.body)
+	if len(spans) != 2 {
+		t.Fatalf("span count = %d, want 2", len(spans))
 	}
-	if len(rawBatch) != 2 {
-		t.Fatalf("batch length = %d, want 2", len(rawBatch))
+	root, child := spans[0], spans[1]
+	if root["parentSpanId"] != nil {
+		t.Fatalf("trace-create must become the root span, got parent %v", root["parentSpanId"])
 	}
-	wantTypes := []string{EventTypeTraceCreate, EventTypeObservationCreate}
-	for i, item := range rawBatch {
-		ev, ok := item.(map[string]any)
-		if !ok {
-			t.Fatalf("batch[%d] is not an object", i)
-		}
-		if ev["type"] != wantTypes[i] {
-			t.Fatalf("batch[%d].type = %v, want %v", i, ev["type"], wantTypes[i])
-		}
-		if s, _ := ev["id"].(string); s == "" {
-			t.Fatalf("batch[%d].id is empty", i)
-		}
-		if s, _ := ev["timestamp"].(string); s == "" {
-			t.Fatalf("batch[%d].timestamp is empty", i)
-		}
-		if _, ok := ev["body"]; !ok {
-			t.Fatalf("batch[%d] has no body", i)
+	if root["traceId"] != child["traceId"] {
+		t.Fatalf("observation landed in another trace: %v vs %v", root["traceId"], child["traceId"])
+	}
+	if child["parentSpanId"] != root["spanId"] {
+		t.Fatalf("observation without a parent must hang off the root span: parent=%v root=%v", child["parentSpanId"], root["spanId"])
+	}
+	if got := otlpAttr(root, "langfuse.trace.name"); got != "agent-chat-turn" {
+		t.Fatalf("langfuse.trace.name = %q, want agent-chat-turn", got)
+	}
+	if got := otlpAttr(child, "langfuse.observation.type"); got != "generation" {
+		t.Fatalf("langfuse.observation.type = %q, want generation", got)
+	}
+	for _, span := range spans {
+		for _, key := range []string{"traceId", "spanId", "name", "startTimeUnixNano", "endTimeUnixNano"} {
+			if s, _ := span[key].(string); s == "" {
+				t.Fatalf("span %v lacks %s", span["name"], key)
+			}
 		}
 	}
 }
 
-func TestIngestReturnsErrorOnRejectedEvents(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusMultiStatus)
-		_, _ = w.Write([]byte(`{"successes":[],"errors":[{"id":"e1","status":400,"message":"invalid trace body"}]}`))
-	}))
-	defer srv.Close()
+func TestIngestJoinsObservationsAcrossBatches(t *testing.T) {
+	first, err := otlpPayload(sampleBatch()[:1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := otlpPayload(sampleBatch()[1:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := otlpSpans(t, first)[0]
+	child := otlpSpans(t, second)[0]
+	if root["traceId"] != child["traceId"] || child["parentSpanId"] != root["spanId"] {
+		t.Fatalf("a trace and its observation sent separately must still join: root=%v child=%v", root, child)
+	}
+}
 
-	err := New(srv.URL, "pk", "sk", true).Ingest(context.Background(), sampleBatch())
+func TestIngestRejectsUnknownEventBody(t *testing.T) {
+	_, err := otlpPayload([]Event{{ID: "e1", Type: EventTypeTraceCreate, Body: "nope"}})
 	if err == nil {
-		t.Fatal("expected an error when the server rejects events")
+		t.Fatal("an event body of an unknown type must be an error, not a silently dropped span")
 	}
-	if !strings.Contains(err.Error(), "invalid trace body") {
-		t.Fatalf("error should carry the rejection reason, got %v", err)
+	if !strings.Contains(err.Error(), "e1") {
+		t.Fatalf("error should name the event, got %v", err)
 	}
+}
+
+func otlpSpans(t *testing.T, body map[string]any) []map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed struct {
+		ResourceSpans []struct {
+			ScopeSpans []struct {
+				Spans []map[string]any `json:"spans"`
+			} `json:"scopeSpans"`
+		} `json:"resourceSpans"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	var spans []map[string]any
+	for _, rs := range parsed.ResourceSpans {
+		for _, ss := range rs.ScopeSpans {
+			spans = append(spans, ss.Spans...)
+		}
+	}
+	if len(spans) == 0 {
+		t.Fatalf("request body carries no spans: %v", body)
+	}
+	return spans
+}
+
+func otlpAttr(span map[string]any, key string) string {
+	attrs, _ := span["attributes"].([]any)
+	for _, a := range attrs {
+		kv, _ := a.(map[string]any)
+		if kv["key"] != key {
+			continue
+		}
+		value, _ := kv["value"].(map[string]any)
+		s, _ := value["stringValue"].(string)
+		return s
+	}
+	return ""
 }
 
 func TestIngestReturnsErrorOnHTTPError(t *testing.T) {

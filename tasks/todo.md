@@ -1,3 +1,57 @@
+# Runtime <-> Langfuse: v4, identity, prompt version, tree, cost (2026-09-17)
+
+## Diagnosis (all 7 points)
+1. userId/sessionId random: kagent derives `user_id=A2A_USER_<contextId>`, `session_id=contextId`;
+   contextId = `runtime-<conv uuid>` (agent-runtime) / `tg-chat-<chatId>` (tg-gateway direct).
+   Telegram username never reaches runtime as data (only prepended as text line).
+2. Prompt version: runtime has env `PROMPT_VERSION` (git string). Langfuse needs a prompt object +
+   `langfuse.observation.prompt.name/version` (int) on generation spans. Nothing pushes prompts today.
+3/5/6. Tree is already one trace; root = FastAPI `POST /` with no i/o; `invocation`/`invoke_agent` no i/o;
+   three nested LLM rows (`call_llm` ADK i/o via `gcp.vertex.agent.llm_*`, `generate_content` tokens
+   but no i/o (content goes to OTel LOGS, which are disabled), `openai.chat` from OpenAIInstrumentor).
+4. v4: no `x-langfuse-ingestion-version: 4` header; trace attrs not on every span; console Go client and
+   `scripts/agent-eval/push_scores.py` use deprecated `/api/public/ingestion` (Cloud sunset 2026-11-16).
+7. Cost: `glm-5.3-flash` has no model definition in the Langfuse project => cost blank.
+
+## Plan
+- [x] A. Go callers: add `metadata` to A2A message (`dada.channel`, `dada.chat_id`, `dada.username`,
+      `dada.first_name`, `dada.thread_id`, `dada.conversation_id`) in
+      `backend/internal/agentruntime/a2a.go` + `backend/internal/tggateway/a2a.go` (new
+      `SendWithContext(ctx, agent, contextID, text, meta)`); tests; gofmt gate.
+- [x] B. Runtime patch (`kagent-app/patch_tracing.py`, Dockerfile COPY for `kagent/adk/_agent_executor.py`):
+      in `_execute_impl` read `context.message.metadata`, build langfuse attrs and push via
+      `set_kagent_span_attributes` (all child spans) AND set on current root span:
+      `langfuse.user.id=@username|telegram:<chat>`, `langfuse.session.id`, `langfuse.trace.name=
+      "<agent> · telegram · @username"`, `langfuse.trace.tags=[channel, agent]`, `langfuse.trace.metadata.*`,
+      `langfuse.release=$PROMPT_VERSION`, `langfuse.environment=$KAGENT_ENV|prod`,
+      `langfuse.observation.prompt.name/version` from env `LANGFUSE_PROMPT_NAME/VERSION`;
+      root: `update_name`, `langfuse.observation.type=agent`, `langfuse.observation.input`=user text,
+      `langfuse.observation.output`=final text, level=ERROR on failure.
+      OpenAIInstrumentor behind `KAGENT_INSTRUMENT_OPENAI` (default false) => drop `openai.chat` layer.
+- [ ] C. argo-infra composition `baselineEnv`: `OTEL_EXPORTER_OTLP_TRACES_HEADERS` can't carry auth (per-agent),
+      so header goes into the exporter via patch (`x-langfuse-ingestion-version=4` merged in `_utils.py`);
+      add `OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental`,
+      `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=SPAN_ONLY` (=> `generate_content` gets
+      `gen_ai.input.messages`/`gen_ai.output.messages` on span => no null i/o). Bump agentImage after CI.
+- [x] D. Backend `SaveAgent`: push-only prompt publish: creds from `req.Env` (`LANGFUSE_PUBLIC/SECRET_KEY`
+      or Basic from `OTEL_EXPORTER_OTLP_HEADERS`); GET current production prompt, skip if text equal;
+      else `POST /api/public/v2/prompts` (name=agent, label production, commitMessage=git promptVersion,
+      tags=[promptVersion]); inject `LANGFUSE_PROMPT_NAME/VERSION` into claim env (always strip stale first).
+      Failure = warn + save proceeds without prompt link.
+- [x] E. v4 migration of console: `backend/internal/langfuse` Ingest -> OTLP JSON to
+      `/api/public/otel/v1/traces` (same Event API for callers); `push_scores.py` -> `POST /api/public/scores`.
+- [ ] F. Cost: `scripts/langfuse/ensure_models.py` + `models.json` (glm-5.3-flash etc.) -> `POST /api/public/models`
+      per project; run for support-agent project (sandbox agent) now.
+- [ ] G. Verify in agent-sandbox (tg-exchange-support): send TG message, check Langfuse trace: root name,
+      user/session, prompt link, cost, no nulls. Docs: kagent-app/README env table.
+
+## Decisions to confirm
+- session.id = `@username` (private chat) / `@username@<chat_id>` (group); one Langfuse session per user
+  forever (no per-conversation split). Alternative: `@username/<conv short id>`.
+- `openai.chat` layer dropped (duplicate of generate_content). `call_llm` stays (ADK, has i/o).
+
+---
+
 # Billing grace banner accuracy (2026-08-25)
 
 - [x] Trace the billing-page banner condition and API over-limit contract.

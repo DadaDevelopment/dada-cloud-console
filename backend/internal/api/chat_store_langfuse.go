@@ -112,18 +112,16 @@ func (s langfuseChatStore) SessionMessages(ctx context.Context, sessionID uuid.U
 	}
 
 	newestFirst := make([]chatMessage, 0, want)
-	totalPages := 1
-	for page := 1; page <= totalPages && len(newestFirst) < want; page++ {
+	cursor := ""
+	for len(newestFirst) < want {
 		list, err := client.ListTraces(ctx, langfuse.TraceQuery{
 			SessionID: sessionID.String(),
-			OrderBy:   "timestamp.desc",
-			Page:      page,
+			Cursor:    cursor,
 			Limit:     langfuse.MaxPageLimit,
 		})
 		if err != nil {
 			return nil, err
 		}
-		totalPages = list.Meta.TotalPages
 		if len(list.Data) == 0 {
 			break
 		}
@@ -132,7 +130,11 @@ func (s langfuseChatStore) SessionMessages(ctx context.Context, sessionID uuid.U
 				newestFirst = append(newestFirst, msg)
 			}
 		}
-		if len(newestFirst) >= want && page < totalPages {
+		cursor = list.Meta.Cursor
+		if cursor == "" {
+			break
+		}
+		if len(newestFirst) >= want {
 			log.Printf("agent-chat: session %s has more than %d messages in langfuse, older ones dropped", sessionID, want)
 		}
 	}
@@ -180,8 +182,8 @@ func agentChatMessageFromTrace(tr langfuse.Trace) (chatMessage, bool) {
 		return chatMessage{}, false
 	}
 
-	var content string
-	if err := json.Unmarshal(tr.Output, &content); err != nil {
+	content, ok := transcriptText(tr.Output)
+	if !ok {
 		return chatMessage{}, false
 	}
 
@@ -189,10 +191,43 @@ func agentChatMessageFromTrace(tr langfuse.Trace) (chatMessage, bool) {
 	var meta struct {
 		ToolName string `json:"tool_name"`
 	}
-	if err := json.Unmarshal(tr.Metadata, &meta); err == nil {
-		msg.ToolName = meta.ToolName
+	if raw, ok := transcriptObject(tr.Metadata); ok {
+		if err := json.Unmarshal(raw, &meta); err == nil {
+			msg.ToolName = meta.ToolName
+		}
 	}
 	return msg, true
+}
+
+// transcriptText reads a message body back. The v2 observations API hands io
+// back as it was stored: a JSON string for what the console wrote, but any
+// other producer's raw text must not be mistaken for a missing message.
+func transcriptText(raw json.RawMessage) (string, bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", false
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s, true
+	}
+	return string(raw), true
+}
+
+// transcriptObject unwraps metadata that arrives either as an object or as an
+// object serialised into a JSON string, both of which the API produces
+// depending on how the attribute was ingested.
+func transcriptObject(raw json.RawMessage) (json.RawMessage, bool) {
+	if len(raw) == 0 {
+		return nil, false
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		raw = json.RawMessage(s)
+	}
+	if len(raw) == 0 || raw[0] != '{' {
+		return nil, false
+	}
+	return raw, true
 }
 
 func startOfDayUTC(t time.Time) time.Time {

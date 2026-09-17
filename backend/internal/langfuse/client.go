@@ -1,7 +1,12 @@
-// Package langfuse is a minimal client for the Langfuse batch ingestion API.
+// Package langfuse is a minimal client for the Langfuse OTLP ingestion API
+// (ingestion version 4).
 //
 // It exists to ship console-agent turn traces to Langfuse without pulling in an
-// OpenTelemetry SDK for what is one HTTP POST per turn. The only entry point
+// OpenTelemetry SDK for what is one HTTP POST per turn. Callers still describe
+// a turn as a batch of trace/observation events; the client renders that batch
+// as one OTLP/JSON request, because the batch ingestion endpoint is being
+// retired (Cloud sunset 2026-11-16) and organisations created since 2026-09-16
+// only have the OTLP path. The only entry point
 // the request path uses is IngestAsync, which is strictly fire-and-forget: it
 // runs on its own goroutine with its own background context, recovers from
 // panics, and never reports back. Tracing must not be able to slow down or
@@ -20,7 +25,11 @@ import (
 	"time"
 )
 
-const ingestPath = "/api/public/ingestion"
+const ingestPath = "/api/public/otel/v1/traces"
+
+const ingestionVersionHeader = "x-langfuse-ingestion-version"
+
+const ingestionVersion = "4"
 
 const ingestTimeout = 5 * time.Second
 
@@ -97,27 +106,6 @@ type ObservationBody struct {
 	ParentObservationID string         `json:"parentObservationId,omitempty"`
 }
 
-type ingestRequest struct {
-	Batch []Event `json:"batch"`
-}
-
-// ingestError is one per-event rejection. Message is a constant
-// ("Invalid request data") and Error carries the field that was wrong, so
-// reporting Message alone leaves nothing to act on.
-type ingestError struct {
-	ID      string          `json:"id"`
-	Status  int             `json:"status"`
-	Message string          `json:"message"`
-	Error   json.RawMessage `json:"error"`
-}
-
-type ingestResponse struct {
-	Successes []struct {
-		ID string `json:"id"`
-	} `json:"successes"`
-	Errors []ingestError `json:"errors"`
-}
-
 // Client talks to one Langfuse project. A zero-value or nil Client is a safe
 // no-op, which is how the feature stays off when no keys are configured.
 type Client struct {
@@ -161,7 +149,11 @@ func (c *Client) Ingest(ctx context.Context, batch []Event) error {
 		return nil
 	}
 
-	body, err := json.Marshal(ingestRequest{Batch: batch})
+	payload, err := otlpPayload(batch)
+	if err != nil {
+		return fmt.Errorf("langfuse ingestion: %w", err)
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("langfuse ingestion: encode batch: %w", err)
 	}
@@ -176,6 +168,7 @@ func (c *Client) Ingest(ctx context.Context, batch []Event) error {
 		return fmt.Errorf("langfuse ingestion: build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(ingestionVersionHeader, ingestionVersion)
 	req.SetBasicAuth(c.PublicKey, c.SecretKey)
 
 	resp, err := client.Do(req)
@@ -187,19 +180,6 @@ func (c *Client) Ingest(ctx context.Context, batch []Event) error {
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("langfuse ingestion: status %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
-	}
-
-	var parsed ingestResponse
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return nil
-	}
-	if len(parsed.Errors) > 0 {
-		first := parsed.Errors[0]
-		detail := strings.TrimSpace(string(first.Error))
-		if detail == "" || detail == "null" {
-			detail = first.Message
-		}
-		return fmt.Errorf("langfuse ingestion: %d event(s) rejected, first %s: %s: %s", len(parsed.Errors), first.ID, first.Message, detail)
 	}
 	return nil
 }

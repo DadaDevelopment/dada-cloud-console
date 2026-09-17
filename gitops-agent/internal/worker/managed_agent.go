@@ -242,6 +242,7 @@ func (w *DBWatcher) doCreateAgent(ctx context.Context, op db.Operation) error {
 		return err
 	}
 	fillUnsaid(&spec, carried)
+	syncLangfusePrompt(ctx, &spec)
 
 	yaml, err := renderer.RenderManagedAgent(spec)
 	if err != nil {
