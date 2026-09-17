@@ -990,3 +990,17 @@ User rated the first Cloud redesign35%: styling improved, but the experience rem
 - `git add <path>` on a file BOTH sessions edited stages the foreign hunks too. Compiled locally only because their untracked `judge.go` sat in the tree.
 - Before commit: `git diff --cached` per file, grep for symbols not defined in tracked files; or verify from `git archive HEAD` in docker (clean tree), not from the working tree.
 - Fix without touching the shared tree: `git hash-object -w` + `git update-index --cacheinfo` → commit from index; their WIP stays as unstaged diff.
+
+## 2026-09-18 — prompt link hung on a manual console save; owner wanted the pipeline
+
+Built the Langfuse prompt publish into gitops-agent's `saveAgent` path and then told the
+owner the link needs one `saveAgent` (via MCP) to appear. Owner: "не должно быть что оно
+зависит от этого, я просил обновлять промт в CI, причем тут MCP?".
+
+Pattern: a versioned artifact (prompt) already has a delivery chain (git -> Argo ->
+ManagedAgent -> ConfigMap -> pod). Any side effect keyed to that version belongs ON that
+chain, at the point where the artifact actually lands (here: the pod booting with it), not
+on one of several ways to trigger the chain. If the acceptance step reads "now call X by
+hand", the hook is in the wrong place.
+Rule: before wiring a sync to an API call, list every path the artifact can arrive by; the
+hook must fire on all of them or it is not CI.
