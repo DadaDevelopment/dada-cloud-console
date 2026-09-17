@@ -60,6 +60,13 @@ const PAYMENT_PROMPT: RecoveryPrompt = {
   resource_name: "checkout",
 };
 
+const PAYMENT_PROMPT_NO_PROJECT: RecoveryPrompt = {
+  kind: "payment_recurring_forbidden",
+  failed_at: "2026-08-10T00:00:00Z",
+  fixed_at: "2026-08-11T00:00:00Z",
+  resource_name: "checkout",
+};
+
 test("a null prompt never shows", () => {
   assert.equal(shouldShowRecoveryPrompt(null), false);
 });
@@ -111,4 +118,12 @@ test("install kind routes back to the apps page scoped to the failed environment
 
 test("payment kind routes to the project's billing page", () => {
   assert.equal(recoveryPromptHref(PAYMENT_PROMPT), "/projects/proj-2/billing");
+});
+
+test("payment kind without project_id falls back to the route's project", () => {
+  assert.equal(recoveryPromptHref(PAYMENT_PROMPT_NO_PROJECT, "proj-route"), "/projects/proj-route/billing");
+});
+
+test("payment kind with no project anywhere yields null instead of /projects/undefined", () => {
+  assert.equal(recoveryPromptHref(PAYMENT_PROMPT_NO_PROJECT), null);
 });

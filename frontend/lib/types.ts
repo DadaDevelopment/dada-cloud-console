@@ -2276,8 +2276,14 @@ export interface RecoveryPrompt {
   kind: RecoveryPromptKind;
   failed_at: string;
   fixed_at: string;
-  project_id: string;
-  environment_id: string;
+  /**
+   * Omitted by the backend when the underlying audit row was written against
+   * an org rather than a project -- currently the case for every
+   * payment_recurring_forbidden prompt (platform_recovery.go). Resolve the
+   * project from the route instead of assuming this exists.
+   */
+  project_id?: string;
+  environment_id?: string;
   resource_name: string;
 }
 

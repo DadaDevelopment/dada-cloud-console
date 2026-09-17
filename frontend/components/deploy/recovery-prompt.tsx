@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { useT } from "@/lib/i18n/console/context";
+import { useParams } from "next/navigation";
 import { recoveryApi } from "@/lib/api";
 import {
   dismissRecoveryPrompt,
@@ -56,6 +57,7 @@ const COPY_KEYS: Record<RecoveryPromptData["kind"], { title: string; body: strin
  */
 export function RecoveryPrompt({ placement }: RecoveryPromptProps) {
   const { t } = useT();
+  const params = useParams<{ projectId: string }>();
   const [prompt, setPrompt] = useState<RecoveryPromptData | null>(null);
   const shownRef = useRef(false);
 
@@ -86,7 +88,10 @@ export function RecoveryPrompt({ placement }: RecoveryPromptProps) {
   if (!visible || !prompt) return null;
 
   const copy = COPY_KEYS[prompt.kind];
-  const href = recoveryPromptHref(prompt);
+  // The backend omits project_id for payment-kind prompts (org-scoped audit
+  // row), so resolve it from the route; with neither, hide the CTA instead
+  // of linking to /projects/undefined/billing.
+  const href = recoveryPromptHref(prompt, params?.projectId);
 
   function handleDismiss() {
     if (!prompt) return;
@@ -114,6 +119,7 @@ export function RecoveryPrompt({ placement }: RecoveryPromptProps) {
           <X className="h-4 w-4" />
         </button>
       </div>
+      {href && (
       <div className="mt-3">
         <Link
           href={href}
@@ -126,6 +132,7 @@ export function RecoveryPrompt({ placement }: RecoveryPromptProps) {
           {t(copy.cta)}
         </Link>
       </div>
+      )}
     </div>
   );
 }

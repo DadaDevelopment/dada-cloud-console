@@ -63,11 +63,22 @@ export function shouldShowRecoveryPrompt(prompt: RecoveryPrompt | null): boolean
  * that).
  *
  * `payment_recurring_forbidden` goes to the project's billing page, where
- * the checkout flow already lives.
+ * the checkout flow already lives. The backend omits `project_id` for this
+ * kind (the failed audit row is org-scoped), so callers resolve it from the
+ * route -- `fallbackProjectId` is what makes the difference between
+ * "/projects/<id>/billing" and the dead "/projects/undefined/billing" that
+ * artempro2021@bk.ru was sent to on 2026-09-10 (ux_events 4x, audit-path
+ * graph). Returns null when no project can be resolved at all; callers
+ * hide the CTA rather than render a broken link.
  */
-export function recoveryPromptHref(prompt: RecoveryPrompt): string {
+export function recoveryPromptHref(
+  prompt: RecoveryPrompt,
+  fallbackProjectId?: string,
+): string | null {
+  const projectId = prompt.project_id ?? fallbackProjectId;
+  if (!projectId) return null;
   if (prompt.kind === "payment_recurring_forbidden") {
-    return `/projects/${prompt.project_id}/billing`;
+    return `/projects/${projectId}/billing`;
   }
-  return `/projects/${prompt.project_id}/apps?envId=${prompt.environment_id}`;
+  return `/projects/${projectId}/apps?envId=${prompt.environment_id}`;
 }
