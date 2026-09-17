@@ -9,3 +9,5 @@ FROM ghcr.io/kagent-dev/kagent/app:${KAGENT_VERSION}
 COPY --from=patch /.kagent/.venv/lib/python3.13/site-packages/kagent/core/tracing/ /.kagent/.venv/lib/python3.13/site-packages/kagent/core/tracing/
 COPY --from=patch /.kagent/.venv/lib/python3.13/site-packages/kagent/adk/_agent_executor.py /.kagent/.venv/lib/python3.13/site-packages/kagent/adk/_agent_executor.py
 COPY --from=patch /.kagent/.venv/lib/python3.13/site-packages/kagent/adk/__pycache__/_agent_executor.cpython-313.opt-2.pyc /.kagent/.venv/lib/python3.13/site-packages/kagent/adk/__pycache__/_agent_executor.cpython-313.opt-2.pyc
+COPY --from=patch /.kagent/.venv/lib/python3.13/site-packages/kagent/adk/cli.py /.kagent/.venv/lib/python3.13/site-packages/kagent/adk/cli.py
+COPY --from=patch /.kagent/.venv/lib/python3.13/site-packages/kagent/adk/__pycache__/cli.cpython-313.opt-2.pyc /.kagent/.venv/lib/python3.13/site-packages/kagent/adk/__pycache__/cli.cpython-313.opt-2.pyc

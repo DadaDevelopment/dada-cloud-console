@@ -18,7 +18,10 @@ After the patch:
     endpoint is Langfuse (see ``_dada.exporter_headers``);
   * the A2A executor shapes each turn for Langfuse v4 (user/session from the
     caller's ``dada.*`` message metadata, readable root name, root
-    input/output, prompt link, release) through ``kagent.core.tracing._dada``.
+    input/output, prompt link, release) through ``kagent.core.tracing._dada``;
+  * the ``static`` CLI command hands the system prompt it booted with to
+    ``_dada.register_prompt`` so the pod publishes it to Langfuse once per
+    rollout and every span links to that prompt version.
 
 Every anchor is asserted so an upstream bump that moves the code fails the
 build instead of silently shipping the noisy runtime again.
@@ -69,6 +72,21 @@ PATCHED_EXPORTER = (
     "                    endpoint=trace_endpoint, timeout=trace_timeout_seconds, headers=exporter_headers(trace_endpoint)\n"
     "                )\n"
     "            )\n"
+)
+
+ANCHOR_CLI_IMPORT = "from kagent.core import KAgentConfig, configure_logging, configure_tracing\n"
+PATCHED_CLI_IMPORT = (
+    "from kagent.core import KAgentConfig, configure_logging, configure_tracing\n"
+    "from kagent.core.tracing import _dada as dada_tracing\n"
+)
+ANCHOR_CLI_PROMPT = (
+    "    agent_config = AgentConfig.model_validate(config)\n"
+    '    with open(os.path.join(filepath, "agent-card.json"), "r") as f:\n'
+)
+PATCHED_CLI_PROMPT = (
+    "    agent_config = AgentConfig.model_validate(config)\n"
+    "    dada_tracing.register_prompt(agent_config.instruction)\n"
+    '    with open(os.path.join(filepath, "agent-card.json"), "r") as f:\n'
 )
 
 ANCHOR_EXEC_IMPORT = "from kagent.core.tracing._span_processor import (\n"
@@ -163,6 +181,13 @@ def main() -> None:
             (ANCHOR_EXEC_BEGIN, PATCHED_EXEC_BEGIN),
             (ANCHOR_EXEC_END, PATCHED_EXEC_END),
             (ANCHOR_EXEC_FAIL, PATCHED_EXEC_FAIL),
+        ],
+    )
+    patch_file(
+        locate("kagent.adk.cli"),
+        [
+            (ANCHOR_CLI_IMPORT, PATCHED_CLI_IMPORT),
+            (ANCHOR_CLI_PROMPT, PATCHED_CLI_PROMPT),
         ],
     )
     importlib.import_module("kagent.core.tracing._dada")

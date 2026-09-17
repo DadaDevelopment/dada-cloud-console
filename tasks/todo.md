@@ -28,16 +28,17 @@
       root: `update_name`, `langfuse.observation.type=agent`, `langfuse.observation.input`=user text,
       `langfuse.observation.output`=final text, level=ERROR on failure.
       OpenAIInstrumentor behind `KAGENT_INSTRUMENT_OPENAI` (default false) => drop `openai.chat` layer.
-- [ ] C. argo-infra composition `baselineEnv`: `OTEL_EXPORTER_OTLP_TRACES_HEADERS` can't carry auth (per-agent),
+- [x] C. argo-infra composition `baselineEnv`: `OTEL_EXPORTER_OTLP_TRACES_HEADERS` can't carry auth (per-agent),
       so header goes into the exporter via patch (`x-langfuse-ingestion-version=4` merged in `_utils.py`);
       add `OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental`,
       `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=SPAN_ONLY` (=> `generate_content` gets
       `gen_ai.input.messages`/`gen_ai.output.messages` on span => no null i/o). Bump agentImage after CI.
-- [x] D. Backend `SaveAgent`: push-only prompt publish: creds from `req.Env` (`LANGFUSE_PUBLIC/SECRET_KEY`
-      or Basic from `OTEL_EXPORTER_OTLP_HEADERS`); GET current production prompt, skip if text equal;
-      else `POST /api/public/v2/prompts` (name=agent, label production, commitMessage=git promptVersion,
-      tags=[promptVersion]); inject `LANGFUSE_PROMPT_NAME/VERSION` into claim env (always strip stale first).
-      Failure = warn + save proceeds without prompt link.
+- [x] D. Prompt link, CI-driven (reworked after review: must not depend on a console `saveAgent`):
+      the pod publishes the system prompt it booted with (`kagent.adk.cli.static` ->
+      `_dada.register_prompt`) as Langfuse text prompt `<agent>` (label production, commitMessage =
+      `PROMPT_VERSION`, identical text never republished) and links every span via
+      `langfuse.observation.prompt.*`. Rides git -> Argo -> ManagedAgent -> ConfigMap -> rollout;
+      gitops-agent `syncLangfusePrompt` removed. Failure = warn + no link.
 - [x] E. v4 migration of console: `backend/internal/langfuse` Ingest -> OTLP JSON to
       `/api/public/otel/v1/traces` (same Event API for callers); `push_scores.py` -> `POST /api/public/scores`.
 - [ ] F. Cost: `scripts/langfuse/ensure_models.py` + `models.json` (glm-5.3-flash etc.) -> `POST /api/public/models`

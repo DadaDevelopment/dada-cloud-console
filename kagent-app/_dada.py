@@ -18,13 +18,28 @@ v4 ingestion reads:
 ``begin_turn`` runs before the ADK runner starts, ``end_turn``/``fail_turn``
 when the executor publishes the final task event. The turn state lives in a
 contextvar so the executor stays free of plumbing.
+
+Prompt versions are push-only and ride the same delivery as the prompt itself:
+git (argo-infra ManagedAgent) -> ConfigMap -> this pod. ``register_prompt`` is
+called at boot with the system prompt the pod was started with and mirrors it
+into the agent's Langfuse project as a text prompt named after the agent
+(label ``production``, commit message = ``PROMPT_VERSION``). Langfuse versions
+are append-only, so identical text is never re-published; the resulting integer
+version is what every span links to through ``langfuse.observation.prompt.*``.
+No console call, no CI step outside the rollout, no read-back into git.
 """
 
 from __future__ import annotations
 
+import base64
 import contextvars
+import json
 import logging
 import os
+import threading
+import urllib.error
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -86,15 +101,102 @@ def _user_and_session(meta: dict[str, str], fallback_user: str, fallback_session
     return user, session
 
 
+LANGFUSE_DEFAULT_HOST = "https://cloud.langfuse.com"
+LANGFUSE_PROMPT_LABEL = "production"
+PROMPT_SYNC_WAIT_SECONDS = 5.0
+
+_prompt_link_state: dict[str, Any] = {}
+_prompt_synced = threading.Event()
+_prompt_synced.set()
+
+
+def _langfuse_credentials() -> Optional[tuple[str, str, str]]:
+    """(host, public key, secret key) from LANGFUSE_* env, else from the OTLP basic-auth header."""
+    host = (os.getenv("LANGFUSE_HOST") or os.getenv("LANGFUSE_BASE_URL") or LANGFUSE_DEFAULT_HOST).rstrip("/")
+    public = os.getenv("LANGFUSE_PUBLIC_KEY", "").strip()
+    secret = os.getenv("LANGFUSE_SECRET_KEY", "").strip()
+    if public and secret:
+        return host, public, secret
+    raw = os.getenv("OTEL_EXPORTER_OTLP_TRACES_HEADERS") or os.getenv("OTEL_EXPORTER_OTLP_HEADERS") or ""
+    for pair in raw.split(","):
+        key, _, value = pair.strip().partition("=")
+        if key.strip().lower() != "authorization":
+            continue
+        scheme, _, token = urllib.parse.unquote(value.strip()).partition(" ")
+        if scheme.lower() != "basic":
+            continue
+        try:
+            decoded = base64.b64decode(token.strip()).decode()
+        except (ValueError, UnicodeDecodeError):
+            continue
+        public, _, secret = decoded.partition(":")
+        if public and secret:
+            return host, public, secret
+    return None
+
+
+def _langfuse_json(creds: tuple[str, str, str], method: str, path: str, body: Optional[dict[str, Any]] = None) -> Any:
+    host, public, secret = creds
+    data = json.dumps(body).encode() if body is not None else None
+    request = urllib.request.Request(host + path, data=data, method=method)
+    request.add_header("Authorization", "Basic " + base64.b64encode(f"{public}:{secret}".encode()).decode())
+    request.add_header("Accept", "application/json")
+    if data is not None:
+        request.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(request, timeout=15) as response:
+        return json.load(response)
+
+
+def ensure_prompt_version(creds: tuple[str, str, str], name: str, text: str, commit_message: str) -> int:
+    """Version of the Langfuse text prompt ``name`` whose text equals ``text``, publishing one only when production differs."""
+    path = "/api/public/v2/prompts/" + urllib.parse.quote(name, safe="") + "?label=" + LANGFUSE_PROMPT_LABEL
+    try:
+        current = _langfuse_json(creds, "GET", path)
+        if current.get("type") == "text" and current.get("prompt") == text:
+            return int(current["version"])
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            raise
+    body: dict[str, Any] = {"name": name, "type": "text", "prompt": text, "labels": [LANGFUSE_PROMPT_LABEL]}
+    if commit_message:
+        body["commitMessage"] = commit_message
+    created = _langfuse_json(creds, "POST", "/api/public/v2/prompts", body)
+    return int(created["version"])
+
+
+def _sync_prompt(name: str, text: str, version_label: str) -> None:
+    try:
+        creds = _langfuse_credentials()
+        if creds is None:
+            logger.info("dada tracing: no Langfuse credentials, prompt %s runs without a prompt link", name)
+            return
+        version = ensure_prompt_version(creds, name, text, version_label)
+        _prompt_link_state.update({
+            "langfuse.observation.prompt.name": name,
+            "langfuse.observation.prompt.version": version,
+        })
+        logger.info("dada tracing: prompt %s %s is Langfuse version %d", name, version_label, version)
+    except Exception:
+        logger.warning("dada tracing: prompt %s: Langfuse sync failed, running without a prompt link", name, exc_info=True)
+    finally:
+        _prompt_synced.set()
+
+
+def register_prompt(text: Optional[str]) -> None:
+    """Mirror the system prompt this pod boots with into Langfuse, off the request path."""
+    name = os.getenv("KAGENT_NAME", "")
+    text = (text or "").strip()
+    if not name or not text:
+        return
+    _prompt_synced.clear()
+    threading.Thread(
+        target=_sync_prompt, args=(name, text, os.getenv("PROMPT_VERSION", "")), name="dada-langfuse-prompt", daemon=True
+    ).start()
+
+
 def _prompt_link() -> dict[str, Any]:
-    name = os.getenv("LANGFUSE_PROMPT_NAME", "")
-    version = os.getenv("LANGFUSE_PROMPT_VERSION", "")
-    if not name or not version.isdigit():
-        return {}
-    return {
-        "langfuse.observation.prompt.name": name,
-        "langfuse.observation.prompt.version": int(version),
-    }
+    _prompt_synced.wait(PROMPT_SYNC_WAIT_SECONDS)
+    return dict(_prompt_link_state)
 
 
 def build_attributes(agent: str, meta: dict[str, str], fallback_user: str, fallback_session: str) -> dict[str, Any]:

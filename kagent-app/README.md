@@ -37,7 +37,7 @@ Runtime env honoured by the patch:
 | `KAGENT_INSTRUMENT_HTTPX` | `false` | `true` restores upstream httpx client spans |
 | `KAGENT_INSTRUMENT_OPENAI` | `false` | `true` restores the `openai.chat` span (duplicate of ADK `generate_content`) |
 | `LANGFUSE_INGESTION_VERSION` | `4` when the OTLP endpoint host contains `langfuse` | value of the `x-langfuse-ingestion-version` header added to the trace exporter |
-| `LANGFUSE_PROMPT_NAME` / `LANGFUSE_PROMPT_VERSION` | unset | Langfuse prompt link (`langfuse.observation.prompt.*`) on every span; set by the console on `SaveAgent` |
+| `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` (else basic auth from `OTEL_EXPORTER_OTLP_HEADERS`), `LANGFUSE_HOST` | cloud.langfuse.com | at boot the pod publishes its system prompt to Langfuse as text prompt `<KAGENT_NAME>` (label `production`, commit message `PROMPT_VERSION`, no new version when the text is unchanged) and links every span to it via `langfuse.observation.prompt.*`; rides the gitops rollout, no console call involved |
 | `LANGFUSE_TRACING_ENVIRONMENT` | `default` | `langfuse.environment` |
 | `PROMPT_VERSION` | unset | `langfuse.release` + `trace.metadata.prompt_version` |
 
