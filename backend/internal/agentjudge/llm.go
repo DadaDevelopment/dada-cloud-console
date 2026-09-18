@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -20,10 +21,11 @@ type LLM interface {
 // OpenAIChat is an OpenAI-compatible chat completion client used for the judge
 // call; the same gateway and key as the agent itself.
 type OpenAIChat struct {
-	BaseURL string
-	APIKey  string
-	Model   string
-	HTTP    *http.Client
+	BaseURL    string
+	APIKey     string
+	Model      string
+	HTTP       *http.Client
+	RetryPause time.Duration
 }
 
 type chatRequest struct {
@@ -56,7 +58,37 @@ type chatResponse struct {
 	} `json:"error"`
 }
 
+const llmRetries = 3
+
+// Complete asks the model once, retrying a 429 with a growing pause because
+// the provider sends no retry-after.
 func (c *OpenAIChat) Complete(ctx context.Context, prompt string) (string, error) {
+	var out string
+	var err error
+	for attempt := 1; attempt <= llmRetries; attempt++ {
+		out, err = c.complete(ctx, prompt)
+		if err == nil || !errors.Is(err, errRateLimited) || attempt == llmRetries {
+			return out, err
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(time.Duration(attempt) * c.retryPause()):
+		}
+	}
+	return out, err
+}
+
+var errRateLimited = errors.New("rate limited")
+
+func (c *OpenAIChat) retryPause() time.Duration {
+	if c.RetryPause > 0 {
+		return c.RetryPause
+	}
+	return 5 * time.Second
+}
+
+func (c *OpenAIChat) complete(ctx context.Context, prompt string) (string, error) {
 	body, err := json.Marshal(chatRequest{Model: c.Model, Messages: []chatMessage{{Role: "user", Content: prompt}}, MaxTokens: 4000, Thinking: &chatThinking{Type: "disabled"}})
 	if err != nil {
 		return "", err
@@ -77,6 +109,9 @@ func (c *OpenAIChat) Complete(ctx context.Context, prompt string) (string, error
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return "", fmt.Errorf("judge llm: status 429: %s: %w", strings.TrimSpace(string(raw)), errRateLimited)
+	}
 	if resp.StatusCode >= 400 {
 		return "", fmt.Errorf("judge llm: status %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
 	}

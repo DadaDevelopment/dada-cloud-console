@@ -1,6 +1,8 @@
 version: 2
 name: turn
 prompt: turn.md
+skip:
+  usernames: [dada_roll_probe]
 total:
   score: total
   hard_cap: 20

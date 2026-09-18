@@ -104,7 +104,7 @@ func (j *Judge) Submit(agent string, t Turn) {
 		return
 	}
 	spec := j.spec(agent)
-	if spec == nil {
+	if spec == nil || spec.Skips(t.Username) {
 		return
 	}
 	go func() {

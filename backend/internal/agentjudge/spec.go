@@ -59,11 +59,17 @@ type Total struct {
 	FailBelow float64        `yaml:"fail_below"`
 }
 
+// Skip names traffic the judge leaves unscored, such as synthetic probes.
+type Skip struct {
+	Usernames []string `yaml:"usernames"`
+}
+
 // Spec is the parsed turn.yaml plus the prompt template next to it.
 type Spec struct {
 	Version  int         `yaml:"version"`
 	Name     string      `yaml:"name"`
 	Prompt   string      `yaml:"prompt"`
+	Skip     Skip        `yaml:"skip"`
 	Total    Total       `yaml:"total"`
 	Signals  []Signal    `yaml:"signals"`
 	Criteria []Criterion `yaml:"criteria"`
@@ -151,6 +157,16 @@ func ParseSpec(raw []byte) (*Spec, error) {
 }
 
 // ScoreName is the full Langfuse score name of one criterion or signal.
+// Skips reports whether turns of this username stay unjudged.
+func (s *Spec) Skips(username string) bool {
+	for _, u := range s.Skip.Usernames {
+		if strings.EqualFold(strings.TrimPrefix(u, "@"), strings.TrimPrefix(username, "@")) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Spec) ScoreName(suffix string) string {
 	return s.Name + "." + suffix
 }

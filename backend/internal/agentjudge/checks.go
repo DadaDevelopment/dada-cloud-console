@@ -17,6 +17,7 @@ type Exchange struct {
 type Turn struct {
 	TraceID            string
 	ObservationID      string
+	Username           string
 	Incoming           []string
 	Reply              string
 	Parts              []string
@@ -103,7 +104,7 @@ func checkForbidOpener(c Criterion, t Turn) (bool, string) {
 }
 
 func checkMaxQuestions(c Criterion, t Turn) (bool, string) {
-	count := strings.Count(t.Reply, "?")
+	count := strings.Count(reURL.ReplaceAllString(t.Reply, " "), "?")
 	limit := c.Max
 	if limit <= 0 {
 		limit = 1

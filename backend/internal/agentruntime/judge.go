@@ -46,7 +46,7 @@ func (r *Runtime) judgeTurn(ctx context.Context, conv Conversation, run AgentRun
 	for _, m := range pending {
 		pendingIDs[m.ID.String()] = true
 	}
-	t := agentjudge.Turn{TraceID: traced.TraceID, ObservationID: traced.ObservationID, Reply: reply, Parts: parts,
+	t := agentjudge.Turn{TraceID: traced.TraceID, ObservationID: traced.ObservationID, Username: conv.ActorUsername, Reply: reply, Parts: parts,
 		NoQuestionThisTurn: run.ConversationContext.NoQuestionThisTurn, ReplyError: run.ConversationContext.ReplyError != ""}
 	for _, m := range pending {
 		if text := strings.TrimSpace(m.Content); text != "" {

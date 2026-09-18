@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dada-tuda/console/backend/internal/langfuse"
 )
@@ -78,6 +79,7 @@ func TestCodeChecks(t *testing.T) {
 		{"forbidden word clean", "R14", Turn{Reply: "Группа даёт сигналы и куратора"}, false},
 		{"two questions", "R12", Turn{Reply: "Счёт есть? Опыт есть?"}, true},
 		{"one question", "R12", Turn{Reply: "Счёт у FxPro уже есть?"}, false},
+		{"question mark inside link", "R12", Turn{Reply: "Вот ссылка: https://direct-fxpro.com/en/partner/x?platform=web\nПару минут займёт, ожидаю обратной связи", NoQuestionThisTurn: true}, false},
 		{"no question allowed", "R12", Turn{Reply: "Счёт у FxPro уже есть?", NoQuestionThisTurn: true}, true},
 		{"long message", "R13", Turn{Parts: []string{strings.Repeat("а", 251)}}, true},
 		{"long turn", "R13", Turn{Parts: []string{strings.Repeat("а", 200), strings.Repeat("б", 200), strings.Repeat("в", 100)}}, true},
@@ -286,6 +288,16 @@ func TestSubmitPostsScores(t *testing.T) {
 	}
 	if !strings.Contains(llm.prompt, "салам") {
 		t.Error("prompt did not carry the client text")
+	}
+}
+
+func TestSubmitSkipsProbeUsernames(t *testing.T) {
+	llm := &fakeLLM{answer: `{}`}
+	j := New("testdata", llm, &recorder{})
+	j.Submit("roman", Turn{TraceID: "abc", Username: "@dada_roll_probe", Reply: "Счёт у FxPro уже есть?"})
+	time.Sleep(50 * time.Millisecond)
+	if llm.prompt != "" {
+		t.Fatal("probe turn reached the llm")
 	}
 }
 
