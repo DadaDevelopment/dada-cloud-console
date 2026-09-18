@@ -752,6 +752,7 @@ function AppRow({ app, env, projectId, expanded, onToggle, t }: AppRowProps) {
                 <Link
                   href={appHref}
                   onClick={(e) => e.stopPropagation()}
+                  data-ux="apps_row:lastmile_chip"
                   className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-950/60 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900 transition-colors"
                 >
                   {t("apps.alerts.chip.lastMile")}
