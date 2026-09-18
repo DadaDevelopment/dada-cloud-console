@@ -1039,3 +1039,19 @@ Intent: replace the text-heavy catalogue with clear product choices and a strong
 - [ ] Unify light editorial marketing shell, header/footer, shared landing sections and compact consent.
 - [ ] Review desktop/mobile visuals and real navigation/keyboard behavior; targeted lint/types.
 - [ ] Leave updated local preview for review. No infrastructure work.
+
+## 2026-09-18 — Перекат агентов / образа / MCP без даунтайма
+
+Просьба владельца: «настрой кластер так чтобы агент/образ его/mcp перекатывались без даунтайма, это важно для всех клиентских будущих агентов». Сначала это, потом agent.json.
+
+- [x] Корневая причина шторма ReplicaSet при bump `agentImage.tag` [live]: контроллер kagent катился с 1 репликой без leader election (чарт включает `LEADER_ELECT` только при `controller.replicas > 1`), старый и новый под несколько минут реконсайлили одних агентов с разными образами — 180 ревизий RS и 15 подов tg-vibecoder за один bump. Kyverno ни при чём (шаблоны RS отличались только тегом).
+- [x] Лечение [argo-infra `0f3f58b29`, console-migration]: `controller.replicas: 2` + `pdb.maxUnavailable: 1`. Два переката контроллера подряд [live]: lease перешёл tqk8f→8jk9f, ревизии RS агентов не двинулись (1293/1268/288/176), 4 пода агентов на месте.
+- [x] Агенты: Kyverno `MutatingPolicy kagent-agent-graceful-rollout` (preStop 5s, grace 180s) уже в проде; перекат агента под пробой 45/45 `http=200 state=completed`, 0 отказов [live].
+- [x] MCP и все клиентские аппы [dada-argo `ecb23c71`, develop]: общий чарт `helm/common` даёт каждому rolling-деплойменту `terminationGracePeriodSeconds: 30` и `lifecycle.preStop.sleep 5` (`terminationGracePeriodSeconds`, `preStopSleepSeconds`, 0 = выкл). Recreate-аппы (`recreate: true` или не-RWX pvc) получают только grace. Рендер HEAD vs правка через `helm/python` и `helm/app`: ровно эти поля (tg-agent-tools, reels-task-tools), у searxng (Recreate) только grace. tg-agent-tools в проде уже несёт `30 / 5` [live], перекат MCP под пробой `initialize` на `/mcp`: 87/87 `http=200 serverInfo`, 0 отказов [live].
+- [x] Отвергнуто: TCP readiness по умолчанию для аппов без `healthcheck` — 35/44 прод-деплойментов без readiness, ≥8 не слушают порт (воркеры), дефолтная проба заклинит их перекат. Readiness остаётся opt-in через `healthcheck: "true"`.
+- [ ] Дыра консоли: она никогда не пишет `healthcheck`, значит ни один клиентский апп из консоли не имеет readiness, и rolling-перекат для них = «новый под Running» без проверки, что он отвечает. Нужен рычаг в консоли (или дефолт `healthcheck` для web-аппов с портом).
+- [x] agent.json исключён из трейсов [dada-cloud `b10923dc`]: `excluded_urls` → `agent(-card)?\.json`, post-response flush тоже. Ждёт CI-тег и пин в argo-infra `controller.agentImage.tag`.
+
+### Побочно замечено
+- tg-vibecoder: OTLP export `401 No authorization header` в логах пода — трассы этого агента в Langfuse не доезжают, отдельный разбор.
+- dada-argo `/Users/alex/IdeaProjects/dada-argo`: чужой незакоммиченный дифф (service.enabled, ports, grace 30, preStopSleepSeconds 5) и `stash@{0}`, не тронуты; правка чарта сделана из отдельного worktree.
