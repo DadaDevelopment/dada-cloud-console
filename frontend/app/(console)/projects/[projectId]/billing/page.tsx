@@ -11,7 +11,7 @@ import { ConsumptionBreakdown } from "@/components/billing/consumption-breakdown
 import { useT } from "@/lib/i18n/console/context";
 import { resumablePaymentUrl } from "@/lib/checkout-status";
 import { trackUxEvent } from "@/lib/ux-telemetry";
-import { reachGoal } from "@/lib/metrika";
+import { reachGoal, GOAL_CHECKOUT_REDIRECT } from "@/lib/metrika";
 import { promoErrorMessageKey, normalizePromoCode } from "@/lib/billing-promo";
 import { shouldShowQuotaGraceWarning } from "@/lib/billing-quota";
 import { clsx } from "clsx";
@@ -222,6 +222,7 @@ export default function BillingPage() {
     setNotConfiguredPlan(null);
     setCheckoutUrl(null);
     setCheckoutingPlan(plan);
+    trackUxEvent("click", `billing_checkout:click:${plan}`);
     try {
       /**
        * Force false whenever the merchant cannot do recurring charges, even
@@ -231,16 +232,21 @@ export default function BillingPage() {
       const consent = canOfferAutopay(account?.autopay) && autopayConsent;
       const resp = await billingApi.checkout(projectId, plan, consent);
       setCheckoutUrl({ plan, url: resp.confirmation_url });
+      trackUxEvent("view", `billing_checkout:redirect:${plan}`);
+      reachGoal(GOAL_CHECKOUT_REDIRECT, { plan });
       window.location.assign(resp.confirmation_url);
     } catch (err) {
       const status = (err as { status?: number } | undefined)?.status;
       const code = (err as { code?: string } | undefined)?.code;
       if (status === 409) {
         setNotConfiguredPlan(plan);
+        trackUxEvent("error_shown", `billing_checkout:not_configured:${plan}`);
       } else if (status === 422 && code === "recurring_not_supported") {
         setCheckoutError({ plan, message: t("billing.checkoutErrorRecurringNotSupported") });
+        trackUxEvent("error_shown", `billing_checkout:recurring_not_supported:${plan}`);
       } else {
         setCheckoutError({ plan, message: err instanceof Error ? err.message : t("billing.checkoutError") });
+        trackUxEvent("error_shown", `billing_checkout:error:${plan}`);
       }
     } finally {
       setCheckoutingPlan(null);
@@ -679,6 +685,7 @@ export default function BillingPage() {
             <div className="mt-4">
               <button
                 type="button"
+                data-ux="billing_checkout:renew"
                 disabled={checkoutingPlan === account.plan}
                 onClick={() => handleCheckout(account.plan)}
                 className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
@@ -702,6 +709,7 @@ export default function BillingPage() {
                 <div key={p.key}>
                   <button
                     type="button"
+                    data-ux={`billing_checkout:pay:${p.key}`}
                     disabled={checkoutingPlan === p.key}
                     onClick={() => handleCheckout(p.key)}
                     className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-blue-600 px-4 py-2 text-sm font-semibold text-blue-600 transition-colors hover:bg-blue-50 disabled:opacity-60 dark:border-blue-500 dark:text-blue-400 dark:hover:bg-blue-950/40"

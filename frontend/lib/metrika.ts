@@ -80,6 +80,9 @@ export function reachGoal(goal: string, params?: Record<string, string>) {
 /** Goal fired when a visitor clicks the register CTA on a marketing landing. */
 export const GOAL_LANDING_CTA = "landing_cta_click";
 
+/** Goal fired when a checkout call succeeds and the browser heads to YooKassa. */
+export const GOAL_CHECKOUT_REDIRECT = "checkout_redirect";
+
 /** Legacy goal for the former console-owned `/register` choice screen. */
 export const GOAL_SIGNUP_STARTED = "signup_started";
 
