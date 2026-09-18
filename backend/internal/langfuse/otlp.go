@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,6 +25,7 @@ import (
 // observations joinable when they arrive in different batches (the transcript
 // store writes single-trace batches, the turn recorder writes a whole turn).
 func otlpPayload(batch []Event) (map[string]any, error) {
+	environment := tracingEnvironment()
 	spans := make([]map[string]any, 0, len(batch))
 	roots := map[string]map[string]any{}
 	rootStart := map[string]time.Time{}
@@ -78,6 +80,8 @@ func otlpPayload(batch []Event) (map[string]any, error) {
 		"resourceSpans": []map[string]any{{
 			"resource": map[string]any{"attributes": []map[string]any{
 				attr("service.name", "dada-console"),
+				attr("langfuse.environment", environment),
+				attr("deployment.environment.name", environment),
 			}},
 			"scopeSpans": []map[string]any{{
 				"scope": map[string]any{"name": "dada-console/langfuse"},
@@ -85,6 +89,18 @@ func otlpPayload(batch []Event) (map[string]any, error) {
 			}},
 		}},
 	}, nil
+}
+
+// tracingEnvironment is the Langfuse environment every span of this process
+// lands in. It reads the same LANGFUSE_TRACING_ENVIRONMENT the kagent-app
+// image reads, so a console-emitted trace and an agent-emitted trace of the
+// same deployment sit in the same environment instead of the Go side falling
+// into "default" next to the agents' "prod".
+func tracingEnvironment() string {
+	if v := strings.TrimSpace(os.Getenv("LANGFUSE_TRACING_ENVIRONMENT")); v != "" {
+		return v
+	}
+	return "default"
 }
 
 func traceSpan(body TraceBody, eventTimestamp string) (map[string]any, time.Time, error) {
@@ -98,6 +114,7 @@ func traceSpan(body TraceBody, eventTimestamp string) (map[string]any, time.Time
 	}
 	attrs := []map[string]any{
 		attr("langfuse.observation.type", "span"),
+		attr("langfuse.environment", tracingEnvironment()),
 	}
 	if body.Name != "" {
 		attrs = append(attrs, attr("langfuse.trace.name", body.Name))
@@ -154,6 +171,7 @@ func observationSpan(body ObservationBody, eventTimestamp string) (map[string]an
 	}
 	attrs := []map[string]any{
 		attr("langfuse.observation.type", strings.ToLower(body.Type)),
+		attr("langfuse.environment", tracingEnvironment()),
 	}
 	if body.Input != nil {
 		attrs = append(attrs, attr("langfuse.observation.input", body.Input))

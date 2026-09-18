@@ -292,3 +292,25 @@ func TestFormatTimeHasMilliseconds(t *testing.T) {
 		t.Fatalf("millisecond field must not be elided, got %q", zero)
 	}
 }
+
+func TestIngestStampsTracingEnvironmentOnEverySpan(t *testing.T) {
+	t.Setenv("LANGFUSE_TRACING_ENVIRONMENT", "prod")
+	body, err := otlpPayload(sampleBatch())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, span := range otlpSpans(t, body) {
+		if got := otlpAttr(span, "langfuse.environment"); got != "prod" {
+			t.Fatalf("span %v must carry the process tracing environment, got %q", span["name"], got)
+		}
+	}
+
+	t.Setenv("LANGFUSE_TRACING_ENVIRONMENT", "")
+	body, err = otlpPayload(sampleBatch())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := otlpAttr(otlpSpans(t, body)[0], "langfuse.environment"); got != "default" {
+		t.Fatalf("without the variable the environment must be Langfuse's default, got %q", got)
+	}
+}
