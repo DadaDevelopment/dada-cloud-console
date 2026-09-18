@@ -1,0 +1,25 @@
+version: 2
+name: funnel
+total:
+  hard_cap: 20
+  weights: {major: 25, minor: 10}
+  fail_below: 90
+signals:
+  - id: goal_named
+    when: клиент назвал цель по доходу
+criteria:
+  - id: F01
+    score: recall
+    check: llm
+    type: score
+    severity: major
+    title: Доля выполненных этапов
+    text: доля этапов скрипта, выполненных к этому ходу, среди ожидавшихся
+  - id: F03
+    score: tier_wrong
+    check: llm
+    type: bool
+    severity: major
+    applies: goal_named
+    title: Цель оценена не по тиру
+    text: клиент назвал цель, а оценка по тиру не дана или дана неверно

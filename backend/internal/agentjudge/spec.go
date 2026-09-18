@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -78,19 +79,51 @@ type Spec struct {
 
 // LoadSpec reads <dir>/turn.yaml and the prompt file it names.
 func LoadSpec(dir string) (*Spec, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, "turn.yaml"))
+	return loadSpecFile(filepath.Join(dir, "turn.yaml"))
+}
+
+// LoadSpecs reads every <dir>/*.yaml as a judge spec; each one runs on
+// every turn and writes scores under its own name. A dir without specs is
+// os.ErrNotExist so the caller treats it like a missing judge.
+func LoadSpecs(dir string) ([]*Spec, error) {
+	files, err := filepath.Glob(filepath.Join(dir, "*.yaml"))
+	if err != nil {
+		return nil, err
+	}
+	if len(files) == 0 {
+		return nil, os.ErrNotExist
+	}
+	sort.Strings(files)
+	names := map[string]string{}
+	specs := make([]*Spec, 0, len(files))
+	for _, f := range files {
+		spec, err := loadSpecFile(f)
+		if err != nil {
+			return nil, err
+		}
+		if prev, dup := names[spec.Name]; dup {
+			return nil, fmt.Errorf("%s: judge name %s already used by %s", f, spec.Name, prev)
+		}
+		names[spec.Name] = f
+		specs = append(specs, spec)
+	}
+	return specs, nil
+}
+
+func loadSpecFile(file string) (*Spec, error) {
+	raw, err := os.ReadFile(file)
 	if err != nil {
 		return nil, err
 	}
 	spec, err := ParseSpec(raw)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", filepath.Join(dir, "turn.yaml"), err)
+		return nil, fmt.Errorf("%s: %w", file, err)
 	}
 	prompt := spec.Prompt
 	if prompt == "" {
-		prompt = "turn.md"
+		prompt = strings.TrimSuffix(filepath.Base(file), ".yaml") + ".md"
 	}
-	tpl, err := os.ReadFile(filepath.Join(dir, prompt))
+	tpl, err := os.ReadFile(filepath.Join(filepath.Dir(file), prompt))
 	if err != nil {
 		return nil, err
 	}

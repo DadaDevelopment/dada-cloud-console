@@ -38,7 +38,7 @@ type Judge struct {
 	storeWait time.Duration
 	queue     chan scoreJob
 	mu        sync.Mutex
-	specs     map[string]*Spec
+	specs     map[string][]*Spec
 	missing   map[string]bool
 }
 
@@ -52,7 +52,7 @@ const queueSize = 512
 // New wires a judge; basePath is the same gitops root the runtime reads
 // domains from.
 func New(basePath string, llm LLM, sink ScoreSink) *Judge {
-	j := &Judge{basePath: basePath, llm: llm, sink: sink, timeout: 2 * time.Minute, storeWait: 10 * time.Minute, queue: make(chan scoreJob, queueSize), specs: map[string]*Spec{}, missing: map[string]bool{}}
+	j := &Judge{basePath: basePath, llm: llm, sink: sink, timeout: 2 * time.Minute, storeWait: 10 * time.Minute, queue: make(chan scoreJob, queueSize), specs: map[string][]*Spec{}, missing: map[string]bool{}}
 	go j.store()
 	return j
 }
@@ -70,7 +70,7 @@ func (j *Judge) store() {
 	}
 }
 
-func (j *Judge) spec(agent string) *Spec {
+func (j *Judge) agentSpecs(agent string) []*Spec {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	if s, ok := j.specs[agent]; ok {
@@ -80,7 +80,7 @@ func (j *Judge) spec(agent string) *Spec {
 		return nil
 	}
 	dir := filepath.Join(j.basePath, "agents", agent, "judge")
-	s, err := LoadSpec(dir)
+	specs, err := LoadSpecs(dir)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			log.Warn().Err(err).Str("agent", agent).Msg("agentjudge: judge spec unreadable")
@@ -88,14 +88,16 @@ func (j *Judge) spec(agent string) *Spec {
 		j.missing[agent] = true
 		return nil
 	}
-	j.specs[agent] = s
-	log.Info().Str("agent", agent).Int("criteria", len(s.Criteria)).Msg("agentjudge: judge spec loaded")
-	return s
+	j.specs[agent] = specs
+	for _, s := range specs {
+		log.Info().Str("agent", agent).Str("judge", s.Name).Int("criteria", len(s.Criteria)).Msg("agentjudge: judge spec loaded")
+	}
+	return specs
 }
 
-// Enabled reports whether the agent ships a judge spec.
+// Enabled reports whether the agent ships at least one judge spec.
 func (j *Judge) Enabled(agent string) bool {
-	return j != nil && j.spec(agent) != nil
+	return j != nil && len(j.agentSpecs(agent)) > 0
 }
 
 // Submit scores the turn on its own goroutine and never reports back.
@@ -103,21 +105,25 @@ func (j *Judge) Submit(agent string, t Turn) {
 	if j == nil || t.TraceID == "" {
 		return
 	}
-	spec := j.spec(agent)
-	if spec == nil || spec.Skips(t.Username) {
-		return
+	for _, spec := range j.agentSpecs(agent) {
+		if !spec.Skips(t.Username) {
+			j.submitSpec(agent, spec, t)
+		}
 	}
+}
+
+func (j *Judge) submitSpec(agent string, spec *Spec, t Turn) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Error().Interface("panic", r).Str("trace", t.TraceID).Msg("agentjudge: run panicked")
+				log.Error().Interface("panic", r).Str("judge", spec.Name).Str("trace", t.TraceID).Msg("agentjudge: run panicked")
 			}
 		}()
 		ctx, cancel := context.WithTimeout(context.Background(), j.timeout)
 		defer cancel()
 		results, err := j.Run(ctx, spec, t)
 		if err != nil {
-			log.Warn().Err(err).Str("agent", agent).Str("trace", t.TraceID).Msg("agentjudge: llm part failed, code scores only")
+			log.Warn().Err(err).Str("agent", agent).Str("judge", spec.Name).Str("trace", t.TraceID).Msg("agentjudge: llm part failed, code scores only")
 		}
 		scores := make([]langfuse.Score, 0, len(results))
 		for _, r := range results {
@@ -130,7 +136,7 @@ func (j *Judge) Submit(agent string, t Turn) {
 		select {
 		case j.queue <- scoreJob{trace: t.TraceID, scores: scores}:
 		default:
-			log.Warn().Str("trace", t.TraceID).Int("scores", len(scores)).Msg("agentjudge: score queue full, turn dropped")
+			log.Warn().Str("judge", spec.Name).Str("trace", t.TraceID).Int("scores", len(scores)).Msg("agentjudge: score queue full, turn dropped")
 		}
 	}()
 }

@@ -3,7 +3,9 @@ package agentjudge
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -320,5 +322,44 @@ func TestRunDropsCriterionWhoseSignalIsOff(t *testing.T) {
 	}
 	if got["turn.total"].Value != 100 {
 		t.Errorf("total = %v (%s)", got["turn.total"].Value, got["turn.total"].Comment)
+	}
+}
+
+func TestLoadSpecsRunsEveryJudgeInTheDir(t *testing.T) {
+	specs, err := LoadSpecs("testdata/agents/duo/judge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(specs) != 2 || specs[0].Name != "funnel" || specs[1].Name != "turn" {
+		t.Fatalf("specs = %+v", specs)
+	}
+	if !strings.Contains(specs[0].Template, "Судья воронки") {
+		t.Error("funnel.yaml did not pick funnel.md as its default prompt")
+	}
+	if _, err := LoadSpecs("testdata/agents/nobody/judge"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("empty dir error = %v", err)
+	}
+	llm := &fakeLLM{answer: `{"recall": {"value": 80, "why": "S2 missing"}, "tier_wrong": null, "goal_named": false, "non_human": false, "forbidden_promise": false, "politeness": 100, "money_elsewhere": false, "register_fit": 100, "objection_handling": null, "forbidden_content": false, "on_step": 100, "wrong_persona": false, "bot_suspect": false, "objection": false, "emotion": false, "guarantee_ask": false, "lost_money": false}`}
+	j := New("testdata", llm, &recorder{})
+	var mu sync.Mutex
+	names := map[string]float64{}
+	done := make(chan struct{}, 2)
+	j.sink = sinkFunc(func(ctx context.Context, s []langfuse.Score) error {
+		mu.Lock()
+		for _, sc := range s {
+			names[sc.Name] = sc.Value
+		}
+		mu.Unlock()
+		done <- struct{}{}
+		return nil
+	})
+	j.Submit("duo", Turn{TraceID: "abc", Incoming: []string{"да"}, Reply: "Подходит тебе такой формат?", Parts: []string{"Подходит тебе такой формат?"}})
+	<-done
+	<-done
+	if names["funnel.recall"] != 80 || names["funnel.total"] != 75 || names["turn.total"] != 100 {
+		t.Errorf("scores = %v", names)
+	}
+	if _, ok := names["funnel.tier_wrong"]; ok {
+		t.Error("tier_wrong scored while goal_named is false")
 	}
 }
