@@ -52,7 +52,7 @@ const queueSize = 512
 // New wires a judge; basePath is the same gitops root the runtime reads
 // domains from.
 func New(basePath string, llm LLM, sink ScoreSink) *Judge {
-	j := &Judge{basePath: basePath, llm: llm, sink: sink, timeout: 2 * time.Minute, storeWait: 10 * time.Minute, queue: make(chan scoreJob, queueSize), specs: map[string][]*Spec{}, missing: map[string]bool{}}
+	j := &Judge{basePath: basePath, llm: llm, sink: sink, timeout: 4 * time.Minute, storeWait: 10 * time.Minute, queue: make(chan scoreJob, queueSize), specs: map[string][]*Spec{}, missing: map[string]bool{}}
 	go j.store()
 	return j
 }

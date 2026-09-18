@@ -58,10 +58,10 @@ type chatResponse struct {
 	} `json:"error"`
 }
 
-const llmRetries = 3
+const llmRetries = 6
 
 // Complete asks the model once, retrying a 429 with a growing pause because
-// the provider sends no retry-after.
+// the provider sends no retry-after; six attempts wait out a z.ai burst.
 func (c *OpenAIChat) Complete(ctx context.Context, prompt string) (string, error) {
 	var out string
 	var err error
@@ -85,7 +85,7 @@ func (c *OpenAIChat) retryPause() time.Duration {
 	if c.RetryPause > 0 {
 		return c.RetryPause
 	}
-	return 5 * time.Second
+	return 10 * time.Second
 }
 
 func (c *OpenAIChat) complete(ctx context.Context, prompt string) (string, error) {
