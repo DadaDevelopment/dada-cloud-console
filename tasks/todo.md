@@ -1076,3 +1076,12 @@ Intent: replace the text-heavy catalogue with clear product choices and a strong
 - tg-vibecoder: OTLP export `401 No authorization header` — у Deployment нет ни `OTEL_EXPORTER_OTLP_HEADERS`, ни `LANGFUSE_*` (у tg-exchange-support и reels-poc есть) [live]; агенту не выдан Langfuse-проект, трассы не доезжают. Нужны ключи от владельца, сам не выписываю.
 - Другая сессия Claude на этой машине (call-center, с 16.09) крутит curl к Langfuse API без пауз и держит лимит 30/мин на нуле.
 - dada-argo `/Users/alex/IdeaProjects/dada-argo`: чужой незакоммиченный дифф (service.enabled, ports, grace 30, preStopSleepSeconds 5) и `stash@{0}`, не тронуты; правка чарта сделана из отдельного worktree.
+
+## Cost и prompt name на корне хода (2026-09-18, «не хватило»)
+
+- [x] Корень нёс токены только ПОСЛЕДНЕГО вызова LLM (`kagent_usage_metadata` в `_agent_executor.py:606-632` last-wins) и без имени модели, поэтому Langfuse считал cost только на generation'ах.
+- [x] `TurnSpanProcessor.on_end` суммирует `gen_ai.usage.input_tokens/output_tokens` всех `call_llm` хода, `end_turn`/`fail_turn` ставят сумму + `langfuse.observation.model.name` (из `gen_ai.request.model`, фолбэк — модель из `config.json` через `register_model`) на корень; Langfuse-воркер прайсит любой observation с `provided_model_name` (`IngestionService/index.ts` ~1338), тип не важен.
+- [x] Prompt name/version на корне — как metadata (`prompt_name`, `prompt_version`). Нативная ссылка на промпт невозможна: `OtelIngestionProcessor.ts` `canLinkPrompt = observationType === GENERATION`. Единственный обход — сделать корень GENERATION, что теряет тип agent; отвергнуто.
+- [x] Проверка в образе `kagent/app:0.10.0-rc3` (патч + `root_cost_test.py`): 2 вызова 100/10 + 250/40 → корень input=350, output=50, total=400, llm_calls=2, model=gpt-5-mini, prompt_name/version; без вызовов — фолбэк на usage_metadata и модель из конфига.
+- [ ] Jenkins → образ `ad9f93b6` → пин `kagent.agentImage.tag` в argo-infra → пробный ход → `v2/observations` корень с `calculatedTotalCost`.
+- Trade-off: суммарный cost трейса в UI Langfuse теперь = корень + generation'ы (двойной счёт на уровне trace). Цена за cost на корне; если мешает — читать cost с корня, не с trace.
