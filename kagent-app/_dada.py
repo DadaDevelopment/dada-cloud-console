@@ -322,8 +322,20 @@ def end_turn(task_state: Any, status_message: Any, run_metadata: Optional[dict[s
             for src, dst in (("prompt_token_count", "input"), ("candidates_token_count", "output"), ("total_token_count", "total")):
                 if isinstance(usage.get(src), int):
                     root.set_attribute(f"langfuse.observation.usage_details.{dst}", usage[src])
+        _stamp_trace_ids(root, run_metadata)
     except Exception:
         logger.warning("dada tracing: end_turn failed", exc_info=True)
+
+
+def _stamp_trace_ids(root: Any, run_metadata: Optional[dict[str, Any]]) -> None:
+    """Expose the root span ids through the A2A task metadata so the caller can attach scores to this trace."""
+    if run_metadata is None:
+        return
+    ctx = root.get_span_context()
+    if not ctx.trace_id:
+        return
+    run_metadata["dada.trace_id"] = format(ctx.trace_id, "032x")
+    run_metadata["dada.observation_id"] = format(ctx.span_id, "016x")
 
 
 def fail_turn(error_message: str) -> None:
