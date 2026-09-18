@@ -108,6 +108,7 @@ type Runtime struct {
 	structuredAgents map[string]bool
 	factSkills       map[string]string
 	linkAllowlist    []string
+	judge            TurnJudge
 	syncPause        func(context.Context, Conversation) error
 	// notifyOperator raises the operator card from inside the runtime (the
 	// narrow mode's only way out of a silent turn). nil = no operator
@@ -344,12 +345,14 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 	}
 	_, narrowAtEntry := narrowSince(conv)
 	var reply string
+	var traced A2AReply
 	var after RuntimeState
 	for attempt := 0; attempt < 2; attempt++ {
-		reply, err = r.a2a.Send(ctx, run)
+		traced, err = r.send(ctx, run)
 		if err != nil {
 			return MessageResponse{}, &turnFailure{err: fmt.Errorf("a2a send: %w", err)}
 		}
+		reply = traced.Text
 		after, err = r.states.GetState(ctx, conv.ID)
 		if err != nil {
 			return MessageResponse{}, err
@@ -455,7 +458,18 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 	}
 	r.recordTurnCounters(ctx, conv, reply)
 	r.mirrorState(ctx, conv, after, "")
+	r.judgeTurn(ctx, conv, run, pending, history, reply, parts, traced)
 	return MessageResponse{Text: reply, Messages: parts}, nil
+}
+
+// send asks the agent for the turn, keeping the trace ids when the client can
+// report them.
+func (r *Runtime) send(ctx context.Context, run AgentRunRequest) (A2AReply, error) {
+	if traced, ok := r.a2a.(TracedA2AClient); ok {
+		return traced.SendTraced(ctx, run)
+	}
+	text, err := r.a2a.Send(ctx, run)
+	return A2AReply{Text: text}, err
 }
 
 // linksToEntities converts gateway link metadata into the generic entity

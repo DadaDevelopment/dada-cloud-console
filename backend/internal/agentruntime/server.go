@@ -52,6 +52,7 @@ func NewServer(pool *pgxpool.Pool, gitopsBasePath string) *Server {
 
 	runtime.factSkills = ParseFactSkills(os.Getenv("AGENT_FACT_SKILLS"))
 	runtime.linkAllowlist = ParseLinkAllowlist(os.Getenv("AGENT_REPLY_LINK_ALLOWLIST"))
+	runtime.judge = judgeFromEnv(gitopsBasePath)
 	token := os.Getenv("AGENT_RUNTIME_TOKEN")
 	runtime.contextKey = []byte(token)
 	srv := &Server{runtime: runtime, pool: pool, a2a: a2a, token: token, pauseCRM: NewHTTPPauseCRM(os.Getenv("AGENT_PAUSE_CRM_URL"), os.Getenv("AGENT_PAUSE_CRM_TOKEN"), os.Getenv("AGENT_PAUSE_CRM_STATUS"))}

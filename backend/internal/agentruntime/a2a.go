@@ -148,15 +148,35 @@ type a2aResponse struct {
 	Result json.RawMessage `json:"result"`
 }
 
+// A2AReply is the agent answer together with the Langfuse ids of the turn the
+// agent image stamps into the task metadata; both ids are empty when the agent
+// runs without the dada tracing patch.
+type A2AReply struct {
+	Text          string
+	TraceID       string
+	ObservationID string
+}
+
+// TracedA2AClient is implemented by clients that can report where the agent
+// traced the turn; the runtime uses it to attach judge scores.
+type TracedA2AClient interface {
+	SendTraced(ctx context.Context, run AgentRunRequest) (A2AReply, error)
+}
+
 func (c *httpA2AClient) Send(ctx context.Context, run AgentRunRequest) (string, error) {
+	reply, err := c.SendTraced(ctx, run)
+	return reply.Text, err
+}
+
+func (c *httpA2AClient) SendTraced(ctx context.Context, run AgentRunRequest) (A2AReply, error) {
 	agentName, messages := run.AgentName, run.Messages
 	if len(messages) == 0 {
-		return "", fmt.Errorf("no messages to send")
+		return A2AReply{}, fmt.Errorf("no messages to send")
 	}
 
 	lastMsg := messages[len(messages)-1]
 	if lastMsg.Role != "user" && lastMsg.Role != "system" {
-		return "", fmt.Errorf("last message must be user or system, got %s", lastMsg.Role)
+		return A2AReply{}, fmt.Errorf("last message must be user or system, got %s", lastMsg.Role)
 	}
 
 	message := a2aMessage{
@@ -167,7 +187,7 @@ func (c *httpA2AClient) Send(ctx context.Context, run AgentRunRequest) (string, 
 	}
 	result, err := c.call(ctx, run, message)
 	if err != nil {
-		return "", err
+		return A2AReply{}, err
 	}
 	task := parseTask(result)
 	for attempt := 0; task.needsRetry() && attempt < c.retries; attempt++ {
@@ -186,11 +206,11 @@ func (c *httpA2AClient) Send(ctx context.Context, run AgentRunRequest) (string, 
 			entry.Strs("questions", task.Questions).Msg("agentruntime: agent paused on ask_user; retrying the turn")
 		}
 		if err := c.pause(ctx, wait); err != nil {
-			return "", fmt.Errorf("retry after %s task: %w", task.State, err)
+			return A2AReply{}, fmt.Errorf("retry after %s task: %w", task.State, err)
 		}
 		message.MessageID = uuid.NewString()
 		if result, err = c.call(ctx, run, message); err != nil {
-			return "", fmt.Errorf("retry after %s task: %w", task.State, err)
+			return A2AReply{}, fmt.Errorf("retry after %s task: %w", task.State, err)
 		}
 		task = parseTask(result)
 	}
@@ -212,21 +232,21 @@ func (c *httpA2AClient) Send(ctx context.Context, run AgentRunRequest) (string, 
 			}}},
 		})
 		if err != nil {
-			return "", fmt.Errorf("resume after ask_user: %w", err)
+			return A2AReply{}, fmt.Errorf("resume after ask_user: %w", err)
 		}
 		task = parseTask(result)
 	}
 	if task.State != "" && task.State != "completed" {
 		if task.Error != "" {
-			return "", fmt.Errorf("a2a task did not complete: %s: %s", task.State, task.Error)
+			return A2AReply{}, fmt.Errorf("a2a task did not complete: %s: %s", task.State, task.Error)
 		}
-		return "", fmt.Errorf("a2a task did not complete: %s", task.State)
+		return A2AReply{}, fmt.Errorf("a2a task did not complete: %s", task.State)
 	}
 	text := extractText(result)
 	if text == "" {
-		return "", fmt.Errorf("a2a %s: no text in response", agentName)
+		return A2AReply{}, fmt.Errorf("a2a %s: no text in response", agentName)
 	}
-	return text, nil
+	return A2AReply{Text: text, TraceID: task.TraceID, ObservationID: task.ObservationID}, nil
 }
 
 func (c *httpA2AClient) call(ctx context.Context, run AgentRunRequest, message a2aMessage) (json.RawMessage, error) {
@@ -288,10 +308,12 @@ func (c *httpA2AClient) call(ctx context.Context, run AgentRunRequest, message a
 }
 
 type a2aTask struct {
-	ID        string
-	State     string
-	Error     string
-	Questions []string
+	ID            string
+	State         string
+	Error         string
+	Questions     []string
+	TraceID       string
+	ObservationID string
 }
 
 func (t a2aTask) needsRetry() bool {
@@ -321,11 +343,14 @@ func parseTask(raw json.RawMessage) a2aTask {
 				Parts []a2aPart `json:"parts"`
 			} `json:"message"`
 		} `json:"status"`
+		Metadata map[string]any `json:"metadata"`
 	}
 	if json.Unmarshal(raw, &v) != nil {
 		return a2aTask{}
 	}
 	task := a2aTask{ID: v.ID, State: v.Status.State}
+	task.TraceID, _ = v.Metadata["dada.trace_id"].(string)
+	task.ObservationID, _ = v.Metadata["dada.observation_id"].(string)
 	for _, part := range v.Status.Message.Parts {
 		if part.Kind == "text" && task.State == "failed" {
 			task.Error = strings.TrimSpace(strings.Join([]string{task.Error, strings.TrimSpace(part.Text)}, " "))
