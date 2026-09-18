@@ -101,7 +101,7 @@ func leakReason(reply string) string {
 	if m := leakPlaceholder.FindString(text); m != "" {
 		return "placeholder " + m
 	}
-	if utf8.RuneCountInString(text) > leakMaxRunes {
+	if longestReplyPart(text) > leakMaxRunes {
 		return "reply longer than a client message"
 	}
 	if strings.Count(text, "\n\n") >= 3 && strings.Count(text, "«") >= 2 && strings.Contains(text, "?") && strings.Contains(text, "…") {
@@ -143,3 +143,20 @@ func leakRepairMessage(reason string) string {
 }
 
 const leakRepairHint = "Предыдущий черновик клиенту не отправлен: в нём были внутренние рассуждения или служебные слова (%s). Напиши только сам ответ клиенту: 1-3 коротких предложения по-русски, без размышлений, черновиков, названий инструментов и правил."
+
+// longestReplyPart measures the longest message the client would actually
+// receive: a series is cut on separator lines before delivery, so the length
+// guard applies per delivered message, not to the whole draft.
+func longestReplyPart(text string) int {
+	parts := capReplyParts(splitReplyParts(text))
+	if len(parts) == 0 {
+		return utf8.RuneCountInString(text)
+	}
+	longest := 0
+	for _, part := range parts {
+		if n := utf8.RuneCountInString(part); n > longest {
+			longest = n
+		}
+	}
+	return longest
+}

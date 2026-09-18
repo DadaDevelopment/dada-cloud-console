@@ -33,6 +33,7 @@ func TestLeakReasonCatchesMonologues(t *testing.T) {
 		"answer frame":                           "Отвечаю: депозит 500 лежит на вашем счёте у FxPro как ваши деньги",
 		"mixed script":                           "Okay so client wants to know about leverage settings, но в базе этого нет, so I will answer that defaults are fine and move on to deposit. Отдельных требований нет.",
 		"long reply":                             strings.Repeat("Депозит заводите из личного кабинета FxPro, сумму выбираете сами. ", 12),
+		"long part inside a series":              "Коротко.\n---\n" + strings.Repeat("Депозит заводите из личного кабинета FxPro, сумму выбираете сами. ", 12) + "\n---\nПодходит?",
 		"S94 link placeholder":                   "Регистрируйтесь по нашей партнёрской ссылке, счёт по ней нужен для привязки к группе: [ссылка]",
 		"curly placeholder":                      "Куратор {имя} напишет вам здесь после пополнения",
 		"angle placeholder":                      "Пополняйте от <сумма> долларов в кабинете FxPro",
@@ -74,6 +75,11 @@ func TestLeakReasonPassesClientReplies(t *testing.T) {
 		"curator in third person": "Куратор персональный, он сам трейдер и ведёт вас по сделкам. Счёт у FxPro уже есть?",
 		"button in third person":  "Кнопка Deposit справа сверху, она может не появиться в списке до верификации. Паспорт уже загрузили?",
 		"он as a client word":     "Депозит остаётся на вашем счёте, он не переходит к нам. Пополняете сегодня?",
+		"long series of short parts": strings.Join([]string{
+			strings.Repeat("Нам платит брокер комиссию с торгового объёма, поэтому нам выгодны прибыльные трейдеры. ", 5),
+			strings.Repeat("Для вступления нужна регистрация по нашей ссылке у брокера, дальше помогу с депозитом. ", 5),
+			"Подходит тебе такой формат?",
+		}, "\n---\n"),
 	}
 	for name, reply := range cases {
 		if reason := leakReason(reply); reason != "" {
