@@ -36,21 +36,34 @@ func TestAckConfirmationBatch(t *testing.T) {
 
 func TestAckLimitReason_OffByDefault(t *testing.T) {
 	long := strings.Repeat("я", 200)
-	require.Empty(t, ackLimitReason(long, ackPending("готово"), RuntimeState{}, 0))
-	require.Empty(t, ackLimitReason(long, ackPending("готово"), RuntimeState{}, -5))
+	require.Empty(t, ackLimitReason(long, ackPending("готово"), nil, RuntimeState{}, 0))
+	require.Empty(t, ackLimitReason(long, ackPending("готово"), nil, RuntimeState{}, -5))
 }
 
 func TestAckLimitReason_FiresOnlyOnALongReplyToABareConfirmation(t *testing.T) {
 	long := strings.Repeat("я", 200)
-	require.NotEmpty(t, ackLimitReason(long, ackPending("готово"), RuntimeState{}, 30))
-	require.Empty(t, ackLimitReason("Принял", ackPending("готово"), RuntimeState{}, 30))
-	require.Empty(t, ackLimitReason(long, ackPending("а какая комиссия?"), RuntimeState{}, 30))
+	require.NotEmpty(t, ackLimitReason(long, ackPending("готово"), nil, RuntimeState{}, 30))
+	require.Empty(t, ackLimitReason("Принял", ackPending("готово"), nil, RuntimeState{}, 30))
+	require.Empty(t, ackLimitReason(long, ackPending("а какая комиссия?"), nil, RuntimeState{}, 30))
 
 	open := RuntimeState{OpenLoops: map[string]OpenLoop{"amount": {Question: "сколько?", Status: "open", SourceMessageID: uuid.New()}}}
-	require.Empty(t, ackLimitReason(long, ackPending("готово"), open, 30), "an open loop means the turn has real work to do")
+	require.Empty(t, ackLimitReason(long, ackPending("готово"), nil, open, 30), "an open loop means the turn has real work to do")
 
 	resolved := RuntimeState{OpenLoops: map[string]OpenLoop{"amount": {Question: "сколько?", Status: "resolved", SourceMessageID: uuid.New()}}}
-	require.NotEmpty(t, ackLimitReason(long, ackPending("готово"), resolved, 30))
+	require.NotEmpty(t, ackLimitReason(long, ackPending("готово"), nil, resolved, 30))
+}
+
+// native.53 t03 on prod: «Давай расскажу, как вступить?» → «ок» was treated as
+// a receipt, the S5-S7 series (392 runes) was sent back for a rewrite and the
+// script lost S5 and S7. An "ок" to the agent's question is an answer.
+func TestAckLimitReason_SkipsAnAnswerToTheAgentsQuestion(t *testing.T) {
+	long := strings.Repeat("я", 200)
+	asked := []Message{{Role: "assistant", Content: "Давай я теперь расскажу как к нам вступить, если тут вопросов не осталось?"}}
+	require.Empty(t, ackLimitReason(long, ackPending("ок"), asked, RuntimeState{}, 30))
+	told := []Message{{Role: "assistant", Content: "Ссылка на регистрацию: пройди её и напиши."}}
+	require.NotEmpty(t, ackLimitReason(long, ackPending("ок"), told, RuntimeState{}, 30))
+	afterUser := []Message{{Role: "assistant", Content: "Подходит такой формат?"}, {Role: "user", Content: "да"}, {Role: "assistant", Content: "Ссылка ниже."}}
+	require.NotEmpty(t, ackLimitReason(long, ackPending("готово"), afterUser, RuntimeState{}, 30))
 }
 
 func TestAckLimitFlag_DefaultIsZero(t *testing.T) {

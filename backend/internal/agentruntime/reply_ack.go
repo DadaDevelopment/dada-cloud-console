@@ -67,7 +67,11 @@ func ackConfirmationBatch(pending []Message) bool {
 // limit <= 0 (AGENT_RUNTIME_ACK_LIMIT unset) switches the whole rule off, an
 // open loop switches it off for this turn (something is still unanswered, so
 // the turn has real work to do), and so does an empty confirmation batch.
-func ackLimitReason(reply string, pending []Message, state RuntimeState, limit int) string {
+// An "ок" right after the agent's own question is an answer, not a receipt:
+// «рассказать, как вступить?» → «ок» opens the S5-S7 series of the script,
+// which is three messages long by design, so the limit does not apply there
+// either (the same last-assistant-question test courtesyOnly uses).
+func ackLimitReason(reply string, pending, history []Message, state RuntimeState, limit int) string {
 	if limit <= 0 {
 		return ""
 	}
@@ -77,6 +81,9 @@ func ackLimitReason(reply string, pending []Message, state RuntimeState, limit i
 		}
 	}
 	if !ackConfirmationBatch(pending) {
+		return ""
+	}
+	if answersAgentQuestion(history) {
 		return ""
 	}
 	if runes := len([]rune(strings.TrimSpace(reply))); runes > limit {
@@ -89,4 +96,13 @@ func ackLimitReason(reply string, pending []Message, state RuntimeState, limit i
 // wrong, what to do instead, and nothing about the machinery.
 func ackRepairHint(limit int) string {
 	return fmt.Sprintf("Предыдущий черновик клиенту не отправлен: клиент сообщил, что действие выполнено, и ждёт короткого подтверждения, а не объяснения. Ответь одной короткой репликой до %d знаков, без нового вопроса и без пересказа того, что он только что сделал.", limit)
+}
+
+func answersAgentQuestion(history []Message) bool {
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role == "assistant" {
+			return strings.ContainsAny(history[i].Content, "?？")
+		}
+	}
+	return false
 }
