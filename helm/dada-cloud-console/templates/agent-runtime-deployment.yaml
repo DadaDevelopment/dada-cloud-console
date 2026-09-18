@@ -58,11 +58,16 @@ spec:
             - secretRef:
                 name: {{ . }}
             {{- end }}
-          {{- if .Values.agentRuntime.agentSkills }}
+          {{- if or .Values.agentRuntime.agentSkills .Values.agentRuntime.agentJudges }}
           volumeMounts:
             {{- range $agent, $files := .Values.agentRuntime.agentSkills }}
             - name: skills-{{ $agent }}
               mountPath: /etc/agent-runtime/agents/{{ $agent }}/domains
+              readOnly: true
+            {{- end }}
+            {{- range $agent, $files := .Values.agentRuntime.agentJudges }}
+            - name: judge-{{ $agent }}
+              mountPath: /etc/agent-runtime/agents/{{ $agent }}/judge
               readOnly: true
             {{- end }}
           {{- end }}
@@ -84,12 +89,17 @@ spec:
             failureThreshold: 3
           resources:
             {{- toYaml .Values.agentRuntime.resources | nindent 12 }}
-      {{- if .Values.agentRuntime.agentSkills }}
+      {{- if or .Values.agentRuntime.agentSkills .Values.agentRuntime.agentJudges }}
       volumes:
         {{- range $agent, $files := .Values.agentRuntime.agentSkills }}
         - name: skills-{{ $agent }}
           configMap:
             name: {{ include "dada-cloud-console.fullname" $ }}-skills-{{ $agent }}
+        {{- end }}
+        {{- range $agent, $files := .Values.agentRuntime.agentJudges }}
+        - name: judge-{{ $agent }}
+          configMap:
+            name: {{ include "dada-cloud-console.fullname" $ }}-judge-{{ $agent }}
         {{- end }}
       {{- end }}
 {{- end }}

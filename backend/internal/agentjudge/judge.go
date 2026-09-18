@@ -137,6 +137,9 @@ func (j *Judge) Run(ctx context.Context, spec *Spec, t Turn) ([]Result, error) {
 				if !ok {
 					continue
 				}
+				if c.Applies != "" && verdicts[c.Applies].Value != 1 {
+					continue
+				}
 				r := Result{Name: spec.ScoreName(c.Score), Value: v.Value, Comment: v.Why, Severity: c.Severity}
 				if c.Type == TypeBool {
 					r.Boolean = true

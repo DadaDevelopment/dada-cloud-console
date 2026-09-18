@@ -32,6 +32,11 @@ type chatRequest struct {
 	Temperature float64       `json:"temperature"`
 	Stream      bool          `json:"stream"`
 	MaxTokens   int           `json:"max_tokens,omitempty"`
+	Thinking    *chatThinking `json:"thinking,omitempty"`
+}
+
+type chatThinking struct {
+	Type string `json:"type"`
 }
 
 type chatMessage struct {
@@ -44,6 +49,7 @@ type chatResponse struct {
 		Message struct {
 			Content string `json:"content"`
 		} `json:"message"`
+		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Error *struct {
 		Message string `json:"message"`
@@ -51,7 +57,7 @@ type chatResponse struct {
 }
 
 func (c *OpenAIChat) Complete(ctx context.Context, prompt string) (string, error) {
-	body, err := json.Marshal(chatRequest{Model: c.Model, Messages: []chatMessage{{Role: "user", Content: prompt}}, MaxTokens: 2000})
+	body, err := json.Marshal(chatRequest{Model: c.Model, Messages: []chatMessage{{Role: "user", Content: prompt}}, MaxTokens: 4000, Thinking: &chatThinking{Type: "disabled"}})
 	if err != nil {
 		return "", err
 	}
@@ -84,7 +90,11 @@ func (c *OpenAIChat) Complete(ctx context.Context, prompt string) (string, error
 	if len(parsed.Choices) == 0 {
 		return "", fmt.Errorf("judge llm: no choices")
 	}
-	return parsed.Choices[0].Message.Content, nil
+	choice := parsed.Choices[0]
+	if strings.TrimSpace(choice.Message.Content) == "" {
+		return "", fmt.Errorf("judge llm: empty content, finish_reason=%s", choice.FinishReason)
+	}
+	return choice.Message.Content, nil
 }
 
 // RenderPrompt fills the turn.md template with the LLM criteria, signals and

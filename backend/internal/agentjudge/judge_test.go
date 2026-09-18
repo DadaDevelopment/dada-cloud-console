@@ -294,3 +294,21 @@ func TestSubmitPostsScores(t *testing.T) {
 type sinkFunc func(ctx context.Context, s langfuse.Score) error
 
 func (f sinkFunc) CreateScore(ctx context.Context, s langfuse.Score) error { return f(ctx, s) }
+
+func TestRunDropsCriterionWhoseSignalIsOff(t *testing.T) {
+	spec := loadTestSpec(t)
+	llm := &fakeLLM{answer: `{"non_human": false, "forbidden_promise": false, "politeness": 100, "money_elsewhere": false, "register_fit": 100, "objection_handling": 10, "forbidden_content": false, "on_step": 100, "wrong_persona": false, "bot_suspect": false, "objection": false, "emotion": false, "guarantee_ask": true, "lost_money": false}`}
+	j := New("testdata", llm, &recorder{})
+	turn := Turn{TraceID: "t", Incoming: []string{"гарантии есть?"}, Reply: "Гарантий нет. Счёт у FxPro есть?", Parts: []string{"Гарантий нет. Счёт у FxPro есть?"}}
+	results, err := j.Run(context.Background(), spec, turn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := byName(results)
+	if _, ok := got["turn.objection_handling"]; ok {
+		t.Error("objection_handling scored while the objection signal is false")
+	}
+	if got["turn.total"].Value != 100 {
+		t.Errorf("total = %v (%s)", got["turn.total"].Value, got["turn.total"].Comment)
+	}
+}

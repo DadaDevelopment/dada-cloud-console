@@ -456,6 +456,7 @@ agentRuntime:
   existingSecret: ""
   extraEnv: []
   agentSkills: {}
+  agentJudges: {}
   enabled: false
   image:
     repository: dada-cloud-console-agent-runtime
