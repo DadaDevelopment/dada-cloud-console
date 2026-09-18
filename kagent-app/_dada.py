@@ -65,9 +65,14 @@ class DadaTurn:
     input: str = ""
     attributes: dict[str, Any] = field(default_factory=dict)
     adk_spans: list[trace.Span] = field(default_factory=list)
+    model: str = ""
+    generations: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 ADK_TURN_SPAN_PREFIXES = ("invocation", "invoke_agent")
+GEN_MODEL_ATTRIBUTES = ("gen_ai.response.model", "gen_ai.request.model")
 
 
 class TurnSpanProcessor(SpanProcessor):
@@ -84,7 +89,21 @@ class TurnSpanProcessor(SpanProcessor):
             logger.warning("dada tracing: on_start failed", exc_info=True)
 
     def on_end(self, span: ReadableSpan) -> None:
-        pass
+        """Fold every finished LLM call of the turn into the root's usage so the root carries the turn's total cost."""
+        turn = _current_turn.get()
+        attrs = span.attributes or {}
+        if turn is None or ("gen_ai.usage.input_tokens" not in attrs and "gen_ai.usage.output_tokens" not in attrs):
+            return
+        try:
+            turn.generations += 1
+            turn.input_tokens += int(attrs.get("gen_ai.usage.input_tokens") or 0)
+            turn.output_tokens += int(attrs.get("gen_ai.usage.output_tokens") or 0)
+            for key in GEN_MODEL_ATTRIBUTES:
+                if attrs.get(key):
+                    turn.model = str(attrs[key])
+                    break
+        except Exception:
+            logger.warning("dada tracing: on_end failed", exc_info=True)
 
     def shutdown(self) -> None:
         pass
@@ -142,6 +161,13 @@ PROMPT_SYNC_WAIT_SECONDS = 5.0
 _prompt_link_state: dict[str, Any] = {}
 _prompt_synced = threading.Event()
 _prompt_synced.set()
+_agent_model = ""
+
+
+def register_model(model: Optional[str]) -> None:
+    """Remember the model the agent boots with; it prices the root span when a turn ends before any LLM call reports one."""
+    global _agent_model
+    _agent_model = (model or "").strip()
 
 
 def _langfuse_credentials() -> Optional[tuple[str, str, str]]:
@@ -317,14 +343,51 @@ def end_turn(task_state: Any, status_message: Any, run_metadata: Optional[dict[s
         if state not in ("working", "completed"):
             root.set_attribute("langfuse.observation.level", "WARNING")
             root.set_attribute("langfuse.observation.status_message", f"task {state}")
+        _stamp_turn_totals(root, turn, run_metadata)
+        _stamp_prompt_metadata(root)
+        _stamp_trace_ids(root, run_metadata)
+    except Exception:
+        logger.warning("dada tracing: end_turn failed", exc_info=True)
+
+
+def _stamp_turn_totals(root: Any, turn: DadaTurn, run_metadata: Optional[dict[str, Any]]) -> None:
+    """Put the turn's summed tokens and model name on the root so Langfuse prices the whole turn there.
+
+    Langfuse computes cost for any observation that carries a model name and
+    usage details, not only for generations. ADK's call_llm spans are summed
+    by ``TurnSpanProcessor.on_end``; kagent's ``usage_metadata`` only holds the
+    last LLM call and is the fallback when no call_llm span was seen.
+    """
+    if turn.generations:
+        root.set_attribute("langfuse.observation.usage_details.input", turn.input_tokens)
+        root.set_attribute("langfuse.observation.usage_details.output", turn.output_tokens)
+        root.set_attribute("langfuse.observation.usage_details.total", turn.input_tokens + turn.output_tokens)
+        root.set_attribute("langfuse.observation.metadata.llm_calls", turn.generations)
+    else:
         usage = (run_metadata or {}).get("kagent_usage_metadata") or {}
         if isinstance(usage, dict):
             for src, dst in (("prompt_token_count", "input"), ("candidates_token_count", "output"), ("total_token_count", "total")):
                 if isinstance(usage.get(src), int):
                     root.set_attribute(f"langfuse.observation.usage_details.{dst}", usage[src])
-        _stamp_trace_ids(root, run_metadata)
-    except Exception:
-        logger.warning("dada tracing: end_turn failed", exc_info=True)
+    model = turn.model or _agent_model
+    if model:
+        root.set_attribute("langfuse.observation.model.name", model)
+
+
+def _stamp_prompt_metadata(root: Any) -> None:
+    """Show the prompt name and version in the root's metadata.
+
+    Langfuse links a prompt natively only to GENERATION observations
+    (``canLinkPrompt`` in its OTel ingestion), so the AGENT root carries the
+    same name and version as plain metadata instead.
+    """
+    link = _prompt_link()
+    name = link.get("langfuse.observation.prompt.name")
+    version = link.get("langfuse.observation.prompt.version")
+    if name:
+        root.set_attribute("langfuse.observation.metadata.prompt_name", name)
+    if version is not None:
+        root.set_attribute("langfuse.observation.metadata.prompt_version", version)
 
 
 def _stamp_trace_ids(root: Any, run_metadata: Optional[dict[str, Any]]) -> None:
@@ -350,6 +413,8 @@ def fail_turn(error_message: str) -> None:
         root.set_attribute("langfuse.observation.output", error_message or "(failed, no message)")
         root.set_attribute("langfuse.observation.level", "ERROR")
         root.set_attribute("langfuse.observation.status_message", (error_message or "failed")[:500])
+        _stamp_turn_totals(root, turn, None)
+        _stamp_prompt_metadata(root)
     except Exception:
         logger.warning("dada tracing: fail_turn failed", exc_info=True)
 

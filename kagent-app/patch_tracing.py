@@ -116,6 +116,7 @@ ANCHOR_CLI_PROMPT = (
 PATCHED_CLI_PROMPT = (
     "    agent_config = AgentConfig.model_validate(config)\n"
     "    dada_tracing.register_prompt(agent_config.instruction)\n"
+    "    dada_tracing.register_model(agent_config.model.model)\n"
     '    with open(os.path.join(filepath, "agent-card.json"), "r") as f:\n'
 )
 
