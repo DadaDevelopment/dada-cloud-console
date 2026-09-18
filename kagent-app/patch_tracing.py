@@ -12,6 +12,9 @@ so the image patches the source at build time.
 After the patch:
   * httpx client spans are emitted only when KAGENT_INSTRUMENT_HTTPX=true;
   * FastAPI keeps the request span but drops the send/receive children;
+  * the legacy ``/.well-known/agent.json`` card URL (still polled next to
+    ``agent-card.json``) is excluded from request spans and post-response
+    flushes the same way upstream excludes ``agent-card.json``;
   * the OpenAI client instrumentor (a third copy of every LLM call next to
     ADK's call_llm/generate_content) runs only when KAGENT_INSTRUMENT_OPENAI=true;
   * the OTLP trace exporter sends ``x-langfuse-ingestion-version: 4`` when the
@@ -56,6 +59,14 @@ PATCHED_FASTAPI = (
     "            FastAPIInstrumentor().instrument_app(\n"
     '                fastapi_app, excluded_urls=_excluded_urls, exclude_spans=["send", "receive"]\n'
     "            )\n"
+)
+ANCHOR_EXCLUDED = '        _excluded_urls = ".*/\\\\.well-known/agent-card\\\\.json"\n'
+PATCHED_EXCLUDED = '        _excluded_urls = ".*/\\\\.well-known/agent(-card)?\\\\.json"\n'
+ANCHOR_FLUSH = '    return path not in _FLUSH_EXCLUDED_PATHS and not path.endswith("/.well-known/agent-card.json")\n'
+PATCHED_FLUSH = (
+    "    return path not in _FLUSH_EXCLUDED_PATHS and not path.endswith(\n"
+    '        ("/.well-known/agent-card.json", "/.well-known/agent.json")\n'
+    "    )\n"
 )
 ANCHOR_OPENAI = "        if instrument_openai_client:\n            OpenAIInstrumentor().instrument()\n"
 PATCHED_OPENAI = (
@@ -194,6 +205,8 @@ def main() -> None:
         [
             (ANCHOR_HTTPX, PATCHED_HTTPX),
             (ANCHOR_FASTAPI, PATCHED_FASTAPI),
+            (ANCHOR_EXCLUDED, PATCHED_EXCLUDED),
+            (ANCHOR_FLUSH, PATCHED_FLUSH),
             (ANCHOR_OPENAI, PATCHED_OPENAI),
             (ANCHOR_EXPORTER, PATCHED_EXPORTER),
             (ANCHOR_UTILS_IMPORT, PATCHED_UTILS_IMPORT),
