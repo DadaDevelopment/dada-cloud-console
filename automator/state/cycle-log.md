@@ -6728,3 +6728,18 @@ Jenkins main #75 на b6a1d7a1, образ пода сверяется отде�
 - Метрика H03 (первый ЧУЖОЙ succeeded-платёж): 0 из 1 (единственный succeeded = org dada, владелец). 3 canceled artem = yk_forbidden-эпоха. Битых внутренних ссылок по ретроспективе ux_events: 4 за всю историю, все - artem 09-10, источник один.
 - Заведено: E135 (measure 10-01), bl 0508 (instrument checkout, verify artem returns, H03), bl 0507 (TG-боты без HTTP-сервера = 502 при живом транспорте, 3/5 мёртвых URL замера - крупнейший класс), audit-path-graph перезаписан.
 - Агенты: без фана - цикл однопоточный (grounding-цепочка psql->audit->code->test->ship, фанил бы разрушил целостность разбора). Время ~50 мин.
+
+## 2026-09-18 sess-0918a — checkout path instrumented + shipped (0508 closed, H03), E158 measured, класс E134-E141 закрыт
+- Гейт: `cyc mandate` = NORMAL (ships 7/7, tax 0%). Ops-handoff 09-16 (старше суток) — не перепроверялся; строка в owner-actions не нужна: панель и доставка проверялись моим же деплоем (Jenkins #105 SUCCESS).
+- Задача: 0508 (bl next, H03). Замыкание измерений: E158 (просрочено 08-29) + пачка E134-E141 (09-13/09-14).
+- GROUNDING [live psql]: artem после фикса 7f59ca7f: 3 сессии (09-14 18:18, 09-15 14:14, 09-17 11:28), каждая: /apps → recovery.apps.view → фанвк-апп → fanclub.run.place. 0 кликов CTA, 0 dismiss. Он не потерян для CTA - он не ходил на /billing вообще.
+- [code] Дыра: billing page checkout полностью слеп - pay-кнопки без data-ux, handleCheckout без маркеров, Metrika-цели checkout_redirect НЕ существовало (проверено Management API).
+- Отгружено 2171f58c: billing_checkout:click:<plan> / :redirect:<plan> (view перед навигацией) / 3 error_shown варианта (not_configured/recurring/error); data-ux="billing_checkout:renew" и ":pay:<plan>"; GOAL_CHECKOUT_REDIRECT. +565f1641: data-ux="apps_row:lastmile_chip" (E158 критерий-2 ослепление).
+- Гейт из access-metrika (цель = код в одном цикле): цель checkout_redirect СОЗДАНА live в счётчике 110158915 = id 637214589, reporting возвращает totals [0.0] (структурно измерима).
+- M2: tsc 0, test:unit 502/502, lint 0 errors. Доставка: Jenkins #105 SUCCESS ровно на 565f1641 [changeset], прод-под d2wlj (07:04:30Z) image ghcr.io/.../frontend:565f1641 [live kubectl]. Анонимный чанк-греп неадекватен для ленивого роута - provenance образа авторитетен.
+- E158: green_but_dead 4/111 (2/71→3/86→4/111 = дрейф, не деградация); fonbet-value ВЫЛЕЧЕН юзером после чипа (n=1 продукт-факт); критерий-2 пуст по ловушке (bruzas с 08-21 не заходил) - status measured.
+- Класс E134-E141 [live psql одним проходом]: 6 measured-success + E138 measured-nfe. Ключевое: SeedDatabaseDSN 197 строк (все после выката), 0 ручных SetEnvVar DATABASE_URL, 0 не-схемных URL от внешних, 0 «not applicable» в агент-чате (137 msgs/6 юзеров), ssl_not_supported не вернулся. Побочное: 172 failure SeedDatabaseDSN = один день 08-18, hex-ключ с \n у instatic-il1cvo (одноразовое, не завожу).
+- Беклог: 0508 closed (commit 2171f58c); 0509 added P1/H03 - квотная стена 09-25 у ВСЕХ активных орг (live psql: quota_grace_until=2026-09-25 x8, expiry_notified_at=08-26).
+- H touched: H03 (0508), H02 (E158 evidence).
+- Сабагенты: 1 попытка (psql-проба) - 429 rate_limit провайдера, работа инлайном. Беклог-лок release: 0508 закрыт - лок снят bl close автоматически.
+- Время: ~50 мин.
