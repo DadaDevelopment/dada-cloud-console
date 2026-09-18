@@ -191,8 +191,8 @@ func (f *fakeLLM) Complete(_ context.Context, prompt string) (string, error) {
 
 type recorder struct{ scores []langfuse.Score }
 
-func (r *recorder) CreateScore(_ context.Context, s langfuse.Score) error {
-	r.scores = append(r.scores, s)
+func (r *recorder) CreateScores(_ context.Context, s []langfuse.Score) error {
+	r.scores = append(r.scores, s...)
 	return nil
 }
 
@@ -262,11 +262,9 @@ func TestSubmitPostsScores(t *testing.T) {
 		t.Fatal("spec discovery broken")
 	}
 	done := make(chan struct{})
-	j.sink = sinkFunc(func(ctx context.Context, s langfuse.Score) error {
-		rec.scores = append(rec.scores, s)
-		if s.Name == "turn.total" {
-			close(done)
-		}
+	j.sink = sinkFunc(func(ctx context.Context, s []langfuse.Score) error {
+		rec.scores = append(rec.scores, s...)
+		close(done)
 		return nil
 	})
 	j.Submit("roman", Turn{TraceID: "abc", ObservationID: "def", Incoming: []string{"салам"}, Reply: "И вам салам", Parts: []string{"И вам салам"}})
@@ -291,9 +289,9 @@ func TestSubmitPostsScores(t *testing.T) {
 	}
 }
 
-type sinkFunc func(ctx context.Context, s langfuse.Score) error
+type sinkFunc func(ctx context.Context, s []langfuse.Score) error
 
-func (f sinkFunc) CreateScore(ctx context.Context, s langfuse.Score) error { return f(ctx, s) }
+func (f sinkFunc) CreateScores(ctx context.Context, s []langfuse.Score) error { return f(ctx, s) }
 
 func TestRunDropsCriterionWhoseSignalIsOff(t *testing.T) {
 	spec := loadTestSpec(t)

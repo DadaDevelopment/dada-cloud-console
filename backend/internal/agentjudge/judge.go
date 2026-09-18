@@ -16,7 +16,7 @@ import (
 
 // ScoreSink receives the produced scores; the Langfuse client satisfies it.
 type ScoreSink interface {
-	CreateScore(ctx context.Context, score langfuse.Score) error
+	CreateScores(ctx context.Context, scores []langfuse.Score) error
 }
 
 // Result is one score ready for the sink.
@@ -31,19 +31,43 @@ type Result struct {
 // Judge scores turns of the agents whose package ships a judge spec under
 // <basePath>/agents/<agent>/judge.
 type Judge struct {
-	basePath string
-	llm      LLM
-	sink     ScoreSink
-	timeout  time.Duration
-	mu       sync.Mutex
-	specs    map[string]*Spec
-	missing  map[string]bool
+	basePath  string
+	llm       LLM
+	sink      ScoreSink
+	timeout   time.Duration
+	storeWait time.Duration
+	queue     chan scoreJob
+	mu        sync.Mutex
+	specs     map[string]*Spec
+	missing   map[string]bool
 }
+
+type scoreJob struct {
+	trace  string
+	scores []langfuse.Score
+}
+
+const queueSize = 512
 
 // New wires a judge; basePath is the same gitops root the runtime reads
 // domains from.
 func New(basePath string, llm LLM, sink ScoreSink) *Judge {
-	return &Judge{basePath: basePath, llm: llm, sink: sink, timeout: 2 * time.Minute, specs: map[string]*Spec{}, missing: map[string]bool{}}
+	j := &Judge{basePath: basePath, llm: llm, sink: sink, timeout: 2 * time.Minute, storeWait: 10 * time.Minute, queue: make(chan scoreJob, queueSize), specs: map[string]*Spec{}, missing: map[string]bool{}}
+	go j.store()
+	return j
+}
+
+// store is the single worker that posts queued scores. Langfuse takes scores
+// one request at a time under a per-minute budget, so a burst of turns queues
+// here instead of timing out in parallel.
+func (j *Judge) store() {
+	for job := range j.queue {
+		ctx, cancel := context.WithTimeout(context.Background(), j.storeWait)
+		if err := j.sink.CreateScores(ctx, job.scores); err != nil {
+			log.Warn().Err(err).Str("trace", job.trace).Int("scores", len(job.scores)).Int("queued", len(j.queue)).Msg("agentjudge: scores not stored")
+		}
+		cancel()
+	}
 }
 
 func (j *Judge) spec(agent string) *Spec {
@@ -95,14 +119,18 @@ func (j *Judge) Submit(agent string, t Turn) {
 		if err != nil {
 			log.Warn().Err(err).Str("agent", agent).Str("trace", t.TraceID).Msg("agentjudge: llm part failed, code scores only")
 		}
+		scores := make([]langfuse.Score, 0, len(results))
 		for _, r := range results {
 			score := langfuse.Score{TraceID: t.TraceID, ObservationID: t.ObservationID, Name: r.Name, Value: r.Value, Comment: r.Comment, DataType: langfuse.ScoreNumeric}
 			if r.Boolean {
 				score.DataType = langfuse.ScoreBoolean
 			}
-			if err := j.sink.CreateScore(ctx, score); err != nil {
-				log.Warn().Err(err).Str("trace", t.TraceID).Str("score", r.Name).Msg("agentjudge: score not stored")
-			}
+			scores = append(scores, score)
+		}
+		select {
+		case j.queue <- scoreJob{trace: t.TraceID, scores: scores}:
+		default:
+			log.Warn().Str("trace", t.TraceID).Int("scores", len(scores)).Msg("agentjudge: score queue full, turn dropped")
 		}
 	}()
 }
