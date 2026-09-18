@@ -78,6 +78,26 @@ Delivery chain, all live:
   excludes `agent-card.json`). Older `POST /` roots with `openai.chat` children (22:48Z) predate the
   `3226c3e3` roll at 23:10Z.
 
+## Review — «откуда такие разные трейсы» (2026-09-18, sessions list)
+
+Two shapes in the sessions list; the odd one (`runtime-<uuid>` / `telegram:-9001…` / env
+`default` / no cost) was NOT the agents. `v2/observations?environment=default` from 09-01 [live]:
+- `judge_turn` roots (02:35-02:56Z, sessions `runtime-<conv>`, users `telegram:<chat>`): emitted by
+  agent-runtime's first judge version, dada-cloud `caca7ec4` (01:02 MSK), removed in `87d1002a`
+  (05:37 MSK, "the kagent root span already carries the turn io") [origin]. The running
+  agent-runtime is `30cd9317` ⊇ `87d1002a` [live], last such root 02:56Z, none since.
+- `judge_session` / `judge_probe` roots (sessions `funnel/smoke-0918-*`, users `0`/`-9001…`):
+  call_center `scripts/push_judge.py`, deleted with the funnel evaluator (call_center docs/20, 21).
+- `POST /` and `GET /.well-known/agent.json` roots (22:49Z, 23:40Z): pre-roll kagent-app, fixed
+  by `3226c3e3`/`b10923dc`.
+- The `@qa_jl*` rows are the target shape (kagent-app `_dada.py`, env `prod`, cost present).
+
+Root cause that stays: the Go OTLP emitter (`backend/internal/langfuse/otlp.go`) never set an
+environment, so anything the console emits lands in `default`. Fixed in `0dbac6eb`: every span
+and the resource carry `langfuse.environment` from `LANGFUSE_TRACING_ENVIRONMENT` (same variable
+as kagent-app); argo-infra `a5a97ac20` sets it to `prod` for backend + agent-runtime. Test
+`TestIngestStampsTracingEnvironmentOnEverySpan`. Pending: Jenkins build of `0dbac6eb` + CI pin.
+
 ## Decisions to confirm
 - session.id = `@username` (private chat) / `@username@<chat_id>` (group); one Langfuse session per user
   forever (no per-conversation split). Alternative: `@username/<conv short id>`.
