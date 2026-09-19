@@ -46,9 +46,11 @@ var leakMarkers = []string{
 	"в kb нет", "нет в kb", "из kb", "kb ", "черновик",
 }
 
-var leakFramePattern = regexp.MustCompile(`(?i)(^|[^\pL])(к клиенту|итоговое|итог|правило|отвечаю|скажу|заметка|мысли|рассуждение):`)
+var leakFramePattern = regexp.MustCompile(`(?i)(^|[^\pL])(к клиенту|итоговое|итог|правило|отвечаю|скажу|заметка|мысли|рассуждение|по s\d{1,2}[a-zа-я]?|этап s\d{1,2}[a-zа-я]?|s\d{1,2}[a-zа-я]?):`)
 
-var leakThirdPersonPattern = regexp.MustCompile(`(?i)(^|[^\pL])((он|она|клиент)\s+(назвал|назвала|сказал|сказала|написал|написала|спросил|спросила|ответил|ответила|прислал|прислала|пополнил|пополнила|зарегистрировался|зарегистрировалась|хочет|готов|готова|решил|решила))($|[^\pL])`)
+var leakStagePattern = regexp.MustCompile(`(?i)(^|[^\pL])(по|этап|этапу|шаг|ход|дальше|реплика|переход к)\s+S\d{1,2}[a-zа-я]?($|[^\pL\d])`)
+
+var leakThirdPersonPattern = regexp.MustCompile(`(?i)(^|[^\pL])((он|она|клиент)\s+((уже|сам|сама|тоже|ранее|раньше|только что)\s+)?(назвал|назвала|сказал|сказала|написал|написала|спросил|спросила|ответил|ответила|прислал|прислала|пополнил|пополнила|зарегистрировался|зарегистрировалась|хочет|готов|готова|решил|решила|торговал|торговала))($|[^\pL])`)
 
 var leakEnglishFillers = []string{"continue to", "hmm", "okay,", "fine.", "let me ", "the user ", "the client "}
 
@@ -80,6 +82,9 @@ func leakReason(reply string) string {
 	}
 	if m := leakFramePattern.FindStringSubmatch(text); m != nil {
 		return "reasoning frame " + strings.ToLower(m[2]) + ":"
+	}
+	if m := leakStagePattern.FindString(text); m != "" {
+		return "script stage code " + strings.TrimSpace(m)
 	}
 	if m := leakThirdPersonPattern.FindStringSubmatch(text); m != nil {
 		return "third person about the client «" + strings.ToLower(m[2]) + "»"
