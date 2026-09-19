@@ -1116,28 +1116,39 @@ func (r *StatusReconciler) reconcile(ctx context.Context) map[snapKey]bool {
 	// being frozen at the git-watcher's "Unknown". Still strictly read-only.
 	agg := map[snapKey]*liveApp{}
 
-	// resolveEnv is the namespace-to-environment lookup shared by every workload
-	// kind (Deployment/StatefulSet/DaemonSet/Pod), in three steps:
-	//  1. the workload's own namespace (normal case).
-	//  2. an unambiguous namespace-override app name among live (non-Orphaned)
-	//     snapshots — a live twin always outranks an Orphaned one by this step,
-	//     which is what keeps a re-homed app from reviving its old row.
-	//  3. only if step 2 found no live claimant at all, fall back to the
-	//     orphan-including map: the one remaining case is an adopted/infra app
-	//     whose sole snapshot got marked Orphaned, and without this step its
-	//     live workload can never be attributed again and the row gets purged
-	//     for real out from under a running pod.
+	deps, err := r.client.AppsV1().Deployments("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Warn().Err(err).Msg("status-reconciler: list deployments")
+	}
+	sts, err := r.client.AppsV1().StatefulSets("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Warn().Err(err).Msg("status-reconciler: list statefulsets")
+	}
+	dss, err := r.client.AppsV1().DaemonSets("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Warn().Err(err).Msg("status-reconciler: list daemonsets")
+	}
+
+	var refs []workloadRef
+	if deps != nil {
+		for i := range deps.Items {
+			refs = append(refs, workloadRef{labels: deps.Items[i].Labels, name: deps.Items[i].Name, ns: deps.Items[i].Namespace})
+		}
+	}
+	if sts != nil {
+		for i := range sts.Items {
+			refs = append(refs, workloadRef{labels: sts.Items[i].Labels, name: sts.Items[i].Name, ns: sts.Items[i].Namespace})
+		}
+	}
+	if dss != nil {
+		for i := range dss.Items {
+			refs = append(refs, workloadRef{labels: dss.Items[i].Labels, name: dss.Items[i].Name, ns: dss.Items[i].Namespace})
+		}
+	}
+	home := homeKeys(refs, envByNs, envNames)
+
 	resolveEnv := func(app, ns string) (uuid.UUID, bool) {
-		if id, ok := envByNs[ns]; ok {
-			return id, true
-		}
-		if ids := appEnvs[app]; len(ids) == 1 {
-			return ids[0], true
-		}
-		if ids := appEnvsAll[app]; len(ids) == 1 {
-			return ids[0], true
-		}
-		return uuid.UUID{}, false // not an app namespace, and name absent/ambiguous → skip
+		return resolveWorkloadEnv(app, ns, envByNs, appEnvs, appEnvsAll, home)
 	}
 
 	acc := func(labels map[string]string, name, ns string, desired, ready int32, containers []corev1.Container) {
@@ -1175,18 +1186,14 @@ func (r *StatusReconciler) reconcile(ctx context.Context) map[snapKey]bool {
 		}
 	}
 
-	if deps, err := r.client.AppsV1().Deployments("").List(ctx, metav1.ListOptions{}); err != nil {
-		log.Warn().Err(err).Msg("status-reconciler: list deployments")
-	} else {
+	if deps != nil {
 		for i := range deps.Items {
 			d := &deps.Items[i]
 			acc(d.Labels, d.Name, d.Namespace, desiredReplicas(d), d.Status.ReadyReplicas, d.Spec.Template.Spec.Containers)
 		}
 	}
 
-	if sts, err := r.client.AppsV1().StatefulSets("").List(ctx, metav1.ListOptions{}); err != nil {
-		log.Warn().Err(err).Msg("status-reconciler: list statefulsets")
-	} else {
+	if sts != nil {
 		for i := range sts.Items {
 			s := &sts.Items[i]
 			acc(s.Labels, s.Name, s.Namespace, replicasOrDefault(s.Spec.Replicas), s.Status.ReadyReplicas, s.Spec.Template.Spec.Containers)
@@ -1195,9 +1202,7 @@ func (r *StatusReconciler) reconcile(ctx context.Context) map[snapKey]bool {
 
 	// DaemonSet desired count is node-driven (DesiredNumberScheduled), not a
 	// spec.replicas; a DS matching zero nodes reads Stopped, which is honest.
-	if dss, err := r.client.AppsV1().DaemonSets("").List(ctx, metav1.ListOptions{}); err != nil {
-		log.Warn().Err(err).Msg("status-reconciler: list daemonsets")
-	} else {
+	if dss != nil {
 		for i := range dss.Items {
 			ds := &dss.Items[i]
 			acc(ds.Labels, ds.Name, ds.Namespace, ds.Status.DesiredNumberScheduled, ds.Status.NumberReady, ds.Spec.Template.Spec.Containers)
@@ -1353,6 +1358,73 @@ func stripEnvSuffix(instance string, envNames map[string]bool) string {
 		}
 	}
 	return instance
+}
+
+// workloadRef is the identity the status reconciler needs from a workload of
+// any kind (Deployment, StatefulSet, DaemonSet) to decide which App it belongs
+// to, before any counters are read from it.
+type workloadRef struct {
+	labels map[string]string
+	name   string
+	ns     string
+}
+
+// homeKeys lists every (env, app) that has at least one workload inside its
+// own environment namespace. The name-based fallback in resolveWorkloadEnv
+// consults it so a same-named workload in some other namespace is not folded
+// into an app that already lives at home.
+func homeKeys(refs []workloadRef, envByNs map[string]uuid.UUID, envNames map[string]bool) map[snapKey]bool {
+	home := map[snapKey]bool{}
+	for _, w := range refs {
+		envID, ok := envByNs[w.ns]
+		if !ok {
+			continue
+		}
+		if app := appKeyFromMeta(w.labels, w.name, envNames); app != "" {
+			home[snapKey{envID, app}] = true
+		}
+	}
+	return home
+}
+
+// resolveWorkloadEnv maps a workload (by app key and namespace) to the
+// environment whose App snapshot should mirror it, in three steps:
+//  1. the workload's own namespace (normal case).
+//  2. an unambiguous namespace-override app name among live (non-Orphaned)
+//     snapshots — a live twin always outranks an Orphaned one by this step,
+//     which is what keeps a re-homed app from reviving its old row.
+//  3. only if step 2 found no live claimant at all, fall back to the
+//     orphan-including map: the one remaining case is an adopted/infra app
+//     whose sole snapshot got marked Orphaned, and without this step its
+//     live workload can never be attributed again and the row gets purged
+//     for real out from under a running pod.
+//
+// Steps 2 and 3 exist for apps whose only workload runs outside the env
+// namespace (App spec.namespace overrides, adopted infra). They must not
+// claim a foreign workload for an app that already runs in its own
+// namespace: the kagent controller renders a Deployment named after every
+// agent in namespace kagent, and when a tenant app carries the same name
+// (agent-sandbox tg-vibecoder, 2026-09-08) the fallback summed both, the
+// snapshot recorded desired+1, and every deploy re-rendered that inflated
+// count into git — replicas crept 3→4→5→6→7 across five deploys. A workload
+// outside the env namespace is attributed by name only when the resolved
+// app has no workload at home.
+func resolveWorkloadEnv(app, ns string, envByNs map[string]uuid.UUID, appEnvs, appEnvsAll map[string][]uuid.UUID, home map[snapKey]bool) (uuid.UUID, bool) {
+	if id, ok := envByNs[ns]; ok {
+		return id, true
+	}
+	var candidate uuid.UUID
+	if ids := appEnvs[app]; len(ids) == 1 {
+		candidate = ids[0]
+	} else if ids := appEnvsAll[app]; len(ids) == 1 {
+		candidate = ids[0]
+	} else {
+		return uuid.UUID{}, false
+	}
+	if home[snapKey{candidate, app}] {
+		return uuid.UUID{}, false
+	}
+	return candidate, true
 }
 
 func desiredReplicas(d *appsv1.Deployment) int32 {
