@@ -328,8 +328,8 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 	run := AgentRunRequest{AgentName: conv.AgentName, ContextID: "runtime-" + conv.ID.String(), Messages: pending,
 		EndUserKey: conv.Channel + ":" + conv.ExternalID,
 		ConversationContext: AgentConversationContext{ConversationID: conv.ID.String(), Channel: conv.Channel,
-			ExternalID: conv.ExternalID, Username: conv.ActorUsername, State: state, AvailableSkills: skills,
-			SeamlessHandoff: r.flags.SeamlessHandoff, ReplySplit: r.flags.SplitReply && !r.structuredAgents[conv.AgentName]},
+			ExternalID: conv.ExternalID, Username: conv.ActorUsername, FirstName: actorFirstName(conv.ActorMetadata),
+			State: state, AvailableSkills: skills, SeamlessHandoff: r.flags.SeamlessHandoff, ReplySplit: r.flags.SplitReply && !r.structuredAgents[conv.AgentName]},
 		ActorMetadata: conv.ActorMetadata}
 	if r.flags.QuestionBudget {
 		questions, phrases := turnCounters(conv)

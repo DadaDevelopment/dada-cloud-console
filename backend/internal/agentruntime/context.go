@@ -19,6 +19,7 @@ type AgentConversationContext struct {
 	Channel         string       `json:"channel"`
 	ExternalID      string       `json:"external_id"`
 	Username        string       `json:"username,omitempty"`
+	FirstName       string       `json:"first_name,omitempty"`
 	State           RuntimeState `json:"state"`
 	AvailableSkills []string     `json:"available_skills"`
 	Now             string       `json:"now,omitempty"`
@@ -49,6 +50,13 @@ type AgentConversationContext struct {
 	// through so the form gate reads delay_s instead of reconstructing the
 	// rhythm from timestamps. Absent when the gateway added no pause.
 	DelaySeconds int `json:"delay_s,omitempty"`
+}
+
+// actorFirstName is the channel's first name of the actor, the only name the
+// prompt may greet the client with; empty when the channel sent none.
+func actorFirstName(meta map[string]any) string {
+	name, _ := meta["first_name"].(string)
+	return strings.TrimSpace(name)
 }
 
 // AgentRunRequest is one invocation of an agent.
