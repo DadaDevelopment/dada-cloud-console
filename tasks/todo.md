@@ -98,6 +98,23 @@ and the resource carry `langfuse.environment` from `LANGFUSE_TRACING_ENVIRONMENT
 as kagent-app); argo-infra `a5a97ac20` sets it to `prod` for backend + agent-runtime. Test
 `TestIngestStampsTracingEnvironmentOnEverySpan`. Pending: Jenkins build of `0dbac6eb` + CI pin.
 
+## Langfuse project move + MCP flap (2026-09-19)
+- [x] Runtime family (`tg-referral-runtime`, `AGENT_LANGFUSE_*`, tg-exchange-support git env + OTLP basic
+      header + `langfuseProjectId`) moved to project `suort-agent` (`cmu8k0bxp10mzad0fnlhaj2sx`);
+      argo-infra a137b2865; console chat / reels / telemost keys untouched.
+- [x] Evidence: new pod env pk fp `2d04c469` in both LANGFUSE_PUBLIC_KEY and OTLP header; boot log
+      `prompt tg-exchange-support 2026-09-18.native.66 is Langfuse version 1`; `GET /v2/prompts` = 1 prompt,
+      labels latest+production; `ensure_models.py` created 12 GLM prices; agent-runtime
+      `dada_langfuse_units{day,month}=0`, `budget_exceeded=0`, `poll_age=1s` (metrics v2 works on new keys).
+- [ ] New org rejects legacy reads (`GET /api/public/traces` -> `LEGACY_API_UNAVAILABLE_FOR_NEW_ORGANIZATION`);
+      backend uses only v2 observations/metrics + `POST /scores` (create still supported). Confirm on first
+      live turn: root cost + prompt link, 2 scores/turn, no qa_*/probe roots.
+- [x] MCP flap root cause: `~/.claude/mcp-needs-auth-cache.json` is global per server name; a night loop
+      (`while true; do claude -p ...; sleep 15` in ~/dev/dadadev-brains, pid 2506) dies every cycle with
+      `OAuth session expired and could not be refreshed`, respawns every ~22s (108k transcripts, 109/h),
+      boots `npx -y mcp-remote` each time; load 60-126 => 30s CONNECT_TIMEOUT => 15 min block for all
+      sessions. Mitigation `MCP_TIMEOUT=120000` in `~/.claude/settings.json`; real fix = stop/relogin the loop.
+
 ## Decisions to confirm
 - session.id = `@username` (private chat) / `@username@<chat_id>` (group); one Langfuse session per user
   forever (no per-conversation split). Alternative: `@username/<conv short id>`.
