@@ -139,6 +139,7 @@ func (s *Server) Handler() http.Handler {
 	protected.POST("/tools/update-state", s.handleUpdateState)
 	protected.POST("/tools/stop-agent", s.handleStopAgent)
 	protected.POST("/tools/escalate", s.handleEscalate)
+	protected.GET("/state", s.handleGetState)
 	protected.POST("/hooks", s.handleCreateHook)
 	protected.GET("/hooks", s.handleListHooks)
 	protected.DELETE("/hooks/:id", s.handleDeleteHook)
@@ -188,6 +189,28 @@ func (s *Server) handleCreateHook(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"id": id})
+}
+
+// handleGetState is the read side for evals and operators: the runtime state
+// of the active conversation addressed by agent_name, channel and external_id.
+// 404 when the conversation does not exist yet.
+func (s *Server) handleGetState(c *gin.Context) {
+	agentName, channel, externalID := c.Query("agent_name"), c.Query("channel"), c.Query("external_id")
+	if agentName == "" || channel == "" || externalID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "agent_name, channel and external_id query params required"})
+		return
+	}
+	conv, err := s.runtime.store.FindActiveConversation(c.Request.Context(), agentName, channel, externalID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no such conversation"})
+		return
+	}
+	state, err := s.runtime.states.GetState(c.Request.Context(), conv.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "state unavailable"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"conversation_id": conv.ID.String(), "state": state})
 }
 
 func (s *Server) handleListHooks(c *gin.Context) {
