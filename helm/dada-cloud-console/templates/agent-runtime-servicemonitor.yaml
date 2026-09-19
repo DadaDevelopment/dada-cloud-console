@@ -1,0 +1,21 @@
+{{- if and .Values.agentRuntime.enabled .Values.metrics.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "dada-cloud-console.fullname" . }}-agent-runtime
+  labels:
+    {{- include "dada-cloud-console.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent-runtime
+    {{- with .Values.metrics.prometheusReleaseLabel }}
+    release: {{ . }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "dada-cloud-console.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: agent-runtime
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.metrics.serviceMonitor.interval }}
+{{- end }}

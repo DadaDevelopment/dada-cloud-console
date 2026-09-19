@@ -89,6 +89,7 @@ func main() {
 		}
 	}
 	srv.StartIdleScheduler(context.Background(), idleTick, os.Getenv("TG_GATEWAY_OUTBOUND_URL"))
+	srv.StartBudgetGuard(context.Background())
 
 	port := os.Getenv("AGENT_RUNTIME_PORT")
 	if port == "" {

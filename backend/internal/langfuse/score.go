@@ -23,13 +23,14 @@ const (
 // Score is one evaluation value attached to a trace or, when ObservationID is
 // set, to one observation of it.
 type Score struct {
-	ID            string  `json:"id,omitempty"`
-	TraceID       string  `json:"traceId"`
-	ObservationID string  `json:"observationId,omitempty"`
-	Name          string  `json:"name"`
-	Value         float64 `json:"value"`
-	DataType      string  `json:"dataType,omitempty"`
-	Comment       string  `json:"comment,omitempty"`
+	ID            string         `json:"id,omitempty"`
+	TraceID       string         `json:"traceId"`
+	ObservationID string         `json:"observationId,omitempty"`
+	Name          string         `json:"name"`
+	Value         float64        `json:"value"`
+	DataType      string         `json:"dataType,omitempty"`
+	Comment       string         `json:"comment,omitempty"`
+	Metadata      map[string]any `json:"metadata,omitempty"`
 }
 
 type rateLimited struct {

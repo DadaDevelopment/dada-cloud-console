@@ -7,6 +7,7 @@ package agentjudge
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -60,7 +61,7 @@ type Total struct {
 	FailBelow float64        `yaml:"fail_below"`
 }
 
-// Skip names traffic the judge leaves unscored, such as synthetic probes.
+// Skip names traffic the judge leaves unscored, such as synthetic probes; a username may be a glob (qa_*, *_probe), matched ignoring case and @.
 type Skip struct {
 	Usernames []string `yaml:"usernames"`
 }
@@ -192,8 +193,9 @@ func ParseSpec(raw []byte) (*Spec, error) {
 // ScoreName is the full Langfuse score name of one criterion or signal.
 // Skips reports whether turns of this username stay unjudged.
 func (s *Spec) Skips(username string) bool {
+	name := strings.ToLower(strings.TrimPrefix(username, "@"))
 	for _, u := range s.Skip.Usernames {
-		if strings.EqualFold(strings.TrimPrefix(u, "@"), strings.TrimPrefix(username, "@")) {
+		if ok, _ := path.Match(strings.ToLower(strings.TrimPrefix(u, "@")), name); ok {
 			return true
 		}
 	}

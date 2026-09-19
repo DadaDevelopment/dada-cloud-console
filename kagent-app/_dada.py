@@ -14,10 +14,12 @@ v4 ingestion reads:
 * the root span gets a readable name, ``langfuse.observation.type=agent``,
   the user text as input, the final answer as output, and level ERROR on a
   failed task;
-* the ADK ``invocation`` and ``invoke_agent`` spans, which ADK leaves without
-  io, get the same input at start (``TurnSpanProcessor``) and the latest
-  answer text as output while the executor drains events (``note_event``),
-  before ADK closes them.
+* the ADK ``invocation`` and ``invoke_agent`` wrapper spans, which carry
+  nothing the root does not, are dropped at export (``MutingSpanExporter``);
+  so is every span of a muted turn: a caller that says ``dada.telemetry=off``
+  (agent-runtime under the Langfuse unit budget) or a synthetic username
+  (``DADA_TRACE_MUTE_USERNAMES``, default ``qa_*,*_probe,eval_*``). A muted
+  turn also hands no trace id back, so no judge score can follow it.
 
 ``begin_turn`` runs before the ADK runner starts, ``end_turn``/``fail_turn``
 when the executor publishes the final task event. The turn state lives in a
@@ -37,19 +39,22 @@ from __future__ import annotations
 
 import base64
 import contextvars
+import fnmatch
 import json
 import logging
 import os
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 from opentelemetry import context as otel_context
 from opentelemetry import trace
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
+from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +69,7 @@ class DadaTurn:
     trigger: str
     input: str = ""
     attributes: dict[str, Any] = field(default_factory=dict)
-    adk_spans: list[trace.Span] = field(default_factory=list)
+    muted: bool = False
     model: str = ""
     generations: int = 0
     input_tokens: int = 0
@@ -73,20 +78,64 @@ class DadaTurn:
 
 ADK_TURN_SPAN_PREFIXES = ("invocation", "invoke_agent")
 GEN_MODEL_ATTRIBUTES = ("gen_ai.response.model", "gen_ai.request.model")
+MUTE_USERNAMES_ENV = "DADA_TRACE_MUTE_USERNAMES"
+MUTE_USERNAMES_DEFAULT = "qa_*,*_probe,eval_*"
+MUTED_TRACE_TTL_SECONDS = 900.0
+
+_muted_traces: dict[int, float] = {}
+
+
+def _mute_patterns() -> list[str]:
+    raw = os.getenv(MUTE_USERNAMES_ENV, MUTE_USERNAMES_DEFAULT)
+    return [p.strip().lstrip("@").lower() for p in raw.split(",") if p.strip()]
+
+
+def is_muted_user(user: str) -> bool:
+    """A synthetic caller (QA persona, rollout probe, eval) whose turns never reach Langfuse."""
+    name = user.lstrip("@").lower()
+    return any(fnmatch.fnmatchcase(name, p) for p in _mute_patterns())
+
+
+def _mute_trace(trace_id: int) -> None:
+    now = time.monotonic()
+    for tid, deadline in list(_muted_traces.items()):
+        if deadline < now:
+            _muted_traces.pop(tid, None)
+    _muted_traces[trace_id] = now + MUTED_TRACE_TTL_SECONDS
+
+
+def exportable(span: ReadableSpan) -> bool:
+    """False for ADK's io-less wrapper spans and for any span of a muted turn."""
+    if span.name.startswith(ADK_TURN_SPAN_PREFIXES):
+        return False
+    ctx = span.get_span_context()
+    return ctx is None or ctx.trace_id not in _muted_traces
+
+
+class MutingSpanExporter(SpanExporter):
+    """Wrap the OTLP exporter so unit-costing spans that carry no value never leave the pod."""
+
+    def __init__(self, inner: SpanExporter) -> None:
+        self._inner = inner
+
+    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        kept = [s for s in spans if exportable(s)]
+        if not kept:
+            return SpanExportResult.SUCCESS
+        return self._inner.export(kept)
+
+    def shutdown(self) -> None:
+        self._inner.shutdown()
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return self._inner.force_flush(timeout_millis)
 
 
 class TurnSpanProcessor(SpanProcessor):
-    """Give ADK's invocation/invoke_agent spans the turn's input and remember them for the output."""
+    """Fold the turn's LLM calls into its root so the root carries the whole turn's cost."""
 
     def on_start(self, span: Span, parent_context: Optional[otel_context.Context] = None) -> None:
-        turn = _current_turn.get()
-        if turn is None or not span.name.startswith(ADK_TURN_SPAN_PREFIXES):
-            return
-        try:
-            span.set_attribute("langfuse.observation.input", turn.input)
-            turn.adk_spans.append(span)
-        except Exception:
-            logger.warning("dada tracing: on_start failed", exc_info=True)
+        pass
 
     def on_end(self, span: ReadableSpan) -> None:
         """Fold every finished LLM call of the turn into the root's usage so the root carries the turn's total cost."""
@@ -298,7 +347,10 @@ def begin_turn(context: Any, run_args: dict[str, Any], span_attributes: dict[str
             trigger=meta.get("trigger", "turn"),
             input=user_text,
             attributes=attrs,
+            muted=meta.get("telemetry", "").lower() == "off" or is_muted_user(str(attrs.get("langfuse.user.id", ""))),
         )
+        if turn.muted:
+            _mute_trace(root.get_span_context().trace_id)
         if root.is_recording():
             root.update_name(attrs["langfuse.trace.name"])
             root.set_attributes(attrs)
@@ -309,22 +361,6 @@ def begin_turn(context: Any, run_args: dict[str, Any], span_attributes: dict[str
     except Exception:
         logger.warning("dada tracing: begin_turn failed", exc_info=True)
         return None
-
-
-def note_event(status_message: Any) -> None:
-    """Stamp the answer text seen so far on the ADK spans that are still open."""
-    turn = _current_turn.get()
-    if turn is None:
-        return
-    try:
-        output = _message_text(status_message)
-        if not output:
-            return
-        for span in turn.adk_spans:
-            if span.is_recording():
-                span.set_attribute("langfuse.observation.output", output)
-    except Exception:
-        logger.warning("dada tracing: note_event failed", exc_info=True)
 
 
 def end_turn(task_state: Any, status_message: Any, run_metadata: Optional[dict[str, Any]] = None) -> None:
@@ -345,7 +381,8 @@ def end_turn(task_state: Any, status_message: Any, run_metadata: Optional[dict[s
             root.set_attribute("langfuse.observation.status_message", f"task {state}")
         _stamp_turn_totals(root, turn, run_metadata)
         _stamp_prompt_metadata(root)
-        _stamp_trace_ids(root, run_metadata)
+        if not turn.muted:
+            _stamp_trace_ids(root, run_metadata)
     except Exception:
         logger.warning("dada tracing: end_turn failed", exc_info=True)
 

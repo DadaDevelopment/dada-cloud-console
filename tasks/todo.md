@@ -1085,3 +1085,18 @@ Intent: replace the text-heavy catalogue with clear product choices and a strong
 - [x] Проверка в образе `kagent/app:0.10.0-rc3` (патч + `root_cost_test.py`): 2 вызова 100/10 + 250/40 → корень input=350, output=50, total=400, llm_calls=2, model=gpt-5-mini, prompt_name/version; без вызовов — фолбэк на usage_metadata и модель из конфига.
 - [ ] Jenkins → образ `ad9f93b6` → пин `kagent.agentImage.tag` в argo-infra → пробный ход → `v2/observations` корень с `calculatedTotalCost`.
 - Trade-off: суммарный cost трейса в UI Langfuse теперь = корень + generation'ы (двойной счёт на уровне trace). Цена за cost на корне; если мешает — читать cost с корня, не с trace.
+
+## Квота Langfuse 50k units/month пробита (2026-09-19)
+
+Просьба владельца: разобраться, кто жжёт units; не быть расточительным в рантайме; жёстко держать набор скоров; стоп новых отправок при >1.5k/day + алерт; переезд на новый проект без риска вылезти за 50k/month.
+
+- [x] Кто жёг [Langfuse `v2/metrics`, 24ч до 18.09]: корневые трейсы по userId — `@dada_roll_probe` 998 (мои же пробы переката), `@qa_target1_01..14` ≈1500, `qa_jl*`/`qa_ladder*` единицы ⇒ ~100% синтетика, прод-юзеров в топе нет. На один судимый ход ≈40 units: 1 trace + ~7 obs (2 обёртки `invocation`/`invoke_agent` ADK) + ~32 score (17 критериев turn + 2 funnel, часть по два). При 20k scores/day судья = половина квоты.
+- [x] Агент (`kagent-app/_dada.py`, `patch_tracing.py`): экспортёр обёрнут в `MutingSpanExporter` — обёртки ADK `invocation*`/`invoke_agent*` не уезжают; ход с `dada.telemetry=off` или от юзера по маске `DADA_TRACE_MUTE_USERNAMES` (default `qa_*,*_probe,eval_*`) целиком глушится по trace_id (TTL 15 мин), trace id наружу не отдаётся ⇒ судья такой ход не видит. Проверка в образе: `mute_test.py` «mute ok».
+- [x] Судья (`agentjudge`): один score на судью на ход (`turn.total`, `funnel.total`), критерии и причины — в `metadata.checks` + `metadata.violations`; `skip.usernames` понимает глоб (`path.Match`); `MuteWhen` глушит судью целиком. Тесты обновлены на свёрнутый score.
+- [x] Бюджетный страж (`langfusebudget`): раз в 10 мин (`LANGFUSE_BUDGET_POLL`) считает units за UTC-день и месяц через `v2/metrics` (observations + roots + 3 вида scores), гейджи `dada_langfuse_units{window}`, `dada_langfuse_units_limit{window}`, `dada_langfuse_budget_exceeded`, `dada_langfuse_budget_poll_age_seconds`. Лимиты `LANGFUSE_BUDGET_UNITS_DAY=1500`, `LANGFUSE_BUDGET_UNITS_MONTH=45000` (запас под 31 день). Перебор ⇒ судья молчит + каждый A2A-запрос несёт `dada.telemetry: "off"` ⇒ агент не шлёт трейс. Первое чтение до тикера: рестарт под пробитым бюджетом глушит сразу; ошибка чтения держит прошлый вердикт.
+- [x] agent-runtime отдаёт `/metrics`; чарт: `agent-runtime-servicemonitor.yaml`, алерты `DadaLangfuseBudgetExceeded` (critical, 1m) и `DadaLangfuseBudgetPollStale` (>1ч без чтения).
+- [x] Skip-листы судей на глобы: `tg-agent-tools/.../judge/{turn,funnel}.yaml`, argo-infra cloud-console values (2 места).
+- Ожидаемая цена хода после: 1 trace + ~5 obs + 2 score ≈ 8 units (было ≈40); синтетика = 0. 1.5k/day ≈ 190 реальных ходов/день.
+- [ ] Jenkins → пин `kagent.agentImage.tag` в argo-infra → приёмка по `v2/metrics`: roots от `qa_*` = 0, score/ход = 2, `invocation` obs = 0, `dada_langfuse_units` на `/metrics`.
+- [ ] Переезд на новый проект Langfuse (владелец создаёт): ключи в секретах `tg-referral-runtime` и `kagent-otel`/per-agent, старый проект остаётся историей.
+- Trade-off: при перебое бюджета теряются реальные ходы (без трейса и без оценки) — осознанно, по просьбе владельца; метрики/алерт покажут момент и кто виноват.

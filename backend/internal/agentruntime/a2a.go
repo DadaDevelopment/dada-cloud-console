@@ -16,12 +16,13 @@ import (
 )
 
 type httpA2AClient struct {
-	http       *http.Client
-	endpoint   func(agentName string) string
-	timeout    time.Duration
-	retryPause time.Duration
-	retries    int
-	pause      func(ctx context.Context, d time.Duration) error
+	http         *http.Client
+	endpoint     func(agentName string) string
+	timeout      time.Duration
+	retryPause   time.Duration
+	retries      int
+	pause        func(ctx context.Context, d time.Duration) error
+	telemetryOff func() bool
 }
 
 // failedTaskRetryPause is the first pause before re-sending a turn whose task
@@ -259,6 +260,12 @@ func (c *httpA2AClient) call(ctx context.Context, run AgentRunRequest, message a
 	reqBody := a2aRequest{JSONRPC: "2.0", ID: "agentruntime", Method: "message/send"}
 	if message.Metadata == nil {
 		message.Metadata = a2aMetadata(run)
+	}
+	if c.telemetryOff != nil && c.telemetryOff() {
+		if message.Metadata == nil {
+			message.Metadata = map[string]any{}
+		}
+		message.Metadata["dada.telemetry"] = "off"
 	}
 	reqBody.Params.Message = message
 	payload, err := json.Marshal(reqBody)

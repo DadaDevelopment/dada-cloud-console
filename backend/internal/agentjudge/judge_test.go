@@ -273,20 +273,22 @@ func TestSubmitPostsScores(t *testing.T) {
 	})
 	j.Submit("roman", Turn{TraceID: "abc", ObservationID: "def", Incoming: []string{"салам"}, Reply: "И вам салам", Parts: []string{"И вам салам"}})
 	<-done
-	var total langfuse.Score
-	for _, s := range rec.scores {
-		if s.TraceID != "abc" || s.ObservationID != "def" {
-			t.Errorf("score %s on wrong target: %+v", s.Name, s)
-		}
-		if s.Name == "turn.total" {
-			total = s
-		}
-		if s.Name == "turn.bad_form" && s.DataType != langfuse.ScoreBoolean {
-			t.Errorf("bad_form dataType = %s", s.DataType)
-		}
+	if len(rec.scores) != 1 {
+		t.Fatalf("one score per judge per turn, got %d: %+v", len(rec.scores), rec.scores)
 	}
-	if total.Value != 100 || total.DataType != langfuse.ScoreNumeric {
+	total := rec.scores[0]
+	if total.TraceID != "abc" || total.ObservationID != "def" {
+		t.Errorf("score on wrong target: %+v", total)
+	}
+	if total.Name != "turn.total" || total.Value != 100 || total.DataType != langfuse.ScoreNumeric {
 		t.Errorf("total = %+v", total)
+	}
+	checks, _ := total.Metadata["checks"].(map[string]any)
+	if entry, _ := checks["bad_form"].(map[string]any); entry == nil || entry["value"] != float64(0) {
+		t.Errorf("bad_form missing from metadata.checks: %v", total.Metadata)
+	}
+	if v, _ := total.Metadata["violations"].([]string); len(v) != 0 {
+		t.Errorf("violations = %v", v)
 	}
 	if !strings.Contains(llm.prompt, "салам") {
 		t.Error("prompt did not carry the client text")
@@ -296,10 +298,46 @@ func TestSubmitPostsScores(t *testing.T) {
 func TestSubmitSkipsProbeUsernames(t *testing.T) {
 	llm := &fakeLLM{answer: `{}`}
 	j := New("testdata", llm, &recorder{})
-	j.Submit("roman", Turn{TraceID: "abc", Username: "@dada_roll_probe", Reply: "Счёт у FxPro уже есть?"})
+	for _, user := range []string{"@dada_roll_probe", "qa_target1_07", "@QA_jl13"} {
+		j.Submit("roman", Turn{TraceID: "abc", Username: user, Reply: "Счёт у FxPro уже есть?"})
+	}
 	time.Sleep(50 * time.Millisecond)
 	if llm.prompt != "" {
 		t.Fatal("probe turn reached the llm")
+	}
+}
+
+func TestSubmitMutedUnderBudget(t *testing.T) {
+	llm := &fakeLLM{answer: `{}`}
+	j := New("testdata", llm, &recorder{})
+	j.MuteWhen(func() bool { return true })
+	j.Submit("roman", Turn{TraceID: "abc", Username: "ivan", Reply: "Счёт у FxPro уже есть?"})
+	time.Sleep(50 * time.Millisecond)
+	if llm.prompt != "" {
+		t.Fatal("muted judge still ran")
+	}
+}
+
+func TestFoldViolationsAndReasons(t *testing.T) {
+	spec := loadTestSpec(t)
+	results := []Result{
+		{Name: "turn.bad_opener", Value: 1, Boolean: true, Comment: "opener", Severity: SeverityMinor},
+		{Name: "turn.register_fit", Value: 30, Comment: "too formal", Severity: SeverityMajor},
+		{Name: "turn.politeness", Value: 100, Severity: SeverityMajor},
+		{Name: "turn.bot_suspect", Value: 1, Boolean: true},
+		{Name: "turn.total", Value: 65, Comment: "violations: R10, R20"},
+	}
+	score := spec.fold(Turn{TraceID: "t"}, results)
+	if score.Name != "turn.total" || score.Value != 65 || score.Comment != "violations: R10, R20" {
+		t.Fatalf("score = %+v", score)
+	}
+	got, _ := score.Metadata["violations"].([]string)
+	if strings.Join(got, ",") != "bad_opener,register_fit" {
+		t.Errorf("violations = %v", got)
+	}
+	checks := score.Metadata["checks"].(map[string]any)
+	if checks["register_fit"].(map[string]any)["why"] != "too formal" || checks["bot_suspect"].(map[string]any)["value"] != float64(1) {
+		t.Errorf("checks = %v", checks)
 	}
 }
 
@@ -343,11 +381,13 @@ func TestLoadSpecsRunsEveryJudgeInTheDir(t *testing.T) {
 	j := New("testdata", llm, &recorder{})
 	var mu sync.Mutex
 	names := map[string]float64{}
+	checks := map[string]map[string]any{}
 	done := make(chan struct{}, 2)
 	j.sink = sinkFunc(func(ctx context.Context, s []langfuse.Score) error {
 		mu.Lock()
 		for _, sc := range s {
 			names[sc.Name] = sc.Value
+			checks[sc.Name], _ = sc.Metadata["checks"].(map[string]any)
 		}
 		mu.Unlock()
 		done <- struct{}{}
@@ -356,10 +396,13 @@ func TestLoadSpecsRunsEveryJudgeInTheDir(t *testing.T) {
 	j.Submit("duo", Turn{TraceID: "abc", Incoming: []string{"да"}, Reply: "Подходит тебе такой формат?", Parts: []string{"Подходит тебе такой формат?"}})
 	<-done
 	<-done
-	if names["funnel.recall"] != 80 || names["funnel.total"] != 75 || names["turn.total"] != 100 {
+	if names["funnel.total"] != 75 || names["turn.total"] != 100 {
 		t.Errorf("scores = %v", names)
 	}
-	if _, ok := names["funnel.tier_wrong"]; ok {
+	if recall, _ := checks["funnel.total"]["recall"].(map[string]any); recall == nil || recall["value"] != float64(80) {
+		t.Errorf("funnel checks = %v", checks["funnel.total"])
+	}
+	if _, ok := checks["funnel.total"]["tier_wrong"]; ok {
 		t.Error("tier_wrong scored while goal_named is false")
 	}
 }

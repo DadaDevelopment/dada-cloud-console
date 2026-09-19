@@ -42,3 +42,32 @@ func TestA2AMetadataOmittedWhenNothingKnown(t *testing.T) {
 		t.Fatalf("metadata = %v, want nil", got)
 	}
 }
+
+// TestA2ASendMutesTelemetryOverBudget: while the Langfuse budget guard reports
+// exceeded, every request tells the agent to keep the turn out of Langfuse;
+// once it clears, the flag disappears.
+func TestA2ASendMutesTelemetryOverBudget(t *testing.T) {
+	agent := &fakeAgent{t: t, replies: []string{completedReply, completedReply}}
+	srv := httptest.NewServer(agent.handler())
+	defer srv.Close()
+
+	over := true
+	client := newTestA2AClient(srv.URL)
+	client.telemetryOff = func() bool { return over }
+	if _, err := client.Send(context.Background(), testRun()); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	over = false
+	if _, err := client.Send(context.Background(), testRun()); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if len(agent.requests) != 2 {
+		t.Fatalf("requests = %d, want 2", len(agent.requests))
+	}
+	if got := agent.requests[0].Metadata["dada.telemetry"]; got != "off" {
+		t.Errorf("over budget: dada.telemetry = %v, want off", got)
+	}
+	if _, ok := agent.requests[1].Metadata["dada.telemetry"]; ok {
+		t.Errorf("under budget: dada.telemetry still set: %v", agent.requests[1].Metadata)
+	}
+}

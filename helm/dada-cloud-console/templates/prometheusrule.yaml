@@ -404,4 +404,34 @@ spec:
               remaining open shards. That is the intended state while draining or migrating,
               but if it is the last tenant shard, placement has nowhere left to go. Check the
               db_shards registry and /admin/db-shards.
+    - name: dada-cloud-console.langfuse
+      rules:
+        - alert: DadaLangfuseBudgetExceeded
+          expr: max by (namespace, service) (dada_langfuse_budget_exceeded) > 0
+          for: 1m
+          keep_firing_for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: "Langfuse unit budget exceeded, new traces and scores are muted"
+            description: >-
+              The support-agent Langfuse project is over its unit budget (traces + observations
+              + scores). The agent runtime now sends dada.telemetry=off to the agents and the
+              judge posts no scores, so every turn from here is invisible in Langfuse until the
+              window rolls over. Find the emitter: dada_langfuse_units{window="day"} against
+              dada_langfuse_units_limit, then the Langfuse v2 metrics API by userId (qa_*,
+              *_probe, eval_* are synthetic and must never reach the project). The month cap
+              is the plan's 50k units.
+        - alert: DadaLangfuseBudgetPollStale
+          expr: max by (namespace, service) (dada_langfuse_budget_poll_age_seconds) > 3600
+          for: 10m
+          keep_firing_for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Langfuse budget guard has not read usage for {{`{{ $value | humanizeDuration }}`}}"
+            description: >-
+              The guard keeps its last verdict when Langfuse does not answer, so a stale poll
+              means the mute may be wrong in either direction. Check agent-runtime logs for
+              "langfuse budget" and the Langfuse API from the pod.
 {{- end }}

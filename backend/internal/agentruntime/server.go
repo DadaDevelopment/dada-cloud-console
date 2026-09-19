@@ -10,9 +10,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dada-tuda/console/backend/internal/langfusebudget"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog/log"
 )
 
@@ -26,6 +28,7 @@ type Server struct {
 	operator       *OperatorNotifier
 	outbound       ChannelOutbound
 	pauseSyncLocks [64]sync.Mutex
+	budget         *langfusebudget.Guard
 }
 
 func NewServer(pool *pgxpool.Pool, gitopsBasePath string) *Server {
@@ -52,10 +55,13 @@ func NewServer(pool *pgxpool.Pool, gitopsBasePath string) *Server {
 
 	runtime.factSkills = ParseFactSkills(os.Getenv("AGENT_FACT_SKILLS"))
 	runtime.linkAllowlist = ParseLinkAllowlist(os.Getenv("AGENT_REPLY_LINK_ALLOWLIST"))
-	runtime.judge = judgeFromEnv(gitopsBasePath)
+	lf := langfuseFromEnv()
+	budget := langfusebudget.New(lf)
+	a2a.(*httpA2AClient).telemetryOff = budget.Exceeded
+	runtime.judge = judgeFromEnv(gitopsBasePath, lf, budget)
 	token := os.Getenv("AGENT_RUNTIME_TOKEN")
 	runtime.contextKey = []byte(token)
-	srv := &Server{runtime: runtime, pool: pool, a2a: a2a, token: token, pauseCRM: NewHTTPPauseCRM(os.Getenv("AGENT_PAUSE_CRM_URL"), os.Getenv("AGENT_PAUSE_CRM_TOKEN"), os.Getenv("AGENT_PAUSE_CRM_STATUS"))}
+	srv := &Server{runtime: runtime, pool: pool, a2a: a2a, token: token, budget: budget, pauseCRM: NewHTTPPauseCRM(os.Getenv("AGENT_PAUSE_CRM_URL"), os.Getenv("AGENT_PAUSE_CRM_TOKEN"), os.Getenv("AGENT_PAUSE_CRM_STATUS"))}
 	srv.operator = NewOperatorNotifier(pool, os.Getenv("AGENT_ESCALATION_OPERATOR"), os.Getenv("TG_GATEWAY_OUTBOUND_URL"))
 	if url := os.Getenv("TG_GATEWAY_OUTBOUND_URL"); url != "" {
 		srv.outbound = NewHTTPChannelOutbound(url)
@@ -98,10 +104,22 @@ func (s *Server) StartIdleScheduler(ctx context.Context, idleTickSeconds int, ou
 	log.Info().Int("tick_seconds", idleTickSeconds).Bool("outbound", outboundURL != "").Msg("agentruntime: idle scheduler started")
 }
 
+// StartBudgetGuard polls the Langfuse unit budget until ctx ends; without
+// Langfuse keys there is no guard and nothing to poll.
+func (s *Server) StartBudgetGuard(ctx context.Context) {
+	if s.budget == nil {
+		log.Info().Msg("agentruntime: langfuse budget guard off (no keys)")
+		return
+	}
+	go s.budget.Run(ctx)
+	log.Info().Msg("agentruntime: langfuse budget guard started")
+}
+
 func (s *Server) Handler() http.Handler {
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.GET("/health", s.handleHealth)
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	protected := r.Group("/")
 	protected.Use(func(c *gin.Context) {
 		supplied := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")

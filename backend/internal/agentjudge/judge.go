@@ -29,7 +29,10 @@ type Result struct {
 }
 
 // Judge scores turns of the agents whose package ships a judge spec under
-// <basePath>/agents/<agent>/judge.
+// <basePath>/agents/<agent>/judge. Each judge posts one Langfuse score per
+// turn (its total, criteria and signals in the score metadata): Langfuse
+// bills a unit per score, and the 30-odd per-criterion scores of the first
+// version were more than half of the project's monthly quota.
 type Judge struct {
 	basePath  string
 	llm       LLM
@@ -40,6 +43,7 @@ type Judge struct {
 	mu        sync.Mutex
 	specs     map[string][]*Spec
 	missing   map[string]bool
+	muted     func() bool
 }
 
 type scoreJob struct {
@@ -100,9 +104,17 @@ func (j *Judge) Enabled(agent string) bool {
 	return j != nil && len(j.agentSpecs(agent)) > 0
 }
 
+// MuteWhen installs the budget check: while it reports true no turn is
+// judged, so no score is posted.
+func (j *Judge) MuteWhen(muted func() bool) {
+	if j != nil {
+		j.muted = muted
+	}
+}
+
 // Submit scores the turn on its own goroutine and never reports back.
 func (j *Judge) Submit(agent string, t Turn) {
-	if j == nil || t.TraceID == "" {
+	if j == nil || t.TraceID == "" || (j.muted != nil && j.muted()) {
 		return
 	}
 	for _, spec := range j.agentSpecs(agent) {
@@ -125,20 +137,40 @@ func (j *Judge) submitSpec(agent string, spec *Spec, t Turn) {
 		if err != nil {
 			log.Warn().Err(err).Str("agent", agent).Str("judge", spec.Name).Str("trace", t.TraceID).Msg("agentjudge: llm part failed, code scores only")
 		}
-		scores := make([]langfuse.Score, 0, len(results))
-		for _, r := range results {
-			score := langfuse.Score{TraceID: t.TraceID, ObservationID: t.ObservationID, Name: r.Name, Value: r.Value, Comment: r.Comment, DataType: langfuse.ScoreNumeric}
-			if r.Boolean {
-				score.DataType = langfuse.ScoreBoolean
-			}
-			scores = append(scores, score)
-		}
+		scores := []langfuse.Score{spec.fold(t, results)}
 		select {
 		case j.queue <- scoreJob{trace: t.TraceID, scores: scores}:
 		default:
 			log.Warn().Str("judge", spec.Name).Str("trace", t.TraceID).Int("scores", len(scores)).Msg("agentjudge: score queue full, turn dropped")
 		}
 	}()
+}
+
+// fold packs the run into the one score Langfuse gets: the total, with every
+// criterion and signal under metadata.checks (value, and the judge's reason
+// when it gave one) and the violated ids under metadata.violations.
+func (s *Spec) fold(t Turn, results []Result) langfuse.Score {
+	checks := map[string]any{}
+	violations := []string{}
+	total := langfuse.Score{TraceID: t.TraceID, ObservationID: t.ObservationID, Name: s.ScoreName(s.Total.Score), DataType: langfuse.ScoreNumeric}
+	for _, r := range results {
+		if r.Name == total.Name {
+			total.Value, total.Comment = r.Value, r.Comment
+			continue
+		}
+		id := strings.TrimPrefix(r.Name, s.Name+".")
+		entry := map[string]any{"value": r.Value}
+		if r.Comment != "" {
+			entry["why"] = r.Comment
+		}
+		checks[id] = entry
+		if r.Severity != "" && (r.Boolean && r.Value == 1 || !r.Boolean && r.Value < s.Total.FailBelow) {
+			violations = append(violations, id)
+		}
+	}
+	sort.Strings(violations)
+	total.Metadata = map[string]any{"checks": checks, "violations": violations}
+	return total
 }
 
 // Run evaluates the code criteria, makes the one LLM call and folds both into

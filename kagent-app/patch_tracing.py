@@ -79,11 +79,13 @@ ANCHOR_EXPORTER = (
     "            )\n"
 )
 PATCHED_EXPORTER = (
-    "            from kagent.core.tracing._dada import exporter_headers\n"
+    "            from kagent.core.tracing._dada import MutingSpanExporter, exporter_headers\n"
     "\n"
     "            processor = BatchSpanProcessor(\n"
-    "                _create_span_exporter(\n"
-    "                    endpoint=trace_endpoint, timeout=trace_timeout_seconds, headers=exporter_headers(trace_endpoint)\n"
+    "                MutingSpanExporter(\n"
+    "                    _create_span_exporter(\n"
+    "                        endpoint=trace_endpoint, timeout=trace_timeout_seconds, headers=exporter_headers(trace_endpoint)\n"
+    "                    )\n"
     "                )\n"
     "            )\n"
 )
@@ -129,11 +131,6 @@ ANCHOR_EXEC_BEGIN = "        context_token = set_kagent_span_attributes(span_att
 PATCHED_EXEC_BEGIN = (
     "        dada_tracing.begin_turn(context, run_args, span_attributes)\n"
     "        context_token = set_kagent_span_attributes(span_attributes)\n"
-)
-ANCHOR_EXEC_EVENT = "                        task_result_aggregator.process_event(a2a_event)\n"
-PATCHED_EXEC_EVENT = (
-    "                        task_result_aggregator.process_event(a2a_event)\n"
-    "                        dada_tracing.note_event(task_result_aggregator.task_status_message)\n"
 )
 ANCHOR_EXEC_END = "        # publish the task result event - this is final\n"
 PATCHED_EXEC_END = (
@@ -220,7 +217,6 @@ def main() -> None:
         [
             (ANCHOR_EXEC_IMPORT, PATCHED_EXEC_IMPORT),
             (ANCHOR_EXEC_BEGIN, PATCHED_EXEC_BEGIN),
-            (ANCHOR_EXEC_EVENT, PATCHED_EXEC_EVENT),
             (ANCHOR_EXEC_END, PATCHED_EXEC_END),
             (ANCHOR_EXEC_FAIL, PATCHED_EXEC_FAIL),
         ],
