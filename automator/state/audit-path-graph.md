@@ -1,68 +1,95 @@
 # Audit path graph (перезаписывается каждый цикл разбора)
 
-## Окно этого разбора: 2026-09-17 (sess-0917a), дельта с 09-16 + сквозной разбор artem
+## Окно этого разбора: 2026-09-20 (sess-0920a), скользящие 30 дней, 16 новых юзеров
 
-## Новые юзеры за окно
-0 (live psql: users created_at > 2026-09-16 = NONE). Разбор = сквозной путь платёжно-мотивированного юзера.
+## Главный вывод окна
+Из 16 новых пользователей за 30 дней **5 (31%) закончили путь без единого живого приложения**
+[live psql: `resource_snapshots kind='App' phase<>'Orphaned'`] — самая крупная течь окна.
+Три из пяти (`saravananofficial13`, `ivakinavv23`, `y4ndex.danila`) уперлись в один класс:
+`BuildFinished failure` с `fail_reason='framework_undetected'`/`dockerfile_build_failed`
+[live psql `builds.fail_reason`] — сборщик не распознаёт репозиторий, и это последнее, что они
+видят. Класс «пустая папка с html» чинили 09-10 (`86d64424`), но обычные node/python-репо без
+манифеста всё ещё режутся тем же кодом. Ещё двое утекли до первого деплоя: `dada-tuda.ru1@buss.gq`
+дважды кликнул «загрузить» без единого `UploadSourceArchive` в аудите (дыра инструментации),
+`staffybot@mail.ru` утонул в 30-кратном retry-шторме `VerifyDomainAuthorization` (бэкофф
+`dec39f68` от 09-11 пришёл ПОСЛЕ его инцидента 09-10).
 
-## Случай цикла: artempro2021@bk.ru (fanvk, 3 приложения, три canceled-платежа) - ПЕРВЫЙ ДВОЙНОЙ РАЗРЫВ: наш фиксour-side баг закрыл наш же баг
-Цепочка 09-10 12:25-12:31 [live psql ux_events, user 4b1b8d89]:
-apps/fanvk (recovery.apps.view) -> apps (recovery.apps.view) -> **recovery.apps.click.payment_recurring_forbidden** 12:29:54 (from=/apps)
--> path=/projects/undefined/billing x4 (12:29:54-12:30:01) -> a:Обзор -> /projects/undefined -> a:Биллинг -> снова /projects/undefined/billing
--> тишина. Юзер ХОТЕЛ оплатить; CTA «Перейти к оплате» вёл на /projects/undefined/billing.
+## Цепочки новых юзеров (607 строк аудита) [live psql]
+| email | signup (UTC) | событий | 6-е действие (развилка) | терминальное действие | live app? |
+|---|---|---:|---|---|:---:|
+| tarotreaderhimu@gmail.com | 08-21 13:58 | 19 | StartGitAppInstall | **BuildFinished / failure** | ✅ (с 3-й попытки) |
+| dl592675334@gmail.com | 08-23 18:02 | 28 | StartGitAppInstall | UpdateAppStartCommand / success | ✅ |
+| zqleaders@gmail.com | 08-25 02:58 | 19 | CreateAppServer *(failure×2)* | ViewApps / success | ✅ |
+| m206rv159@yandex.ru | 08-26 04:44 | 65 | StartGitAppInstall | DeployImageVersion / success | ✅ (после 5× CreateServiceDatabase failure) |
+| kof97zip@gmail.com | 08-28 02:48 | 15 | CreateApp | ViewApps / success | ✅ |
+| messiajit4@gmail.com | 08-28 04:45 | 45 | StartGitAppInstall | ViewApp / success | ✅ |
+| saravananofficial13@gmail.com | 09-02 05:27 | 16 | StartGitAppInstall | **BuildFinished / failure** | ❌ |
+| wgck@sls.xx.kg | 09-03 01:36 | 81 | StartGitAppInstall | ViewApps / success | ✅ |
+| ivakinavv23@yandex.ru | 09-03 08:00 | 18 | CreateProject (2-й) | ViewApp / success (после 2× TriggerAutofix failure) | ❌ |
+| yzfy@sls.xx.kg | 09-05 09:07 | 56 | StartGitAppInstall | DeleteApp / success (удалил оба сам) | ❌ (самоочистка) |
+| masaybasay@yandex.ru | 09-07 12:19 | 33 | StartGitAppInstall | ViewApp / success | ✅ |
+| dada-tuda.ru1@buss.gq | 09-08 03:35 | **7** | SetAIRoutingMode | **CreateProject / success** (тупик) | ❌ |
+| y4ndex.danila@yandex.ru | 09-09 12:03 | **9** | UploadSourceArchive | **BuildFinished / failure** | ❌ |
+| staffybot@mail.ru | 09-10 08:18 | 44 | CreateServiceDatabase | ViewApps / success (после 30× VerifyDomainAuthorization failure) | ❌ |
+| wow83168@gmail.com | 09-10 14:29 | 38 | StartGitAppInstall | ResolveAutofix / success | ✅ |
+| freitorsk@yandex.ru | 09-12 09:52 | 114 | ResolveSolution | ViewApps / success | ✅ |
 
-Причина [code, до фикса]: backend отдаёт payment-prompt БЕЗ project_id (дизайн: CreatePaymentFailed-аудит
-пишется на org, platform_recovery.go:88-96), recoveryPromptHref строил `/projects/${prompt.project_id}/billing`
-без проверки. Тип RecoveryPrompt в types.ts врал: project_id обязан.
+## Кто не сделал ничего
+Нулей по всем таблицам в когорте **нет** [live psql: у всех 16 ≥7 строк audit_events].
+Мёртвый до первого действия — только `dada-tuda.ru1@buss.gq` (7 событий, 2 клика
+`empty-apps-cta-upload` в ux_events, 0 `UploadSourceArchive` в аудите). `yzfy` — не смерть,
+а самоочистка (задеплоил и сам удалил). `agent_chat_messages`/`feedback` join по
+`user_sub=keycloak_sub` дают 0 совпадений для всей когорты; чат за всю историю видел 11
+уникальных `user_sub` из 70 юзеров — это инструментационный факт, не поведенческий.
 
-Отгружено `7f59ca7f` (09-17): project_id/environment_id опциональны по контракту; href строится с fallback
-на projectId из роута (компонент смонтирован в [projectId]/apps); нет ни того ни другого - CTA скрывается.
-+2 теста. Эксперимент E135, measure 2026-10-01.
+## Граф переходов [live psql]
+| from → to | count | distinct users |
+|---|---:|---:|
+| ViewProject → ViewApps | 46 | 16 |
+| CreateProject → ViewProject | 18 | 16 |
+| SignUp → SessionStart | 16 | 16 |
+| SessionStart → CreateProject | 16 | 16 |
+| VerifyDomainAuthorization → VerifyDomainAuthorization | 35 | **2** (retry-петля, не путь) |
+| DeployImageVersion → DeployImageVersion | 19 | 8 |
+| ViewBuildLogs → BuildFinished | 15 | 10 |
+| BuildFinished → CreateApp | 12 | 9 |
+| StartGitAppInstall → FinishGitAppInstall | 9 | 7 |
+| ConnectGitRepo → TriggerBuild | 9 | 8 |
 
-## Терминальные действия новых юзеров (сканирование окна 14д, live psql)
-| исход | кто |
-|---|---|
-| ResolveAutofix success | wow83168 (nodejs-argo, 09-10) - из graph 09-16; PR-нотис-фикс b6a1d7a1 в проде, замер E134 10-07 |
-| BuildFinished failure | y4ndex.danila (smirad), saravananofficial13, tarotreaderhimu (класс известен) |
-| VerifyDomainAuthorization failure | staffybot (ACME pending, норм-стадия по ops-handoff 09-16) |
-| TriggerAutofix failure | ivakinavv23 (jkjk) |
-| InstallSolution failure | kkartov |
-| CreateProject | dada-tuda.ru1@buss.gq |
+**Первое действие после регистрации.** SignUp → SessionStart (16/16) → CreateProject pending
+(16/16) → ViewProject (16/16) → ViewApps (16/16) → развилка на rn6: CreateProject success 10/16,
+StartGitAppInstall 4/16, CreateServiceDatabase 1/16, SetAIRoutingMode 1/16. Онбординг до 5-го
+шага детерминирован; первая реальная развилка — шаг 6.
 
-## Панель/платформа
-not_ready-строки панели - юзерские 503 (wow83168, gulyaev) и unmaintained-хвосты; платформенных причин нет (ops-handoff 09-16).
+**Терминальное действие.** ViewApps/ViewApp success 8/16 (50%), BuildFinished failure 3,
+DeployImageVersion success 1, UpdateAppStartCommand success 1, DeleteApp 1, CreateProject
+success 1, ResolveAutofix success 1. Крупнейший кластер заканчивает на пассивном просмотре,
+не на ошибке — причина остановки структурно невидима (см. долги инструментации).
 
-## НОВОЕ инструментирование, заведённое этим циклом
-(1) **Битые внутренние URL как отдельный класс разрыва.** Паттерн `path LIKE '/projects/undefined%'` в
-ux_events = юзер ушёл по битой внутренней ссылке. До сегодня нигде не считался. Проверка ретроспективой:
-всего 4 события за всю историю (все - artem 09-10). Метрика должна оставаться 0; любое ненулевое значение =
-P2-баг битой ссылки, искать источник по props.from. (2) **Revenue leak чекаута** - bl 0508 (H03):
-инструментирование billing_checkout_started/abandoned, замер возврата artem после фикса.
+## Вывод цикла, ушедший в код (fee1bb36)
+Квотная стена 09-25 у 8 орг [live psql billing_accounts]. CTA всех ЧЕТЫРЁХ квотных поверхностей
+(grace-banner, spend-widget, db-quota-panel, upgrade-dialog fallback) вели на `/pricing`, чьи
+кнопки тарифов = `consoleHref('/login')`, а `/login` для залогиненного = `router.replace('/projects')`
+[code]. Мёртвое кольцо: от предупреждения о стене не было пути к чекауту. Переведены на
+`/projects/<id>/billing#billing-plans`; нет projectId — CTA скрывается (а не строится на undefined).
+Плюс: баннер показывался только over-limit (1 орг из 8), теперь говорит и с at-limit группой
+(7 из 8 сидят ровно на 1/1 и встретили бы стену голым 403).
 
-## Вывод цикла
-Разрыв №2 на пути artem к оплате устранён в коде (7f59ca7f); жди возврата, не строй нового: metрика H03
-(первый ЧУЖОЙ succeeded-платёж) закрытых дыр больше не имеет по коду [code: recoveryPromptHref больше не
-может вернуть /projects/undefined]. Следующий разрыв того же юзера = на стороне чекаута YooKassa (0508).
+## Долги инструментации (чего audit_events не может ответить)
+1. Неуспешные логины/OAuth-callback не пишутся вообще — нужен `AuthCallbackFailed` с
+   `outcome='failure'`, симметрично SignUp. 44% когорты словили `auth_callback_failed`
+   [live psql ux_events], все вошли потом — самовосстанавливающийся race, но аудит слеп.
+2. Пассивный уход (50% терминальных) неотличим от «вернусь позже» — нужен join с
+   `ux_events.event_type IN ('visibility','nav_leave')` в регулярном path-graph.
+3. Клик Upload → аудит-строка разрывается при клиентской ошибке/отмене: нужен
+   `UploadSourceArchiveAttempted` в `backend/internal/api/uploadsource.go:60-66` ДО валидации.
+4. Домен на проект без App/PublicApi не помечается — нужен `target_resource_exists` в metadata
+   при `AddDomainAuthorization`.
+5. `CreateAgent` не связан с визитом `/agents`: 5 визитов, 0 CreateAgent за 30 дней [live psql].
 
----
+## Контроль-метрики (держать на нуле)
+- `ux_events path LIKE '/projects/undefined%'` = 0 за окно (фикс 7f59ca7f жив).
+- Любое ненулевое значение = P2-баг битой внутренней ссылки, источник искать по props.from.
 
-# 2026-09-18 sess-0918a — artem-путь: revenue-leak закрыт в измеримом слое; стена 09-25 следующая точка
-
-## Путь artempro2021@bk.ru после фикса 7f59ca7f (3 сессии, live ux_events)
-- 09-14 18:18: /callback → /projects → /apps (recovery.apps.view 18:18:41) → НЕ кликнул CTA → fanvk-апп → app_latest_build:success → меню → Выйти. Сессия 8с на решение по плашке.
-- 09-15 14:14: /apps (recovery.apps.view) → fanvk → клик a:fanclub.run.place (свой живой сайт) → ушёл.
-- 09-17 11:28: recovery.apps.view → тишина дальше (0 events).
-
-## Выводы
-1. Плашка recovery ВИДНА (view пишется 3/3 сессий), CTA не кликается ни разу - но и dismiss нет:
-   юзер не отвергает предложение, он каждый раз уходит смотреть СВОЙ апп. Битых ссылок по-прежнему
-   0 (метрика фикса 7f59ca7f держится).
-2. Разрыв сместился: не «CTA ведёт в никуда», а «биллинг не в пути юзера». Насильно путь появится
-   09-25 (квотная стена у всех активных орг, live billing_accounts) - там же теперь стоит полная
-   инструментация клика/редиректа/ошибки (2171f58c) и Метрика-цель 637214589.
-3. Контроль-метрика битых ссылок: ux_events /projects/undefined/billing = 0 за окно (фикс жив).
-4. Инструментационный долг, закрытый здесь же: apps_row:lastmile_chip (565f1641) - E158 критерий-2
-   больше не слеп.
-
-## Граф переходов artem (3 сессии)
-recovery.apps.view → ViewApp(fanvk) 3/3; ViewApp → клик своего домена 1/3; CTA→billing 0/3; dismiss 0/3.
+*Все цифры — прямыми запросами psql к прод-БД через `kubectl exec -n databases postgresql-0`
+в этом цикле [live psql]. Ничего не экстраполировано.*
