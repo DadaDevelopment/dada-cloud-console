@@ -20,8 +20,11 @@ func (f fakeA2AIdle) Send(ctx context.Context, run AgentRunRequest) (string, err
 func TestInvocationEnvelope(t *testing.T) {
 	r := idleHookRow{IdleMinutes: 31, HookMessage: "Спроси про KYC."}
 	got := invocationEnvelope(r)
-	if !strings.Contains(got, "[invocation: cause=conversation_idle, idle=31m]") {
-		t.Fatalf("envelope must carry cause and idle duration, got %q", got)
+	if !strings.Contains(got, "[invocation: cause=conversation_idle, idle=31m, step=1]") {
+		t.Fatalf("envelope must carry cause, idle duration and the 1-based ladder step, got %q", got)
+	}
+	if third := invocationEnvelope(idleHookRow{IdleMinutes: 1440, Step: 2}); !strings.Contains(third, "step=3]") {
+		t.Fatalf("step in the envelope is the number of the follow-up being written, got %q", third)
 	}
 	if !strings.Contains(got, "Спроси про KYC.") {
 		t.Fatalf("envelope must carry the hook instruction, got %q", got)
@@ -31,6 +34,227 @@ func TestInvocationEnvelope(t *testing.T) {
 	if !strings.Contains(def, "follow-up") {
 		t.Fatalf("empty hook message must fall back to the default instruction, got %q", def)
 	}
+}
+
+// idleDaytime is a Moscow lunchtime: inside the quiet-hours gap and inside a
+// send window, so every ladder step is allowed and the tests do not depend on
+// the wall clock they run at.
+func idleDaytime() time.Time {
+	return time.Date(2026, 9, 21, 13, 15, 0, 0, idleSendLocation)
+}
+
+func TestIdleStepAllowedAt(t *testing.T) {
+	at := func(hour int) time.Time { return time.Date(2026, 9, 21, hour, 30, 0, 0, idleSendLocation) }
+	cases := []struct {
+		step int
+		hour int
+		want bool
+	}{
+		{0, 10, true}, {0, 23, false}, {0, 3, false}, {0, 7, true},
+		{1, 16, true}, {1, 0, false},
+		{2, 16, false}, {2, 19, true}, {2, 7, true}, {2, 8, true}, {2, 13, true}, {2, 23, false},
+		{5, 12, false}, {5, 13, true},
+	}
+	for _, c := range cases {
+		if got := idleStepAllowedAt(c.step, at(c.hour)); got != c.want {
+			t.Errorf("step %d at %02d:30 MSK: got %v want %v", c.step, c.hour, got, c.want)
+		}
+	}
+	utc := time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC)
+	if !idleStepAllowedAt(2, utc) {
+		t.Fatalf("10:00 UTC is 13:00 Moscow, a send window")
+	}
+}
+
+func TestIdleScheduler_LadderFiresEachStepOnceAndResetsOnInbound(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	pool := store.(*pgStoreAlias).pool
+
+	agentName := "idle-ladder-" + uuid.NewString()[:8]
+	conv, _, err := store.GetOrCreateConversation(ctx, agentName, "telegram", "chat-ladder", Actor{ExternalID: "u1"})
+	require_NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM conversations WHERE agent_name = $1`, agentName)
+		_, _ = pool.Exec(ctx, `DELETE FROM lifecycle_hooks WHERE agent_name = $1`, agentName)
+	})
+	_, err = pool.Exec(ctx, `
+		INSERT INTO lifecycle_hooks (agent_name, name, trigger_event, trigger_config, action_type, action_config)
+		VALUES ($1, 'follow-up', 'conversation.idle', '{"ladder_minutes":[20,40,120]}', 'schedule', '{"agent_message":"дожим"}')
+	`, agentName)
+	require_NoError(t, err)
+
+	var envelopes []string
+	a2a := fakeA2AIdleCapture{reply: "Получилось пройти регистрацию?", seen: &envelopes}
+	var delivered int
+	outbound := &fakeOutbound{onSend: func(agent, chat, text string) { delivered++ }}
+	rt := NewRuntime(store, &noopHooks{}, a2a, nil)
+	rt.contextKey = []byte(testRuntimeToken)
+	sched := NewIdleScheduler(pool, rt, a2a, outbound, time.Second)
+	sched.now = idleDaytime
+
+	age := func(minutes int) {
+		_, err := pool.Exec(ctx, `UPDATE conversations SET updated_at = NOW() - make_interval(mins => $2) WHERE id = $1`, conv.ID, minutes)
+		require_NoError(t, err)
+	}
+	tick := func(label string) {
+		if err := sched.Tick(ctx); err != nil {
+			t.Fatalf("%s: %v", label, err)
+		}
+	}
+
+	age(10)
+	tick("too early")
+	if delivered != 0 {
+		t.Fatalf("10 minutes of silence must not reach the 20-minute first step, got %d", delivered)
+	}
+
+	age(25)
+	tick("step 1")
+	tick("step 1 repeat")
+	if delivered != 1 {
+		t.Fatalf("first step fires once per silence, got %d", delivered)
+	}
+	if len(envelopes) != 1 || !strings.Contains(envelopes[0], "idle=20m, step=1]") {
+		t.Fatalf("first envelope must name step 1 with its own wait, got %v", envelopes)
+	}
+
+	age(30)
+	tick("step 2 too early")
+	if delivered != 1 {
+		t.Fatalf("second step waits 40 minutes after the first follow-up, got %d deliveries", delivered)
+	}
+	age(45)
+	tick("step 2")
+	if delivered != 2 || !strings.Contains(envelopes[1], "idle=40m, step=2]") {
+		t.Fatalf("second step must fire after its own wait, got %d deliveries %v", delivered, envelopes)
+	}
+
+	age(3 * 24 * 60)
+	tick("step 3 beyond first-step reach")
+	if delivered != 3 || !strings.Contains(envelopes[2], "step=3]") {
+		t.Fatalf("max_idle_minutes bounds the first step only, got %d deliveries %v", delivered, envelopes)
+	}
+
+	age(3 * 24 * 60)
+	tick("ladder exhausted")
+	if delivered != 3 {
+		t.Fatalf("a three-step ladder must stop after three follow-ups, got %d", delivered)
+	}
+
+	if err := store.ClearIdleFlag(ctx, conv.ID); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	age(25)
+	tick("restart")
+	if delivered != 4 || !strings.Contains(envelopes[3], "step=1]") {
+		t.Fatalf("an inbound message restarts the ladder from step 1, got %d deliveries %v", delivered, envelopes)
+	}
+}
+
+func TestIdleScheduler_HoldsStepsOutsideSendWindow(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	pool := store.(*pgStoreAlias).pool
+
+	agentName := "idle-window-" + uuid.NewString()[:8]
+	conv, _, err := store.GetOrCreateConversation(ctx, agentName, "telegram", "chat-window", Actor{ExternalID: "u1"})
+	require_NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM conversations WHERE agent_name = $1`, agentName)
+		_, _ = pool.Exec(ctx, `DELETE FROM lifecycle_hooks WHERE agent_name = $1`, agentName)
+	})
+	_, err = pool.Exec(ctx, `
+		INSERT INTO lifecycle_hooks (agent_name, name, trigger_event, trigger_config, action_type, action_config)
+		VALUES ($1, 'follow-up', 'conversation.idle', '{"ladder_minutes":[0]}', 'schedule', '{}')
+	`, agentName)
+	require_NoError(t, err)
+	_, err = pool.Exec(ctx, `UPDATE conversations SET updated_at = NOW() - interval '5 minutes' WHERE id = $1`, conv.ID)
+	require_NoError(t, err)
+
+	var delivered int
+	outbound := &fakeOutbound{onSend: func(agent, chat, text string) { delivered++ }}
+	rt := NewRuntime(store, &noopHooks{}, fakeA2AIdle{reply: "Продолжим?"}, nil)
+	rt.contextKey = []byte(testRuntimeToken)
+	sched := NewIdleScheduler(pool, rt, fakeA2AIdle{reply: "Продолжим?"}, outbound, time.Second)
+
+	sched.now = func() time.Time { return time.Date(2026, 9, 21, 2, 0, 0, 0, idleSendLocation) }
+	if err := sched.Tick(ctx); err != nil {
+		t.Fatalf("night tick: %v", err)
+	}
+	if delivered != 0 {
+		t.Fatalf("no follow-up goes out at night, got %d", delivered)
+	}
+	sched.now = idleDaytime
+	if err := sched.Tick(ctx); err != nil {
+		t.Fatalf("day tick: %v", err)
+	}
+	if delivered != 1 {
+		t.Fatalf("the held step fires on the first daytime tick, got %d", delivered)
+	}
+}
+
+func TestIdleScheduler_SkipsGroupsWhenDirectOnlyAndPausedConversations(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	pool := store.(*pgStoreAlias).pool
+
+	agentName := "idle-direct-" + uuid.NewString()[:8]
+	direct, _, err := store.GetOrCreateConversation(ctx, agentName, "telegram", "1482108441", Actor{ExternalID: "1482108441"})
+	require_NoError(t, err)
+	group, _, err := store.GetOrCreateConversation(ctx, agentName, "telegram", "-90010001351", Actor{ExternalID: "90010001351"})
+	require_NoError(t, err)
+	paused, _, err := store.GetOrCreateConversation(ctx, agentName, "telegram", "5228790663", Actor{ExternalID: "5228790663"})
+	require_NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM conversations WHERE agent_name = $1`, agentName)
+		_, _ = pool.Exec(ctx, `DELETE FROM lifecycle_hooks WHERE agent_name = $1`, agentName)
+	})
+	for _, id := range []uuid.UUID{direct.ID, group.ID, paused.ID} {
+		_, err = pool.Exec(ctx, `UPDATE conversations SET updated_at = NOW() - interval '30 minutes' WHERE id = $1`, id)
+		require_NoError(t, err)
+	}
+	rt := NewRuntime(store, &noopHooks{}, fakeA2AIdle{reply: "Продолжим?"}, nil)
+	rt.contextKey = []byte(testRuntimeToken)
+	if _, err := rt.states.PauseAgent(ctx, paused.ID, "operator"); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	_, err = pool.Exec(ctx, `
+		INSERT INTO lifecycle_hooks (agent_name, name, trigger_event, trigger_config, action_type, action_config)
+		VALUES ($1, 'follow-up', 'conversation.idle', '{"ladder_minutes":[20],"direct_only":true}', 'schedule', '{}')
+	`, agentName)
+	require_NoError(t, err)
+
+	var chats []string
+	outbound := &fakeOutbound{onSend: func(agent, chat, text string) { chats = append(chats, chat) }}
+	sched := NewIdleScheduler(pool, rt, fakeA2AIdle{reply: "Продолжим?"}, outbound, time.Second)
+	sched.now = idleDaytime
+	if err := sched.Tick(ctx); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if len(chats) != 1 || chats[0] != "1482108441" {
+		t.Fatalf("direct_only must reach the private chat only, never the group or the paused conversation, got %v", chats)
+	}
+	var groupStep any
+	require_NoError(t, pool.QueryRow(ctx, `SELECT metadata->>'idle_step' FROM conversations WHERE id = $1`, group.ID).Scan(&groupStep))
+	if groupStep != nil {
+		t.Fatalf("a skipped group chat must not be claimed, got idle_step %v", groupStep)
+	}
+}
+
+type fakeA2AIdleCapture struct {
+	reply string
+	seen  *[]string
+}
+
+func (f fakeA2AIdleCapture) Send(ctx context.Context, run AgentRunRequest) (string, error) {
+	for i := len(run.Messages) - 1; i >= 0; i-- {
+		if run.Messages[i].Role == "system" {
+			*f.seen = append(*f.seen, run.Messages[i].Content)
+			break
+		}
+	}
+	return f.reply, nil
 }
 
 func TestIdleScheduler_InvokesOncePerIdlePeriod(t *testing.T) {
@@ -61,6 +285,7 @@ func TestIdleScheduler_InvokesOncePerIdlePeriod(t *testing.T) {
 	rt := NewRuntime(store, &noopHooks{}, fakeA2AIdle{reply: "возвращаюсь к вашему вопросу"}, nil)
 	rt.contextKey = []byte(testRuntimeToken)
 	sched := NewIdleScheduler(store.(*pgStoreAlias).pool, rt, fakeA2AIdle{reply: "возвращаюсь к вашему вопросу"}, outbound, time.Second)
+	sched.now = idleDaytime
 
 	if err := sched.Tick(ctx); err != nil {
 		t.Fatalf("tick 1: %v", err)
@@ -119,6 +344,7 @@ func TestIdleScheduler_SkipsConversationsQuietLongerThanReach(t *testing.T) {
 	rt := NewRuntime(store, &noopHooks{}, fakeA2AIdle{reply: "Получилось зарегистрироваться?"}, nil)
 	rt.contextKey = []byte(testRuntimeToken)
 	sched := NewIdleScheduler(pool, rt, fakeA2AIdle{reply: "Получилось зарегистрироваться?"}, outbound, time.Second)
+	sched.now = idleDaytime
 	if err := sched.Tick(ctx); err != nil {
 		t.Fatalf("tick: %v", err)
 	}
@@ -148,7 +374,7 @@ func TestClearIdleFlag(t *testing.T) {
 	})
 
 	_, err = store.(*pgStoreAlias).pool.Exec(ctx,
-		`UPDATE conversations SET metadata = jsonb_set(metadata, '{idle_fired_at}', '"2026-09-03T00:00:00Z"') WHERE id = $1`, conv.ID)
+		`UPDATE conversations SET metadata = metadata || '{"idle_fired_at":"2026-09-03T00:00:00Z","idle_step":3}' WHERE id = $1`, conv.ID)
 	require_NoError(t, err)
 
 	if err := store.ClearIdleFlag(ctx, conv.ID); err != nil {
@@ -158,6 +384,9 @@ func TestClearIdleFlag(t *testing.T) {
 	require_NoError(t, err)
 	if _, has := got.Metadata["idle_fired_at"]; has {
 		t.Fatalf("idle_fired_at must be gone, got %v", got.Metadata)
+	}
+	if _, has := got.Metadata["idle_step"]; has {
+		t.Fatalf("idle_step must be gone so the ladder restarts, got %v", got.Metadata)
 	}
 }
 

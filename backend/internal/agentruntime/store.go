@@ -418,14 +418,15 @@ func (s *pgStore) FindMessageByChannelID(ctx context.Context, conversationID uui
 	return msg, err
 }
 
-// ClearIdleFlag removes the idle_fired_at metadata key (Agent Harness v2,
-// Step 7): every real inbound user message re-arms the conversation's idle
-// hooks, so a 30-minute follow-up fires once per idle period, not once per
-// conversation lifetime.
+// ClearIdleFlag removes the idle_fired_at and idle_step metadata keys (Agent
+// Harness v2, Step 7): every real inbound user message re-arms the
+// conversation's idle hooks and resets the follow-up ladder to its first
+// step, so the ladder runs once per idle period, not once per conversation
+// lifetime.
 func (s *pgStore) ClearIdleFlag(ctx context.Context, conversationID uuid.UUID) error {
 	_, err := s.pool.Exec(ctx, `
 		UPDATE conversations
-		SET metadata = metadata - 'idle_fired_at'
+		SET metadata = metadata - 'idle_fired_at' - 'idle_step'
 		WHERE id = $1
 	`, conversationID)
 	return err

@@ -48,6 +48,7 @@ type idleHookRow struct {
 	ActorUsername  string
 	IdleMinutes    int
 	HookMessage    string
+	Step           int
 }
 
 // IdleScheduler runs proactive agent invocations for conversations that have
@@ -55,17 +56,22 @@ type idleHookRow struct {
 // are deterministic platform work (this file); the follow-up CONTENT is the
 // agent's job, invoked with an explicit reason rather than a fake user turn.
 //
-// Fire-once semantics live in conversations.metadata.idle_fired_at: the
-// scheduler claims a conversation by writing that key before invoking, so
-// concurrent ticks cannot double-fire, and the next inbound user message
-// clears the key (ProcessMessage), re-arming the hook for the next idle
-// period.
+// A hook is a ladder: trigger_config.ladder_minutes lists how long the
+// conversation must stay quiet before each step fires, measured from the last
+// activity (the customer's message for step 0, our previous follow-up for the
+// rest). conversations.metadata.idle_step counts the steps already sent in
+// the current silence; the scheduler claims a step by incrementing the
+// counter before invoking, so concurrent ticks cannot double-fire, and the
+// next inbound user message resets it (ProcessMessage), re-arming the ladder
+// from the top. A hook without ladder_minutes is a one-step ladder of
+// idle_minutes, which is the pre-ladder behaviour.
 type IdleScheduler struct {
 	pool     *pgxpool.Pool
 	runtime  *Runtime
 	a2a      A2AClient
 	outbound ChannelOutbound
 	interval time.Duration
+	now      func() time.Time
 }
 
 // ChannelOutbound delivers a finished agent reply to the channel the
@@ -80,7 +86,7 @@ func NewIdleScheduler(pool *pgxpool.Pool, runtime *Runtime, a2a A2AClient, outbo
 	if interval <= 0 {
 		interval = idleScanIntervalDefault
 	}
-	return &IdleScheduler{pool: pool, runtime: runtime, a2a: a2a, outbound: outbound, interval: interval}
+	return &IdleScheduler{pool: pool, runtime: runtime, a2a: a2a, outbound: outbound, interval: interval, now: time.Now}
 }
 
 // Run blocks ticking the scheduler until ctx is cancelled.
@@ -105,35 +111,102 @@ func (s *IdleScheduler) Run(ctx context.Context) {
 const idleMaxMinutesDefault = "1440"
 
 // dueIdleHooks joins enabled conversation.idle hooks with conversations that
-// have been quiet past the threshold, no longer than the hook's reach, and are
-// not already claimed by a newer idle_fired_at mark.
+// still have a ladder step left and have been quiet past that step's wait.
+// The reach bound (max_idle_minutes) applies to the first step only: a
+// conversation that already received a follow-up stays on the ladder however
+// long the customer keeps quiet. The ladder falls back to a single
+// idle_minutes step when the hook has no ladder_minutes. Paused conversations
+// (agent_enabled = false) are not candidates: a human owns them. With
+// trigger_config.direct_only the hook skips Telegram groups and channels
+// (negative external ids), which also keeps synthetic eval chats off the
+// ladder: follow-ups are for a private dialogue with one lead.
 const dueIdleHooksSQL = `
-SELECT h.id::text, h.agent_name, c.id::text, c.external_id, c.actor_username,
-       COALESCE((h.trigger_config->>'idle_minutes')::int, 30),
-       COALESCE(h.action_config->>'agent_message', '')
+WITH candidates AS (
+SELECT h.id::text AS hook_id, h.agent_name, c.id::text AS conversation_id, c.external_id, c.actor_username,
+       COALESCE((h.trigger_config->>'idle_minutes')::int, 30) AS idle_minutes,
+       COALESCE(h.action_config->>'agent_message', '') AS agent_message,
+       COALESCE((c.metadata->>'idle_step')::int, 0) AS step,
+       COALESCE(h.trigger_config->'ladder_minutes',
+                jsonb_build_array(COALESCE((h.trigger_config->>'idle_minutes')::int, 30))) AS ladder,
+       COALESCE((h.trigger_config->>'max_idle_minutes')::int, ` + idleMaxMinutesDefault + `) AS max_idle_minutes,
+       c.updated_at
 FROM lifecycle_hooks h
 JOIN conversations c
   ON c.agent_name = h.agent_name
  AND c.status = 'active'
- AND c.updated_at < NOW() - make_interval(mins => COALESCE((h.trigger_config->>'idle_minutes')::int, 30))
- AND c.updated_at > NOW() - make_interval(mins => COALESCE((h.trigger_config->>'max_idle_minutes')::int, ` + idleMaxMinutesDefault + `))
- AND COALESCE(c.metadata->>'idle_fired_at', '') = ''
+ AND (NOT COALESCE((h.trigger_config->>'direct_only')::bool, false) OR c.external_id NOT LIKE '-%')
+LEFT JOIN conversation_runtime_state st ON st.conversation_id = c.id
 WHERE h.trigger_event = 'conversation.idle'
   AND h.enabled = true
   AND h.action_type = 'schedule'
+  AND COALESCE(st.agent_enabled, true)
+)
+SELECT hook_id, agent_name, conversation_id, external_id, actor_username,
+       (ladder->>step)::int, agent_message, step
+FROM candidates
+WHERE jsonb_typeof(ladder) = 'array'
+  AND step < jsonb_array_length(ladder)
+  AND updated_at < NOW() - make_interval(mins => (ladder->>step)::int)
+  AND (step > 0 OR updated_at > NOW() - make_interval(mins => max_idle_minutes))
 LIMIT 50`
 
-// claimIdle marks the conversation as fired. The WHERE clause re-checks the
-// claim so two concurrent ticks cannot both pass: exactly one UPDATE wins.
+// claimIdle advances the conversation to the next ladder step. The WHERE
+// clause re-checks the step so two concurrent ticks cannot both pass: exactly
+// one UPDATE wins. updated_at moves to now so the next step waits its own
+// interval from this follow-up.
 const claimIdleSQL = `
-UPDATE conversations SET metadata = jsonb_set(
-		COALESCE(metadata, '{}'::jsonb), '{idle_fired_at}',
-		to_jsonb(to_char(NOW() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')), true),
+UPDATE conversations SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+		'idle_fired_at', to_char(NOW() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+		'idle_step', $2::int + 1),
 	updated_at = NOW()
-WHERE id = $1 AND COALESCE(metadata->>'idle_fired_at', '') = ''`
+WHERE id = $1 AND COALESCE((metadata->>'idle_step')::int, 0) = $2`
 
-// Tick runs one scheduler pass: find due conversations, claim each, invoke
-// the agent with the idle-reason envelope, persist the turn, deliver.
+// idleSendLocation is the customers' clock: the send windows below are hours
+// in Moscow, where the lead's team and the audience live.
+var idleSendLocation = mustLoadLocation("Europe/Moscow")
+
+// idleQuietFromHour..idleQuietToHour is the night: no follow-up of any step
+// goes out then; the step waits for the morning and fires on the first tick
+// after quiet hours end.
+const (
+	idleQuietFromHour = 23
+	idleQuietToHour   = 7
+)
+
+// idleWindowHours are the daytime slots the lead asked for («окна 7-8, 13:00
+// и 19:00»): steps from idleWindowFromStep on fire only inside them, so the
+// evening and daily nudges land when people read Telegram, not whenever the
+// interval happens to expire. The first two steps (20 minutes, an hour) stay
+// on their own timers: they follow up on a conversation that was live minutes
+// ago.
+var idleWindowHours = map[int]bool{7: true, 8: true, 13: true, 19: true}
+
+const idleWindowFromStep = 2
+
+func mustLoadLocation(name string) *time.Location {
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return time.FixedZone("MSK", 3*60*60)
+	}
+	return loc
+}
+
+// idleStepAllowedAt reports whether a ladder step may be sent at the given
+// wall-clock moment.
+func idleStepAllowedAt(step int, at time.Time) bool {
+	hour := at.In(idleSendLocation).Hour()
+	if hour >= idleQuietFromHour || hour < idleQuietToHour {
+		return false
+	}
+	if step >= idleWindowFromStep && !idleWindowHours[hour] {
+		return false
+	}
+	return true
+}
+
+// Tick runs one scheduler pass: find due conversations, skip those outside
+// their send window, claim each remaining step, invoke the agent with the
+// idle-reason envelope, persist the turn, deliver.
 func (s *IdleScheduler) Tick(ctx context.Context) error {
 	rows, err := s.pool.Query(ctx, dueIdleHooksSQL)
 	if err != nil {
@@ -142,7 +215,7 @@ func (s *IdleScheduler) Tick(ctx context.Context) error {
 	var due []idleHookRow
 	for rows.Next() {
 		var r idleHookRow
-		if err := rows.Scan(&r.HookID, &r.AgentName, &r.ConversationID, &r.ChatExternalID, &r.ActorUsername, &r.IdleMinutes, &r.HookMessage); err != nil {
+		if err := rows.Scan(&r.HookID, &r.AgentName, &r.ConversationID, &r.ChatExternalID, &r.ActorUsername, &r.IdleMinutes, &r.HookMessage, &r.Step); err != nil {
 			rows.Close()
 			return fmt.Errorf("scan idle hook row: %w", err)
 		}
@@ -153,8 +226,12 @@ func (s *IdleScheduler) Tick(ctx context.Context) error {
 		return err
 	}
 
+	now := s.now()
 	for _, r := range due {
-		tag, err := s.pool.Exec(ctx, claimIdleSQL, r.ConversationID)
+		if !idleStepAllowedAt(r.Step, now) {
+			continue
+		}
+		tag, err := s.pool.Exec(ctx, claimIdleSQL, r.ConversationID, r.Step)
 		if err != nil {
 			log.Warn().Err(err).Str("conversation", r.ConversationID).Msg("agentruntime: idle claim failed")
 			continue
@@ -169,10 +246,12 @@ func (s *IdleScheduler) Tick(ctx context.Context) error {
 
 // invocationEnvelope renders the outbound-run reason the agent receives.
 // Owner's spec: the agent must see WHY it was invoked, not a fake user
-// message.
+// message. step is 1-based in the envelope: it is the number of the follow-up
+// the agent is about to write, which is how the continuity skill counts its
+// ladder.
 func invocationEnvelope(r idleHookRow) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("[invocation: cause=conversation_idle, idle=%dm]\n", r.IdleMinutes))
+	sb.WriteString(fmt.Sprintf("[invocation: cause=conversation_idle, idle=%dm, step=%d]\n", r.IdleMinutes, r.Step+1))
 	msg := r.HookMessage
 	if strings.TrimSpace(msg) == "" {
 		msg = "Диалог давно без ответа. Составь короткое уместное follow-up сообщение клиенту: мягко вернись к его последнему вопросу и предложи продолжить."
