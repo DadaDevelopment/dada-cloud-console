@@ -45,6 +45,7 @@ type Criterion struct {
 	Max      int      `yaml:"max"`
 	Message  int      `yaml:"message"`
 	Turn     int      `yaml:"turn"`
+	Allow    []string `yaml:"allow"`
 }
 
 // Signal is a situation label the LLM marks on the client side of the turn.

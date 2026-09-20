@@ -176,6 +176,7 @@ criteria:
     score: bad_form
     check: code
     kind: form
+    allow: ["👍", "🤝", "🤞", "•"]
     type: bool
     severity: minor
     title: Эмодзи, длинное тире, точка в конце, списки, заголовки, жирный

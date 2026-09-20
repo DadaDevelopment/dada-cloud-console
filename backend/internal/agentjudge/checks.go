@@ -135,7 +135,7 @@ func checkMaxLength(c Criterion, t Turn) (bool, string) {
 }
 
 var (
-	reListMarker = regexp.MustCompile(`(?m)^\s*(?:[-*•]|\d+[.)])\s+`)
+	reListMarker = regexp.MustCompile(`(?m)^\s*([-*•]|\d+[.)])\s+`)
 	reHeader     = regexp.MustCompile(`(?m)^\s*#{1,6}\s`)
 	reBold       = regexp.MustCompile(`\*\*[^*\n]+\*\*|__[^_\n]+__`)
 )
@@ -148,14 +148,21 @@ func isEmoji(r rune) bool {
 	return false
 }
 
+// checkForm flags the delivery form the script forbids; “allow“ on the
+// criterion lists exceptions: emoji as themselves («👍») and the word «list»
+// for bullet lists, both of which the lead's verbatim replies carry.
 func checkForm(c Criterion, t Turn) (bool, string) {
+	allowed := map[string]bool{}
+	for _, a := range c.Allow {
+		allowed[strings.TrimSpace(a)] = true
+	}
 	for _, m := range t.messages() {
 		m = strings.TrimSpace(m)
 		if m == "" {
 			continue
 		}
 		for _, r := range m {
-			if isEmoji(r) {
+			if isEmoji(r) && !allowed[string(r)] && r != 0xFE0F && r != 0x200D {
 				return true, "эмодзи " + string(r)
 			}
 		}
@@ -165,7 +172,7 @@ func checkForm(c Criterion, t Turn) (bool, string) {
 		if strings.HasSuffix(m, ".") && !strings.HasSuffix(m, "...") {
 			return true, "точка в конце сообщения"
 		}
-		if reListMarker.MatchString(m) {
+		if mk := reListMarker.FindStringSubmatch(m); mk != nil && !allowed[mk[1]] {
 			return true, "маркированный список"
 		}
 		if reHeader.MatchString(m) {
