@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { billingApi } from "@/lib/api";
 import type { AccountSummary } from "@/lib/api";
+import { quotaPressure, quotaUpgradeHref } from "@/lib/billing-quota";
+import { useProjectContext } from "@/lib/project-context";
+import { trackUxEvent } from "@/lib/ux-telemetry";
 import { useT } from "@/lib/i18n/console/context";
 
 const DISMISS_KEY = "dada_grace_banner_dismissed_until";
@@ -37,8 +40,11 @@ function readDismissed(): string | null {
  * The email sweeper carries the same message; this is the copy that reaches
  * people who never open their mail.
  *
- * It renders only when the account is BOTH inside a grace window and over a
- * limit, so an org that fits in the free tier is never told about a wall it
+ * It renders for accounts inside a grace window that are either already over a
+ * limit or sitting exactly on one. The second case is the larger group and used
+ * to be silent: an account at 1 of 1 apps loses nothing on the deadline, but
+ * the next app it creates is the one refused, and it learned that only from the
+ * 403. An org comfortably under every limit is still never told about a wall it
  * will not hit. Dismissal is remembered per deadline: dismissing the 30-day
  * notice does not silence the one sent the day before.
  *
@@ -48,6 +54,7 @@ function readDismissed(): string | null {
  */
 export function GraceBanner() {
   const { t } = useT();
+  const { projectId, defaultProjectId } = useProjectContext();
   const [summary, setSummary] = useState<AccountSummary | null>(null);
   const [dismissedFor, setDismissedFor] = useState<string | null>(readDismissed);
 
@@ -65,20 +72,26 @@ export function GraceBanner() {
   }, []);
 
   const graceUntil = summary?.quota_grace_until ?? null;
-  if (!graceUntil || dismissedFor === graceUntil) return null;
+  const { over, at } = quotaPressure(summary?.quotas ?? null, QUOTA_ORDER);
+  const pressured = over.length > 0 || at.length > 0;
+  const upgradeHref = quotaUpgradeHref(projectId ?? defaultProjectId);
+  const visible = Boolean(graceUntil) && dismissedFor !== graceUntil && pressured;
 
-  const over = QUOTA_ORDER.filter((key) => {
-    const row = summary?.quotas?.[key];
-    return row && row.limit > 0 && row.used > row.limit;
-  });
-  if (over.length === 0) return null;
+  useEffect(() => {
+    if (!visible) return;
+    trackUxEvent("view", over.length > 0 ? "grace_banner:over_limit" : "grace_banner:at_limit");
+  }, [visible, over.length]);
+
+  if (!graceUntil || dismissedFor === graceUntil) return null;
+  if (!pressured) return null;
 
   const deadline = new Date(graceUntil);
   const dateLabel = Number.isNaN(deadline.getTime()) ? graceUntil : deadline.toLocaleDateString();
-  const overLabel = over.map((key) => t(`spend.quota.${key}`).toLowerCase()).join(", ");
+  const label = (keys: string[]) => keys.map((key) => t(`spend.quota.${key}`).toLowerCase()).join(", ");
 
   function dismiss() {
     if (!graceUntil) return;
+    trackUxEvent("click", "grace_banner:dismiss");
     try {
       window.localStorage.setItem(DISMISS_KEY, graceUntil);
     } catch {
@@ -90,15 +103,25 @@ export function GraceBanner() {
   return (
     <div className="flex items-start gap-3 border-b border-amber-300 bg-amber-50 px-4 py-2.5 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100">
       <p className="flex-1">
-        {t("grace.banner.text", { date: dateLabel, resources: overLabel })}{" "}
-        <Link href="/pricing" className="font-medium underline underline-offset-2">
-          {t("grace.banner.cta")}
-        </Link>
+        {over.length > 0
+          ? t("grace.banner.text", { date: dateLabel, resources: label(over) })
+          : t("grace.banner.atLimit", { date: dateLabel, resources: label(at) })}{" "}
+        {upgradeHref && (
+          <Link
+            href={upgradeHref}
+            data-ux="grace_banner:upgrade"
+            onClick={() => trackUxEvent("click", "grace_banner:upgrade")}
+            className="font-medium underline underline-offset-2"
+          >
+            {t("grace.banner.cta")}
+          </Link>
+        )}
       </p>
       <button
         type="button"
         onClick={dismiss}
         aria-label={t("grace.banner.dismiss")}
+        data-ux="grace_banner:dismiss"
         className="shrink-0 rounded px-1.5 text-amber-700 transition-colors hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-900"
       >
         ✕

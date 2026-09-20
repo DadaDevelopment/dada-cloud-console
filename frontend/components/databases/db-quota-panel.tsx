@@ -10,6 +10,7 @@ import type {
   DatabaseTableCard,
 } from "@/lib/types";
 import { formatBytes } from "@/components/charts/format";
+import { quotaUpgradeHref } from "@/lib/billing-quota";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Spinner } from "@/components/ui/spinner";
 import { useT } from "@/lib/i18n/console/context";
@@ -83,13 +84,16 @@ function QuotaBanner({
   now,
   onArchive,
   archivable,
+  projectId,
 }: {
   insights: DatabaseInsights;
   now: number;
   onArchive?: () => void;
   archivable: boolean;
+  projectId: string;
 }) {
   const { t, locale } = useT();
+  const upgradeHref = quotaUpgradeHref(projectId);
   const limit = insights.sizeLimitBytes ?? 0;
   const size = insights.sizeBytes ?? 0;
   const state = insights.quotaState ?? "none";
@@ -128,12 +132,15 @@ function QuotaBanner({
         {t("databases.quota.banner.backupsSafe")}
       </p>
       <div className="mt-3 flex flex-wrap items-center gap-3">
-        <Link
-          href="/pricing"
-          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700"
-        >
-          {t("databases.quota.banner.upgrade")}
-        </Link>
+        {upgradeHref && (
+          <Link
+            href={upgradeHref}
+            data-ux="db_quota_banner:upgrade"
+            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700"
+          >
+            {t("databases.quota.banner.upgrade")}
+          </Link>
+        )}
         {archivable && onArchive && (
           <button
             type="button"
@@ -420,6 +427,7 @@ export function DbQuotaPanel({
     <QuotaBanner
       insights={insights}
       now={now}
+      projectId={projectId}
       archivable={Boolean(candidate && envId && !hasOpen)}
       onArchive={() => setDialog(true)}
     />

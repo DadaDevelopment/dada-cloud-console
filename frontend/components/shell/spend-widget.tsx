@@ -5,6 +5,8 @@ import Link from "next/link";
 import { billingApi } from "@/lib/api";
 import type { AccountSummary } from "@/lib/api";
 import { formatRub } from "@/lib/format";
+import { quotaUpgradeHref } from "@/lib/billing-quota";
+import { trackUxEvent } from "@/lib/ux-telemetry";
 import { useProjectContext } from "@/lib/project-context";
 import { useT } from "@/lib/i18n/console/context";
 
@@ -37,7 +39,8 @@ function formatGraceDate(iso: string): string {
  */
 export function SpendWidget() {
   const { t } = useT();
-  const { projectId } = useProjectContext();
+  const { projectId, defaultProjectId } = useProjectContext();
+  const upgradeHref = quotaUpgradeHref(projectId ?? defaultProjectId);
   const [summary, setSummary] = useState<AccountSummary | null>(null);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -135,13 +138,19 @@ export function SpendWidget() {
                   {t("spend.quota.grace", { date: formatGraceDate(summary.quota_grace_until) })}
                 </p>
               )}
-              <Link
-                href="/pricing"
-                onClick={() => setOpen(false)}
-                className="mt-2 inline-block text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
-              >
-                {t("spend.quota.upgrade")} →
-              </Link>
+              {upgradeHref && (
+                <Link
+                  href={upgradeHref}
+                  onClick={() => {
+                    trackUxEvent("click", "spend_widget:upgrade");
+                    setOpen(false);
+                  }}
+                  data-ux="spend_widget:upgrade"
+                  className="mt-2 inline-block text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
+                >
+                  {t("spend.quota.upgrade")} →
+                </Link>
+              )}
             </div>
           )}
 

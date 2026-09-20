@@ -6,6 +6,7 @@ import { billingApi } from "@/lib/api";
 import type { BillingPlan, BillingQuota } from "@/lib/api";
 import { useT } from "@/lib/i18n/console/context";
 import { pickTargetPlan, QUOTA_FIELD } from "@/lib/plan-reach";
+import { quotaUpgradeHref } from "@/lib/billing-quota";
 import { saveUpgradeIntent } from "@/lib/upgrade-intent";
 import { trackUxEvent } from "@/lib/ux-telemetry";
 
@@ -215,8 +216,9 @@ export function UpgradeDialog({
                 {t("upgrade.dialog.close")}
               </button>
               <Link
-                href="/pricing"
+                href={quotaUpgradeHref(projectId) ?? "/projects"}
                 data-ux="upgrade_dialog:pricing"
+                onClick={() => trackUxEvent("click", "upgrade_dialog:plans")}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
               >
                 {t("upgrade.dialog.plansCta")}

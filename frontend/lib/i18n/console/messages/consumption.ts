@@ -42,7 +42,11 @@ export const consumption: Messages = {
     ru: "У вас больше ресурсов ({resources}), чем включено в бесплатный тариф. Всё созданное продолжит работать, но с {date} создавать новые не получится.",
     en: "You have more resources ({resources}) than the free plan includes. Everything you created keeps running, but from {date} you will not be able to create new ones.",
   },
-  "grace.banner.cta": { ru: "Посмотреть тарифы", en: "See the plans" },
+  "grace.banner.atLimit": {
+    ru: "Вы на пределе бесплатного тарифа ({resources}). Всё созданное продолжит работать, но с {date} создать ещё не получится.",
+    en: "You are at the free plan limit ({resources}). Everything you created keeps running, but from {date} you will not be able to create another one.",
+  },
+  "grace.banner.cta": { ru: "Выбрать тариф", en: "Choose a plan" },
   "grace.banner.dismiss": { ru: "Скрыть", en: "Dismiss" },
   "quota.upsell.title": { ru: "Достигнут лимит тарифа", en: "You have reached your plan limit" },
   "quota.upsell.text": {
