@@ -64,7 +64,7 @@ func (r *Runtime) judgeTurn(ctx context.Context, conv Conversation, run AgentRun
 		}
 	}
 	for _, m := range history {
-		if pendingIDs[m.ID.String()] || strings.TrimSpace(m.Content) == "" {
+		if pendingIDs[m.ID.String()] || m.Role == "system" || strings.TrimSpace(m.Content) == "" {
 			continue
 		}
 		role := "roman"

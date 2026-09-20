@@ -502,3 +502,100 @@ func TestNewIdleSchedulerClampsInterval(t *testing.T) {
 		t.Fatalf("interval = %v, want %v", s.interval, idleScanIntervalDefault)
 	}
 }
+
+type fakeA2ARegisterRetry struct {
+	replies []string
+	errors  *[]string
+	calls   *int
+}
+
+func (f fakeA2ARegisterRetry) Send(ctx context.Context, run AgentRunRequest) (string, error) {
+	*f.errors = append(*f.errors, run.ConversationContext.ReplyError)
+	i := *f.calls
+	*f.calls++
+	if i >= len(f.replies) {
+		i = len(f.replies) - 1
+	}
+	return f.replies[i], nil
+}
+
+func TestIdleScheduler_RewritesFollowUpInClientRegister(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	pool := store.(*pgStoreAlias).pool
+
+	agentName := "idle-register-" + uuid.NewString()[:8]
+	conv, _, err := store.GetOrCreateConversation(ctx, agentName, "telegram", "chat-register", Actor{ExternalID: "u1"})
+	require_NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM conversations WHERE agent_name = $1`, agentName)
+		_, _ = pool.Exec(ctx, `DELETE FROM lifecycle_hooks WHERE agent_name = $1`, agentName)
+	})
+	_, err = pool.Exec(ctx, `
+		INSERT INTO lifecycle_hooks (agent_name, name, trigger_event, trigger_config, action_type, action_config)
+		VALUES ($1, 'follow-up', 'conversation.idle', '{"idle_minutes":0}', 'schedule', '{"agent_message":"дожим"}')
+	`, agentName)
+	require_NoError(t, err)
+	_, err = store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "user", Content: "привет, ты тут?"})
+	require_NoError(t, err)
+
+	var errors []string
+	var calls int
+	a2a := fakeA2ARegisterRetry{errors: &errors, calls: &calls,
+		replies: []string{"Ты на связи? Давайте продолжим, я всё объясню", "Ты на связи? Давай продолжим, всё объясню"}}
+	var delivered []string
+	outbound := &fakeOutbound{onSend: func(agent, chat, text string) { delivered = append(delivered, text) }}
+	rt := NewRuntime(store, &noopHooks{}, a2a, nil)
+	rt.contextKey = []byte(testRuntimeToken)
+	sched := NewIdleScheduler(pool, rt, a2a, outbound, time.Second)
+	sched.now = idleDaytime
+
+	if err := sched.Tick(ctx); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if calls != 2 || errors[0] != "" || !strings.Contains(errors[1], "на «ты»") {
+		t.Fatalf("a «давайте» follow-up to a «ты» client must be sent back once with the register hint, got calls=%d errors=%q", calls, errors)
+	}
+	if len(delivered) != 1 || strings.Contains(delivered[0], "Давайте") {
+		t.Fatalf("the rewritten follow-up is what reaches the client, got %q", delivered)
+	}
+}
+
+func TestIdleScheduler_InvokeNowClaimsStepWithoutDelivery(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	pool := store.(*pgStoreAlias).pool
+
+	agentName := "idle-now-" + uuid.NewString()[:8]
+	conv, _, err := store.GetOrCreateConversation(ctx, agentName, "telegram", "-900123", Actor{ExternalID: "900123"})
+	require_NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM conversations WHERE agent_name = $1`, agentName)
+		_, _ = pool.Exec(ctx, `DELETE FROM lifecycle_hooks WHERE agent_name = $1`, agentName)
+	})
+	_, err = pool.Exec(ctx, `
+		INSERT INTO lifecycle_hooks (agent_name, name, trigger_event, trigger_config, action_type, action_config)
+		VALUES ($1, 'follow-up', 'conversation.idle', '{"ladder_minutes":[20,40],"direct_only":true}', 'schedule', '{"agent_message":"дожим"}')
+	`, agentName)
+	require_NoError(t, err)
+
+	var envelopes []string
+	a2a := fakeA2AIdleCapture{reply: "Получилось пройти регистрацию?", seen: &envelopes}
+	var delivered int
+	rt := NewRuntime(store, &noopHooks{}, a2a, nil)
+	rt.contextKey = []byte(testRuntimeToken)
+	sched := NewIdleScheduler(pool, rt, a2a, &fakeOutbound{onSend: func(_, _, _ string) { delivered++ }}, time.Second)
+
+	for step, want := range []string{"idle=20m, step=1]", "idle=40m, step=2]"} {
+		reply, err := sched.InvokeNow(ctx, conv)
+		require_NoError(t, err)
+		if reply == "" || !strings.Contains(envelopes[step], want) {
+			t.Fatalf("step %d: reply %q envelopes %v", step+1, reply, envelopes)
+		}
+	}
+	reply, err := sched.InvokeNow(ctx, conv)
+	require_NoError(t, err)
+	if reply != "" || len(envelopes) != 2 || delivered != 0 {
+		t.Fatalf("exhausted ladder must stay silent and nothing reaches the channel: reply %q envelopes %d delivered %d", reply, len(envelopes), delivered)
+	}
+}

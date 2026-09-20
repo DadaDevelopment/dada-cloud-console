@@ -89,6 +89,14 @@ func NewIdleScheduler(pool *pgxpool.Pool, runtime *Runtime, a2a A2AClient, outbo
 	return &IdleScheduler{pool: pool, runtime: runtime, a2a: a2a, outbound: outbound, interval: interval, now: time.Now}
 }
 
+func (s *IdleScheduler) send(ctx context.Context, run AgentRunRequest) (A2AReply, error) {
+	if traced, ok := s.a2a.(TracedA2AClient); ok {
+		return traced.SendTraced(ctx, run)
+	}
+	text, err := s.a2a.Send(ctx, run)
+	return A2AReply{Text: text}, err
+}
+
 // Run blocks ticking the scheduler until ctx is cancelled.
 func (s *IdleScheduler) Run(ctx context.Context) {
 	t := time.NewTicker(s.interval)
@@ -149,6 +157,20 @@ WHERE jsonb_typeof(ladder) = 'array'
   AND updated_at < NOW() - make_interval(mins => (ladder->>step)::int)
   AND (step > 0 OR updated_at > NOW() - make_interval(mins => max_idle_minutes))
 LIMIT 50`
+
+// nextIdleStepSQL is the ladder row of one conversation with the timers
+// dropped: InvokeNow claims the next step on demand.
+const nextIdleStepSQL = `
+SELECT h.id::text, h.agent_name, c.id::text, c.external_id, c.actor_username,
+       (COALESCE(h.trigger_config->'ladder_minutes',
+                 jsonb_build_array(COALESCE((h.trigger_config->>'idle_minutes')::int, 30)))->>COALESCE((c.metadata->>'idle_step')::int, 0))::int,
+       COALESCE(h.action_config->>'agent_message', ''),
+       COALESCE((c.metadata->>'idle_step')::int, 0)
+FROM lifecycle_hooks h
+JOIN conversations c ON c.agent_name = h.agent_name AND c.id = $1
+WHERE h.trigger_event = 'conversation.idle' AND h.enabled = true AND h.action_type = 'schedule'
+ORDER BY h.created_at
+LIMIT 1`
 
 // claimIdle advances the conversation to the next ladder step. The WHERE
 // clause re-checks the step so two concurrent ticks cannot both pass: exactly
@@ -239,9 +261,36 @@ func (s *IdleScheduler) Tick(ctx context.Context) error {
 		if tag.RowsAffected() == 0 {
 			continue
 		}
-		s.invoke(ctx, r)
+		s.invoke(ctx, r, true)
 	}
 	return nil
+}
+
+// InvokeNow fires the next ladder step of one conversation regardless of
+// the timers and returns the follow-up without delivering it. Evals call it
+// through POST /idle to see what the scheduler would send after a silence;
+// the step is claimed exactly as on a tick, so the ladder state is real.
+// Empty reply with nil error means the ladder is exhausted or the agent is
+// paused, the same silence a tick would produce.
+func (s *IdleScheduler) InvokeNow(ctx context.Context, conv Conversation) (string, error) {
+	var r idleHookRow
+	var minutes *int
+	err := s.pool.QueryRow(ctx, nextIdleStepSQL, conv.ID).Scan(&r.HookID, &r.AgentName, &r.ConversationID, &r.ChatExternalID, &r.ActorUsername, &minutes, &r.HookMessage, &r.Step)
+	if err != nil {
+		return "", fmt.Errorf("idle hook for conversation: %w", err)
+	}
+	if minutes == nil {
+		return "", nil
+	}
+	r.IdleMinutes = *minutes
+	tag, err := s.pool.Exec(ctx, claimIdleSQL, r.ConversationID, r.Step)
+	if err != nil {
+		return "", fmt.Errorf("claim idle step: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return "", nil
+	}
+	return s.invoke(ctx, r, false), nil
 }
 
 // invocationEnvelope renders the outbound-run reason the agent receives.
@@ -261,14 +310,15 @@ func invocationEnvelope(r idleHookRow) string {
 }
 
 // invoke persists the system turn, calls the agent, persists the reply, and
-// hands it to the channel. Errors are logged per-conversation: one broken
-// follow-up must not stop the rest of the pass.
-func (s *IdleScheduler) invoke(ctx context.Context, r idleHookRow) {
+// hands it to the channel when deliver is set. Errors are logged
+// per-conversation: one broken follow-up must not stop the rest of the pass.
+// The persisted reply is returned, empty when nothing was produced.
+func (s *IdleScheduler) invoke(ctx context.Context, r idleHookRow, deliver bool) string {
 	convID := r.ConversationID
 	conv, err := s.runtime.store.GetConversation(ctx, parseUUID(convID))
 	if err != nil {
 		log.Warn().Err(err).Str("conversation", convID).Msg("agentruntime: idle invoke: load conversation")
-		return
+		return ""
 	}
 
 	lock := &s.runtime.runLocks[conv.ID[0]]
@@ -276,22 +326,22 @@ func (s *IdleScheduler) invoke(ctx context.Context, r idleHookRow) {
 	defer lock.Unlock()
 	if s.runtime.states == nil {
 		log.Warn().Str("conversation", convID).Msg("agentruntime: idle state unavailable")
-		return
+		return ""
 	}
 	state, err := s.runtime.states.GetState(ctx, conv.ID)
 	if err != nil || !state.AgentEnabled {
-		return
+		return ""
 	}
 	state, err = s.runtime.refreshActiveSkills(ctx, conv, state)
 	if err != nil || !state.AgentEnabled {
 		log.Warn().Err(err).Msg("agentruntime: idle active skill refresh unavailable")
-		return
+		return ""
 	}
 	var skills []string
 	if catalog, ok := s.runtime.domains.(DomainCatalog); ok {
 		skills, err = catalog.ListDomains(ctx, conv.AgentName)
 		if err != nil {
-			return
+			return ""
 		}
 	}
 
@@ -301,16 +351,16 @@ func (s *IdleScheduler) invoke(ctx context.Context, r idleHookRow) {
 		Content: envelope,
 	}); err != nil {
 		log.Warn().Err(err).Str("conversation", convID).Msg("agentruntime: idle invoke: save system message")
-		return
+		return ""
 	}
 
 	history, err := s.runtime.store.GetRecentMessages(ctx, conv.ID, 20)
 	if err != nil {
 		log.Warn().Err(err).Str("conversation", convID).Msg("agentruntime: idle invoke: history")
-		return
+		return ""
 	}
 
-	reply, err := s.a2a.Send(ctx, AgentRunRequest{
+	run := AgentRunRequest{
 		AgentName: conv.AgentName, ContextID: "runtime-" + conv.ID.String(), Messages: history,
 		EndUserKey: conv.Channel + ":" + conv.ExternalID,
 		ConversationContext: AgentConversationContext{ConversationID: conv.ID.String(),
@@ -318,39 +368,57 @@ func (s *IdleScheduler) invoke(ctx context.Context, r idleHookRow) {
 			FirstName: actorFirstName(conv.ActorMetadata), State: state, AvailableSkills: skills,
 			SeamlessHandoff: s.runtime.flags.SeamlessHandoff},
 		ActorMetadata: conv.ActorMetadata, Trigger: "idle",
-	})
-	if err != nil {
-		log.Warn().Err(err).Str("conversation", convID).Msg("agentruntime: idle invoke: a2a")
-		return
 	}
-	state, err = s.runtime.states.GetState(ctx, conv.ID)
-	if err != nil || !state.AgentEnabled {
-		return
+	register := clientRegister(history, nil)
+	var reply string
+	var traced A2AReply
+	for attempt := 0; attempt < 2; attempt++ {
+		traced, err = s.send(ctx, run)
+		if err != nil {
+			log.Warn().Err(err).Str("conversation", convID).Msg("agentruntime: idle invoke: a2a")
+			return ""
+		}
+		state, err = s.runtime.states.GetState(ctx, conv.ID)
+		if err != nil || !state.AgentEnabled {
+			return ""
+		}
+		reply = stripEmDash(traced.Text)
+		if reason := leakReason(reply); reason != "" {
+			log.Warn().Str("conversation", convID).Str("reason", reason).Msg("agentruntime: idle follow-up dropped as internal monologue")
+			return ""
+		}
+		if soft := registerMismatchReason(reply, register); soft != "" && attempt == 0 {
+			log.Warn().Str("conversation", convID).Str("reason", soft).Msg("agentruntime: idle follow-up sent back for a rewrite")
+			run.ConversationContext.State = state
+			run.ConversationContext.ReplyError = registerRepairHint(reply, register)
+			continue
+		}
+		break
 	}
-	reply = stripEmDash(reply)
-	if reason := leakReason(reply); reason != "" {
-		log.Warn().Str("conversation", convID).Str("reason", reason).Msg("agentruntime: idle follow-up dropped as internal monologue")
-		return
-	}
+	s.runtime.judgeTurn(ctx, conv, run, nil, history, reply, splitReplyParts(reply), traced)
 	if _, err := s.runtime.store.SaveMessage(ctx, conv.ID, SaveMessageInput{
 		Role:    "assistant",
 		Content: reply,
 	}); err != nil {
 		log.Warn().Err(err).Str("conversation", convID).Msg("agentruntime: idle invoke: save reply")
-		return
+		return ""
 	}
 
+	if !deliver {
+		return reply
+	}
 	if s.outbound == nil {
 		log.Info().Str("conversation", convID).Msg("agentruntime: idle follow-up persisted but no outbound configured")
-		return
+		return reply
 	}
 	state, err = s.runtime.states.GetState(ctx, conv.ID)
 	if err != nil || !state.AgentEnabled {
-		return
+		return ""
 	}
 	if err := s.outbound.SendOutbound(ctx, r.AgentName, r.ChatExternalID, reply, ""); err != nil {
 		log.Warn().Err(err).Str("conversation", convID).Msg("agentruntime: idle follow-up delivery failed (reply persisted)")
 	}
+	return reply
 }
 
 func parseUUID(s string) uuid.UUID {

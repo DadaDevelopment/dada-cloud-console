@@ -140,6 +140,7 @@ func (s *Server) Handler() http.Handler {
 	protected.POST("/tools/stop-agent", s.handleStopAgent)
 	protected.POST("/tools/escalate", s.handleEscalate)
 	protected.GET("/state", s.handleGetState)
+	protected.POST("/idle", s.handleIdleNow)
 	protected.POST("/hooks", s.handleCreateHook)
 	protected.GET("/hooks", s.handleListHooks)
 	protected.DELETE("/hooks/:id", s.handleDeleteHook)
@@ -189,6 +190,37 @@ func (s *Server) handleCreateHook(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"id": id})
+}
+
+// handleIdleNow fires the next follow-up step of a conversation on demand and
+// returns it without delivering to the channel. It is the eval transport for
+// the idle ladder: a suite step «idle» calls it where a real client would have
+// gone quiet, so register, leak and judge coverage reach the follow-ups too.
+func (s *Server) handleIdleNow(c *gin.Context) {
+	var req struct {
+		AgentName  string `json:"agent_name"`
+		Channel    string `json:"channel"`
+		ExternalID string `json:"external_id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.AgentName == "" || req.Channel == "" || req.ExternalID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "agent_name, channel and external_id are required"})
+		return
+	}
+	conv, err := s.runtime.store.FindActiveConversation(c.Request.Context(), req.AgentName, req.Channel, req.ExternalID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no such conversation"})
+		return
+	}
+	scheduler := s.scheduler
+	if scheduler == nil {
+		scheduler = NewIdleScheduler(s.pool, s.runtime, s.a2a, nil, 0)
+	}
+	reply, err := scheduler.InvokeNow(c.Request.Context(), conv)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"text": reply, "messages": capReplyParts(splitReplyParts(reply)), "sent": reply != ""})
 }
 
 // handleGetState is the read side for evals and operators: the runtime state

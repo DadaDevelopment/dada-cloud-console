@@ -48,7 +48,7 @@ func TestPGIdleSuppressesPausedConversationBeforeAndDuringRun(t *testing.T) {
 				require.NoError(t, err)
 			}
 			scheduler := NewIdleScheduler(store.pool, rt, model, &fakeOutbound{onSend: func(_, _, _ string) { delivered++ }}, time.Second)
-			scheduler.invoke(ctx, idleHookRow{ConversationID: conv.ID.String(), AgentName: conv.AgentName, ChatExternalID: conv.ExternalID, IdleMinutes: 30})
+			scheduler.invoke(ctx, idleHookRow{ConversationID: conv.ID.String(), AgentName: conv.AgentName, ChatExternalID: conv.ExternalID, IdleMinutes: 30}, true)
 			require.Zero(t, delivered)
 			if stopDuring {
 				require.Equal(t, 1, calls)

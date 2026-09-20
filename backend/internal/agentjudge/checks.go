@@ -43,6 +43,7 @@ var codeChecks = map[string]codeCheck{
 	"max_length":     checkMaxLength,
 	"form":           checkForm,
 	"language_match": checkLanguageMatch,
+	"register":       checkRegister,
 }
 
 func isWordRune(r rune) bool {
