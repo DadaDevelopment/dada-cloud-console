@@ -84,6 +84,8 @@ type runtimeFlags struct {
 	// 0 (the default) is off.
 	AckLimit int
 
+	FunnelOrder bool
+
 	// SilenceRecovery (AGENT_RUNTIME_SILENCE_RECOVERY, plan 4.3) puts a turn
 	// that ended without a message and without a deliberate Suppressed on the
 	// existing turn_recovery ladder, instead of leaving the customer with
@@ -100,6 +102,7 @@ func runtimeFlagsFromEnv() runtimeFlags {
 		SplitReply:        envBool("AGENT_RUNTIME_SPLIT_REPLY", false),
 		QuestionBudget:    envBool("AGENT_RUNTIME_QUESTION_BUDGET", false),
 		AckLimit:          envInt("AGENT_RUNTIME_ACK_LIMIT", 0),
+		FunnelOrder:       envBool("AGENT_RUNTIME_FUNNEL_ORDER", false),
 		SilenceRecovery:   envBool("AGENT_RUNTIME_SILENCE_RECOVERY", false),
 	}
 }
