@@ -37,6 +37,7 @@ const (
 	defaultDayLimit   = 1500
 	defaultMonthLimit = 45000
 	defaultPoll       = 10 * time.Minute
+	retryPoll         = time.Minute
 )
 
 var (
@@ -71,6 +72,7 @@ type Guard struct {
 	poll       time.Duration
 	now        func() time.Time
 	over       atomic.Bool
+	known      atomic.Bool
 	lastPoll   atomic.Int64
 }
 
@@ -96,33 +98,40 @@ func envInt(key string, def int64) int64 {
 	return def
 }
 
-// Exceeded reports whether new traces and scores must be held back.
+// Exceeded reports whether new traces and scores must be held back. A guard
+// that has never managed to read the usage answers true: the quota was
+// blown on 2026-09-20 by pods that restarted hourly, got 429 on their first
+// poll and spent ten minutes believing the budget was fine. Until the first
+// read lands the pod holds back, and Run retries every minute to shorten
+// that hold.
 func (g *Guard) Exceeded() bool {
-	return g != nil && g.over.Load()
+	return g != nil && (!g.known.Load() || g.over.Load())
 }
 
 // Run polls until ctx ends. The first read happens before Run returns
-// control to the ticker, so a restart under an exceeded budget mutes at once.
+// control to the timer, so a restart under an exceeded budget mutes at once;
+// a failed read is retried after retryPoll instead of the full interval.
 func (g *Guard) Run(ctx context.Context) {
 	if g == nil {
 		return
 	}
-	g.Refresh(ctx)
-	t := time.NewTicker(g.poll)
-	defer t.Stop()
 	for {
+		wait := g.poll
+		if !g.Refresh(ctx) {
+			wait = retryPoll
+		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.C:
-			g.Refresh(ctx)
+		case <-time.After(wait):
 		}
 	}
 }
 
 // Refresh reads today's and this month's units and updates the verdict. A
-// failed read keeps the previous verdict and only ages the poll gauge.
-func (g *Guard) Refresh(ctx context.Context) {
+// failed read keeps the previous verdict, only ages the poll gauge and
+// returns false.
+func (g *Guard) Refresh(ctx context.Context) bool {
 	now := g.now().UTC()
 	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
@@ -130,13 +139,13 @@ func (g *Guard) Refresh(ctx context.Context) {
 	if err != nil {
 		log.Warn().Err(err).Msg("langfusebudget: day usage unreadable, keeping last verdict")
 		g.age()
-		return
+		return false
 	}
 	month, err := g.units(ctx, monthStart, now)
 	if err != nil {
 		log.Warn().Err(err).Msg("langfusebudget: month usage unreadable, keeping last verdict")
 		g.age()
-		return
+		return false
 	}
 	units.WithLabelValues("day").Set(float64(day))
 	units.WithLabelValues("month").Set(float64(month))
@@ -145,6 +154,7 @@ func (g *Guard) Refresh(ctx context.Context) {
 		log.Warn().Int64("day", day).Int64("day_limit", g.dayLimit).Int64("month", month).Int64("month_limit", g.monthLimit).Bool("exceeded", over).Msg("langfusebudget: verdict changed")
 	}
 	g.over.Store(over)
+	g.known.Store(true)
 	if over {
 		exceeded.Set(1)
 	} else {
@@ -152,6 +162,7 @@ func (g *Guard) Refresh(ctx context.Context) {
 	}
 	g.lastPoll.Store(now.Unix())
 	g.age()
+	return true
 }
 
 func (g *Guard) age() {

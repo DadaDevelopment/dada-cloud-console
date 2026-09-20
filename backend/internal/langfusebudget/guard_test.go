@@ -54,6 +54,27 @@ func TestRefreshKeepsVerdictWhenLangfuseFails(t *testing.T) {
 	}
 }
 
+func TestUnreadGuardHoldsBackUntilFirstRead(t *testing.T) {
+	fc := &fakeCounter{perView: map[string]int64{langfuse.ViewObservations: 10}, err: errors.New("429")}
+	g := &Guard{counter: fc, dayLimit: 1500, monthLimit: 45000, now: time.Now}
+	if !g.Exceeded() {
+		t.Fatal("a guard that never read the usage must hold back")
+	}
+	if g.Refresh(context.Background()) {
+		t.Fatal("a 429 read must report failure")
+	}
+	if !g.Exceeded() {
+		t.Fatal("a failed first read must keep holding back")
+	}
+	fc.err = nil
+	if !g.Refresh(context.Background()) {
+		t.Fatal("a clean read must report success")
+	}
+	if g.Exceeded() {
+		t.Fatal("10 units under 1500 must lift the hold")
+	}
+}
+
 func TestNilGuardNeverExceeds(t *testing.T) {
 	var g *Guard
 	if g.Exceeded() {
