@@ -50,6 +50,8 @@ func TestLeakReasonCatchesMonologues(t *testing.T) {
 		"bare stage code":                         "Дальше S9, цель по доходу: какая цель по результатам с трейдинга в месяц?",
 		"t10 n70 threshold plan":                  "500 выше порога, вопрос о счёте не задаём (ссылка уже у него): «Получилось пройти регистрацию? »",
 		"t10 n70 aside then quoted line":          "Ссылку он получил (регистрация идёт): «Получилось пройти регистрацию?»",
+		"t14 n71 stage chain as a message":        "S5 → S6 → S7\n---\nНам платит брокер комиссию с вашего торгового объема, поэтому мы заинтересованы в том, чтобы взращивать прибыльных трейдеров",
+		"stage code alone on a line":              "S9\nПодскажите, а какая цель по результатам с трейдинга в месяц?",
 	}
 	for name, reply := range cases {
 		if reason := leakReason(reply); reason == "" {

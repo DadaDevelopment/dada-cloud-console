@@ -50,6 +50,11 @@ var leakFramePattern = regexp.MustCompile(`(?i)(^|[^\pL])(к клиенту|ит
 
 var leakStagePattern = regexp.MustCompile(`(?i)(^|[^\pL])(по|этап|этапу|шаг|ход|дальше|реплика|переход к)\s+S\d{1,2}[a-zа-я]?($|[^\pL\d])`)
 
+// leakStageChainPattern catches stage codes without a leading word: a route
+// written as a chain («S5 → S6 → S7», t14 native.71 r1 sent it as its own
+// message) or a code standing alone on a line.
+var leakStageChainPattern = regexp.MustCompile(`(?im)(^|[^\pL\d])S\d{1,2}[a-zа-я]?\s*(→|->|=>|⇒)|^\s*S\d{1,2}[a-zа-я]?\s*$`)
+
 var leakThirdPersonPattern = regexp.MustCompile(`(?i)(^|[^\pL])((он|она|клиент)\s+((уже|сам|сама|тоже|ранее|раньше|только что)\s+)?(назвал|назвала|сказал|сказала|написал|написала|спросил|спросила|ответил|ответила|прислал|прислала|пополнил|пополнила|зарегистрировался|зарегистрировалась|хочет|готов|готова|решил|решила|торговал|торговала))($|[^\pL])`)
 
 // leakPlanningPattern catches the model narrating its own decision instead of
@@ -91,6 +96,9 @@ func leakReason(reply string) string {
 		return "reasoning frame " + strings.ToLower(m[2]) + ":"
 	}
 	if m := leakStagePattern.FindString(text); m != "" {
+		return "script stage code " + strings.TrimSpace(m)
+	}
+	if m := leakStageChainPattern.FindString(text); m != "" {
 		return "script stage code " + strings.TrimSpace(m)
 	}
 	if m := leakThirdPersonPattern.FindStringSubmatch(text); m != nil {
