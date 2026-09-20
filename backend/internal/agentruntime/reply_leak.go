@@ -52,6 +52,13 @@ var leakStagePattern = regexp.MustCompile(`(?i)(^|[^\pL])(по|этап|этап
 
 var leakThirdPersonPattern = regexp.MustCompile(`(?i)(^|[^\pL])((он|она|клиент)\s+((уже|сам|сама|тоже|ранее|раньше|только что)\s+)?(назвал|назвала|сказал|сказала|написал|написала|спросил|спросила|ответил|ответила|прислал|прислала|пополнил|пополнила|зарегистрировался|зарегистрировалась|хочет|готов|готова|решил|решила|торговал|торговала))($|[^\pL])`)
 
+// leakPlanningPattern catches the model narrating its own decision instead of
+// talking to the client (t10 native.70 r1: «500 выше порога, вопрос о счёте не
+// задаём (ссылка уже у него): «Получилось пройти регистрацию? »»). Three
+// tells: threshold talk, a negated first-person-plural plan verb, or a
+// parenthesised aside followed by a quoted script line.
+var leakPlanningPattern = regexp.MustCompile(`(?i)(^|[^\pL])((выше|ниже)\s+порога|не\s+(задаём|задаю)|у\s+(него|неё)\s+уже)($|[^\pL])|\)\s*:\s*«`)
+
 var leakEnglishFillers = []string{"continue to", "hmm", "okay,", "fine.", "let me ", "the user ", "the client "}
 
 var leakMarkerPattern = regexp.MustCompile(`(?i)\b(kb|skill|placeholder|internal)\b`)
@@ -88,6 +95,9 @@ func leakReason(reply string) string {
 	}
 	if m := leakThirdPersonPattern.FindStringSubmatch(text); m != nil {
 		return "third person about the client «" + strings.ToLower(m[2]) + "»"
+	}
+	if m := leakPlanningPattern.FindString(text); m != "" {
+		return "planning talk «" + strings.TrimSpace(m) + "»"
 	}
 	share, latin := latinShare(text)
 	if share > 0 {

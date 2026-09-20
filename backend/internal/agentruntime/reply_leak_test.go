@@ -48,6 +48,8 @@ func TestLeakReasonCatchesMonologues(t *testing.T) {
 		"t13 n66 adverb between pronoun and verb": "400 баксов выше порога, значит его заход. Вопрос о счёте у FxPro: он уже сказал, что торговал на FxPro, значит счёт есть. Спрошу про ссылку.",
 		"t13 n66 script stage code":               "Значит счёт есть. По S10: «Счёт у FxPro регистрировали по нашей ссылке?»",
 		"bare stage code":                         "Дальше S9, цель по доходу: какая цель по результатам с трейдинга в месяц?",
+		"t10 n70 threshold plan":                  "500 выше порога, вопрос о счёте не задаём (ссылка уже у него): «Получилось пройти регистрацию? »",
+		"t10 n70 aside then quoted line":          "Ссылку он получил (регистрация идёт): «Получилось пройти регистрацию?»",
 	}
 	for name, reply := range cases {
 		if reason := leakReason(reply); reason == "" {
@@ -80,6 +82,8 @@ func TestLeakReasonPassesClientReplies(t *testing.T) {
 		"он as a client word":         "Депозит остаётся на вашем счёте, он не переходит к нам. Пополняете сегодня?",
 		"galaxy phone is not a stage": "На Galaxy S10 терминал MT5 ставится из магазина приложений, как на любой телефон с Android. Установили?",
 		"он уже is a client word":     "Счёт открыт, он уже виден в кабинете FxPro. Пополнение сегодня?",
+		"threshold as client fact":    "Порог входа 300 долларов, ниже него риск на сделку не удержать. Реально собрать 300?",
+		"parenthesis then colon":      "Пополнение (карта или SBP): в кабинете FxPro кнопка Deposit. Получилось?",
 		"long series of short parts": strings.Join([]string{
 			strings.Repeat("Нам платит брокер комиссию с торгового объёма, поэтому нам выгодны прибыльные трейдеры. ", 5),
 			strings.Repeat("Для вступления нужна регистрация по нашей ссылке у брокера, дальше помогу с депозитом. ", 5),
