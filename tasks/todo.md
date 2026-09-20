@@ -114,6 +114,17 @@ as kagent-app); argo-infra `a5a97ac20` sets it to `prod` for backend + agent-run
       `OAuth session expired and could not be refreshed`, respawns every ~22s (108k transcripts, 109/h),
       boots `npx -y mcp-remote` each time; load 60-126 => 30s CONNECT_TIMEOUT => 15 min block for all
       sessions. Mitigation `MCP_TIMEOUT=120000` in `~/.claude/settings.json`; real fix = stop/relogin the loop.
+- [x] Burn 09-20 (20k+ units/day): all 1,646 prod-env roots were synthetic `@tNN_*` personas from local
+      `eval_run.py --suite target_script --transport runtime --repeats 3` against prod runtime (full agent
+      tree + 2 judge scores/turn + SDK experiment spans); CI negligible. Backend guard blind: state per pod
+      (11 RS/27h), first poll 429 => `Exceeded()=false`, SDK experiment writes unstoppable.
+- [x] Fix per owner ("не лей эвалы туда - просто отчет в ci"): tg-agent-tools ffe3e86 - eval_run.py has no
+      Langfuse SDK, `eval_sync.py` -> `eval_items.py`, callers `eval_<scenario>_<hex>` (agent
+      `DADA_TRACE_MUTE_USERNAMES` + judge `skip.usernames` cover `eval_*`), CI workflow without LANGFUSE_*.
+      Smoke: markers x1 through prod runtime -> summary.md, Langfuse window = 0 production-env observations
+      (only `sdk-experiment` spans from the owner's still-running old-script pid 20125).
+- [ ] Owner: stop old-script runs (pid 20125, Python 3.10, pre-ffe3e86 eval_run.py) - each `target_script x3`
+      run costs ~3.7k units. Optional: drop LANGFUSE_* GitHub secrets in tg-agent-tools.
 
 ## Decisions to confirm
 - session.id = `@username` (private chat) / `@username@<chat_id>` (group); one Langfuse session per user
@@ -1120,3 +1131,17 @@ Intent: replace the text-heavy catalogue with clear product choices and a strong
 - [x] Снапшот tg-vibecoder после нового gitops-agent: `replicas=1`, `namespaces=[agent-sandbox-prod]` (kagent-близнец выпал) [live БД 09:13Z].
 - [ ] Переезд на новый проект Langfuse (владелец создаёт): ключи в секретах `tg-referral-runtime` и `kagent-otel`/per-agent, старый проект остаётся историей.
 - Trade-off: при перебое бюджета теряются реальные ходы (без трейса и без оценки) — осознанно, по просьбе владельца; метрики/алерт покажут момент и кто виноват.
+
+## 2026-09-19 — Cloud landing: explain the product
+- [x] Replace abstract homepage copy with ready-project → public URL positioning.
+- [x] Explain responsibility split versus VPS; move secondary products below primary flow.
+- [x] Verify claims against source, lint/types and preview where available.
+
+Review: homepage RU/EN rewritten, VPS responsibility split added, secondary products moved down; FAQ/JSON-LD share updated dictionary, metadata/footer aligned. Claims checked against billing plan and Git repo API source. ESLint and TypeScript passed; local browser first screen inspected. Preview http://127.0.0.1:4181/. No production deployment or conversion measurement.
+
+## 2026-09-19 — Editorial readability revision
+- [x] Inspect Anthropic, Yandex Cloud and Apple reference pages; inspect Anthropic visual composition.
+- [x] Rebuild homepage with direct product title, 20–25px body text, useful interactive deployment examples, fewer sections.
+- [x] Simplify footer; verify RU/EN, mobile/desktop, interactions and code checks.
+
+Readability review: browser computed homepage paragraphs20–25px with rgb(32,32,30) ink; widths320/768/1024/1440 CSSpx matched document scrollWidth. RU/EN render, bot/API switches and Free FAQ expansion passed. ESLint/tsc/diff-check passed. Anthropic composition inspected in browser; Apple/Yandex official pages read. Preview only, no deployment.
