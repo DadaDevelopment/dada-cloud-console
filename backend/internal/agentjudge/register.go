@@ -15,8 +15,10 @@ const (
 // Word boundaries are spelled out because RE2's \b is ASCII-only and does not
 // stop at Cyrillic letters.
 var (
-	tyPronounPattern = regexp.MustCompile(`(?i)(^|[^\pL])(ты|тебя|тебе|тобой|твой|твоя|твои|твоё|твое|твоего|твоей|твою|твоим|твоём|твоем)($|[^\pL])`)
-	vyPronounPattern = regexp.MustCompile(`(?i)(^|[^\pL])(вы|вас|вам|вами|ваш|ваша|ваши|ваше|вашего|вашей|вашу|вашим|вашем|ваших|вашими)($|[^\pL])`)
+	tyPronounPattern    = regexp.MustCompile(`(?i)(^|[^\pL])(ты|тебя|тебе|тобой|твой|твоя|твои|твоё|твое|твоего|твоей|твою|твоим|твоём|твоем)($|[^\pL])`)
+	vyPronounPattern    = regexp.MustCompile(`(?i)(^|[^\pL])(вы|вас|вам|вами|ваш|ваша|ваши|ваше|вашего|вашей|вашу|вашим|вашем|ваших|вашими)($|[^\pL])`)
+	vyPossessivePattern = regexp.MustCompile(`(?i)(^|[^\pL])(ваш|ваша|ваши|ваше|вашего|вашей|вашу|вашим|вашем|ваших|вашими)($|[^\pL])`)
+	vyPersonPattern     = regexp.MustCompile(`(?i)(^|[^\pL])(вы|вас|вам|вами)($|[^\pL])`)
 
 	tyVerbPattern = regexp.MustCompile(`(?i)(^|[^\pL])(\pL{2,}(ешь|ёшь|ишь)|привет|здарова|дарова|давай|подскажи|напиши|скажи|расскажи|смотри|посмотри|пиши|держи|отправь|скинь|попробуй|заходи|пройди|зарегистрируйся|пополни|напомни|спрашивай|обращайся|подумай|решай|сообщи|дай|знай|поверь|учти|имей)($|[^\pL])`)
 	vyVerbPattern = regexp.MustCompile(`(?i)(^|[^\pL])(\pL{3,}(йте|йтесь)|здравствуйте|можете|хотите|будете|сможете|знаете|понимаете|планируете|торгуете|пополняете|решите|сообщите|дайте|решайте|учтите|имейте)($|[^\pL])`)
@@ -30,18 +32,27 @@ var (
 // The markers follow the core.md rule: «вы» by default, «ты» once the client
 // writes «ты», slang or a singular imperative («привет, дай ссылку»). Second
 // person verbs are not read on the client side because «сделаешь» may be about
-// a third person.
+// a third person. A possessive «ваш» alone («по вашей ссылке», «ваш канал»)
+// is about the team, so it does not move a client who already wrote «ты» to
+// «вы»; it counts as «вы» only when no older message shows «ты».
 func ClientRegister(clientTexts []string) string {
+	possessiveOnly := false
 	for i := len(clientTexts) - 1; i >= 0; i-- {
 		text := clientTexts[i]
 		ty := tyPronounPattern.MatchString(text) || clientTyPattern.MatchString(text)
-		vy := vyPronounPattern.MatchString(text) || clientVyPattern.MatchString(text)
+		vyPerson := vyPersonPattern.MatchString(text) || clientVyPattern.MatchString(text)
+		vy := vyPerson || vyPossessivePattern.MatchString(text)
 		switch {
 		case ty && !vy:
 			return RegisterTy
-		case vy && !ty:
+		case vyPerson && !ty:
 			return RegisterVy
+		case vy && !ty:
+			possessiveOnly = true
 		}
+	}
+	if possessiveOnly {
+		return RegisterVy
 	}
 	return ""
 }

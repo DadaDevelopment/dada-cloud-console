@@ -19,6 +19,9 @@ func TestClientRegister(t *testing.T) {
 		{"slang is ty", []string{"хз, тыщ 50 наверное"}, RegisterTy},
 		{"both in one skipped", []string{"вы или ты?"}, ""},
 		{"вывод is not вы", []string{"вывод денег быстрый?"}, ""},
+		{"team possessive keeps ty", []string{"Привет, хочу в канал", "Да, по вашей ссылке и регистрировался"}, RegisterTy},
+		{"team possessive alone is vy", []string{"хочу в канал", "ваш канал платный?"}, RegisterVy},
+		{"person pronoun still flips", []string{"Привет", "Подскажите, вы платите за сигналы?"}, RegisterVy},
 	}
 	for _, c := range cases {
 		if got := ClientRegister(c.texts); got != c.want {
