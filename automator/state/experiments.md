@@ -3024,3 +3024,36 @@ inode против 65536 при старом дефолте. Ровно ×4. PVC
 | E135 (sess-0917a, 2026-09-17, hypothesis: H03) | Recovery-CTA «Перейти к оплате» для payment_recurring_forbidden вёл на `/projects/undefined/billing`: backend НАМЕРЕННО не шлёт project_id (аудит-строка орговая, platform_recovery.go:88-96), а recoveryPromptHref строил линк как будто он есть всегда [code frontend/lib/recovery-prompt.ts:68-73 до фикса]. Единственный юзер, который вернулся ДОПЛАТИТЬ после нашей же ошибки оплаты, получил битый URL четыре клика подряд. Гипотеза: CTA, ведущий на живой биллинг проекта, возвращает платёжно-мотивированного юзера на путь чекаута | 2026-09-17 отгружено `7f59ca7f` origin/main (frontend: types.ts project_id/environment_id теперь опциональны по wire-контракту; recoveryPromptHref(prompt, fallbackProjectId) берёт projectId из роута, возвращает null если нет нигде; компонент скрывает CTA вместо битого линка; +2 теста: fallback на роут и null-кейс; tsc 0 ошибок, test:unit 502/502, lint 0 errors) | ux_events: target=`recovery.apps.click.payment_recurring_forbidden` затем ближайший по времени path-event на `/projects/<uuid>/billing` (не undefined); контроль - payments по created_by_sub artem | клик recovery-CTA снова ведёт на /projects/<его-uuid>/billing (не undefined); сильный сигнал - payments-row от artem | baseline [live psql 09-17]: artempro2021@bk.ru 09-10 12:29 сделал 4 клика CTA с from=/projects/915d00c2.../apps, все ушли на /projects/undefined/billing; 3 его платежа 08-14/15 canceled (yk_forbidden-эпоха); единственный succeeded-платёж за всю историю = org `dada` (владелец) 07-25, то есть метрика H03 «первый ЧУЖОЙ платёж» = 0 | 2026-10-01 (2 недели) | open | **Ловушка замера записана заранее:** ноль кликов recovery после фикса скорее значит «плашка уже dismissed в localStorage» (клиентский флаг kind+failed_at), а НЕ «фикс не работает» - сначала знаменатель recovery.apps.view. Вторая ловушка: success = вернувшийся живой путь чекаута, не обязательно succeeded-платёж за 2 недели (решение о деньгах не мгновенное) | если artem не вернулся к чекауту - bl 0508: разбор его следующей сессии по audit + instrument checkout path |
 
 | E161 (sess-0920a, 2026-09-20, hypothesis: H03) | Квотная стена 09-25 приходит к 8 оргам сразу, и ВСЕ поверхности, которые о ней предупреждают, ведут в никуда: grace-banner, spend-widget, db-quota-panel и no-plan-фоллбек upgrade-диалога линковали на `/pricing`, чьи кнопки тарифов = `consoleHref('/login')`, а `/login` для залогиненного = `router.replace('/projects')` [code frontend/app/(auth)/login/page.tsx:26-43]. То есть от предупреждения о стене физически не было пути к чекауту, который уже существует на странице биллинга. Вторая половина гипотезы: баннер молчал для тех, кому он нужнее всего - он рендерился только при `used > limit` (1 орг из 8), а 7 из 8 сидят ровно на 1/1 и встретили бы стену голым 403 без единого предупреждения | 2026-09-20 отгружено `fee1bb36` origin/main (frontend: lib/billing-quota.ts +quotaPressure/quotaUpgradeHref, все 4 поверхности на `/projects/<id>/billing#billing-plans`, CTA скрывается при неизвестном projectId вместо `/projects/undefined`; grace-banner говорит и с at-limit группой, отдельная копирайт-строка grace.banner.atLimit ru/en; data-ux + ux-события на каждом CTA: grace_banner:upgrade/dismiss, spend_widget:upgrade, db_quota_banner:upgrade, upgrade_dialog:plans; +6 node:test кейсов; tsc 0, test:unit 508/508, lint 0 errors) | live psql cloud-console: (1) знаменатель - `ux_events` target='grace_banner:at_limit'/'grace_banner:over_limit' event_type='view' за 09-25..10-02 (сколько орг вообще увидели предупреждение); (2) `ux_events` target LIKE '%:upgrade' click - дошли ли до биллинга; (3) `billing_checkout:click:*` / `upgrade_dialog:checkout` (инструментация 2171f58c) - открыли ли чекаут; (4) целевой исход - `payments` status='succeeded' от ЧУЖОГО (не org dada) | хотя бы один ЧУЖОЙ succeeded-платёж, либо (слабее) ненулевая цепочка view -> upgrade-click -> checkout-click от чужой орг | baseline [live psql 09-20]: `quota_grace_until='2026-09-25'` у 8 орг (dada, bruzas.85, artempro2021@bk.ru, ggrk52, goleva.giftdev, good.win2283, gunopice85, artemmendeleev), `grace_notified_at`=09-18 у всех, `plan_expires_at` пуст у всех. Фактическая загрузка: artemmendeleev 3 аппа (единственный OVER лимит), остальные ровно 1 апп (AT лимита), ggrk52 и artempro2021 плюс 1 БД + 1 домен. Метрика H03 за всю историю = 0 чужих succeeded-платежей (единственный succeeded = org dada, владелец). Маркеров grace_banner:* в ux_events не существовало | 2026-10-02 (неделя после стены) | open | **Ловушка замера записана заранее:** ноль по метрике (4) за неделю НЕ равен провалу - решение о деньгах не мгновенное, и знаменатель тут 7 живых орг, а не рынок. Сначала снимать (1): если view=0, вопрос не в CTA, а в том, что орги вообще не заходили в консоль на неделе стены (bruzas не заходил с 08-21) - это `unmeasured`, а не kill. Вторая ловушка: at-limit группа НЕ обязана платить 09-25 - она ничего не теряет в этот день, стена придёт на её следующем создании ресурса; поэтому сильный сигнал для неё - не платёж, а клик upgrade (осознанное «понял, где тариф»), и его надо читать отдельно от over-limit группы | след. шаг при подтверждении цепочки без платежа: разбирать уже сам чекаут (YooKassa-сторона), а не путь к нему - путь будет доказан |
+
+## E189 — витрина каталога продаёт то, что не устанавливается (sess-0921a, 2026-09-21, hypothesis: H11)
+
+Посылка: карточка каталога = первое действие новичка на пустом экране, и мы считали её
+безопасным путём («платформа сама всё соберёт»). Проверка посылки замером, а не ощущением.
+
+**[live psql, вся история]** InstallSolution = 17 строк / 6 актёров / 14 реальных попыток.
+По КАТАЛОЖНЫМ карточкам 12 попыток -> **живой апп ровно 1** (searxng). Мёртвых кликов 11.
+it-tools 2/2 провал, jellyfin 5/5 (квота ДО билда), homepage 3/3 (env_failed, баг починен позже),
+excalidraw 1 (собрался, удалён в тот же день).
+
+Корень для it-tools (**[live registry+raw github]**): апстрим-Dockerfile делает
+`npm install -g pnpm` без версии, package.json объявляет packageManager pnpm@9.11.0.
+С выходом pnpm 10 лок отвергается -> карточка ломается по ЧАСАМ, а не по нашему коммиту.
+Пин ветки/тега не спасает: гниёт разрешение тулчейна в момент сборки.
+
+result: отгружено `556c2a8b` — it-tools переведён на image-track
+ghcr.io/corentinth/it-tools:2024.10.22-7ca5933 (манифест 200 linux/amd64, ExposedPorts 80/tcp
+прочитан из конфига образа, совпадает с Port карточки). Тест
+TestRottedUpstreamBuildsStayOnTheImageTrack удерживает карточку на image-треке.
+
+Побочная находка, пойманная ТЕСТОМ (не рассуждением): карточка, уходящая с билд-трека,
+перестаёт опознаваться IsCatalogRepo, и уже задеплоенные демо выпадают из жнеца.
+CorentinTh/it-tools внесён в api.legacyDemoTemplateRepos — механизм, который ровно для
+этого и заведён.
+
+source_of_truth: доля InstallSolution, дошедших до живого URL (app_url_http_seen),
+на следующей когорте установок; и отсутствие новых fail-строк по слагу it-tools.
+status: open
+measure_after: 2026-10-05
+conclusion: посылка «каталог = безопасный путь» ОПРОВЕРГНУТА на числах (1/12). Одна карточка
+починена, класс заведён пунктами 0513-0515. Следующий шаг = гейт достоверности витрины (0513),
+а не починка карточек по одной.
