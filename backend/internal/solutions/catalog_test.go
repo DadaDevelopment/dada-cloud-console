@@ -115,6 +115,26 @@ func TestEveryBuiltEntryShipsItsOwnDockerfileBuild(t *testing.T) {
 	}
 }
 
+// A build-track card is only as reliable as the upstream Dockerfile it clones,
+// and an upstream build step that resolves its own toolchain at build time rots
+// on a clock nobody here controls. it-tools ran `npm install -g pnpm` against a
+// lockfile written for pnpm 9: once pnpm 10 shipped, every install of that card
+// failed, both it ever had, and the second was a stranger's first act on the
+// platform. The card now installs upstream's published image instead, and this
+// test keeps it there — moving it back to the build track would restore a
+// storefront tile that cannot be installed.
+func TestRottedUpstreamBuildsStayOnTheImageTrack(t *testing.T) {
+	for _, slug := range []string{"it-tools"} {
+		s, ok := Lookup(slug)
+		if !ok {
+			t.Fatalf("solution %q is gone from the catalog", slug)
+		}
+		if !s.IsImage() {
+			t.Fatalf("solution %q is back on the build track; its upstream Dockerfile cannot be built", slug)
+		}
+	}
+}
+
 // Every category an entry claims must be one the console knows how to title,
 // otherwise the entry lands in a group with no name on it.
 func TestEveryCategoryHasATitle(t *testing.T) {
@@ -132,19 +152,27 @@ func TestEveryCategoryHasATitle(t *testing.T) {
 	}
 }
 
+// TestIsCatalogRepo pins which repositories the catalog claims as its own
+// showroom deploys. A fork is the customer's own work, not a demo we offered,
+// and a card that moved to the image track no longer builds any repository at
+// all: the catalog cannot be what recognises its old deploys, so those are
+// reaped through api.legacyDemoTemplateRepos instead. A repo still named here
+// after such a move would be claiming a build that no longer happens.
 func TestIsCatalogRepo(t *testing.T) {
-	if !IsCatalogRepo("CorentinTh/it-tools") {
+	if !IsCatalogRepo("excalidraw/excalidraw") {
 		t.Fatal("catalog repo not recognised; its deploys would never be reaped")
 	}
-	if !IsCatalogRepo("corentinth/IT-TOOLS") {
+	if !IsCatalogRepo("EXCALIDRAW/Excalidraw") {
 		t.Fatal("match must be case-insensitive, like GitHub names")
 	}
-	// A fork is the customer's own work, not a demo we offered.
-	if IsCatalogRepo("acme/it-tools") {
+	if IsCatalogRepo("acme/excalidraw") {
 		t.Fatal("a fork must not be treated as a catalog demo")
 	}
 	if IsCatalogRepo("") {
 		t.Fatal("empty repo name matched")
+	}
+	if IsCatalogRepo("CorentinTh/it-tools") {
+		t.Fatal("a retired build-track repo must not be claimed by the catalog")
 	}
 }
 

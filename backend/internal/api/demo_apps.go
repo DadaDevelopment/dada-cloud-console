@@ -16,17 +16,20 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// legacyDemoTemplateRepos is the set of platform-owned starter repositories the
-// console used to offer as its one-click showroom. They are retired in favour of
-// the ready-made project catalog (internal/solutions), but they stay listed here
-// because apps deployed from them are still out there with a deadline stamped on
-// them, and dropping the entry would strand those apps in the projects of people
-// who never claimed them. Membership is an exact match on the full name so a
-// user repository that merely ends in "-starter" is never treated as disposable.
+// legacyDemoTemplateRepos is the set of repositories the console used to build
+// a showroom deploy from and no longer does. The platform-owned starters are
+// retired in favour of the ready-made project catalog (internal/solutions), and
+// a catalog card that moved from the build track to a published image retires
+// its repository the same way. They stay listed here because apps deployed from
+// them are still out there with a deadline stamped on them, and dropping the
+// entry would strand those apps in the projects of people who never claimed
+// them. Membership is an exact match on the full name so a user repository that
+// merely ends in "-starter" is never treated as disposable.
 var legacyDemoTemplateRepos = map[string]struct{}{
 	"DadaDevelopment/dada-nextjs-starter":  {},
 	"DadaDevelopment/dada-fastapi-starter": {},
 	"DadaDevelopment/dada-static-starter":  {},
+	"CorentinTh/it-tools":                  {},
 }
 
 // isDemoTemplateRepo reports whether an app linked to repoFullName is a showroom
