@@ -23,21 +23,22 @@ func TestResolvePastedLinkOutranksEverything(t *testing.T) {
 	}
 }
 
-// TestResolveCatalogLinkKeepsVerifiedSpec covers the case where the pasted link
-// happens to be a catalog repository. The customer must get the entry we
-// verified — branch, root dir, port — not a bare repository row that makes the
-// pipeline guess all three again.
-func TestResolveCatalogLinkKeepsVerifiedSpec(t *testing.T) {
+// TestResolvePastedLinkToRetiredCatalogRepoFallsThroughToRepo covers the case
+// where the pasted link used to be a catalog repository. Every build-track
+// card has retired to an image, so no catalog entry claims a repository
+// anymore: the link must come back as the customer's own repo row, never as a
+// catalog entry promising a build that no longer happens.
+func TestResolvePastedLinkToRetiredCatalogRepoFallsThroughToRepo(t *testing.T) {
 	res := Resolve("https://github.com/excalidraw/excalidraw/tree/master/packages")
 	if len(res.Candidates) == 0 {
 		t.Fatal("no candidates")
 	}
 	top := res.Candidates[0]
-	if top.Kind != CandidateSolution || top.Slug != "excalidraw" {
-		t.Fatalf("top candidate = %s %q, want the excalidraw catalog entry", top.Kind, top.Slug)
+	if top.Kind != CandidateRepo {
+		t.Fatalf("top candidate = %s %q, want the customer's own repo row", top.Kind, top.Slug)
 	}
-	if top.Branch != "master" || top.Port != 80 {
-		t.Fatalf("verified spec lost: branch=%q port=%d", top.Branch, top.Port)
+	if top.Slug != "excalidraw/excalidraw" {
+		t.Fatalf("repo slug = %q, want excalidraw/excalidraw", top.Slug)
 	}
 }
 
@@ -73,9 +74,10 @@ func TestResolveRanksExactAboveSubstring(t *testing.T) {
 	}
 }
 
-// TestResolveAliasFindsRussianQuery is why aliases exist: the catalog is in
-// Russian for people who have not met these projects before, and "доска" is
-// what such a person types when they want Excalidraw.
+// The catalog is in Russian for people who have not met these projects
+// before, and "доска" is what such a person types when they want Excalidraw.
+// The match must survive the card moving between tracks: name and aliases
+// belong to the project, not to how it installs.
 func TestResolveAliasFindsRussianQuery(t *testing.T) {
 	res := Resolve("доска")
 	found := false

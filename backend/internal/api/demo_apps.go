@@ -30,6 +30,9 @@ var legacyDemoTemplateRepos = map[string]struct{}{
 	"DadaDevelopment/dada-fastapi-starter": {},
 	"DadaDevelopment/dada-static-starter":  {},
 	"CorentinTh/it-tools":                  {},
+	"excalidraw/excalidraw":                {},
+	"freeCodeCamp/devdocs":                 {},
+	"cyclotruc/gitingest":                  {},
 }
 
 // isDemoTemplateRepo reports whether an app linked to repoFullName is a showroom

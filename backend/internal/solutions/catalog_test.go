@@ -115,22 +115,37 @@ func TestEveryBuiltEntryShipsItsOwnDockerfileBuild(t *testing.T) {
 	}
 }
 
-// A build-track card is only as reliable as the upstream Dockerfile it clones,
-// and an upstream build step that resolves its own toolchain at build time rots
-// on a clock nobody here controls. it-tools ran `npm install -g pnpm` against a
-// lockfile written for pnpm 9: once pnpm 10 shipped, every install of that card
-// failed, both it ever had, and the second was a stranger's first act on the
-// platform. The card now installs upstream's published image instead, and this
-// test keeps it there — moving it back to the build track would restore a
-// storefront tile that cannot be installed.
+// TestRottedUpstreamBuildsStayOnTheImageTrack keeps cards whose upstream
+// Dockerfile rots or whose upstream moved away off the build track. it-tools
+// ran `npm install -g pnpm` against a pnpm 9 lockfile: once pnpm 10 shipped,
+// every install failed, and the second was a stranger's first act on the
+// platform. gitingest's upstream moved to coderamp-labs and publishes only
+// rolling tags. devdocs and excalidraw ship images that skip the upstream
+// toolchain entirely. Moving any of these back to the build track would
+// restore a storefront tile that cannot be verified before a newcomer clicks.
 func TestRottedUpstreamBuildsStayOnTheImageTrack(t *testing.T) {
-	for _, slug := range []string{"it-tools"} {
+	for _, slug := range []string{"it-tools", "gitingest", "devdocs", "excalidraw"} {
 		s, ok := Lookup(slug)
 		if !ok {
 			t.Fatalf("solution %q is gone from the catalog", slug)
 		}
 		if !s.IsImage() {
-			t.Fatalf("solution %q is back on the build track; its upstream Dockerfile cannot be built", slug)
+			t.Fatalf("solution %q is back on the build track; its upstream build cannot be relied on", slug)
+		}
+	}
+}
+
+// The build track is empty on purpose. Every remaining card installs a
+// published image, because that is the only promise the console can check
+// before the click (cmd/solutionprobe resolves manifests and ports), while a
+// build-track card rots with its upstream's toolchain on a clock nobody here
+// controls. Reviving the track is a deliberate act: bring the card back, name
+// its repository in TestIsCatalogRepo, and add it to api.legacyDemoTemplateRepos
+// when it retires again.
+func TestEveryCardIsRegistryVerifiable(t *testing.T) {
+	for _, s := range V1 {
+		if !s.IsImage() {
+			t.Fatalf("solution %q is on the build track; the catalog ships only registry-verifiable image cards", s.Slug)
 		}
 	}
 }
@@ -157,13 +172,18 @@ func TestEveryCategoryHasATitle(t *testing.T) {
 // and a card that moved to the image track no longer builds any repository at
 // all: the catalog cannot be what recognises its old deploys, so those are
 // reaped through api.legacyDemoTemplateRepos instead. A repo still named here
-// after such a move would be claiming a build that no longer happens.
+// after such a move would be claiming a build that no longer happens. Every
+// build-track repository has now retired that way, so the answer to each is no.
 func TestIsCatalogRepo(t *testing.T) {
-	if !IsCatalogRepo("excalidraw/excalidraw") {
-		t.Fatal("catalog repo not recognised; its deploys would never be reaped")
-	}
-	if !IsCatalogRepo("EXCALIDRAW/Excalidraw") {
-		t.Fatal("match must be case-insensitive, like GitHub names")
+	for _, retired := range []string{
+		"excalidraw/excalidraw",
+		"EXCALIDRAW/Excalidraw",
+		"freeCodeCamp/devdocs",
+		"cyclotruc/gitingest",
+	} {
+		if IsCatalogRepo(retired) {
+			t.Fatalf("%q is still claimed by the catalog, but its card installs an image now; its deploys are reaped via api.legacyDemoTemplateRepos", retired)
+		}
 	}
 	if IsCatalogRepo("acme/excalidraw") {
 		t.Fatal("a fork must not be treated as a catalog demo")

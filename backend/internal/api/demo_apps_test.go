@@ -63,6 +63,28 @@ func TestDemoExpiryFor_TTLZeroDisables(t *testing.T) {
 	}
 }
 
+// legacyDemoTemplateReposGotCompany is the companion of the retirements in
+// catalog_test: a case-insensitive hit for an entry that used to be claimed
+// via solutions.IsCatalogRepo must come from the legacy set instead, so the
+// demo reaper keeps recognising the apps already deployed from it.
+func TestRetiredCatalogReposAreRecognisedByTheReaper(t *testing.T) {
+	for _, retired := range []string{
+		"CorentinTh/it-tools",
+		"excalidraw/excalidraw",
+		"freeCodeCamp/devdocs",
+		"cyclotruc/gitingest",
+		"corentinth/IT-TOOLS",
+		"EXCALIDRAW/Excalidraw",
+	} {
+		if !isDemoTemplateRepo(retired) {
+			t.Fatalf("%q is no longer a catalog repo but must still be reaped as a legacy showroom deploy", retired)
+		}
+	}
+	if isDemoTemplateRepo("acme/excalidraw") {
+		t.Fatal("a fork must not be treated as a catalog demo")
+	}
+}
+
 // seedDemoRepo creates a throwaway project/environment/git_repos row carrying
 // the given deletion deadline and returns the ids the reaper works on.
 func seedDemoRepo(t *testing.T, pool *pgxpool.Pool, appName string, expires *time.Time) (projectID, envID uuid.UUID) {

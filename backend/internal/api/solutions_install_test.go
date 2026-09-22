@@ -131,10 +131,13 @@ func newInstallHandler(pool *pgxpool.Pool) *Handler {
 	return &Handler{pool: pool, cfg: &config.Config{GitopsEncryptionKey: installTestKey}}
 }
 
-// TestInstallSolution_CatalogEntryLinksAndBuilds is the newcomer's scenario:
-// one call, and the project has a repository linked with the verified spec and
-// a build already queued -- no second call the console could forget to make.
-func TestInstallSolution_CatalogEntryLinksAndBuilds(t *testing.T) {
+// TestInstallSolution_CatalogImageCreatesApp is the newcomer's scenario:
+// one call on an image card, and the project has a CreateApp operation queued
+// with the card's pinned ref — no repository linked, nothing to build, no
+// second call the console could forget to make. It also pins that an image
+// install does not leave a git_repos row behind: the card no longer builds,
+// and a phantom repo would put the app in the build pipeline's hands.
+func TestInstallSolution_CatalogImageCreatesApp(t *testing.T) {
 	pool := testInstallPool(t)
 	projectID, envID, userID := seedInstallProject(t, pool, "acme", "k8s")
 	t.Cleanup(func() { dropSeededAudit(pool, "Solution", "excalidraw") })
@@ -149,37 +152,31 @@ func TestInstallSolution_CatalogEntryLinksAndBuilds(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	var repoFullName, branch, rootDir string
-	var port int
+	var image string
 	if err := pool.QueryRow(ctx,
-		`SELECT repo_full_name, production_branch, root_dir, port FROM git_repos
-		 WHERE project_id = $1 AND environment_id = $2 AND app_name = 'excalidraw'`,
-		projectID, envID,
-	).Scan(&repoFullName, &branch, &rootDir, &port); err != nil {
-		t.Fatalf("linked repo not found: %v", err)
+		`SELECT payload->>'image' FROM operations
+		 WHERE environment_id = $1 AND action = 'CreateApp' AND resource_name = 'excalidraw'`,
+		envID,
+	).Scan(&image); err != nil {
+		t.Fatalf("CreateApp not queued: %v", err)
 	}
-	if repoFullName != "excalidraw/excalidraw" {
-		t.Fatalf("repo_full_name = %q", repoFullName)
-	}
-	if branch != "master" {
-		t.Fatalf("branch = %q, want the catalog's verified branch master", branch)
-	}
-	if port != 80 {
-		t.Fatalf("port = %d, want the catalog's verified port 80", port)
+	if image != "docker.io/excalidraw/excalidraw@sha256:4542f30bea392b833822d0e7db4fa2220e6706ca962c082add2665159fa91758" {
+		t.Fatalf("image = %q, want the catalog's pinned ref", image)
 	}
 
-	var buildStatus, buildBranch string
+	var repoCount, buildCount int
 	if err := pool.QueryRow(ctx,
-		`SELECT status, branch FROM builds WHERE environment_id = $1 AND app_name = 'excalidraw'`,
+		`SELECT (SELECT COUNT(*) FROM git_repos WHERE environment_id = $1),
+		        (SELECT COUNT(*) FROM builds WHERE environment_id = $1)`,
 		envID,
-	).Scan(&buildStatus, &buildBranch); err != nil {
-		t.Fatalf("build not queued: %v", err)
+	).Scan(&repoCount, &buildCount); err != nil {
+		t.Fatalf("count repo/build rows: %v", err)
 	}
-	if buildStatus != "queued" {
-		t.Fatalf("build status = %q, want queued", buildStatus)
+	if repoCount != 0 {
+		t.Fatalf("an image install linked %d repositories", repoCount)
 	}
-	if buildBranch != "master" {
-		t.Fatalf("build branch = %q, want master", buildBranch)
+	if buildCount != 0 {
+		t.Fatalf("an image install queued %d builds", buildCount)
 	}
 
 	var dbCount int
@@ -197,17 +194,20 @@ func TestInstallSolution_CatalogEntryLinksAndBuilds(t *testing.T) {
 // TestInstallSolution_WithDatabaseOnVMSeedsDSN is the whole point of item 4 on
 // the VM track: the app comes up already able to reach its database, because
 // the install seeded DATABASE_URL on it rather than telling the customer to go
-// and wire one up.
+// and wire one up. n8n is the image-track card the scenario runs through: an
+// install of an image card is CreateApp plus the same database ordering, so
+// the promise must hold there too, not only on the retired build path.
 func TestInstallSolution_WithDatabaseOnVMSeedsDSN(t *testing.T) {
 	pool := testInstallPool(t)
 	projectID, envID, userID := seedInstallProject(t, pool, "acme", "vm")
-	t.Cleanup(func() { dropSeededAudit(pool, "Solution", "devdocs") })
-	t.Cleanup(func() { dropSeededAudit(pool, "ServiceDatabaseV2", "devdocs-db") })
+	attachReadyAppServer(t, pool, projectID, envID)
+	t.Cleanup(func() { dropSeededAudit(pool, "Solution", "n8n") })
+	t.Cleanup(func() { dropSeededAudit(pool, "ServiceDatabaseV2", "n8n-db") })
 
 	h := newInstallHandler(pool)
 	claims := &auth.Claims{UserID: userID, Groups: []string{"/platform-admins"}}
 	withDB := true
-	c, rec := newInstallCtx(projectID, envID, installSolutionRequest{Slug: "devdocs", WithDatabase: &withDB}, claims)
+	c, rec := newInstallCtx(projectID, envID, installSolutionRequest{Slug: "n8n", WithDatabase: &withDB}, claims)
 	h.InstallSolution(c)
 
 	if rec.Code != http.StatusAccepted {
@@ -223,16 +223,16 @@ func TestInstallSolution_WithDatabaseOnVMSeedsDSN(t *testing.T) {
 	).Scan(&appRef, &database); err != nil {
 		t.Fatalf("database operation not queued: %v", err)
 	}
-	if appRef != "devdocs" {
+	if appRef != "n8n" {
 		t.Fatalf("app_ref = %q, want the installed app so the chart binds them", appRef)
 	}
-	if database != "devdocs" {
+	if database != "n8n" {
 		t.Fatalf("database = %q", database)
 	}
 
 	var encrypted []byte
 	if err := pool.QueryRow(ctx,
-		`SELECT value_encrypted FROM env_vars WHERE environment_id = $1 AND app_name = 'devdocs' AND key = 'DATABASE_URL'`,
+		`SELECT value_encrypted FROM env_vars WHERE environment_id = $1 AND app_name = 'n8n' AND key = 'DATABASE_URL'`,
 		envID,
 	).Scan(&encrypted); err != nil {
 		t.Fatalf("DATABASE_URL not seeded on the app: %v", err)
@@ -241,13 +241,13 @@ func TestInstallSolution_WithDatabaseOnVMSeedsDSN(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decrypt DATABASE_URL: %v", err)
 	}
-	if want := "@devdocs-db:5432/devdocs"; !bytes.Contains(dsn, []byte(want)) {
+	if want := "@n8n-db:5432/n8n"; !bytes.Contains(dsn, []byte(want)) {
 		t.Fatalf("DSN %q does not point at the database it just ordered (%q)", string(dsn), want)
 	}
 
 	var pgPassword []byte
 	if err := pool.QueryRow(ctx,
-		`SELECT value_encrypted FROM env_vars WHERE environment_id = $1 AND app_name = 'devdocs-db' AND key = 'POSTGRES_PASSWORD'`,
+		`SELECT value_encrypted FROM env_vars WHERE environment_id = $1 AND app_name = 'n8n-db' AND key = 'POSTGRES_PASSWORD'`,
 		envID,
 	).Scan(&pgPassword); err != nil {
 		t.Fatalf("POSTGRES_PASSWORD not seeded on the database app: %v", err)
