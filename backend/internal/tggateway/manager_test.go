@@ -270,6 +270,7 @@ func (o *onceTelegram) sentCount() int {
 // failingA2A errors on Send until failures calls have happened, then
 // succeeds -- lets a test drive an exact-length failure streak.
 type failingA2A struct {
+	errMsg   string
 	mu       sync.Mutex
 	failures int
 	calls    int
@@ -284,7 +285,11 @@ func (f *failingA2A) SendWithContext(_ context.Context, _ string, _ string, _ st
 	defer f.mu.Unlock()
 	f.calls++
 	if f.calls <= f.failures {
-		return "", errors.New("a2a unreachable")
+		msg := f.errMsg
+		if msg == "" {
+			msg = "a2a unreachable"
+		}
+		return "", errors.New(msg)
 	}
 	return "ok", nil
 }
@@ -347,6 +352,55 @@ func TestRunPoller_A2AFallbackSuccessIsNotOverriddenByStaleRuntimeError(t *testi
 	waitFor(t, func() bool { return tg.sentCount() == 1 })
 	if got := tg.sent[0]; got != "ok" {
 		t.Fatalf("expected the real a2a reply %q, got %q (fallback=%q)", "ok", got, a2aFailureFallback)
+	}
+}
+
+// TestRunPoller_TransientGroupFailureIsRetriedNotPublished guards the
+// 2026-09-22 18:42 UTC incident: a connection timeout to the A2A controller
+// aborted a turn whose answer was already computed, and the gateway published
+// the technical fallback into a group chat. A transient failure in a group
+// must be retried once and deliver the real reply.
+func TestRunPoller_TransientGroupFailureIsRetriedNotPublished(t *testing.T) {
+	tg := &onceTelegram{updates: []TelegramUpdate{{UpdateID: 1, ChatID: 42, ChatType: "group", Text: "найди пожалуйста актуальные бенчмарки по этой модели"}}}
+	a2a := &failingA2A{failures: 1, errMsg: "a2a agent-t: Post \"http://a2a\": context deadline exceeded"}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go runPoller(ctx, tg, a2a, NewNoopRuntimeClient(), Binding{AgentName: "agent-t", BotToken: "tok-t"})
+
+	deadline := time.Now().Add(6 * time.Second)
+	for time.Now().Before(deadline) && tg.sentCount() < 1 {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if got := tg.sent[0]; got == a2aFailureFallback {
+		t.Fatalf("group chat got the technical fallback, wanted the retried reply")
+	}
+	if got := tg.sent[0]; got != "ok" {
+		t.Fatalf("expected the real a2a reply after retry, got %q", got)
+	}
+	if a2a.calls != 2 {
+		t.Fatalf("expected a2a to be called twice (original + retry), got %d", a2a.calls)
+	}
+}
+
+// TestRunPoller_NonTransientGroupFailureStaysSilent pins the other side of
+// the group gate: an agent-level defect ("no text in response") is not worth
+// a retry and must not announce itself to a group chat; the failure lives in
+// the logs only.
+func TestRunPoller_NonTransientGroupFailureStaysSilent(t *testing.T) {
+	tg := &onceTelegram{updates: []TelegramUpdate{{UpdateID: 1, ChatID: 42, ChatType: "group", Text: "найди пожалуйста актуальные бенчмарки по этой модели"}}}
+	a2a := &failingA2A{failures: 1, errMsg: "a2a agent-u: no text in response"}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go runPoller(ctx, tg, a2a, NewNoopRuntimeClient(), Binding{AgentName: "agent-u", BotToken: "tok-u"})
+
+	time.Sleep(300 * time.Millisecond)
+	if got := tg.sentCount(); got != 0 {
+		t.Fatalf("group chat must stay silent on a non-transient failure, got %d messages", got)
+	}
+	if a2a.calls != 1 {
+		t.Fatalf("non-transient failure must not retry, calls=%d", a2a.calls)
 	}
 }
 

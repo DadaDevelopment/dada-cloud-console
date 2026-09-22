@@ -37,6 +37,36 @@ const typingRefreshInterval = 4 * time.Second
 // so a real outage still doesn't spam every failed message.
 const a2aFailureFallback = "не получилось обработать сообщение, попробуйте отправить его ещё раз"
 
+// a2aRetryDelay is the pause before the single transport-level retry of a
+// failed a2a/runtime turn. Sized for a hiccup (connection-pool reset, brief
+// controller restart), not for a real outage: a dead controller fails the
+// retry too and the message falls through to the normal failure path.
+const a2aRetryDelay = 2 * time.Second
+
+// isTransientProcErr reports whether a processing failure looks like a
+// one-off transport blip worth a single retry. Observed live on
+// 2026-09-22 18:42 UTC: a ConnectTimeout while persisting the session event
+// aborted a turn whose LLM answer was already computed, and the gateway
+// published the technical fallback into a group chat. Only connection-level
+// and 5xx-class errors qualify; agent-level defects ("no text in response",
+// malformed replies) must not retry, a second attempt would reproduce the
+// same result.
+func isTransientProcErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "context deadline exceeded") {
+		return true
+	}
+	for _, marker := range []string{"ConnectTimeout", "connection reset", "EOF", "no such host", "connection refused", "i/o timeout", "status 5"} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // ErrInvalidToken is returned by Manager.Bind when Telegram's getMe rejects
 // the token -- the handler maps this to a synchronous 400.
 type ErrInvalidToken struct{ cause error }
@@ -614,24 +644,55 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 			if runCtx.Err() != nil {
 				return
 			}
-			if useRuntime {
-				log.Warn().Err(procErr).Str("agent", b.AgentName).Msg("tggateway: runtime failed; conversation enablement unknown, suppressing channel output")
-				return
-			}
-			stateMu.Lock()
-			if !failing {
-				failing = true
-				warned = false
-			}
-			log.Warn().Err(procErr).Str("agent", b.AgentName).Msg("tggateway: message processing failed")
-			if !warned {
-				warned = true
-				if sendErr := tg.SendMessage(ctx, b.BotToken, chatID, a2aFailureFallback); sendErr != nil {
-					log.Warn().Err(sendErr).Str("agent", b.AgentName).Msg("tggateway: warning send failed")
+			if isTransientProcErr(procErr) {
+				time.Sleep(a2aRetryDelay)
+				var retryReply string
+				var retryErr error
+				if useRuntime {
+					resp, retryErr = runtime.ProcessMessage(runCtx, req)
+					retryReply = resp.Text
+				} else {
+					retried := make([]string, 0, len(a2aTexts))
+					for _, text := range a2aTexts {
+						r, err := a2a.SendWithContext(runCtx, b.AgentName, a2aContextFor(convKey), text)
+						if err != nil {
+							retryErr = err
+							break
+						}
+						retried = append(retried, r)
+					}
+					if retryErr == nil {
+						retryReply = strings.Join(retried, "\n")
+					}
+				}
+				if retryErr == nil {
+					reply = retryReply
+					procErr = nil
 				}
 			}
-			stateMu.Unlock()
-			return
+			if procErr != nil {
+				if runCtx.Err() != nil {
+					return
+				}
+				if useRuntime {
+					log.Warn().Err(procErr).Str("agent", b.AgentName).Msg("tggateway: runtime failed; conversation enablement unknown, suppressing channel output")
+					return
+				}
+				stateMu.Lock()
+				if !failing {
+					failing = true
+					warned = false
+				}
+				log.Warn().Err(procErr).Str("agent", b.AgentName).Msg("tggateway: message processing failed")
+				if !warned && !IsGroup(batch[0].ChatType) {
+					warned = true
+					if sendErr := tg.SendMessage(ctx, b.BotToken, chatID, a2aFailureFallback); sendErr != nil {
+						log.Warn().Err(sendErr).Str("agent", b.AgentName).Msg("tggateway: warning send failed")
+					}
+				}
+				stateMu.Unlock()
+				return
+			}
 		}
 		stateMu.Lock()
 		failing = false
