@@ -53,12 +53,13 @@ WITH q AS (
   SELECT DISTINCT w FROM unnest(regexp_split_to_array(lower(trim($1)), '[^a-z0-9а-яё_.+-]+')) AS w
   WHERE length(w) >= 3
 )
-SELECT p.message_id, left(p.text, 600) AS text,
+SELECT p.channel, p.message_id, left(p.text, 600) AS text,
        to_char(p.posted_at, 'YYYY-MM-DD') AS posted_on,
        (SELECT count(*) FROM q WHERE position(q.w in lower(p.text)) > 0) AS score
 FROM channel_posts p
+WHERE ($2 = '' OR p.channel = $2)
 ORDER BY score DESC, p.posted_at DESC NULLS LAST
-LIMIT 3
+LIMIT 5
 """
 
 CHAT_SEARCH_SQL = """

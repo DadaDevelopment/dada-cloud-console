@@ -83,10 +83,12 @@ SCHEMA = [
     """,
     """
     CREATE TABLE IF NOT EXISTS channel_posts (
-        message_id BIGINT PRIMARY KEY,
+        message_id BIGINT,
+        channel TEXT NOT NULL DEFAULT '',
         text TEXT NOT NULL,
         posted_at TIMESTAMPTZ,
-        ingested_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        ingested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (channel, message_id)
     )
     """,
     """
@@ -103,6 +105,9 @@ SCHEMA = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS reply_ledger_chat_time_idx ON reply_ledger (chat_id, created_at DESC)",
+    "ALTER TABLE channel_posts ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE channel_posts DROP CONSTRAINT IF EXISTS channel_posts_pkey",
+    "CREATE UNIQUE INDEX IF NOT EXISTS channel_posts_channel_message_idx ON channel_posts (channel, message_id)",
     """
     CREATE TABLE IF NOT EXISTS chat_comments (
         chat_id BIGINT NOT NULL,
@@ -180,7 +185,10 @@ async def refresh_manifests_from_seed(seed_tag: str, manifests: list[dict]) -> N
 
     A row a human edited (its ``seeded_from`` no longer matches) is left
     alone: the console is the intended editor of a manifest, this file only
-    owns what it planted.
+    owns what it planted. A row owned by an older seed tag of this same file
+    is adopted on conflict DO UPDATE by name — that is how a seed change
+    (new columns, new manifest rows) reaches a live database, because the
+    insert is silent when the name already exists.
     """
     pool = await pg_pool()
     names = [m["name"] for m in manifests]
@@ -189,10 +197,17 @@ async def refresh_manifests_from_seed(seed_tag: str, manifests: list[dict]) -> N
             for m in manifests:
                 await conn.execute(
                     """
-                    UPDATE tool_manifests
-                    SET description = $2, input_schema = $3::jsonb, op_type = $4, config = $5::jsonb,
-                        enabled = true, updated_at = now()
-                    WHERE name = $1 AND seeded_from = $6
+                    INSERT INTO tool_manifests (name, description, input_schema, op_type, config, seeded_from)
+                    VALUES ($1, $2, $3::jsonb, $4, $5::jsonb, $6)
+                    ON CONFLICT (name) DO UPDATE
+                    SET description = EXCLUDED.description,
+                        input_schema = EXCLUDED.input_schema,
+                        op_type = EXCLUDED.op_type,
+                        config = EXCLUDED.config,
+                        seeded_from = EXCLUDED.seeded_from,
+                        enabled = true,
+                        updated_at = now()
+                    WHERE tool_manifests.seeded_from LIKE 'vibecoder_%'
                     """,
                     m["name"],
                     m["description"],
@@ -256,7 +271,7 @@ async def upsert_news(items: list[dict]) -> int:
     return written
 
 
-async def upsert_channel_posts(posts: list[dict]) -> int:
+async def upsert_channel_posts(channel: str, posts: list[dict]) -> int:
     if not posts:
         return 0
     pool = await pg_pool()
@@ -266,11 +281,12 @@ async def upsert_channel_posts(posts: list[dict]) -> int:
             for post in posts:
                 status = await conn.execute(
                     """
-                    INSERT INTO channel_posts (message_id, text, posted_at)
-                    VALUES ($1, $2, $3)
-                    ON CONFLICT (message_id) DO UPDATE SET text = EXCLUDED.text
+                    INSERT INTO channel_posts (message_id, channel, text, posted_at)
+                    VALUES ($1, $2, $3, $4)
+                    ON CONFLICT (channel, message_id) DO UPDATE SET text = EXCLUDED.text
                     """,
                     post["message_id"],
+                    channel,
                     post["text"],
                     post.get("posted_at"),
                 )

@@ -102,19 +102,49 @@ async def run(channel: str, pages: int, timeout: float, dry_run: bool) -> int:
         return 0
     import storage
 
-    written = await storage.upsert_channel_posts(posts)
-    print(f"channel ingest: {len(posts)} seen, {written} new rows")
+    written = await storage.upsert_channel_posts(channel, posts)
+    print(f"channel ingest {channel}: {len(posts)} seen, {written} new rows")
     return 0
+
+
+def slugs_from_env() -> list[str]:
+    """Channel slugs to ingest, newest-first source is the CLI arg.
+
+    ``CHANNEL_SLUGS`` (comma-separated) wins over ``CHANNEL_SLUG`` so the
+    multi-channel rollout is a gitops env change, not a code change. The
+    legacy single variable still works and maps to a one-element list.
+    """
+    import os
+
+    raw = os.environ.get("CHANNEL_SLUGS", "") or os.environ.get("CHANNEL_SLUG", "")
+    return [s.strip() for s in raw.split(",") if s.strip()]
+
+
+async def run_all(slugs: list[str], pages: int, timeout: float, dry_run: bool) -> int:
+    """Ingest every slug; one dead channel never fails the batch."""
+    failed = 0
+    for slug in slugs:
+        try:
+            if await run(slug, pages, timeout, dry_run):
+                failed += 1
+        except Exception as exc:
+            print(f"channel ingest {slug} failed: {exc}", file=sys.stderr)
+            failed += 1
+    return 1 if failed == len(slugs) else 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Backfill channel_posts from the public channel preview")
-    parser.add_argument("channel", help="channel username without @")
+    parser.add_argument("channel", help="channel username without @", nargs="?")
     parser.add_argument("--pages", type=int, default=10)
     parser.add_argument("--timeout", type=float, default=20.0)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    return asyncio.run(run(args.channel, args.pages, args.timeout, args.dry_run))
+
+    slugs = [args.channel] if args.channel else slugs_from_env()
+    if not slugs:
+        parser.error("no channel given and CHANNEL_SLUGS/CHANNEL_SLUG is empty")
+    return asyncio.run(run_all(slugs, args.pages, args.timeout, args.dry_run))
 
 
 if __name__ == "__main__":

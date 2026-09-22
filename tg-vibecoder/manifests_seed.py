@@ -11,7 +11,7 @@ from datetime import date
 import facts
 from search_sql import CHANNEL_SEARCH_SQL, CHAT_SEARCH_SQL, FACT_SEARCH_SQL, NEWS_SEARCH_SQL
 
-SEED_TAG = "vibecoder_v1_2026_09_08"
+SEED_TAG = "vibecoder_v2_2026_09_22_web"
 
 DEFAULT_MANIFESTS = [
     {
@@ -50,16 +50,21 @@ DEFAULT_MANIFESTS = [
     {
         "name": "channel_search",
         "description": (
-            "Что канал уже писал по теме. Нужен, чтобы не противоречить собственным постам "
-            "и не пересказывать их заново. Не источник внешних фактов."
+            "Что писали в каналах по теме: наш канал и публичные каналы про ИИ, "
+            "которые читаем. channel опционален: без него ищем везде, с ним — "
+            "только в указанном (например vibe_architect_ai). Не источник внешних "
+            "фактов: канал может ошибаться."
         ),
         "op_type": "sql_query_v1",
         "input_schema": {
             "type": "object",
-            "properties": {"query": {"type": "string"}},
+            "properties": {
+                "query": {"type": "string"},
+                "channel": {"type": "string", "default": ""},
+            },
             "required": ["query"],
         },
-        "config": {"query": CHANNEL_SEARCH_SQL, "param_order": ["query"]},
+        "config": {"query": CHANNEL_SEARCH_SQL, "param_order": ["query", "channel"]},
     },
     {
         "name": "chat_search",

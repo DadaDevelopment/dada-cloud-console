@@ -54,6 +54,7 @@ type GroupPolicy struct {
 	RequireMention  bool
 	PostCommentRate float64
 	QuestionMarkers []string
+	NameAliases     []string
 
 	mu     sync.Mutex
 	recent map[string][]time.Time
@@ -89,10 +90,53 @@ func NewGroupPolicyForAgent(botUsername, agentName string) *GroupPolicy {
 		RequireMention:  envStrFor("TG_GROUP_REQUIRE_MENTION", agentName) == "1",
 		PostCommentRate: envFloatFor("TG_GROUP_POST_COMMENT_RATE", agentName, 0),
 		QuestionMarkers: defaultQuestionMarkers,
+		NameAliases:     nameAliasesFor(agentName),
 		recent:          map[string][]time.Time{},
 		now:             time.Now,
 		roll:            rand.Float64,
 	}
+}
+
+// nameAliasesFor reads TG_GROUP_NAME_ALIASES[_<AGENT>] — a comma-separated
+// list of words people actually use to call the agent ("вайбкодер, vibe,
+// coder"). A name is matched as a whole word so "вайбкод" does not trigger
+// "вайбкодер"; aliases are compared lowercased, spaces are separators.
+func nameAliasesFor(agentName string) []string {
+	raw := envStrFor("TG_GROUP_NAME_ALIASES", agentName)
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		w := strings.ToLower(strings.TrimSpace(part))
+		if w != "" {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// saysAlias reports whether any alias appears as a whole word in the text.
+// Word boundaries are rune-based so Cyrillic names work: a boundary is the
+// edge of the string or a rune that is neither letter nor digit.
+func saysAlias(text string, aliases []string) bool {
+	if len(aliases) == 0 {
+		return false
+	}
+	runes := []rune(strings.ToLower(text))
+	isWord := func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }
+	for _, alias := range aliases {
+		ar := []rune(alias)
+		for i := 0; i+len(ar) <= len(runes); i++ {
+			if i > 0 && isWord(runes[i-1]) {
+				continue
+			}
+			if i+len(ar) < len(runes) && isWord(runes[i+len(ar)]) {
+				continue
+			}
+			if string(runes[i:i+len(ar)]) == alias {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // envSuffix turns an agent name into the env-key suffix that carries its
@@ -185,6 +229,9 @@ func (p *GroupPolicy) Decide(u TelegramUpdate) EngageDecision {
 		return EngageDecision{false, ReasonNoContent}
 	}
 	if p.mentionsBot(u) {
+		return EngageDecision{true, ReasonMention}
+	}
+	if saysAlias(u.Text, p.NameAliases) {
 		return EngageDecision{true, ReasonMention}
 	}
 	if u.ReplyToIsBot && u.ReplyToUsername != "" && strings.EqualFold(u.ReplyToUsername, p.BotUsername) {

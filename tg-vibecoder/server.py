@@ -65,6 +65,7 @@ import manifests_seed
 import ops
 import skills
 import storage
+import web_tools
 
 mcp = FastMCP("vibecoder")
 
@@ -175,6 +176,32 @@ async def today() -> dict:
     """Текущая дата в UTC. Всё, что старше её на месяцы, считается неподтверждённым."""
     now = datetime.now(timezone.utc)
     return {"date": now.date().isoformat(), "iso": now.isoformat(), "weekday": now.strftime("%A")}
+
+
+@mcp.tool
+async def web_search(query: str) -> dict:
+    """Поиск по открытому вебу: официальные анонсы, документация, бенчмарки, цены.
+
+    Юзается, когда news_search пуст или тема шире новостной ленты: таблицы
+    бенчмарков, страница релиза, репозиторий. Возвращает до 6 ссылок с
+    заголовками и сниппетами. Пустой список — поиск ничего не дал или поисковик
+    недоступен, это не «события не было». Ссылка становится фактом только после
+    web_fetch: сначала открой, потом цитируй.
+    """
+    results = await web_tools.search_web(query)
+    return {"results": results}
+
+
+@mcp.tool
+async def web_fetch(url: str) -> dict:
+    """Открыть ссылку и прочитать содержимое текстом (до 6000 символов).
+
+    Для страниц, найденных web_search или присланных собеседником: README
+    репозитория, пост релиза, страница бенчмарка. Возвращает текст страницы
+    или понятную причину, почему открыть не удалось.
+    """
+    text = await web_tools.fetch_page_text(url)
+    return {"url": url, "text": text}
 
 
 async def observe(request):
