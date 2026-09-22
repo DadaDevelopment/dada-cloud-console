@@ -6808,3 +6808,13 @@ Jenkins main #75 на b6a1d7a1, образ пода сверяется отде�
   8000, не 80), 0515 (excalidraw/devdocs — тот же часовой риск; в 0515 записана и ловушка
   с IsCatalogRepo, чтобы следующий цикл не наступил на неё второй раз).
 - ЗАКРЫТО: 0510 с перезаземлением. Эксперимент E189 открыт, measure_after 2026-10-05.
+
+## sess-0922a (2026-09-22, ~50 мин) — product
+- ГЕЙТ: cyc mandate NORMAL (ships 7/7, tax 0%). ops-handoff 09-16 прочитан, не перепроверялся (старше суток — отмечено в owner-actions).
+- ЗАДАЧА: 0513 (bl next, H11) — гейт достоверности витрины каталога.
+- ОТГРУЖЕНО 36629764: (1) cmd/solutionprobe — постоянный registry-гейт карточек (манифест 200 + linux/amd64 + порт карточки в ExposedPorts конфига образа); (2) три оставшиеся билд-трек карточки переведены на проверенные образы: excalidraw @digest (sha-теги умерли в 2021, только rolling latest, свежий 2026-05), gitingest ghcr.io/coderamp-labs:main-4e259a0 (порт 8000 не 80!), devdocs:20260201 (9292); (3) билд-трек каталога ПУСТ и закреплён тестом TestEveryCardIsRegistryVerifiable; (4) репо в legacyDemoTemplateRepos, жнец не теряет старые деплои (TestRetiredCatalogReposAreRecognisedByTheReaper); (5) тесты установки переведены на image-контракт (CreateApp с пином, ноль git_repos/builds строк).
+- M2-ДОКАЗАТЕЛЬСТВО: probe-catalog-images.sh GREEN (27/27 карточек резолвятся, полный go test internal/api + solutions в чистом контейнере golang:1.25); DB-интеграционные тесты на эфемерном postgres:16-alpine через cmd/migrate — 10/10 PASS (TestInstallSolution_CatalogImageCreatesApp, WithDatabaseOnVMSeedsDSN/n8n, RetiredCatalogRepos...).
+- ЗМІСТ ДЛЯ ЮЗЕРА: пустой экран больше не предлагает карточку, которая не устанавливается; класс it-tools (ротация апстрим-тулчейна) и класс jellyfin-порт/образа ловятся зондом ДО клика новичка, а не его первым действием.
+- ПОБOЧНОЕ: VM встала на 104M диска — сняты 7 dangling-образов (ежедневные дубли сборки, users=0 проверен по каждому) + build cache = 14G свободно.
+- ЗАМЕЧЕННОЕ: probe поймал свой же баг нормализации docker.io/ префикса на первом прогоне (401) — починен в том же цикле, до коммита.
+- H11: evidence в hypotheses.md не дописан — owner-контур ведёт статусы; E189 (measure_after 2026-10-05) теперь меряет витрину ПОСЛЕ гейта: доля установок -> живой апп должна подняться с 1/12.
