@@ -15,8 +15,6 @@ import html
 import random
 import re
 
-import httpx
-
 _SEARCH_RESULTS = 6
 _SEARCH_ATTEMPTS = 3
 _SEARCH_BACKOFF = 1.5
@@ -79,6 +77,8 @@ async def _ddg_once(client, base_url: str, query: str) -> list[dict]:
 async def search_web(query: str) -> list[dict]:
     """Run the DDG ladder. Empty list means nothing found or engine down."""
     import time
+
+    import httpx
     now = time.monotonic()
     if now < _SEARCH_DOWN.get("until", 0.0):
         return []
@@ -114,6 +114,7 @@ async def search_web(query: str) -> list[dict]:
 
 async def fetch_page_text(url: str) -> str:
     """Open a URL and return readable text. Never raises."""
+    import httpx
 
     if not re.match(r"^https?://", url.strip()):
         return "Ссылка должна начинаться с http:// или https://"
