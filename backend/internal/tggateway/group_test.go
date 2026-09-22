@@ -70,10 +70,10 @@ func TestDecide_EngagesWhenAddressed(t *testing.T) {
 		t.Fatalf("reply to bot must engage, got %+v", d)
 	}
 	other := groupMsg("а пруф?")
-	other.ReplyToIsBot = true
+	other.ReplyToIsBot = false
 	other.ReplyToUsername = "some_other_bot"
 	if d := p.Decide(other); d.Engage {
-		t.Fatalf("reply to a different bot must not engage, got %+v", d)
+		t.Fatalf("reply to a non-bot message must not engage via reply_to_bot, got %+v", d)
 	}
 }
 

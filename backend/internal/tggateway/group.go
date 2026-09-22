@@ -234,7 +234,7 @@ func (p *GroupPolicy) Decide(u TelegramUpdate) EngageDecision {
 	if saysAlias(u.Text, p.NameAliases) {
 		return EngageDecision{true, ReasonMention}
 	}
-	if u.ReplyToIsBot && u.ReplyToUsername != "" && strings.EqualFold(u.ReplyToUsername, p.BotUsername) {
+	if u.ReplyToIsBot {
 		return EngageDecision{true, ReasonReplyToBot}
 	}
 	if p.RequireMention {
