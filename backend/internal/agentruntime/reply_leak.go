@@ -64,6 +64,14 @@ var leakThirdPersonPattern = regexp.MustCompile(`(?i)(^|[^\pL])((он|она|к�
 // parenthesised aside followed by a quoted script line.
 var leakPlanningPattern = regexp.MustCompile(`(?i)(^|[^\pL])((выше|ниже)\s+порога|не\s+(задаём|задаю)|у\s+(него|неё)\s+уже)($|[^\pL])|\)\s*:\s*«`)
 
+// leakTierPattern catches the internal deposit-tier bucket read out to the
+// client instead of the scripted line for it (P0-4, эвал 20.09: «300к = 300
+// 000 ₽/мес, тир 200-500 тыс.», «Это тир от 200 тыс. до 500 тыс.:»). The tier
+// math stays in the model's head; the client only ever gets Roman's line for
+// that bracket. \b does not follow Cyrillic in Go's RE2, so both boundaries
+// are spelled out explicitly instead of relying on it.
+var leakTierPattern = regexp.MustCompile(`(?i)(^|[^\pL])тир(ы|а|е|ов)?\s+(от\s+)?\d[\d\s\-]*\s*(тыс|к|000)($|[^\pL])`)
+
 var leakEnglishFillers = []string{"continue to", "hmm", "okay,", "fine.", "let me ", "the user ", "the client "}
 
 var leakMarkerPattern = regexp.MustCompile(`(?i)\b(kb|skill|placeholder|internal)\b`)
@@ -106,6 +114,9 @@ func leakReason(reply string) string {
 	}
 	if m := leakPlanningPattern.FindString(text); m != "" {
 		return "planning talk «" + strings.TrimSpace(m) + "»"
+	}
+	if m := leakTierPattern.FindString(text); m != "" {
+		return "internal deposit tier " + strings.TrimSpace(m)
 	}
 	share, latin := latinShare(text)
 	if share > 0 {

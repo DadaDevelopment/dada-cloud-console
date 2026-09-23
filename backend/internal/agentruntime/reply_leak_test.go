@@ -52,6 +52,8 @@ func TestLeakReasonCatchesMonologues(t *testing.T) {
 		"t10 n70 aside then quoted line":          "Ссылку он получил (регистрация идёт): «Получилось пройти регистрацию?»",
 		"t14 n71 stage chain as a message":        "S5 → S6 → S7\n---\nНам платит брокер комиссию с вашего торгового объема, поэтому мы заинтересованы в том, чтобы взращивать прибыльных трейдеров",
 		"stage code alone on a line":              "S9\nПодскажите, а какая цель по результатам с трейдинга в месяц?",
+		"P0-4 tier math read out":                 "300к = 300 000 ₽/мес, тир 200-500 тыс.",
+		"P0-4 tier bucket label":                  "Это тир от 200 тыс. до 500 тыс.: сильная цель по доходу",
 	}
 	for name, reply := range cases {
 		if reason := leakReason(reply); reason == "" {
