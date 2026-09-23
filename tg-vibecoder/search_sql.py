@@ -80,6 +80,19 @@ ORDER BY score DESC, c.sent_at DESC NULLS LAST
 LIMIT 8
 """
 
+CHAT_TAIL_SQL = """
+SELECT c.author, c.username,
+       left(trim(concat_ws(' ', nullif(c.media, ''), c.text)), 400) AS text,
+       to_char(c.sent_at, 'DD.MM HH24:MI') AS said_at,
+       c.is_channel_post AS is_post,
+       c.engaged AS bot_answered
+FROM chat_comments c
+WHERE c.chat_id = $1
+  AND length(c.text) > 0
+ORDER BY c.sent_at DESC NULLS LAST
+LIMIT $2::int
+"""
+
 REPLY_BUDGET_SQL = """
 SELECT count(*) AS answered_last_hour
 FROM reply_ledger

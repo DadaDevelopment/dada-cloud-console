@@ -9,7 +9,7 @@ new handler.
 from datetime import date
 
 import facts
-from search_sql import CHANNEL_SEARCH_SQL, CHAT_SEARCH_SQL, FACT_SEARCH_SQL, NEWS_SEARCH_SQL
+from search_sql import CHANNEL_SEARCH_SQL, CHAT_SEARCH_SQL, CHAT_TAIL_SQL, FACT_SEARCH_SQL, NEWS_SEARCH_SQL
 
 SEED_TAG = "vibecoder_v2_2026_09_22_web"
 
@@ -81,6 +81,27 @@ DEFAULT_MANIFESTS = [
             "required": ["query"],
         },
         "config": {"query": CHAT_SEARCH_SQL, "param_order": ["query"]},
+    },
+    {
+        "name": "chat_tail",
+        "description": (
+            "Последние сообщения чата подряд, как они шли по времени: кто что сказал, "
+            "когда и на что отвечал. Это не поиск по словам, а сама лента диалога. "
+            "Читай перед ответом на обычный коммент, когда важно понять контекст "
+            "разговора: шутка это, спор, продолжение темы или обращение к тебе. "
+            "is_post помечает посты канала, bot_answered - где ты уже отвечал. "
+            "limit не задавай больше 40."
+        ),
+        "op_type": "sql_query_v1",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "chat_id": {"type": "integer"},
+                "limit": {"type": "integer", "default": 30},
+            },
+            "required": ["chat_id"],
+        },
+        "config": {"query": CHAT_TAIL_SQL, "param_order": ["chat_id", "limit"]},
     },
 ]
 
