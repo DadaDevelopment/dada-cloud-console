@@ -209,16 +209,37 @@ func (c *httpA2AClient) SendWithContext(ctx context.Context, agentName string, c
 		return "", fmt.Errorf("a2a %s: %s", agentName, parsed.Error.Message)
 	}
 
-	if isInputRequired(parsed.Result) {
+	// The A2A task carries its own typed outcome in status.state. Reading it
+	// replaces content-sniffing entirely: "completed" (or no state field, for
+	// minimal servers) means extractText below is safe; "input-required" is
+	// the known HITL pause this one-shot client cannot resume; every other
+	// state - failed, canceled, rejected, auth-required, unknown, or one the
+	// spec adds later - means the task did not produce a reply, and whatever
+	// text an artifact carries there (including a leaked upstream error body)
+	// must not be extracted as if it were one. This is the fix for the class
+	// of bug where a new provider failure shape needed a new substring added
+	// to a marker list after the fact: the protocol already says which task
+	// states are not a reply, so read that instead of the content.
+	var envelope a2aResultEnvelope
+	if err := json.Unmarshal(parsed.Result, &envelope); err != nil {
+		return "", fmt.Errorf("a2a %s: decode result envelope: %w", agentName, err)
+	}
+	switch envelope.Status.State {
+	case "", "completed":
+	case "input-required":
 		log.Warn().Str("agent", agentName).Msg("tggateway: agent paused on input-required (ask_user or similar HITL tool) - this client is one-shot and cannot resume it")
 		return a2aInputRequiredFallback, nil
+	default:
+		log.Warn().Str("agent", agentName).Str("state", envelope.Status.State).
+			Msg("tggateway: a2a task ended in a non-completed state, not extracting its text")
+		return a2aFailureFallback, nil
 	}
 
 	text = extractText(parsed.Result)
 	if text == "" {
 		return "", fmt.Errorf("a2a %s: no text in response", agentName)
 	}
-	return text, nil
+	return sanitizeModelReply(text), nil
 }
 
 // a2aInputRequiredFallback is sent to the Telegram user when an agent pauses
@@ -229,22 +250,14 @@ func (c *httpA2AClient) SendWithContext(ctx context.Context, agentName string, c
 // error, it asks them to rephrase as a single message.
 const a2aInputRequiredFallback = "не смог обработать вопрос за один шаг, переформулируйте его одним сообщением"
 
-// isInputRequired reports whether an A2A result is a paused task
-// (status.state == "input-required"), which happens when the agent's model
-// invokes a human-in-the-loop confirmation tool. Such a response carries no
-// "artifacts" and its question text lives in a shape extractText does not
-// parse (observed: a "question" field, not a "text" part), so it must be
-// detected before falling through to the no-text error path.
-func isInputRequired(raw json.RawMessage) bool {
-	var v struct {
-		Status struct {
-			State string `json:"state"`
-		} `json:"status"`
-	}
-	if err := json.Unmarshal(raw, &v); err != nil {
-		return false
-	}
-	return v.Status.State == "input-required"
+// a2aResultEnvelope reads only the one field every A2A task result carries
+// regardless of server: status.state. It is decoded separately from the
+// full-text extraction so a non-completed task can be recognized before
+// extractText ever walks its artifacts.
+type a2aResultEnvelope struct {
+	Status struct {
+		State string `json:"state"`
+	} `json:"status"`
 }
 
 // extractText walks an arbitrary JSON value and concatenates every string
