@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -11,6 +13,52 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
+
+// errApexNotVerified reports that the FQDN's apex has no verified domain
+// authorization for the project, so the caller must not be allowed to register
+// an endpoint on it.
+var errApexNotVerified = errors.New("apex domain is not verified for this project")
+
+// isPlatformDefaultDomain reports whether fqdn belongs to the platform's own
+// default domain, whose hostnames the platform issues itself and the user never
+// owns, so there is no authorization for them to hold.
+func isPlatformDefaultDomain(fqdn, base string) bool {
+	if base == "" || fqdn == "" {
+		return false
+	}
+	return fqdn == base || strings.HasSuffix(fqdn, "."+base)
+}
+
+// requireVerifiedApex fails unless the project holds a verified authorization
+// covering fqdn, mirroring the anti-hijack gate AttachHostname already applies
+// [domains.go, no_verified_apex].
+//
+// Endpoint creation used to skip this check entirely, and the gap was not
+// theoretical: on 2026-09-22 a user registered an endpoint for a domain they
+// had not verified yet, and by the time verification succeeded the endpoint
+// already occupied the name. Every later attempt to attach that domain the
+// working way answered 409 fqdn_taken, and the domain never served anything,
+// because nothing re-applies an endpoint when an authorization turns verified.
+// Refusing the premature endpoint is what keeps that dead end from being
+// created in the first place.
+func (h *Handler) requireVerifiedApex(ctx context.Context, projectID uuid.UUID, fqdn string) error {
+	if isPlatformDefaultDomain(fqdn, h.cfg.DefaultDomainBase) {
+		return nil
+	}
+
+	var authID uuid.UUID
+	err := h.pool.QueryRow(ctx,
+		`SELECT id FROM domain_authorizations
+		 WHERE project_id = $1 AND status = 'verified'
+		   AND ($2 = apex_domain OR $2 LIKE '%.' || apex_domain)
+		 ORDER BY length(apex_domain) DESC LIMIT 1`,
+		projectID, fqdn,
+	).Scan(&authID)
+	if err == pgx.ErrNoRows {
+		return errApexNotVerified
+	}
+	return err
+}
 
 // ListEndpoints returns all PublicApi resources for an app in a project environment.
 //
@@ -169,7 +217,7 @@ func (h *Handler) CreateEndpoint(c *gin.Context) {
 			Outcome:       auditOutcomeFailure,
 			Metadata:      map[string]any{"reason": reason, "status": status, "app_name": appName},
 		})
-		respondError(c, status, msg)
+		respondErrorCode(c, status, reason, msg)
 	}
 
 	var req createEndpointRequest
@@ -221,6 +269,15 @@ func (h *Handler) CreateEndpoint(c *gin.Context) {
 	}
 
 	publicApiName := strings.ReplaceAll(req.FQDN, ".", "-")
+
+	if err := h.requireVerifiedApex(c.Request.Context(), projectID, req.FQDN); err != nil {
+		if errors.Is(err, errApexNotVerified) {
+			reject(http.StatusForbidden, "no_verified_apex", "this domain is not verified for this project yet")
+			return
+		}
+		reject(http.StatusInternalServerError, "authorization_lookup_failed", "failed to check domain authorization")
+		return
+	}
 
 	var existing int
 	if err := h.pool.QueryRow(c.Request.Context(),

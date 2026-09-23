@@ -38,6 +38,7 @@ import { IngressDetail } from "@/components/resources/ingress-detail";
 import { ServiceDatabaseDetail } from "@/components/resources/service-database-detail";
 import { DeleteImpactModal, deleteImpactTargetKey, type DeleteImpactTarget } from "@/components/resources/delete-impact-modal";
 import { MoveAppModal } from "@/components/resources/move-app-modal";
+import { classifyDomainEndpointError, type DomainEndpointFailure } from "@/lib/domain-endpoint-verdict";
 
 interface DomainForm {
   fqdn: string;
@@ -86,6 +87,7 @@ export default function AppDetailPage() {
   const [domainForm, setDomainForm] = useState<DomainForm>(defaultDomainForm(appName));
   const [isDomainSubmitting, setIsDomainSubmitting] = useState(false);
   const [domainSubmitError, setDomainSubmitError] = useState<string | null>(null);
+  const [domainSubmitFailure, setDomainSubmitFailure] = useState<DomainEndpointFailure | null>(null);
 
   const [deleteTarget, setDeleteTarget] = useState<DeleteImpactTarget | null>(null);
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
@@ -241,6 +243,7 @@ export default function AppDetailPage() {
   async function handleDomainCreate(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setDomainSubmitError(null);
+    setDomainSubmitFailure(null);
     setIsDomainSubmitting(true);
     try {
       const scopes = domainForm.auth_scopes
@@ -261,6 +264,8 @@ export default function AppDetailPage() {
       const opId = result.operation?.id;
       router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
     } catch (err) {
+      const failure = classifyDomainEndpointError(err);
+      setDomainSubmitFailure(failure);
       setDomainSubmitError(err instanceof Error ? err.message : t("apps.error.createDomain"));
     } finally {
       setIsDomainSubmitting(false);
@@ -889,7 +894,7 @@ export default function AppDetailPage() {
 
       <Modal
         isOpen={isDomainModalOpen}
-        onClose={() => { setIsDomainModalOpen(false); setDomainSubmitError(null); }}
+        onClose={() => { setIsDomainModalOpen(false); setDomainSubmitError(null); setDomainSubmitFailure(null); }}
         title={t("apps.modal.domain.title")}
       >
         <form onSubmit={handleDomainCreate} className="space-y-4">
@@ -972,11 +977,28 @@ export default function AppDetailPage() {
           )}
 
           {domainSubmitError && (
-            <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">{domainSubmitError}</div>
+            <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+              <p>
+                {domainSubmitFailure === "already_exists"
+                  ? t("apps.error.domainExists")
+                  : domainSubmitFailure === "not_verified"
+                    ? t("apps.error.domainNotVerified")
+                    : domainSubmitError}
+              </p>
+              {(domainSubmitFailure === "already_exists" || domainSubmitFailure === "not_verified") && (
+                <Link
+                  href={`/projects/${projectId}/domains`}
+                  data-ux="domain_endpoint_error_cta:click"
+                  className="mt-2 inline-block font-medium underline underline-offset-2"
+                >
+                  {t("apps.error.domainCta")}
+                </Link>
+              )}
+            </div>
           )}
 
           <div className="flex justify-end gap-3 pt-2">
-            <button type="button" onClick={() => { setIsDomainModalOpen(false); setDomainSubmitError(null); }}
+            <button type="button" onClick={() => { setIsDomainModalOpen(false); setDomainSubmitError(null); setDomainSubmitFailure(null); }}
               className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
               {t("common.cancel")}
             </button>

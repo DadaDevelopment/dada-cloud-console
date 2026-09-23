@@ -293,6 +293,15 @@ export const apps: Messages = {
   "apps.modal.domain.submit": { ru: "Добавить домен", en: "Add Domain" },
   "apps.modal.domain.submitting": { ru: "Регистрация…", en: "Registering…" },
   "apps.error.createDomain": { ru: "Не удалось зарегистрировать домен", en: "Failed to register domain" },
+  "apps.error.domainExists": {
+    ru: "Этот домен уже зарегистрирован как endpoint для этого проекта. Чтобы он начал реально обслуживать трафик, подключите его на странице Домены.",
+    en: "This domain is already registered as an endpoint for this project. To make it actually serve traffic, connect it on the Domains page.",
+  },
+  "apps.error.domainNotVerified": {
+    ru: "Этот домен ещё не подтверждён. Подтвердите его на странице Домены, прежде чем подключать.",
+    en: "This domain is not verified yet. Confirm it on the Domains page before it can be attached.",
+  },
+  "apps.error.domainCta": { ru: "Перейти к доменам", en: "Go to Domains" },
 
   "apps.logs.title": { ru: "Логи", en: "Logs" },
   "apps.logs.live": { ru: "Live", en: "Live" },
