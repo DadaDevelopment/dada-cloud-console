@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -330,22 +331,32 @@ func a2aContextFor(convKey string) string {
 	return "tg-chat-" + convKey
 }
 
-// modelErrorMarkers are substrings that identify an upstream LLM/billing
-// failure leaked into the reply text (observed live: kagent surfaces the raw
-// anymodel.org HTTP 402 body, JSON with request ids, as the artifact text).
-// Such text must never reach the Telegram user.
+// modelErrorPattern matches the shape of a leaked upstream LLM/billing
+// failure body, not one hardcoded status code: "Error code: 402 - {...}",
+// "Error code: 429 - {...}" have both shown up live (anymodel.org billing,
+// z.ai rate limiting), and the next one will carry a third code nobody
+// enumerated in advance. Matching the shape ("Error code: <digits> -")
+// instead of a status-code allowlist means a new upstream failure mode does
+// not need a code change to stop leaking into the chat.
+var modelErrorPattern = regexp.MustCompile(`Error code:\s*\d+\s*-`)
+
+// modelErrorMarkers are substrings for leaks that do not carry an "Error
+// code: N -" prefix but are still raw upstream artifacts, not a reply.
 var modelErrorMarkers = []string{
-	"Error code: 402",
 	"billing_error",
 	"payment_required",
 	"Insufficient balance",
 	"余额不足",
 	"Run /compact",
+	"Limit Exhausted",
 }
 
 // sanitizeModelReply masks upstream model/billing errors: if the reply looks
 // like a leaked API error, the user gets the generic handoff line instead.
 func sanitizeModelReply(reply string) string {
+	if modelErrorPattern.MatchString(reply) {
+		return a2aFailureFallback
+	}
 	for _, marker := range modelErrorMarkers {
 		if strings.Contains(reply, marker) {
 			return a2aFailureFallback

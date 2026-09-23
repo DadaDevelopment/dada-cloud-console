@@ -412,6 +412,22 @@ func TestSanitizeModelReply_MasksLeakedBillingError(t *testing.T) {
 	}
 }
 
+func TestSanitizeModelReply_MasksLeakedRateLimitError(t *testing.T) {
+	leaked := `Error code: 429 - {'error': {'code': '1310', 'message': 'Weekly/Monthly Limit Exhausted. Your limit will reset at 2026-09-23 22:42:41'}}`
+	got := sanitizeModelReply(leaked)
+	if got != a2aFailureFallback {
+		t.Fatalf("expected fallback for leaked rate-limit error, got %q", got)
+	}
+}
+
+func TestSanitizeModelReply_MasksAnyErrorCodeShape(t *testing.T) {
+	leaked := `Error code: 503 - {'error': {'message': 'upstream unavailable'}}`
+	got := sanitizeModelReply(leaked)
+	if got != a2aFailureFallback {
+		t.Fatalf("expected fallback for an unlisted status code carrying the leak shape, got %q", got)
+	}
+}
+
 func TestSanitizeModelReply_NormalReplyUntouched(t *testing.T) {
 	reply := "Hi! I'm the AI assistant of the support team. Which country are you located in?"
 	if got := sanitizeModelReply(reply); got != reply {
