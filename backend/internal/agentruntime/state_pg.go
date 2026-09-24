@@ -160,7 +160,7 @@ func (s *pgStore) PauseAgent(ctx context.Context, id uuid.UUID, reason string) (
 }
 
 func (s *pgStore) MarkPauseCRMSync(ctx context.Context, id uuid.UUID, status string) (RuntimeState, error) {
-	if status != "pending" && status != "completed" && status != "failed" {
+	if status != "pending" && status != "completed" && status != "failed" && status != "rejected" {
 		return RuntimeState{}, fmt.Errorf("%w: invalid CRM sync status", ErrInvalidStatePatch)
 	}
 	return s.mutateState(ctx, id, func(_ pgx.Tx, state *RuntimeState) (bool, error) {
@@ -169,7 +169,7 @@ func (s *pgStore) MarkPauseCRMSync(ctx context.Context, id uuid.UUID, status str
 		}
 		// Successful external synchronization is terminal; a delayed failed retry
 		// must not overwrite it. PauseAgent itself is idempotent and never retries CRM.
-		if state.CRMStatusSync == "completed" || state.CRMStatusSync == status {
+		if state.CRMStatusSync == "completed" || state.CRMStatusSync == "rejected" || state.CRMStatusSync == status {
 			return false, nil
 		}
 		state.CRMStatusSync = status

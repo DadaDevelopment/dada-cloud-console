@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 )
 
 // syncPausedCRM is shared by the stop tool and the service retry loop. The
@@ -21,7 +22,7 @@ func (s *Server) syncPausedCRM(ctx context.Context, conv Conversation) (RuntimeS
 	}
 	defer lock.Unlock()
 	state, err := s.runtime.states.GetState(ctx, conv.ID)
-	if err != nil || state.AgentEnabled || state.CRMStatusSync == "completed" {
+	if err != nil || state.AgentEnabled || state.CRMStatusSync == "completed" || state.CRMStatusSync == "rejected" {
 		return state, err
 	}
 	if store, ok := s.runtime.store.(*pgStore); ok {
@@ -35,7 +36,12 @@ WHERE conversation_id=$1 AND NOT agent_enabled AND crm_status_sync IN ('pending'
 		}
 	}
 	syncStatus := "completed"
-	if s.pauseCRM == nil || s.pauseCRM.SetPaused(ctx, conv, state.PauseReason) != nil {
+	if s.pauseCRM == nil {
+		syncStatus = "failed"
+	} else if err := s.pauseCRM.SetPaused(ctx, conv, state.PauseReason); errors.Is(err, ErrCRMPauseRejected) {
+		syncStatus = "rejected"
+		log.Warn().Err(err).Str("conversation_id", conv.ID.String()).Str("agent", conv.AgentName).Msg("agentruntime: CRM refused the pause for good, no more retries")
+	} else if err != nil {
 		syncStatus = "failed"
 	}
 	return s.runtime.states.MarkPauseCRMSync(ctx, conv.ID, syncStatus)

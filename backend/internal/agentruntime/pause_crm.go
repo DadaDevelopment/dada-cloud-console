@@ -4,12 +4,21 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"time"
 )
+
+// ErrCRMPauseRejected marks an answer that no retry can change: the CRM
+// endpoint refused the request itself (422 for an external id it cannot
+// map, 404 for a person it never linked). The reconciler stores it as the
+// terminal "rejected" status instead of retrying it every 30 seconds for good,
+// as it did for a conversation with external id "-900679279482B" from
+// 2026-09-13 to 2026-09-24.
+var ErrCRMPauseRejected = errors.New("CRM pause rejected permanently")
 
 // PauseCRM sets a configured status, with no operator or opportunity workflow.
 type PauseCRM interface {
@@ -41,6 +50,9 @@ func (p *httpPauseCRM) SetPaused(ctx context.Context, conv Conversation, reason 
 		return fmt.Errorf("CRM pause request unavailable")
 	}
 	defer resp.Body.Close()
+	if permanentPauseRejection(resp.StatusCode) {
+		return fmt.Errorf("%w: status %d", ErrCRMPauseRejected, resp.StatusCode)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("CRM pause rejected: status %d", resp.StatusCode)
 	}
@@ -52,4 +64,15 @@ func (p *httpPauseCRM) SetPaused(ctx context.Context, conv Conversation, reason 
 		return fmt.Errorf("CRM status not confirmed")
 	}
 	return nil
+}
+
+// permanentPauseRejection reports a 4xx the same request will get again.
+// 408 and 429 are about timing, and 401/403 about this runtime's token, which
+// a redeploy fixes; those stay retryable so no pause is dropped over them.
+func permanentPauseRejection(code int) bool {
+	switch code {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusRequestTimeout, http.StatusTooManyRequests:
+		return false
+	}
+	return code >= 400 && code < 500
 }

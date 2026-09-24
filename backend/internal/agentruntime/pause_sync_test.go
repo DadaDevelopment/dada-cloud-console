@@ -3,6 +3,8 @@ package agentruntime
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -39,7 +41,7 @@ func pauseRetryTestStore(t *testing.T) *pgStore {
 		_, err := base.pool.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
 		require.NoError(t, err)
 	})
-	for _, migration := range []string{"148_conversation_state.sql", "150_canonical_message.sql", "151_conversation_runtime_state.sql"} {
+	for _, migration := range []string{"148_conversation_state.sql", "150_canonical_message.sql", "151_conversation_runtime_state.sql", "159_runtime_state_crm_rejected.sql"} {
 		data, err := os.ReadFile(filepath.Join("..", "..", "migrations", migration))
 		require.NoError(t, err)
 		_, err = pool.Exec(ctx, string(data))
@@ -144,4 +146,63 @@ func TestPauseSyncLockWaitHonorsCancellation(t *testing.T) {
 	cancel()
 	_, err := srv.syncPausedCRM(ctx, conv)
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestPGPermanentCRMRejectionIsTerminal(t *testing.T) {
+	store := pauseRetryTestStore(t)
+	ctx := context.Background()
+	rejected := stateTestConversation(t, store)
+	flaky := stateTestConversation(t, store)
+	for _, conv := range []Conversation{rejected, flaky} {
+		_, err := store.PauseAgent(ctx, conv.ID, "escalated: E_TECH_BLOCKED")
+		require.NoError(t, err)
+		_, err = store.MarkPauseCRMSync(ctx, conv.ID, "failed")
+		require.NoError(t, err)
+	}
+	srv := NewServer(store.pool, t.TempDir())
+	calls := map[uuid.UUID]int{}
+	srv.pauseCRM = pauseFunc(func(_ context.Context, conv Conversation, _ string) error {
+		calls[conv.ID]++
+		if conv.ID == rejected.ID {
+			return fmt.Errorf("%w: status 422", ErrCRMPauseRejected)
+		}
+		return errors.New("CRM pause rejected: status 503")
+	})
+	for range 3 {
+		_, err := srv.ReconcilePaused(ctx, 5)
+		require.NoError(t, err)
+	}
+	require.Equal(t, 1, calls[rejected.ID], "a permanent rejection must not be retried")
+	require.Equal(t, 3, calls[flaky.ID], "a transient failure keeps retrying")
+	state, err := store.GetState(ctx, rejected.ID)
+	require.NoError(t, err)
+	require.Equal(t, "rejected", state.CRMStatusSync)
+	require.False(t, state.AgentEnabled)
+	state, err = store.MarkPauseCRMSync(ctx, rejected.ID, "failed")
+	require.NoError(t, err)
+	require.Equal(t, "rejected", state.CRMStatusSync, "a late failed retry must not reopen a rejection")
+}
+
+func TestHTTPPauseCRMClassifiesRejections(t *testing.T) {
+	cases := map[int]bool{
+		http.StatusUnprocessableEntity: true,
+		http.StatusNotFound:            true,
+		http.StatusBadRequest:          true,
+		http.StatusUnauthorized:        false,
+		http.StatusForbidden:           false,
+		http.StatusRequestTimeout:      false,
+		http.StatusTooManyRequests:     false,
+		http.StatusServiceUnavailable:  false,
+		http.StatusBadGateway:          false,
+	}
+	for code, permanent := range cases {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(code)
+			_, _ = w.Write([]byte(`{"applied":false,"error":"invalid_pause_request"}`))
+		}))
+		err := NewHTTPPauseCRM(srv.URL, "token", "AGENT_PAUSED").SetPaused(context.Background(), Conversation{ID: uuid.New(), AgentName: "a", Channel: "telegram", ExternalID: "-900679279482B"}, "r")
+		srv.Close()
+		require.Error(t, err, "status %d", code)
+		require.Equal(t, permanent, errors.Is(err, ErrCRMPauseRejected), "status %d", code)
+	}
 }
