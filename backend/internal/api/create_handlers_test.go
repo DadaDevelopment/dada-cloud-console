@@ -269,12 +269,15 @@ func TestCreatePublicApi_SeedsOptimisticSnapshot(t *testing.T) {
 	pool := testOptimisticPool(t)
 	h := &Handler{pool: pool, cfg: &config.Config{}}
 	projectID, envID := seedOptimisticFixture(t, pool)
-	claims := godClaims(seedUser(t, pool))
+	userID := seedUser(t, pool)
+	claims := godClaims(userID)
 	appName := "app-" + uuid.NewString()[:8]
 	seedApp(t, pool, projectID, envID, appName)
+	apex := "a" + uuid.NewString()[:8] + ".example.com"
+	seedVerifiedAuthorization(t, pool, projectID, userID, apex)
 	sub := "e2e-" + uuid.NewString()[:8]
-	fqdn := sub + ".example.com"
-	publicApiName := sub + "-example-com"
+	fqdn := sub + "." + apex
+	publicApiName := strings.ReplaceAll(fqdn, ".", "-")
 
 	epParams := append(params(projectID, envID), gin.Param{Key: "appName", Value: appName})
 	c, rec := newCreateCtx(t, `{"fqdn":"`+fqdn+`"}`, epParams, claims)
