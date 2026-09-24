@@ -46,6 +46,8 @@ type App interface {
 	// PostStatus reports a commit status back to GitHub on each build-state
 	// transition, with a details URL → console build page.
 	PostStatus(ctx context.Context, installationID int64, repoFullName, sha, state, detailsURL, description string) error
+	CreateDeployment(ctx context.Context, installationID int64, repoFullName string, d DeploymentRequest) (int64, error)
+	PostDeploymentStatus(ctx context.Context, installationID int64, repoFullName string, deploymentID int64, s DeploymentStatus) error
 	// BranchHead resolves the current HEAD commit sha and message for a branch.
 	// token may be empty for anonymous access to a public repo.
 	BranchHead(ctx context.Context, token, repoFullName, branch string) (sha, message string, err error)

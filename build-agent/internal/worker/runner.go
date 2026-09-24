@@ -1308,6 +1308,7 @@ func (r *Runner) execute(ctx context.Context, b *db.Build, repo *db.Repo, llog *
 		return buildOutcome{}, fmt.Errorf("git creds: %w", err)
 	}
 
+	ref := b.CommitSHA
 	if shouldResolveHeadCommit(repo.Provider, b.CommitSHA) {
 		sha, message, herr := r.github.BranchHead(ctx, token, repo.RepoFullName, b.Branch)
 		switch {
@@ -1316,11 +1317,13 @@ func (r *Runner) execute(ctx context.Context, b *db.Build, repo *db.Repo, llog *
 		case sha == "":
 			llog.Warn().Str("branch", b.Branch).Msg("resolve manual build head commit returned no sha")
 		default:
+			ref = sha
 			if serr := db.SetHeadCommit(ctx, r.pool, b.ID, sha, message); serr != nil {
 				llog.Warn().Err(serr).Msg("store manual build head commit failed")
 			}
 		}
 	}
+	r.openGitHubDeployment(ctx, repo, b, ref)
 
 	// detecting → building
 	if ok, err := db.Transition(ctx, r.pool, b.ID, db.StatusDetecting, db.StatusBuilding); err != nil || !ok {
@@ -2048,8 +2051,7 @@ func (r *Runner) postStatus(ctx context.Context, repo *db.Repo, b *db.Build, sta
 	if repo.Provider != "github" || repo.InstallationID == 0 {
 		return
 	}
-	url := fmt.Sprintf("https://console.dada-tuda.ru/projects/%s/apps/%s/builds/%s",
-		repo.ProjectSlug, repo.AppName, b.ID.String())
+	url := buildPageURL(repo.ProjectSlug, repo.AppName, b.ID)
 	if err := r.github.PostStatus(ctx, repo.InstallationID, repo.RepoFullName, b.CommitSHA, state, url, desc); err != nil {
 		log.Debug().Err(err).Msg("post commit status")
 	}

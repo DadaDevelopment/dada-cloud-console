@@ -45,6 +45,12 @@ func (f *fakeApp) ListBranches(_ context.Context, id int64, _ string) ([]github.
 	return f.branches, f.listErr
 }
 func (f *fakeApp) PostStatus(_ context.Context, _ int64, _, _, _, _, _ string) error { return nil }
+func (f *fakeApp) CreateDeployment(context.Context, int64, string, github.DeploymentRequest) (int64, error) {
+	return 0, nil
+}
+func (f *fakeApp) PostDeploymentStatus(context.Context, int64, string, int64, github.DeploymentStatus) error {
+	return nil
+}
 func (f *fakeApp) BranchHead(_ context.Context, _, _, _ string) (string, string, error) {
 	return "", "", nil
 }

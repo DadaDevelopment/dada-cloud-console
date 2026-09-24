@@ -42,7 +42,13 @@ and both the backend Secret and the build-agent Secret get the same
 
 ### 2. Register a GitHub App (external, one-time)
 Least-privilege permissions: Contents R, Metadata R, Commit statuses R/W, Checks R/W,
-Pull requests R, Webhooks. Events: `push`, `pull_request`. Webhook URL →
+Deployments R/W, Pull requests R, Webhooks.
+Deployments R/W feeds the repository's Deployments tab (one GitHub Deployment per
+build, `in_progress` -> `success` with the app URL once the app runs the new
+image and is Ready). Without it every build logs `github deployment not opened`
+and records `builds.gh_deployment_state = 'unavailable'`; builds are unaffected.
+Adding the permission to an existing App needs each installation owner to accept
+it on GitHub before it takes effect. Events: `push`, `pull_request`. Webhook URL →
 `https://<ingress.host>/webhook/github` (the agent's `/webhook/github`, routed by
 the ingress). **Setup URL** (post-install redirect) → `https://<ingress.host>/api/v1/git/install/callback`
 with "Redirect on update" enabled. Fill `BUILD_GITHUB_APP_ID`, `BUILD_GITHUB_APP_KEY`

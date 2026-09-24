@@ -40,6 +40,7 @@ func (p *Poller) Start(ctx context.Context) {
 			p.runner.RetryPlatformFailures(ctx)
 			p.runner.DrainQueue(ctx)
 			p.runner.ReconcileDeploys(ctx)
+			p.runner.SyncGitHubDeployments(ctx)
 		}
 	}
 }

@@ -26,6 +26,12 @@ func (a *liveTokenApp) ListBranches(_ context.Context, _ int64, _ string) ([]git
 	return nil, nil
 }
 func (a *liveTokenApp) PostStatus(_ context.Context, _ int64, _, _, _, _, _ string) error { return nil }
+func (a *liveTokenApp) CreateDeployment(context.Context, int64, string, github.DeploymentRequest) (int64, error) {
+	return 0, nil
+}
+func (a *liveTokenApp) PostDeploymentStatus(context.Context, int64, string, int64, github.DeploymentStatus) error {
+	return nil
+}
 func (a *liveTokenApp) BranchHead(_ context.Context, _, _, _ string) (string, string, error) {
 	return "", "", nil
 }
