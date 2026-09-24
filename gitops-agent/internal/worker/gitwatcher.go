@@ -151,8 +151,12 @@ func (w *GitWatcher) poll(ctx context.Context) {
 	managers := w.currentManagers(ctx)
 
 	for _, mgr := range managers {
-		if err := w.syncRepo(ctx, mgr); err != nil {
+		err := w.syncRepo(ctx, mgr)
+		if err != nil {
 			log.Error().Err(err).Str("repo", mgr.RepoURL()).Msg("git-watcher: sync failed")
+		}
+		if rerr := db.RecordSyncOutcome(ctx, w.pool, mgr.RepoURL(), mgr.Branch(), err); rerr != nil {
+			log.Warn().Err(rerr).Str("repo", mgr.RepoURL()).Msg("git-watcher: recording sync health")
 		}
 	}
 }

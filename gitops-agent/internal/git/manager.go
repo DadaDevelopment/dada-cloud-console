@@ -70,11 +70,15 @@ type Commit struct {
 
 // Manager owns a local clone of one remote repository.
 // It serialises all git operations with a mutex so the DB Watcher
-// and Git Watcher can share the same manager safely.
+// and Git Watcher can share the same manager safely. The mutex belongs to the
+// clone's path, not to the Manager value: the DB watcher, the git watcher and
+// the orphan GC each build their own Manager for the same clone, and a
+// per-value mutex let a watcher pull while an operation was mid-commit on the
+// very same worktree.
 type Manager struct {
 	cfg  RepoConfig
 	path string // absolute path to the local clone
-	mu   sync.Mutex
+	mu   *sync.Mutex
 	// prePush runs immediately before every push with the hash just
 	// committed. It is nil in production and exists so tests can advance the
 	// remote branch inside the window between fetch and push — the only way
@@ -86,7 +90,15 @@ type Manager struct {
 func New(cfg RepoConfig) *Manager {
 	slug := repoSlug(cfg.RepoURL)
 	path := filepath.Join(cfg.LocalBase, slug)
-	return &Manager{cfg: cfg, path: path}
+	return &Manager{cfg: cfg, path: path, mu: lockFor(path)}
+}
+
+var pathLocks sync.Map
+
+// lockFor returns the one mutex shared by every Manager of the clone at path.
+func lockFor(path string) *sync.Mutex {
+	l, _ := pathLocks.LoadOrStore(path, &sync.Mutex{})
+	return l.(*sync.Mutex)
 }
 
 // LocalPath returns the absolute path to the local clone.
@@ -134,6 +146,10 @@ func (m *Manager) Pull() (string, error) {
 }
 
 func (m *Manager) pull() (string, error) {
+	if err := m.reconcileLocalCommits(); err != nil {
+		return "", fmt.Errorf("pulling: %w", err)
+	}
+
 	repo, err := gogit.PlainOpen(m.path)
 	if err != nil {
 		return "", fmt.Errorf("opening repo: %w", err)

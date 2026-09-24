@@ -1,0 +1,4 @@
+ALTER TABLE git_sync_state ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE git_sync_state ADD COLUMN IF NOT EXISTS last_error TEXT;
+ALTER TABLE git_sync_state ADD COLUMN IF NOT EXISTS last_attempt_at TIMESTAMPTZ;
+ALTER TABLE git_sync_state ADD COLUMN IF NOT EXISTS last_success_at TIMESTAMPTZ;

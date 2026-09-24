@@ -38,6 +38,8 @@ func main() {
 	}
 	defer pool.Close()
 
+	git.SetReconcileHook(worker.ReconcileRecorder(pool))
+
 	defaultMgr := git.New(git.RepoConfig{
 		RepoURL:   cfg.DefaultRepoURL,
 		Branch:    cfg.DefaultBranch,

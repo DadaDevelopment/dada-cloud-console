@@ -192,6 +192,7 @@ func collect(ctx context.Context, pool *pgxpool.Pool) {
 	}
 
 	collectPendingHostnames(c, pool)
+	collectGitSync(c, pool)
 
 	collectBoxes(c, pool)
 	collectBoxRepeatUse(c, pool)

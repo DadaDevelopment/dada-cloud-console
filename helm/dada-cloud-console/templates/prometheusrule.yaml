@@ -24,6 +24,30 @@ spec:
               {{`{{ $value }}`}} {{`{{ $labels.action }}`}} operation(s) reached status=Failed in the
               last hour. A user create/attach (build, database, bucket, app server, domain)
               did not complete. Inspect operations.error_message for the reason.
+        - alert: DadaGitopsSyncWedged
+          expr: max by (repo, branch) (dada_gitops_sync_consecutive_failures) >= 4
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "gitops-agent cannot sync {{`{{ $labels.repo }}`}}"
+            description: >-
+              The git watcher failed {{`{{ $value }}`}} syncs in a row for {{`{{ $labels.repo }}`}}
+              ({{`{{ $labels.branch }}`}}). Every operation pulls the same clone before rendering, so
+              no deploy, resize or env change on the platform is going through. Read
+              git_sync_state.last_error; "non-fast-forward" means the clone holds a commit the
+              remote never received.
+        - alert: DadaGitopsSyncStale
+          expr: max by (repo, branch) (dada_gitops_sync_seconds_since_success) > 600
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "gitops-agent has not synced {{`{{ $labels.repo }}`}} for 10+ minutes"
+            description: >-
+              No successful git watcher sync for {{`{{ $labels.repo }}`}} in
+              {{`{{ $value | humanizeDuration }}`}}. Either the agent is down or its syncs keep
+              failing; deploys are not reaching git until it recovers.
         - alert: DadaBuildFailed
           expr: max by (namespace, service) (dada_builds_failed_recent) > 0
           for: 5m
