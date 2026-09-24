@@ -282,26 +282,6 @@ export const apps: Messages = {
   "apps.error.updateImage": { ru: "Не удалось обновить образ", en: "Failed to update image" },
 
   "apps.modal.domain.title": { ru: "Добавить домен", en: "Add Domain" },
-  "apps.modal.domain.fqdn.label": { ru: "FQDN", en: "FQDN" },
-  "apps.modal.domain.authScheme.label": { ru: "Схема аутентификации", en: "Auth Scheme" },
-  "apps.modal.domain.authScheme.none": { ru: "none — публичный доступ", en: "none — public access" },
-  "apps.modal.domain.scopes.label": { ru: "Области доступа", en: "Scopes" },
-  "apps.modal.domain.scopes.hint": { ru: "(через запятую)", en: "(comma-separated)" },
-  "apps.modal.domain.swagger.label": { ru: "Включить Swagger / OpenAPI", en: "Enable Swagger / OpenAPI" },
-  "apps.modal.domain.apiDocsPath.label": { ru: "Путь к документации API", en: "API Docs Path" },
-  "apps.modal.domain.apiTitle.label": { ru: "Заголовок API", en: "API Title" },
-  "apps.modal.domain.submit": { ru: "Добавить домен", en: "Add Domain" },
-  "apps.modal.domain.submitting": { ru: "Регистрация…", en: "Registering…" },
-  "apps.error.createDomain": { ru: "Не удалось зарегистрировать домен", en: "Failed to register domain" },
-  "apps.error.domainExists": {
-    ru: "Этот домен уже зарегистрирован как endpoint для этого проекта. Чтобы он начал реально обслуживать трафик, подключите его на странице Домены.",
-    en: "This domain is already registered as an endpoint for this project. To make it actually serve traffic, connect it on the Domains page.",
-  },
-  "apps.error.domainNotVerified": {
-    ru: "Этот домен ещё не подтверждён. Подтвердите его на странице Домены, прежде чем подключать.",
-    en: "This domain is not verified yet. Confirm it on the Domains page before it can be attached.",
-  },
-  "apps.error.domainCta": { ru: "Перейти к доменам", en: "Go to Domains" },
 
   "apps.logs.title": { ru: "Логи", en: "Logs" },
   "apps.logs.live": { ru: "Live", en: "Live" },

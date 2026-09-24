@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, FormEvent } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { appsApi, endpointsApi, envVarsApi, customDomainsApi, deploymentsApi } from "@/lib/api";
-import type { ResourceSnapshot, AppVolume, OperationResponse, DomainHostname, Deployment } from "@/lib/types";
+import type { ResourceSnapshot, AppVolume, OperationResponse, DomainHostname, Deployment, DomainAuthorization } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
@@ -38,25 +38,7 @@ import { IngressDetail } from "@/components/resources/ingress-detail";
 import { ServiceDatabaseDetail } from "@/components/resources/service-database-detail";
 import { DeleteImpactModal, deleteImpactTargetKey, type DeleteImpactTarget } from "@/components/resources/delete-impact-modal";
 import { MoveAppModal } from "@/components/resources/move-app-modal";
-import { classifyDomainEndpointError, type DomainEndpointFailure } from "@/lib/domain-endpoint-verdict";
-
-interface DomainForm {
-  fqdn: string;
-  auth_scheme: string;
-  auth_scopes: string;
-  swagger_enabled: boolean;
-  swagger_path: string;
-  swagger_title: string;
-}
-
-const defaultDomainForm = (appName: string): DomainForm => ({
-  fqdn: "",
-  auth_scheme: "none",
-  auth_scopes: "",
-  swagger_enabled: false,
-  swagger_path: "/v3/api-docs",
-  swagger_title: appName,
-});
+import { HostnamesManager } from "@/components/deploy/hostnames-manager";
 
 export default function AppDetailPage() {
   const params = useParams<{ projectId: string; appName: string }>();
@@ -84,10 +66,7 @@ export default function AppDetailPage() {
   const [imageSubmitError, setImageSubmitError] = useState<string | null>(null);
 
   const [isDomainModalOpen, setIsDomainModalOpen] = useState(false);
-  const [domainForm, setDomainForm] = useState<DomainForm>(defaultDomainForm(appName));
-  const [isDomainSubmitting, setIsDomainSubmitting] = useState(false);
-  const [domainSubmitError, setDomainSubmitError] = useState<string | null>(null);
-  const [domainSubmitFailure, setDomainSubmitFailure] = useState<DomainEndpointFailure | null>(null);
+  const [verifiedApexes, setVerifiedApexes] = useState<DomainAuthorization[]>([]);
 
   const [deleteTarget, setDeleteTarget] = useState<DeleteImpactTarget | null>(null);
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
@@ -164,6 +143,11 @@ export default function AppDetailPage() {
       .catch(() => setHostnames([]))
       .finally(() => setIsLoadingHostnames(false));
 
+    customDomainsApi
+      .listAuthorizations(projectId)
+      .then((data) => setVerifiedApexes((data.authorizations ?? []).filter((a) => a.status === "verified")))
+      .catch(() => setVerifiedApexes([]));
+
     envVarsApi
       .list(projectId, envId, appName)
       .then((data) => setEnvCount((data.env_vars ?? []).length))
@@ -238,38 +222,6 @@ export default function AppDetailPage() {
     setIsMoveModalOpen(false);
     const opId = result.operation?.id;
     router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
-  }
-
-  async function handleDomainCreate(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setDomainSubmitError(null);
-    setDomainSubmitFailure(null);
-    setIsDomainSubmitting(true);
-    try {
-      const scopes = domainForm.auth_scopes
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-      const result = await endpointsApi.create(projectId, envId, appName, {
-        fqdn: domainForm.fqdn,
-        auth_enabled: domainForm.auth_scheme !== "none",
-        auth_scheme: domainForm.auth_scheme,
-        auth_scopes: scopes,
-        swagger_enabled: domainForm.swagger_enabled,
-        swagger_path: domainForm.swagger_path || "/v3/api-docs",
-        swagger_title: domainForm.swagger_title || appName,
-      });
-      setIsDomainModalOpen(false);
-      setDomainForm(defaultDomainForm(appName));
-      const opId = result.operation?.id;
-      router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
-    } catch (err) {
-      const failure = classifyDomainEndpointError(err);
-      setDomainSubmitFailure(failure);
-      setDomainSubmitError(err instanceof Error ? err.message : t("apps.error.createDomain"));
-    } finally {
-      setIsDomainSubmitting(false);
-    }
   }
 
   if (isLoading) {
@@ -570,7 +522,7 @@ export default function AppDetailPage() {
 
       <AppNextStepCard
         steps={nextSteps}
-        onConnectDomain={() => { setDomainForm(defaultDomainForm(appName)); setIsDomainModalOpen(true); }}
+        onConnectDomain={() => setIsDomainModalOpen(true)}
         gitSettingsHref={`/projects/${projectId}/apps/${appName}/settings?tab=git${envId ? `&envId=${envId}` : ""}`}
         deploymentsHref={`/projects/${projectId}/apps/${appName}/deployments${envId ? `?envId=${envId}` : ""}`}
         portSettingsHref={`/projects/${projectId}/apps/${appName}/settings?tab=config${envId ? `&envId=${envId}` : ""}#port`}
@@ -738,7 +690,7 @@ export default function AppDetailPage() {
           </div>
           {canMutate(role) && (
           <button
-            onClick={() => { setDomainForm(defaultDomainForm(appName)); setIsDomainModalOpen(true); }}
+            onClick={() => setIsDomainModalOpen(true)}
             className="inline-flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
           >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -758,7 +710,7 @@ export default function AppDetailPage() {
             </svg>
             <p className="text-sm text-gray-400 dark:text-gray-500">{t("apps.domains.empty")}</p>
             <button
-              onClick={() => { setDomainForm(defaultDomainForm(appName)); setIsDomainModalOpen(true); }}
+              onClick={() => setIsDomainModalOpen(true)}
               className="mt-2 text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700"
             >
               {t("apps.domains.addFirst")}
@@ -894,120 +846,16 @@ export default function AppDetailPage() {
 
       <Modal
         isOpen={isDomainModalOpen}
-        onClose={() => { setIsDomainModalOpen(false); setDomainSubmitError(null); setDomainSubmitFailure(null); }}
+        onClose={() => setIsDomainModalOpen(false)}
         title={t("apps.modal.domain.title")}
       >
-        <form onSubmit={handleDomainCreate} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("apps.modal.domain.fqdn.label")}</label>
-            <input
-              type="text"
-              required
-              value={domainForm.fqdn}
-              onChange={(e) => setDomainForm((f) => ({ ...f, fqdn: e.target.value }))}
-              placeholder="api.myservice.ru"
-              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("apps.modal.domain.authScheme.label")}</label>
-            <select
-              value={domainForm.auth_scheme}
-              onChange={(e) => setDomainForm((f) => ({ ...f, auth_scheme: e.target.value }))}
-              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            >
-              <option value="none">{t("apps.modal.domain.authScheme.none")}</option>
-              <option value="platform-jwt">platform-jwt</option>
-              <option value="internal">internal</option>
-            </select>
-          </div>
-
-          {domainForm.auth_scheme !== "none" && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
-                {t("apps.modal.domain.scopes.label")} <span className="font-normal text-gray-400 dark:text-gray-500">{t("apps.modal.domain.scopes.hint")}</span>
-              </label>
-              <input
-                type="text"
-                value={domainForm.auth_scopes}
-                onChange={(e) => setDomainForm((f) => ({ ...f, auth_scopes: e.target.value }))}
-                placeholder="api.read, api.write"
-                className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-          )}
-
-          <div className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              id="swagger-enabled"
-              checked={domainForm.swagger_enabled}
-              onChange={(e) => setDomainForm((f) => ({ ...f, swagger_enabled: e.target.checked }))}
-              className="h-4 w-4 rounded border-gray-300 dark:border-gray-700 text-blue-600 dark:text-blue-400 focus:ring-blue-500"
-            />
-            <label htmlFor="swagger-enabled" className="text-sm font-medium text-gray-700 dark:text-gray-200">
-              {t("apps.modal.domain.swagger.label")}
-            </label>
-          </div>
-
-          {domainForm.swagger_enabled && (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("apps.modal.domain.apiDocsPath.label")}</label>
-                <input
-                  type="text"
-                  value={domainForm.swagger_path}
-                  onChange={(e) => setDomainForm((f) => ({ ...f, swagger_path: e.target.value }))}
-                  placeholder="/v3/api-docs"
-                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("apps.modal.domain.apiTitle.label")}</label>
-                <input
-                  type="text"
-                  value={domainForm.swagger_title}
-                  onChange={(e) => setDomainForm((f) => ({ ...f, swagger_title: e.target.value }))}
-                  placeholder={appName}
-                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-            </div>
-          )}
-
-          {domainSubmitError && (
-            <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
-              <p>
-                {domainSubmitFailure === "already_exists"
-                  ? t("apps.error.domainExists")
-                  : domainSubmitFailure === "not_verified"
-                    ? t("apps.error.domainNotVerified")
-                    : domainSubmitError}
-              </p>
-              {(domainSubmitFailure === "already_exists" || domainSubmitFailure === "not_verified") && (
-                <Link
-                  href={`/projects/${projectId}/domains`}
-                  data-ux="domain_endpoint_error_cta:click"
-                  className="mt-2 inline-block font-medium underline underline-offset-2"
-                >
-                  {t("apps.error.domainCta")}
-                </Link>
-              )}
-            </div>
-          )}
-
-          <div className="flex justify-end gap-3 pt-2">
-            <button type="button" onClick={() => { setIsDomainModalOpen(false); setDomainSubmitError(null); setDomainSubmitFailure(null); }}
-              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
-              {t("common.cancel")}
-            </button>
-            <button type="submit" disabled={isDomainSubmitting}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors">
-              {isDomainSubmitting ? <><Spinner size="sm" /> {t("apps.modal.domain.submitting")}</> : t("apps.modal.domain.submit")}
-            </button>
-          </div>
-        </form>
+        <HostnamesManager
+          projectId={projectId}
+          envId={envId}
+          appName={appName}
+          canEdit={canMutate(role)}
+          verifiedApexes={verifiedApexes}
+        />
       </Modal>
 
       {deleteTarget && (
