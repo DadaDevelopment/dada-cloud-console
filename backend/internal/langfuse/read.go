@@ -269,6 +269,9 @@ func (c *Client) getJSON(ctx context.Context, path string, query url.Values, out
 	defer resp.Body.Close()
 
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxReadBody))
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return &RateLimitedError{Path: path, Body: strings.TrimSpace(string(raw)), ResetAt: rateLimitReset(raw, resp.Header.Get("Retry-After"), time.Now())}
+	}
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("langfuse read %s: status %d: %s", path, resp.StatusCode, strings.TrimSpace(string(raw)))
 	}
@@ -279,3 +282,40 @@ func (c *Client) getJSON(ctx context.Context, path string, query url.Values, out
 }
 
 const maxReadBody = 8 << 20
+
+// RateLimitedError is a 429 from the public API. Langfuse cloud counts some
+// endpoints per day (v2/metrics allows 100 requests in 24 hours), so a caller
+// that retries on its own clock only spends the next window early; ResetAt
+// is when the window reopens, zero when the answer did not say.
+type RateLimitedError struct {
+	Path    string
+	Body    string
+	ResetAt time.Time
+}
+
+func (e *RateLimitedError) Error() string {
+	return fmt.Sprintf("langfuse read %s: status 429: %s", e.Path, e.Body)
+}
+
+// rateLimitReset reads the reopening time from the body's details.resetAt,
+// then details.retryAfterSeconds, then the Retry-After header.
+func rateLimitReset(body []byte, retryAfter string, now time.Time) time.Time {
+	var parsed struct {
+		Details struct {
+			ResetAt           string  `json:"resetAt"`
+			RetryAfterSeconds float64 `json:"retryAfterSeconds"`
+		} `json:"details"`
+	}
+	if json.Unmarshal(body, &parsed) == nil {
+		if t, err := time.Parse(time.RFC3339Nano, parsed.Details.ResetAt); err == nil {
+			return t
+		}
+		if parsed.Details.RetryAfterSeconds > 0 {
+			return now.Add(time.Duration(parsed.Details.RetryAfterSeconds * float64(time.Second)))
+		}
+	}
+	if secs, err := strconv.Atoi(strings.TrimSpace(retryAfter)); err == nil && secs > 0 {
+		return now.Add(time.Duration(secs) * time.Second)
+	}
+	return time.Time{}
+}

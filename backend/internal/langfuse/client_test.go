@@ -3,6 +3,7 @@ package langfuse
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -312,5 +313,39 @@ func TestIngestStampsTracingEnvironmentOnEverySpan(t *testing.T) {
 	}
 	if got := otlpAttr(otlpSpans(t, body)[0], "langfuse.environment"); got != "default" {
 		t.Fatalf("without the variable the environment must be Langfuse's default, got %q", got)
+	}
+}
+
+func TestRateLimitResetFromBody(t *testing.T) {
+	now := time.Date(2026, 9, 24, 15, 0, 0, 0, time.UTC)
+	body := []byte(`{"message":"Rate limit exceeded","code":"rate_limited","details":{"retryAfterSeconds":1753,"limit":100,"remaining":0,"resetAt":"2026-09-24T16:04:06.419Z"}}`)
+	if got, want := rateLimitReset(body, "", now), time.Date(2026, 9, 24, 16, 4, 6, 419000000, time.UTC); !got.Equal(want) {
+		t.Fatalf("resetAt %v, want %v", got, want)
+	}
+	if got, want := rateLimitReset([]byte(`{"details":{"retryAfterSeconds":60}}`), "", now), now.Add(time.Minute); !got.Equal(want) {
+		t.Fatalf("retryAfterSeconds gave %v, want %v", got, want)
+	}
+	if got, want := rateLimitReset([]byte(`nope`), "120", now), now.Add(2*time.Minute); !got.Equal(want) {
+		t.Fatalf("Retry-After gave %v, want %v", got, want)
+	}
+	if got := rateLimitReset([]byte(`nope`), "", now); !got.IsZero() {
+		t.Fatalf("no hint must give zero, got %v", got)
+	}
+}
+
+func TestCountReturnsRateLimitedError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"code":"rate_limited","details":{"resetAt":"2026-09-24T16:04:06.419Z"}}`))
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "pk", "sk", true)
+	_, err := c.Count(context.Background(), ViewObservations, time.Now().Add(-time.Hour), time.Now())
+	var limited *RateLimitedError
+	if !errors.As(err, &limited) {
+		t.Fatalf("want RateLimitedError, got %v", err)
+	}
+	if limited.ResetAt.IsZero() || !strings.Contains(err.Error(), "status 429") {
+		t.Fatalf("unexpected error %v", err)
 	}
 }

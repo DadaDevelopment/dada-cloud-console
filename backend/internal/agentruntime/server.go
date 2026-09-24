@@ -56,7 +56,7 @@ func NewServer(pool *pgxpool.Pool, gitopsBasePath string) *Server {
 	runtime.factSkills = ParseFactSkills(os.Getenv("AGENT_FACT_SKILLS"))
 	runtime.linkAllowlist = ParseLinkAllowlist(os.Getenv("AGENT_REPLY_LINK_ALLOWLIST"))
 	lf := langfuseFromEnv()
-	budget := langfusebudget.New(lf)
+	budget := langfusebudget.New(lf, langfusebudget.NewPGStore(pool))
 	a2a.(*httpA2AClient).telemetryOff = budget.Exceeded
 	runtime.judge = judgeFromEnv(gitopsBasePath, lf, budget)
 	token := os.Getenv("AGENT_RUNTIME_TOKEN")
