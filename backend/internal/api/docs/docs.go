@@ -1995,7 +1995,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Checks name, prompt and requested MCP servers against everything the cluster would refuse later. Returns 400 with a per-field error list, or 200 when the draft is safe to commit. Each tools entry is either a bare server name (a server the platform runs) or the whole reference this project brings itself, with url, protocol and headers; a header value may cite the agent env as ${VAR}.",
+                "description": "Checks name, prompt and requested MCP servers against everything the cluster would refuse later. Returns 400 with a per-field error list, or 200 when the draft is safe to commit. Each tools entry is either a bare server name (a server the platform runs) or the whole reference this project brings itself, with url, protocol and headers; a header value may cite the agent env as ${VAR}. Pass the project the draft is for to also check what saveAgent refuses with 409: a name another project already holds, and an own server declared under a name another project owns. A bare name counts only for a platform server or one of that project's own; another project's server is reported as unknown. The project is honoured only when the caller has a role in it.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2008,6 +2008,12 @@ const docTemplate = `{
                 "summary": "Validate a draft agent before it is written to git",
                 "operationId": "validateAgent",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project id or name the draft is for",
+                        "name": "project",
+                        "in": "query"
+                    },
                     {
                         "description": "Draft agent",
                         "name": "request",
@@ -9435,7 +9441,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Queues the git write for one agent (prompt, tools, model). Async: returns 202 with an operation; poll until terminal. Re-posting the same name updates that agent; a field left out keeps its current value, so a prompt-only save does not drop the model, runtime or tools. When the agent's prompt is synced from a git repository (prompt source), a prompt that differs from the synced one is refused with 409 prompt_owned_by_source; pass the synced prompt unchanged to edit the other fields.",
+                "description": "Queues the git write for one agent (prompt, tools, model). Async: returns 202 with an operation; poll until terminal. Re-posting the same name updates that agent; a field left out keeps its current value, so a prompt-only save does not drop the model, runtime or tools. When the agent's prompt is synced from a git repository (prompt source), a prompt that differs from the synced one is refused with 409 prompt_owned_by_source; pass the synced prompt unchanged to edit the other fields. Agent names are shared by every project: a name another project already holds is refused with 409 agent_name_taken.",
                 "consumes": [
                     "application/json"
                 ],

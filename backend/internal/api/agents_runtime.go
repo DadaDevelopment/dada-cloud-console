@@ -69,7 +69,7 @@ func (h *Handler) ListAgentTools(c *gin.Context) {
 		return
 	}
 
-	project := h.toolProjectName(c, claims)
+	_, project := h.toolProject(c, claims)
 	out := make([]AgentToolResponse, 0, len(tools))
 	for _, t := range tools {
 		if t.Project != "" && t.Project != project && !claims.IsPlatformAdmin() {
@@ -154,18 +154,20 @@ type AgentFieldError struct {
 // an outage.
 // @ID          validateAgent
 // @Summary     Validate a draft agent before it is written to git
-// @Description Checks name, prompt and requested MCP servers against everything the cluster would refuse later. Returns 400 with a per-field error list, or 200 when the draft is safe to commit. Each tools entry is either a bare server name (a server the platform runs) or the whole reference this project brings itself, with url, protocol and headers; a header value may cite the agent env as ${VAR}.
+// @Description Checks name, prompt and requested MCP servers against everything the cluster would refuse later. Returns 400 with a per-field error list, or 200 when the draft is safe to commit. Each tools entry is either a bare server name (a server the platform runs) or the whole reference this project brings itself, with url, protocol and headers; a header value may cite the agent env as ${VAR}. Pass the project the draft is for to also check what saveAgent refuses with 409: a name another project already holds, and an own server declared under a name another project owns. A bare name counts only for a platform server or one of that project's own; another project's server is reported as unknown. The project is honoured only when the caller has a role in it.
 // @Tags        agents
 // @Accept      json
 // @Produce     json
 // @Security    BearerAuth
+// @Param       project query    string               false "Project id or name the draft is for"
 // @Param       request body     ValidateAgentRequest true "Draft agent"
 // @Success     200     {object} map[string]interface{} "valid draft"
 // @Failure     400     {object} map[string]interface{} "object with the per-field errors array"
 // @Failure     401     {object} map[string]string
 // @Router      /agents/validate [post]
 func (h *Handler) ValidateAgent(c *gin.Context) {
-	if _, ok := auth.GetClaims(c); !ok {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
 		respondUnauthorized(c)
 		return
 	}
@@ -174,6 +176,7 @@ func (h *Handler) ValidateAgent(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	projectID, projectName := h.toolProject(c, claims)
 
 	problems := validateAgentDraft(saveAgentRequest{
 		Name:   req.Name,
@@ -184,6 +187,17 @@ func (h *Handler) ValidateAgent(c *gin.Context) {
 	for _, header := range req.AllowedHeaders {
 		if err := kagent.ValidateHeader(header); err != nil {
 			problems = append(problems, AgentFieldError{Field: "allowed_headers", Message: err.Error()})
+		}
+	}
+
+	if projectID != uuid.Nil && req.Name != "" {
+		taken, err := agentNameTakenElsewhere(c.Request.Context(), h.pool, projectID, req.Name)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to check the agent name")
+			return
+		}
+		if taken {
+			problems = append(problems, AgentFieldError{Field: "name", Message: agentNameTakenMessage(req.Name)})
 		}
 	}
 
@@ -198,8 +212,21 @@ func (h *Handler) ValidateAgent(c *gin.Context) {
 			return
 		default:
 			known := make(map[string]bool, len(tools))
+			owner := make(map[string]string, len(tools))
 			for _, t := range tools {
-				known[t.Name] = true
+				owner[t.Name] = t.Project
+				if t.Project == "" || t.Project == projectName {
+					known[t.Name] = true
+				}
+			}
+			if projectName != "" {
+				declared := make([]models.AgentToolRef, len(req.Tools))
+				for i, t := range req.Tools {
+					if t.URL != "" {
+						declared[i] = t
+					}
+				}
+				problems = append(problems, toolNameTakeovers(declared, owner, projectName)...)
 			}
 			for _, want := range req.Tools {
 				if want.URL != "" || want.Name == "" {
@@ -261,20 +288,20 @@ func (h *Handler) GetAgentState(c *gin.Context) {
 	c.JSON(http.StatusOK, state)
 }
 
-// toolProjectName resolves the ?project= the agent form sends -- the project the
-// form is being filled in for, by id or by name -- into the project name the
-// composition stamps onto a tool server it owns.
+// toolProject resolves the ?project= the agent form sends -- the project the
+// form is being filled in for, by id or by name -- into its id and the project
+// name the composition stamps onto a tool server it owns.
 //
 // Without it the list is every RemoteMCPServer of one shared namespace, which
 // is every tenant's servers offered to every tenant. The value is honoured only
 // for a project the caller has a role in: naming somebody else's project must
 // not list its servers and their addresses. An unresolvable or foreign value is
-// not an error: it simply matches nothing, so the caller is left with the
-// platform's own servers rather than with somebody else's.
-func (h *Handler) toolProjectName(c *gin.Context, claims *auth.Claims) string {
+// not an error: it simply matches nothing (uuid.Nil and ""), so the caller is
+// left with the platform's own servers rather than with somebody else's.
+func (h *Handler) toolProject(c *gin.Context, claims *auth.Claims) (uuid.UUID, string) {
 	raw := c.Query("project")
 	if raw == "" || h.pool == nil {
-		return ""
+		return uuid.Nil, ""
 	}
 	var (
 		id   uuid.UUID
@@ -285,10 +312,10 @@ func (h *Handler) toolProjectName(c *gin.Context, claims *auth.Claims) string {
 		query, arg = `SELECT id, name FROM projects WHERE id = $1`, parsed
 	}
 	if err := h.pool.QueryRow(c.Request.Context(), query, arg).Scan(&id, &name); err != nil {
-		return ""
+		return uuid.Nil, ""
 	}
 	if _, err := h.effectiveRole(c.Request.Context(), claims, id); err != nil {
-		return ""
+		return uuid.Nil, ""
 	}
-	return name
+	return id, name
 }

@@ -68,6 +68,38 @@ func (h *Handler) agentSnapshotKind(ctx context.Context, projectID, envID uuid.U
 	return kind, nil
 }
 
+// agentNameTakenElsewhere reports whether a project other than this one already
+// holds an agent of this name, as a console claim or as a raw CR in its git.
+//
+// Every agent lands in the one kagent namespace keyed by name alone, so a name
+// is global across tenants: a second claim under a taken name composes a CR that
+// fights the owner's for the same object, and the by-name routes (authorizeAgent)
+// would lock the owner out of their own agent. Environments of the same project
+// are not a conflict here; they are one owner.
+func agentNameTakenElsewhere(ctx context.Context, q pgxQuerier, projectID uuid.UUID, name string) (bool, error) {
+	var taken bool
+	err := q.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM resource_snapshots
+		 WHERE kind IN ('ManagedAgent', 'Agent') AND name = $1 AND project_id <> $2)`,
+		name, projectID,
+	).Scan(&taken)
+	return taken, err
+}
+
+// agentNameTakenMessage is what a customer reads when the name belongs to
+// another project, on save and on validate alike.
+func agentNameTakenMessage(name string) string {
+	return "an agent named " + name + " already runs on this platform and is not yours; agent names are shared by every project, so pick a different name"
+}
+
+// lockAgentName serialises saves of one agent name for the rest of the
+// transaction, so two projects creating the same name at once cannot both pass
+// agentNameTakenElsewhere before either optimistic snapshot row exists.
+func lockAgentName(ctx context.Context, tx pgx.Tx, name string) error {
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "agent-name/"+name)
+	return err
+}
+
 // ListAgents returns the agents of one environment as the console knows them.
 //
 // This is the git-side view: what has been ordered. Whether the agent is
@@ -152,7 +184,7 @@ func (h *Handler) ListAgents(c *gin.Context) {
 //
 // @ID          saveAgent
 // @Summary     Create or update an agent
-// @Description Queues the git write for one agent (prompt, tools, model). Async: returns 202 with an operation; poll until terminal. Re-posting the same name updates that agent; a field left out keeps its current value, so a prompt-only save does not drop the model, runtime or tools. When the agent's prompt is synced from a git repository (prompt source), a prompt that differs from the synced one is refused with 409 prompt_owned_by_source; pass the synced prompt unchanged to edit the other fields.
+// @Description Queues the git write for one agent (prompt, tools, model). Async: returns 202 with an operation; poll until terminal. Re-posting the same name updates that agent; a field left out keeps its current value, so a prompt-only save does not drop the model, runtime or tools. When the agent's prompt is synced from a git repository (prompt source), a prompt that differs from the synced one is refused with 409 prompt_owned_by_source; pass the synced prompt unchanged to edit the other fields. Agent names are shared by every project: a name another project already holds is refused with 409 agent_name_taken.
 // @Tags        agents
 // @Accept      json
 // @Produce     json
@@ -214,6 +246,21 @@ func (h *Handler) SaveAgent(c *gin.Context) {
 
 	if problems := h.toolOwnershipProblems(c.Request.Context(), projectID, req.Tools); len(problems) > 0 {
 		reject(http.StatusConflict, "tool_owned_by_another_project", gin.H{"valid": false, "errors": problems})
+		return
+	}
+
+	nameTaken := gin.H{
+		"error":   "agent_name_taken",
+		"code":    "agent_name_taken",
+		"message": agentNameTakenMessage(req.Name),
+	}
+	taken, err := agentNameTakenElsewhere(c.Request.Context(), h.pool, projectID, req.Name)
+	if err != nil {
+		reject(http.StatusInternalServerError, "lookup_failed", gin.H{"error": "failed to look up agent"})
+		return
+	}
+	if taken {
+		reject(http.StatusConflict, "agent_name_taken", nameTaken)
 		return
 	}
 
@@ -280,6 +327,19 @@ func (h *Handler) SaveAgent(c *gin.Context) {
 		return
 	}
 	defer func() { _ = tx.Rollback(c.Request.Context()) }()
+
+	if err = lockAgentName(c.Request.Context(), tx, req.Name); err != nil {
+		reject(http.StatusInternalServerError, "lookup_failed", gin.H{"error": "failed to look up agent"})
+		return
+	}
+	if taken, err = agentNameTakenElsewhere(c.Request.Context(), tx, projectID, req.Name); err != nil {
+		reject(http.StatusInternalServerError, "lookup_failed", gin.H{"error": "failed to look up agent"})
+		return
+	}
+	if taken {
+		reject(http.StatusConflict, "agent_name_taken", nameTaken)
+		return
+	}
 
 	var op models.Operation
 	row := tx.QueryRow(c.Request.Context(),
