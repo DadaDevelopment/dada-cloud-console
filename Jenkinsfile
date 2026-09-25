@@ -330,7 +330,7 @@ spec:
       resources:
         requests:
           cpu: "100m"
-          # 1280Mi (was 1792Mi, then 1536Mi). request == limit was chosen because at
+          # 1216Mi (was 1792Mi, then 1536Mi, then 1280Mi). request == limit was chosen because at
           # request 256Mi this container sat far over request during the build and
           # was the kubelet's first eviction victim under node MemoryPressure
           # (#136/#139). NODE_OPTIONS below caps the heap at 1280Mi, and the
@@ -344,7 +344,7 @@ spec:
           # build 1 of main (0/4 schedulable). The eviction protection is kept
           # where it matters (dind at 1280/1536, this container at limit 2Gi);
           # only the idle-time reservation shrank.
-          memory: "1280Mi"
+          memory: "1216Mi"
         limits:
           cpu: "1500m"
           memory: "2Gi"
