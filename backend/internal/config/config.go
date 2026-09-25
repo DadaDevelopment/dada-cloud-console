@@ -128,7 +128,8 @@ type Config struct {
 	// posture BuildAgentURL has toward the build-agent. Empty disables Telegram
 	// binding outright -- the three telegram endpoints answer 503 rather than
 	// failing to start.
-	TGGatewayURL string // TG_GATEWAY_URL
+	TGGatewayURL   string // TG_GATEWAY_URL
+	TGGatewayToken string
 
 	// GitHub App slug (the public name in github.com/apps/<slug>). Required for
 	// the connect flow: the install-url endpoint sends the browser to
@@ -863,6 +864,7 @@ func Load() (*Config, error) {
 		BuildAgentWSURL:             getEnv("BUILD_AGENT_WS_URL", ""),
 		BuildAgentTokenSecret:       getEnv("BUILD_AGENT_TOKEN_SECRET", ""),
 		TGGatewayURL:                getEnv("TG_GATEWAY_URL", ""),
+		TGGatewayToken:              getEnv("TG_GATEWAY_TOKEN", ""),
 		GitAppSlug:                  getEnv("GIT_APP_SLUG", ""),
 		NexusRawURL:                 getEnv("NEXUS_RAW_URL", ""),
 		NexusUser:                   getEnv("NEXUS_USER", ""),

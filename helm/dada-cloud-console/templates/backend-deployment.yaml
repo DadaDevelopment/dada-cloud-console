@@ -66,6 +66,15 @@ spec:
             preStop:
               exec:
                 command: ["/bin/sleep", "8"]
+          {{- if .Values.tgGateway.enabled }}
+          env:
+            - name: TG_GATEWAY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (printf "%s-tg-gateway" (include "dada-cloud-console.fullname" .)) .Values.tgGateway.existingSecret }}
+                  key: TG_GATEWAY_TOKEN
+                  optional: true
+          {{- end }}
           envFrom:
             - configMapRef:
                 name: {{ include "dada-cloud-console.fullname" . }}-config

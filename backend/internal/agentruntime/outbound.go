@@ -10,16 +10,17 @@ import (
 )
 
 // httpChannelOutbound delivers proactive replies to tg-gateway's internal
-// POST /outbound endpoint (ClusterIP-only, no auth -- same posture as the
-// runtime's own API).
+// POST /outbound endpoint with the shared TG_GATEWAY_TOKEN bearer.
 type httpChannelOutbound struct {
 	baseURL string
+	token   string
 	http    *http.Client
 }
 
-func NewHTTPChannelOutbound(baseURL string) ChannelOutbound {
+func NewHTTPChannelOutbound(baseURL, token string) ChannelOutbound {
 	return &httpChannelOutbound{
 		baseURL: baseURL,
+		token:   token,
 		http:    &http.Client{Timeout: 30 * time.Second},
 	}
 }
@@ -39,6 +40,9 @@ func (c *httpChannelOutbound) SendOutbound(ctx context.Context, agentName, chatE
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {

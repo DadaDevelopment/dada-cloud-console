@@ -274,7 +274,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 		h.infraLogsearch = logsearch.New(cfg.ElasticsearchURL, cfg.ElasticsearchAPIKey, cfg.ElasticsearchInfraIndex)
 	}
 	h.buildagent = buildagent.New(cfg.BuildAgentURL)
-	h.tgGateway = tggatewayclient.New(cfg.TGGatewayURL)
+	h.tgGateway = tggatewayclient.New(cfg.TGGatewayURL, cfg.TGGatewayToken)
 	h.a2a = tggateway.NewA2AClient()
 	// Prefer admin basic-auth (survives the emptyDir-backed Grafana's DB wipe on
 	// pod restart); fall back to the service-account token when admin creds are unset.

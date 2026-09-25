@@ -60,7 +60,7 @@ func TestAgentTelegram_GatewayUnconfigured(t *testing.T) {
 // TestBindAgentTelegram_EmptyToken never reaches the gateway: an empty field
 // is a validation error, not a proxied request.
 func TestBindAgentTelegram_EmptyToken(t *testing.T) {
-	h := &Handler{tgGateway: tggatewayclient.New("http://unused.invalid")}
+	h := &Handler{tgGateway: tggatewayclient.New("http://unused.invalid", "")}
 	c, w := telegramTestCtx(t, "POST", "/agents/x/telegram", `{"bot_token":""}`, testAgentClaims(), "x")
 	h.BindAgentTelegram(c)
 	if w.Code != http.StatusBadRequest {
@@ -73,7 +73,7 @@ func TestBindAgentTelegram_EmptyToken(t *testing.T) {
 // project id. It is 404, the answer an outsider gets for a real agent.
 func TestBindAgentTelegram_UnknownAgent(t *testing.T) {
 	pool := testAgentGatePool(t)
-	h := &Handler{pool: pool, tgGateway: tggatewayclient.New("http://unused.invalid")}
+	h := &Handler{pool: pool, tgGateway: tggatewayclient.New("http://unused.invalid", "")}
 
 	c, w := telegramTestCtx(t, "POST", "/agents/no-such-agent/telegram", `{"bot_token":"t"}`, testAgentClaims(), "no-such-agent")
 	h.BindAgentTelegram(c)
@@ -94,7 +94,7 @@ func TestBindAgentTelegram_InvalidToken(t *testing.T) {
 	}))
 	defer gw.Close()
 
-	h := &Handler{pool: pool, tgGateway: tggatewayclient.New(gw.URL)}
+	h := &Handler{pool: pool, tgGateway: tggatewayclient.New(gw.URL, "")}
 	c, w := telegramTestCtx(t, "POST", "/agents/"+agentName+"/telegram", `{"bot_token":"bad"}`, agentRoleClaims(projectID, models.MemberRoleDeveloper), agentName)
 	h.BindAgentTelegram(c)
 	if w.Code != http.StatusBadRequest {
@@ -122,7 +122,7 @@ func TestBindAgentTelegram_Success(t *testing.T) {
 	}))
 	defer gw.Close()
 
-	h := &Handler{pool: pool, tgGateway: tggatewayclient.New(gw.URL)}
+	h := &Handler{pool: pool, tgGateway: tggatewayclient.New(gw.URL, "")}
 	c, w := telegramTestCtx(t, "POST", "/agents/"+okName+"/telegram", `{"bot_token":"good"}`, agentRoleClaims(projectID, models.MemberRoleDeveloper), okName)
 	h.BindAgentTelegram(c)
 	if w.Code != http.StatusOK {
@@ -162,7 +162,7 @@ func TestUnbindAgentTelegram_Success(t *testing.T) {
 	}))
 	defer gw.Close()
 
-	h := &Handler{pool: pool, tgGateway: tggatewayclient.New(gw.URL)}
+	h := &Handler{pool: pool, tgGateway: tggatewayclient.New(gw.URL, "")}
 	c, w := telegramTestCtx(t, "DELETE", "/agents/x/telegram", "", claims, name)
 	h.UnbindAgentTelegram(c)
 	if w.Code != http.StatusOK {
@@ -177,7 +177,7 @@ func TestUnbindAgentTelegram_GatewayError(t *testing.T) {
 	}))
 	defer gw.Close()
 
-	h := &Handler{pool: pool, tgGateway: tggatewayclient.New(gw.URL)}
+	h := &Handler{pool: pool, tgGateway: tggatewayclient.New(gw.URL, "")}
 	c, w := telegramTestCtx(t, "DELETE", "/agents/x/telegram", "", claims, name)
 	h.UnbindAgentTelegram(c)
 	if w.Code != http.StatusServiceUnavailable {
@@ -194,7 +194,7 @@ func TestGetAgentTelegram_NotFound(t *testing.T) {
 	}))
 	defer gw.Close()
 
-	h := &Handler{pool: pool, tgGateway: tggatewayclient.New(gw.URL)}
+	h := &Handler{pool: pool, tgGateway: tggatewayclient.New(gw.URL, "")}
 	c, w := telegramTestCtx(t, "GET", "/agents/x/telegram", "", claims, name)
 	h.GetAgentTelegram(c)
 	if w.Code != http.StatusOK {
@@ -218,7 +218,7 @@ func TestGetAgentTelegram_Success(t *testing.T) {
 	}))
 	defer gw.Close()
 
-	h := &Handler{pool: pool, tgGateway: tggatewayclient.New(gw.URL)}
+	h := &Handler{pool: pool, tgGateway: tggatewayclient.New(gw.URL, "")}
 	c, w := telegramTestCtx(t, "GET", "/agents/x/telegram", "", claims, name)
 	h.GetAgentTelegram(c)
 	if w.Code != http.StatusOK {

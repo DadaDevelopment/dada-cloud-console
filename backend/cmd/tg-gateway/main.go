@@ -69,6 +69,10 @@ func main() {
 
 	srv := tggateway.NewServer(mgr)
 	srv.SetDBPinger(pool.Ping)
+	srv.SetToken(os.Getenv("TG_GATEWAY_TOKEN"))
+	if os.Getenv("TG_GATEWAY_TOKEN") == "" {
+		log.Error().Msg("TG_GATEWAY_TOKEN unset: /bindings and /outbound answer 503")
+	}
 
 	port := cfg.TGGatewayPort
 	if port == "" {

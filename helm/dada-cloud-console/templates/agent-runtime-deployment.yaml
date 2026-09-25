@@ -46,6 +46,14 @@ spec:
             - name: TG_GATEWAY_OUTBOUND_URL
               value: {{ .Values.agentRuntime.outboundURL | quote }}
             {{- end }}
+            {{- if .Values.tgGateway.enabled }}
+            - name: TG_GATEWAY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (printf "%s-tg-gateway" (include "dada-cloud-console.fullname" .)) .Values.tgGateway.existingSecret }}
+                  key: TG_GATEWAY_TOKEN
+                  optional: true
+            {{- end }}
             {{- with .Values.agentRuntime.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

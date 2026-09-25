@@ -2,6 +2,7 @@ package tggateway
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -12,12 +13,14 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// Server is tg-gateway's internal HTTP API: no auth, ClusterIP-only, trusted
-// the same way kagent.Reader trusts the kagent runtime. The console backend
-// is its only caller.
+// Server is tg-gateway's internal HTTP API, ClusterIP-only. Every route but
+// /healthz and /readyz requires "Authorization: Bearer <TG_GATEWAY_TOKEN>";
+// callers are the console backend (/bindings) and agent-runtime (/outbound).
+// An unset token fails closed: those routes answer 503.
 type Server struct {
-	mgr  *Manager
-	ping func(context.Context) error
+	mgr   *Manager
+	ping  func(context.Context) error
+	token string
 }
 
 // NewServer builds the internal API over mgr.
@@ -26,16 +29,34 @@ func NewServer(mgr *Manager) *Server { return &Server{mgr: mgr} }
 // SetDBPinger wires a Postgres liveness check used by /readyz.
 func (s *Server) SetDBPinger(fn func(context.Context) error) { s.ping = fn }
 
+// SetToken sets the shared bearer secret the internal routes require.
+func (s *Server) SetToken(token string) { s.token = strings.TrimSpace(token) }
+
 // Handler returns tg-gateway's internal HTTP router.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/readyz", s.handleReadyz)
-	mux.HandleFunc("POST /bindings", s.handleBind)
-	mux.HandleFunc("DELETE /bindings/{agentName}", s.handleUnbind)
-	mux.HandleFunc("GET /bindings/{agentName}", s.handleGet)
-	mux.HandleFunc("POST /outbound", s.handleOutbound)
+	mux.HandleFunc("POST /bindings", s.requireToken(s.handleBind))
+	mux.HandleFunc("DELETE /bindings/{agentName}", s.requireToken(s.handleUnbind))
+	mux.HandleFunc("GET /bindings/{agentName}", s.requireToken(s.handleGet))
+	mux.HandleFunc("POST /outbound", s.requireToken(s.handleOutbound))
 	return recoverAndLog(mux)
+}
+
+func (s *Server) requireToken(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.token == "" {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "tg-gateway token not configured"})
+			return
+		}
+		got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if !ok || subtle.ConstantTimeCompare([]byte(got), []byte(s.token)) != 1 {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		next(w, r)
+	}
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
@@ -131,8 +152,7 @@ type outboundRequest struct {
 	ReplyToID string `json:"reply_to_channel_message_id,omitempty"`
 }
 
-// handleOutbound delivers one proactive message. No auth, ClusterIP-only,
-// same trust posture as the bindings API. Reply anchor optional: a proactive
+// handleOutbound delivers one proactive message. Reply anchor optional: a proactive
 // follow-up usually starts a fresh visual thread, so the reply anchor is
 // used only when provided.
 func (s *Server) handleOutbound(w http.ResponseWriter, r *http.Request) {

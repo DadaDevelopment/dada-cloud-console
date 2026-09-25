@@ -29,17 +29,19 @@ var ErrNotFound = errors.New("tggatewayclient: no binding for that agent")
 // Client is a proxy client for tg-gateway's internal API.
 type Client struct {
 	baseURL    string
+	token      string
 	httpClient *http.Client
 }
 
 // New creates a tg-gateway proxy client. Returns nil if unconfigured so
 // callers can treat Telegram binding as disabled.
-func New(baseURL string) *Client {
+func New(baseURL, token string) *Client {
 	if baseURL == "" {
 		return nil
 	}
 	return &Client{
 		baseURL:    strings.TrimRight(baseURL, "/"),
+		token:      strings.TrimSpace(token),
 		httpClient: &http.Client{Timeout: 20 * time.Second},
 	}
 }
@@ -66,7 +68,7 @@ func (c *Client) Bind(ctx context.Context, agentName, projectID, botToken string
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return Binding{}, fmt.Errorf("tg-gateway unreachable: %w", err)
 	}
@@ -93,7 +95,7 @@ func (c *Client) Unbind(ctx context.Context, agentName string) error {
 	if err != nil {
 		return err
 	}
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return fmt.Errorf("tg-gateway unreachable: %w", err)
 	}
@@ -111,7 +113,7 @@ func (c *Client) Get(ctx context.Context, agentName string) (Binding, error) {
 	if err != nil {
 		return Binding{}, err
 	}
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return Binding{}, fmt.Errorf("tg-gateway unreachable: %w", err)
 	}
@@ -129,4 +131,11 @@ func (c *Client) Get(ctx context.Context, agentName string) (Binding, error) {
 		return Binding{}, err
 	}
 	return out, nil
+}
+
+func (c *Client) do(req *http.Request) (*http.Response, error) {
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	return c.httpClient.Do(req)
 }

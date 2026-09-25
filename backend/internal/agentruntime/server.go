@@ -62,9 +62,9 @@ func NewServer(pool *pgxpool.Pool, gitopsBasePath string) *Server {
 	token := os.Getenv("AGENT_RUNTIME_TOKEN")
 	runtime.contextKey = []byte(token)
 	srv := &Server{runtime: runtime, pool: pool, a2a: a2a, token: token, budget: budget, pauseCRM: NewHTTPPauseCRM(os.Getenv("AGENT_PAUSE_CRM_URL"), os.Getenv("AGENT_PAUSE_CRM_TOKEN"), os.Getenv("AGENT_PAUSE_CRM_STATUS"))}
-	srv.operator = NewOperatorNotifier(pool, os.Getenv("AGENT_ESCALATION_OPERATOR"), os.Getenv("TG_GATEWAY_OUTBOUND_URL"))
+	srv.operator = NewOperatorNotifier(pool, os.Getenv("AGENT_ESCALATION_OPERATOR"), os.Getenv("TG_GATEWAY_OUTBOUND_URL"), os.Getenv("TG_GATEWAY_TOKEN"))
 	if url := os.Getenv("TG_GATEWAY_OUTBOUND_URL"); url != "" {
-		srv.outbound = NewHTTPChannelOutbound(url)
+		srv.outbound = NewHTTPChannelOutbound(url, os.Getenv("TG_GATEWAY_TOKEN"))
 	}
 	runtime.outbound = func(ctx context.Context, agentName, externalID, text, mediaURL string) error {
 		if srv.outbound == nil {
@@ -99,7 +99,7 @@ func (s *Server) StartIdleScheduler(ctx context.Context, idleTickSeconds int, ou
 	}
 	var outbound ChannelOutbound
 	if outboundURL != "" {
-		outbound = NewHTTPChannelOutbound(outboundURL)
+		outbound = NewHTTPChannelOutbound(outboundURL, os.Getenv("TG_GATEWAY_TOKEN"))
 	}
 	s.scheduler = NewIdleScheduler(s.pool, s.runtime, s.a2a, outbound, time.Duration(idleTickSeconds)*time.Second)
 	go s.scheduler.Run(ctx)

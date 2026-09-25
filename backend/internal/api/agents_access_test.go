@@ -114,7 +114,7 @@ func agentGateHandler(t *testing.T, pool *pgxpool.Pool) (*Handler, *agentGateSid
 	t.Cleanup(gw.Close)
 	h := agentTestHandler(nil)
 	h.pool = pool
-	h.tgGateway = tggatewayclient.New(gw.URL)
+	h.tgGateway = tggatewayclient.New(gw.URL, "")
 	h.a2a = &recordingA2A{effects: effects}
 	return h, effects
 }

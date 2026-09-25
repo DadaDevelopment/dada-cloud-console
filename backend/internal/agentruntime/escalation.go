@@ -193,13 +193,13 @@ var errOperatorUnknown = errors.New("operator has not written to the bot yet")
 // with or without @) and delivers through the same gateway /outbound path
 // idle follow-ups use. Either value empty = escalation pauses the agent and
 // records the reason, nobody is messaged.
-func NewOperatorNotifier(pool *pgxpool.Pool, username, outboundURL string) *OperatorNotifier {
+func NewOperatorNotifier(pool *pgxpool.Pool, username, outboundURL, outboundToken string) *OperatorNotifier {
 	username = strings.TrimPrefix(strings.TrimSpace(username), "@")
 	if username == "" || outboundURL == "" {
 		log.Info().Bool("operator", username != "").Bool("outbound", outboundURL != "").Msg("agentruntime: operator escalation delivery disabled")
 		return nil
 	}
-	return &OperatorNotifier{username: username, resolve: pgOperatorChat(pool), outbound: NewHTTPChannelOutbound(outboundURL)}
+	return &OperatorNotifier{username: username, resolve: pgOperatorChat(pool), outbound: NewHTTPChannelOutbound(outboundURL, outboundToken)}
 }
 
 func pgOperatorChat(pool *pgxpool.Pool) func(ctx context.Context, agentName, username string) (string, error) {
