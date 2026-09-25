@@ -36,8 +36,9 @@ Marginal agent+MCP = ~0.5-0.64 GiB reserved. 4 agents + 4 MCP = ~2.2 GiB request
 - [ ] Orphan RemoteMCPServer `kagent/tg-agent-tools` (401 every minute, no Agent uses it): trace readers, then delete.
 - [ ] `ValidateAgent` does not check ModelConfig existence or tool ownership.
 - [ ] MCP `saveAgent` rejects a tools-only save although its doc says omitted fields are kept.
-- [ ] tg-gateway: runtime failure = silent drop (no fallback, no user-visible error); tg-vibecoder still on direct A2A (kagent `ask_user` deadlock exposure).
-- [ ] Doc drift: `docs/STATUS-agent-runtime.md`, `docs/INTEGRATION-agent-runtime.md` describe a runtime->A2A fallback that no longer exists.
+- [x] tg-gateway runtime failure no longer silent: binding setting `tg_bindings.on_failure` (`notice` default / `silent` opt-in) + `failure_notice`, `PUT /bindings/{agent}/failure`: `cb9e271c`. Measured before: 19/1058 tg-exchange-support conversations (09-15..09-25) ended enabled with the last user message unanswered. Prod delivery not verified.
+- [x] tg-vibecoder stays on direct A2A; ask_user resume ported to `tggateway/a2a.go`: `b2ecbf09`. Not moved behind runtime: runtime flags (judge, question budget, funnel order, split, handoff) are process-wide exchange-support tuning, needs C.2 per-agent config first; then direct path can go.
+- [x] Doc drift fixed (runtime->A2A fallback removed from both docs): `cb9e271c`.
 - [~] Plaintext secrets in claims/values (Langfuse keys, tool bearer): owner rule says creds in git are the norm; only fix where rotation pain demands (composition `headersFrom` Secret ref).
 
 ## B. ddc CLI (independent) [origin: DadaDevelopment/ddc cli-v0.3.1]
