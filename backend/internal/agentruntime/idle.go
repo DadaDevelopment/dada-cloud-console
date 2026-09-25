@@ -382,8 +382,18 @@ func (s *IdleScheduler) invoke(ctx context.Context, r idleHookRow, deliver bool)
 		if err != nil || !state.AgentEnabled {
 			return ""
 		}
-		reply = stripEmDash(traced.Text)
+		reply = strings.TrimSpace(stripEmDash(traced.Text))
+		if reply == "" {
+			log.Warn().Str("conversation", convID).Msg("agentruntime: idle follow-up empty, nothing sent")
+			return ""
+		}
 		if reason := leakReason(reply); reason != "" {
+			if attempt == 0 {
+				log.Warn().Str("conversation", convID).Str("reason", reason).Msg("agentruntime: idle follow-up held back as internal text, sent back for a rewrite")
+				run.ConversationContext.State = state
+				run.ConversationContext.ReplyError = leakRepairMessage(reason)
+				continue
+			}
 			log.Warn().Str("conversation", convID).Str("reason", reason).Msg("agentruntime: idle follow-up dropped as internal monologue")
 			return ""
 		}

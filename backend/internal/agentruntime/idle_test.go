@@ -599,3 +599,55 @@ func TestIdleScheduler_InvokeNowClaimsStepWithoutDelivery(t *testing.T) {
 		t.Fatalf("exhausted ladder must stay silent and nothing reaches the channel: reply %q envelopes %d delivered %d", reply, len(envelopes), delivered)
 	}
 }
+
+func idleLeakFixture(t *testing.T, replies []string) (sent []string, errs []string, calls int) {
+	t.Helper()
+	store := setupTestStore(t)
+	ctx := context.Background()
+	pool := store.(*pgStoreAlias).pool
+	agentName := "idle-leak-" + uuid.NewString()[:8]
+	conv, _, err := store.GetOrCreateConversation(ctx, agentName, "telegram", "chat-leak", Actor{ExternalID: "u1"})
+	require_NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM conversations WHERE agent_name = $1`, agentName)
+		_, _ = pool.Exec(ctx, `DELETE FROM lifecycle_hooks WHERE agent_name = $1`, agentName)
+	})
+	_, err = pool.Exec(ctx, `
+		INSERT INTO lifecycle_hooks (agent_name, name, trigger_event, trigger_config, action_type, action_config)
+		VALUES ($1, 'follow-up', 'conversation.idle', '{"idle_minutes":0}', 'schedule', '{"agent_message":"дожим"}')
+	`, agentName)
+	require_NoError(t, err)
+	_, err = store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "user", Content: "привет, ты тут?"})
+	require_NoError(t, err)
+	a2a := fakeA2ARegisterRetry{errors: &errs, calls: &calls, replies: replies}
+	outbound := &fakeOutbound{onSend: func(agent, chat, text string) { sent = append(sent, text) }}
+	rt := NewRuntime(store, &noopHooks{}, a2a, nil)
+	rt.contextKey = []byte(testRuntimeToken)
+	sched := NewIdleScheduler(pool, rt, a2a, outbound, time.Second)
+	sched.now = idleDaytime
+	if err := sched.Tick(ctx); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	return sent, errs, calls
+}
+
+func TestIdleScheduler_RewritesLeakedFollowUpOnce(t *testing.T) {
+	sent, errs, calls := idleLeakFixture(t, []string{"Ступень S5 → S6: Ты на связи?", "Ты на связи? Давай продолжим"})
+	if calls != 2 || errs[0] != "" || errs[1] == "" {
+		t.Fatalf("a leaked follow-up must be sent back once with the repair hint, got calls=%d errors=%q", calls, errs)
+	}
+	if len(sent) != 1 || strings.Contains(sent[0], "S5") {
+		t.Fatalf("only the rewritten follow-up reaches the client, got %q", sent)
+	}
+}
+
+func TestIdleScheduler_DropsFollowUpThatLeaksTwiceOrIsBlank(t *testing.T) {
+	sent, _, calls := idleLeakFixture(t, []string{"S5 → S6", "S6 → S7"})
+	if calls != 2 || len(sent) != 0 {
+		t.Fatalf("a follow-up that leaks after the rewrite must not be sent, got calls=%d sent=%q", calls, sent)
+	}
+	sent, _, calls = idleLeakFixture(t, []string{" \n "})
+	if calls != 1 || len(sent) != 0 {
+		t.Fatalf("a blank follow-up must not be sent, got calls=%d sent=%q", calls, sent)
+	}
+}
