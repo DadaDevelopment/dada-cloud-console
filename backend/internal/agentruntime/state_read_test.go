@@ -1,6 +1,7 @@
 package agentruntime
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -40,6 +41,15 @@ func TestPGGetStateReadsConversationByIdentity(t *testing.T) {
 	require.Equal(t, true, state["agent_enabled"])
 	require.Contains(t, state, "reported_facts")
 	require.Contains(t, state, "active_skills")
+	require.NotContains(t, out, "last_assistant", "no reply saved yet")
+
+	_, err := store.SaveMessage(context.Background(), conv.ID, SaveMessageInput{Role: "assistant", Content: "Номер счёта и почту принял"})
+	require.NoError(t, err)
+	status, out = getRuntimeState(t, server.URL, q, testRuntimeToken)
+	require.Equal(t, http.StatusOK, status, out)
+	last := out["last_assistant"].(map[string]any)
+	require.Equal(t, "Номер счёта и почту принял", last["text"])
+	require.NotEmpty(t, last["created_at"])
 
 	status, _ = getRuntimeState(t, server.URL, url.Values{"agent_name": {conv.AgentName}, "channel": {conv.Channel}, "external_id": {"nobody"}}, testRuntimeToken)
 	require.Equal(t, http.StatusNotFound, status)

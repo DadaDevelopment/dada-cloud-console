@@ -224,8 +224,11 @@ func (s *Server) handleIdleNow(c *gin.Context) {
 }
 
 // handleGetState is the read side for evals and operators: the runtime state
-// of the active conversation addressed by agent_name, channel and external_id.
-// 404 when the conversation does not exist yet.
+// of the active conversation addressed by agent_name, channel and external_id,
+// and the last reply the bot saved for it. A handoff line goes to the client
+// through the gateway's outbound, not through the /message answer, which is
+// then suppressed; last_assistant is how an eval sees that the client did get
+// a line. 404 when the conversation does not exist yet.
 func (s *Server) handleGetState(c *gin.Context) {
 	agentName, channel, externalID := c.Query("agent_name"), c.Query("channel"), c.Query("external_id")
 	if agentName == "" || channel == "" || externalID == "" {
@@ -242,7 +245,17 @@ func (s *Server) handleGetState(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "state unavailable"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"conversation_id": conv.ID.String(), "state": state})
+	out := gin.H{"conversation_id": conv.ID.String(), "state": state}
+	if s.pool != nil {
+		var text string
+		var at time.Time
+		err := s.pool.QueryRow(c.Request.Context(), `SELECT content, created_at FROM conversation_messages
+WHERE conversation_id=$1 AND role='assistant' ORDER BY created_at DESC LIMIT 1`, conv.ID).Scan(&text, &at)
+		if err == nil {
+			out["last_assistant"] = gin.H{"text": text, "created_at": at.UTC().Format(time.RFC3339Nano)}
+		}
+	}
+	c.JSON(http.StatusOK, out)
 }
 
 func (s *Server) handleListHooks(c *gin.Context) {
