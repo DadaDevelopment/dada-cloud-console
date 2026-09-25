@@ -33,9 +33,9 @@ Marginal agent+MCP = ~0.5-0.64 GiB reserved. 4 agents + 4 MCP = ~2.2 GiB request
 - [x] tg-gateway `POST /outbound` has no auth (ClusterIP only): add token or NetworkPolicy. Done 2682766a: bearer `TG_GATEWAY_TOKEN` on /bindings + /outbound (503 when unset), console + agent-runtime send it; argo-infra d7e13c48e (token in tgGateway.secret, chart pin). NetworkPolicy skipped: argocd-prod has none in git, live cluster unreachable to check a first NP.
 - [ ] Hand-applied ModelConfigs `tg-referral-glm-53-flash`, `tg-vibecoder-glm-53` live outside argo-infra: move into git.
 - [ ] z.ai calls (agents + judge) bypass ai-gateway ledger `agent_token_usage`: route via ai-gateway. Prereq for C.6.
-- [ ] Orphan RemoteMCPServer `kagent/tg-agent-tools` (401 every minute, no Agent uses it): trace readers, then delete.
-- [ ] `ValidateAgent` does not check ModelConfig existence or tool ownership.
-- [ ] MCP `saveAgent` rejects a tools-only save although its doc says omitted fields are kept.
+- [x] Orphan RemoteMCPServer `kagent/tg-agent-tools` deleted 2026-09-25 (live kubectl). Readers traced first: 0 of 4 Agents reference it, no ManagedAgent tool of that name (claim uses `tg-exchange-support-tools`, same URL), no Argo Application tracks it, not in argo-infra console-migration, console ops naming it are all Committed (last 09-16, before the rename). Not recreated after delete. Spec saved in Review below.
+- [x] `ValidateAgent` runs the save's checks (`checkAgentSave`: draft, ModelConfig exists, name held elsewhere, adopted agent, prompt source) for `?project=` (+ new `?environment=`), ownership in validate's non-leaking wording; unknown `model_config` refused by both: `90a64dde` (main). Console RBAC modelconfigs get/list shipped via chart pin argo-infra `4008d6f48`. Prod delivery not verified.
+- [x] MCP `saveAgent` tools-only save: existing agent may omit the prompt, gitops `fillUnsaid` carries prompt+promptVersion; new agent still needs a prompt; prompt-source 409 kept for a different prompt: `90a64dde` (main). Test renders the claim byte-for-byte equal except tools. Prod delivery not verified.
 - [x] tg-gateway runtime failure no longer silent: binding setting `tg_bindings.on_failure` (`notice` default / `silent` opt-in) + `failure_notice`, `PUT /bindings/{agent}/failure`: `cb9e271c`. Measured before: 19/1058 tg-exchange-support conversations (09-15..09-25) ended enabled with the last user message unanswered. Prod delivery not verified.
 - [x] tg-vibecoder stays on direct A2A; ask_user resume ported to `tggateway/a2a.go`: `b2ecbf09`. Not moved behind runtime: runtime flags (judge, question budget, funnel order, split, handoff) are process-wide exchange-support tuning, needs C.2 per-agent config first; then direct path can go.
 - [x] Doc drift fixed (runtime->A2A fallback removed from both docs): `cb9e271c`.
@@ -77,5 +77,31 @@ Workspace: session scratchpad, not the repo.
 - [ ] Verdict written here with numbers.
 
 ## Review
+
+### Deleted 2026-09-25: RemoteMCPServer kagent/tg-agent-tools (not in git, status omitted)
+
+```yaml
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"kagent.dev/v1alpha2","kind":"RemoteMCPServer","metadata":{"annotations":{},"name":"tg-agent-tools","namespace":"kagent"},"spec":{"description":"tg-exchange-support tool server (geo/kb/documents/crm/ops) over streamable HTTP","protocol":"STREAMABLE_HTTP","terminateOnClose":true,"timeout":"30s","url":"http://tg-agent-tools-service.agent-sandbox-prod.svc.cluster.local:8000/mcp"}}
+  creationTimestamp: "2026-08-31T05:20:42Z"
+  generation: 6
+  name: tg-agent-tools
+  namespace: kagent
+  resourceVersion: "237613520"
+  uid: 69b4b4fb-1a70-43e5-8856-aa273d455850
+spec:
+  description: tg-exchange-support tool server (geo/kb/documents/crm/ops) over streamable
+    HTTP
+  protocol: STREAMABLE_HTTP
+  terminateOnClose: true
+  timeout: 30s
+  url: http://tg-agent-tools-service.agent-sandbox-prod.svc.cluster.local:8000/mcp
+```
+
+Last status: Accepted=False, ReconcileFailed, `initialize`: Unauthorized (bearer gate since dcdb0c3, this CR had no headers).
 
 (filled after spike)
