@@ -1,0 +1,80 @@
+# Agent platform: eve-kagent + eve parity backlog
+
+Started 2026-09-25 from the eve.dev vs Dada agent runtime comparison.
+Source of the comparison: eve.dev docs (llms-full.txt, v0.66.3) and a code map of
+tg-gateway -> agent-runtime -> kagent -> MCP (tg-agent-tools), plus the console panel.
+
+Direction chosen by owner: **eve-kagent** = eve.dev framework as the agent engine,
+made k8s-native by Dada adapters (workflow world on our PG, sandbox on Boxes/Substrate,
+Keycloak auth, ai-gateway model provider, Langfuse OTel, Dada Telegram channel),
+deployed as a Dada app (one pod per project workspace, not one pod per agent).
+Not a kagent fork, not an own agent loop.
+
+Rule: items in A-C are independent of the engine decision and must not be dropped
+if eve-kagent slips.
+
+## Economics baseline [live, kubectl top + requests, 2026-09-25]
+
+| Unit | request RAM | used | CPU idle |
+|---|---|---|---|
+| kagent agent pod (python ADK), x4 | 384Mi (limit 1Gi) | 208-281Mi | 3-5m |
+| MCP tool pod, x4 | 128-256Mi | 51-120Mi | 4-8m |
+| agent-runtime (Go, all conversations) | 64Mi | 11Mi | 1m |
+| tg-gateway (Go, all bots) | - | 8Mi | 10m |
+| kagent controller x2 + ui | 448Mi | 182Mi | - |
+
+Marginal agent+MCP = ~0.5-0.64 GiB reserved. 4 agents + 4 MCP = ~2.2 GiB requested.
+
+## A. Security / ops (independent)
+
+- [x] By-name agent routes gated on owning project role: `9b169b77` (main). Prod delivery not verified.
+- [x] Agent names global, saveAgent refuses a name another project holds: `37a2b4cc` (main).
+- [x] tg-agent-tools `/mcp` bearer gate: tg-agent-tools `dcdb0c3` (memory: project_tg_agent_tools_mcp_bearer_gate.md).
+- [ ] tg-gateway `POST /outbound` has no auth (ClusterIP only): add token or NetworkPolicy.
+- [ ] Hand-applied ModelConfigs `tg-referral-glm-53-flash`, `tg-vibecoder-glm-53` live outside argo-infra: move into git.
+- [ ] z.ai calls (agents + judge) bypass ai-gateway ledger `agent_token_usage`: route via ai-gateway. Prereq for C.6.
+- [ ] Orphan RemoteMCPServer `kagent/tg-agent-tools` (401 every minute, no Agent uses it): trace readers, then delete.
+- [ ] `ValidateAgent` does not check ModelConfig existence or tool ownership.
+- [ ] MCP `saveAgent` rejects a tools-only save although its doc says omitted fields are kept.
+- [ ] tg-gateway: runtime failure = silent drop (no fallback, no user-visible error); tg-vibecoder still on direct A2A (kagent `ask_user` deadlock exposure).
+- [ ] Doc drift: `docs/STATUS-agent-runtime.md`, `docs/INTEGRATION-agent-runtime.md` describe a runtime->A2A fallback that no longer exists.
+- [~] Plaintext secrets in claims/values (Langfuse keys, tool bearer): owner rule says creds in git are the norm; only fix where rotation pain demands (composition `headersFrom` Secret ref).
+
+## B. ddc CLI (independent) [origin: DadaDevelopment/ddc cli-v0.3.1]
+
+- [ ] Local `~/.local/bin/ddc` is the Aug build (login/deploy only): reinstall via install.sh.
+- [ ] `ddc agent eval` with no `--suite` runs only `markers` (runner default) while help says "every suite".
+- [ ] `eval_test.go` example passes `--environment`, unknown to `eval_run.py` (argparse exit 2).
+- [ ] README Langfuse naming contract is stale (evals are report-only now).
+- [ ] `DDC_CLIENT_ID_SECRET` accepted by `MachineCredentialsPresent()` but never read.
+- [ ] Config errors flattened to exit 1; eve contract is 0 pass / 1 fail / 2 config error.
+- [ ] No command to message/tail a deployed agent (`ddc agent invoke --url`, `ddc agent logs --remote`).
+
+## C. eve parity features (delivered by eve-kagent if spike is green, else built on our engine)
+
+1. [ ] HITL protocol: `input.requested` / `inputResponses`, turn parks durably, per-tool approval `never|once|always|auto`; console HITL inbox.
+2. [ ] Channels as config: `turnPolicy steer|queue`, debounce, pacing, reply split, group triggers, output guards all set per channel/agent config, no tg-exchange-support hardcode in the platform.
+3. [ ] OpenAPI connections (+ MCP) with allow/block, approval, brokered creds; GTR `http_call_v1` becomes an OpenAPI connection, no pod needed.
+4. [ ] One history: single source of truth for the conversation across all hops.
+5. [ ] Durable sessions: step checkpoints, replay, park without compute, survive pod restart mid-turn.
+6. [ ] Per-session token/cost limits with pause-and-approve (needs A: z.ai via ai-gateway).
+7. [ ] Eval DSL eve-compatible in ddc: trajectory assertions (calledTool, notCalledTool, toolOrder, usedNoTools, maxToolCalls, noFailedActions), outputEquals, judge choice, `--tag/--exclude-tag`, `--junit`, `--strict`, `--list`; YAML suites keep working (eve `loadYaml` fan-out).
+8. [ ] Dev loop: `ddc agent dev` (local, hot reload), `ddc agent invoke` headless, eval against deployed URL.
+9. [ ] Deploy/versioning: idle sessions hand off to new version, in-flight pinned, rollback.
+10. [ ] Density: pod per project workspace, MCP tool pods replaced by in-process connections where possible.
+11. [ ] Identity: signed forwarded principal + explicit trusted forwarders instead of raw `x-dada-*` headers.
+12. [ ] Panel (console assistant) on the same engine: 3 runtimes -> 1.
+
+## D. eve-kagent spike (throwaway, answer = numbers)
+
+Workspace: session scratchpad, not the repo.
+
+- [ ] D1 RSS/latency: eve workspace with 3-5 agents, idle and 10 concurrent sessions.
+- [ ] D2 Pre-send guard with one bounded rewrite without forking eve (channel delivery or model middleware).
+- [ ] D3 Postgres workflow world: exists, and a `kill -9` mid-turn resumes.
+- [ ] D4 One tg-agent-tools YAML suite runs through `eve eval` via a loadYaml adapter.
+- [ ] Verdict written here with numbers.
+
+## Review
+
+(filled after spike)
