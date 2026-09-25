@@ -120,19 +120,7 @@ podTemplate(
         label: podLabel,
         namespace: 'devops-tools',
         serviceAccount: 'jenkins-admin',
-        // workspaceVolume MUST be set here, not in the yaml below. The k8s plugin
-        // owns the volume named `workspace-volume` and overwrites whatever the
-        // yaml declares for it with this field (default: an emptyDir with no
-        // sizeLimit). That is why the yaml's `sizeLimit: 3Gi` never applied — the
-        // live pod carried a plain `emptyDir: {}`, i.e. uncapped node disk, for as
-        // long as that comment claimed otherwise. dynamicPVC provisions one PVC
-        // per agent pod and deletes it with the pod, same lifecycle as the
-        // ephemeral docker-graph-storage volume below.
-        workspaceVolume: dynamicPVC(
-                requestsSize: '3Gi',
-                accessModes: 'ReadWriteOnce',
-                storageClassName: 'longhorn-ci-scratch'
-        ),
+        workspaceVolume: emptyDirWorkspaceVolume(false),
         yaml: """
 apiVersion: v1
 kind: Pod
@@ -161,57 +149,15 @@ spec:
   # 1 hour is plenty and well under any sane runaway cap.
   activeDeadlineSeconds: 3600
   priorityClassName: ci-agent
-  # NO podAntiAffinity — deliberately. There used to be a required anti-affinity
-  # fence against databases/postgresql, because the workspace and dind's
-  # /var/lib/docker were emptyDir (raw, unaccounted NODE disk) and a build holds
-  # ~9.6 GiB of it: twice a build filled the node it landed on and killed the
-  # platform postgres living there (once taking a live user's app down for
-  # 5h11m), and build #1083 died itself on ENOSPC inside `npm ci` while the node
-  # hosting pg-shard-0-postgresql-0 sat at 99.8%.
-  #
-  # That fence treated the symptom and cost the pod both 15Gi nodes, leaving only
-  # the two 12Gi ones — which then had less free memory than the pod requests
-  # (2650Mi / 2324Mi against a 3136Mi pod, measured 2026-09-08), so builds sat
-  # Pending forever and every fix was another round of shaving container
-  # requests. Both scratch volumes are now generic ephemeral Longhorn PVCs (see
-  # volumes: below), so the disk a build burns is size-capped by a filesystem
-  # instead of borrowed from the node, and Longhorn's 15% minimal-available floor
-  # refuses to place a replica that would zero a node's disk. The cause is gone,
-  # so the fence is gone and all four nodes are eligible again.
-  #
-  # Do NOT re-add a node fence to fix a disk problem. If a build can outgrow its
-  # volume, raise the volume size (and check it still schedules) — that failure
-  # is contained to the build.
   securityContext:
     fsGroup: 1000
   volumes:
-    # The docker graph is a generic ephemeral volume: one Longhorn PVC per agent
-    # pod, created and deleted with it (ownerRef), never shared. The workspace is
-    # the same idea via the plugin's own workspaceVolume field above. Both were
-    # emptyDir until 2026-09-08 — see the podAntiAffinity note for the two P0s
-    # that bought. The size is a hard cap enforced by ext4: a build that overruns
-    # gets ENOSPC in its own volume and fails, instead of taking the node's disk
-    # (and whatever database is on it) with it.
-    # storageClassName is longhorn-ci-scratch (argo-infra jenkins chart):
-    # 1 replica, reclaimPolicy=Delete, no snapshot/backup jobs.
-    # NOTE: workspace-volume is deliberately absent here — the plugin injects it
-    # from the workspaceVolume field above and ignores any yaml definition of it.
     - name: build-cache
       persistentVolumeClaim:
         claimName: jenkins-build-cache
-    # 12Gi, not the old 8Gi emptyDir sizeLimit: the image builds need ~8Gi of
-    # layers and the preflight below warns under 10Gi free, so a 12Gi volume
-    # (~11.1Gi usable after ext4 overhead) is the first size that is genuinely
-    # roomy rather than permanently one image away from full.
     - name: docker-graph-storage
-      ephemeral:
-        volumeClaimTemplate:
-          spec:
-            accessModes: ["ReadWriteOnce"]
-            storageClassName: longhorn-ci-scratch
-            resources:
-              requests:
-                storage: 12Gi
+      emptyDir:
+        sizeLimit: 12Gi
     - name: docker-certs
       emptyDir: {}
     - name: tools-volume
@@ -433,19 +379,11 @@ spec:
           # is by usage-over-request, and at this ratio dind is no longer the
           # cheapest victim. Part of the 672Mi the pod shed to become schedulable.
           memory: "1280Mi"
-          # ephemeral-storage was 4Gi/8Gi while docker-graph-storage was an
-          # emptyDir: the graph counted as pod ephemeral storage, and with NO
-          # request any usage is "over request", making this pod the kubelet's #1
-          # DiskPressure eviction victim (#143: dind SIGTERM exit-0 mid layer
-          # extraction, the other containers 137). The graph now lives on its own
-          # Longhorn PVC and no longer counts here, so this reservation covers
-          # only the container's writable layer and /tmp. Do not delete it: at
-          # zero request the same eviction-ranking trap returns.
-          ephemeral-storage: "1Gi"
+          ephemeral-storage: "12Gi"
         limits:
           cpu: "1500m"
           memory: "1536Mi"
-          ephemeral-storage: "2Gi"
+          ephemeral-storage: "16Gi"
       volumeMounts:
         - name: docker-graph-storage
           mountPath: /var/lib/docker
