@@ -29,6 +29,8 @@ export const domains: Messages = {
   "domains.row.added": { ru: "Добавлен {ago}", en: "Added {ago}" },
 
   "domains.action.verify": { ru: "Проверить сейчас", en: "Check now" },
+  "domains.action.verifyCooldown": { ru: "Проверить можно через {sec} с", en: "Check again in {sec}s" },
+  "domains.action.verifyStopped": { ru: "Автопроверки остановлены", en: "Auto-checks stopped" },
   "domains.autoCheck": { ru: "Проверяем автоматически, пока запись не появится", en: "Checking automatically until the record appears" },
   "domains.verify.notPublishedLabel": {
     ru: "Записи ещё не видно. Добавьте TXT с именем {label} в зоне {apex} и подождите — провайдеры обновляют DNS до 30 минут.",

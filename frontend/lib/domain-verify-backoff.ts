@@ -30,6 +30,42 @@ export function verifyExhausted(attempt: number): boolean {
   return attempt >= VERIFY_MAX_ATTEMPTS;
 }
 
+export interface ManualVerifyCooldownInput {
+  /** Consecutive checks (auto or manual) that already failed. */
+  attempt: number;
+  /** When the last check (auto or manual) was dispatched, or null if none yet. */
+  lastVerifyAtMs: number | null;
+  /** Current time. */
+  nowMs: number;
+}
+
+export interface ManualVerifyCooldownResult {
+  /** True while a manual click must be refused. */
+  blocked: boolean;
+  /** Time left until the button unblocks, 0 when not blocked. */
+  remainingMs: number;
+}
+
+/**
+ * Whether a manual "Verify" click is allowed right now.
+ *
+ * Manual clicks used to bypass the poller entirely: one live user clicked 43
+ * times in 5 minutes, 0.24s apart, with nothing to stop them. This shares the
+ * same {@link verifyDelayMs} pacing the auto-poller already uses, so a manual
+ * click and an automatic check draw from one budget instead of the button
+ * letting a user route around the backoff by hand.
+ */
+export function manualVerifyCooldown({
+  attempt,
+  lastVerifyAtMs,
+  nowMs,
+}: ManualVerifyCooldownInput): ManualVerifyCooldownResult {
+  if (lastVerifyAtMs == null) return { blocked: false, remainingMs: 0 };
+  const remainingMs = verifyDelayMs(attempt) - (nowMs - lastVerifyAtMs);
+  if (remainingMs <= 0) return { blocked: false, remainingMs: 0 };
+  return { blocked: true, remainingMs };
+}
+
 export type VerifyFailureKind = "not_published" | "wrong_value" | "other";
 
 /**

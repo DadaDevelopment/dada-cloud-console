@@ -4,6 +4,7 @@ import {
   VERIFY_MAX_ATTEMPTS,
   challengeLabel,
   classifyVerifyFailure,
+  manualVerifyCooldown,
   verifyDelayMs,
   verifyExhausted,
 } from "./domain-verify-backoff.ts";
@@ -63,4 +64,51 @@ test("strips the zone so the user pastes what most DNS providers ask for", () =>
 
 test("returns the host unchanged when it is not under the apex", () => {
   assert.equal(challengeLabel("_dada-verify.other.com", "acme.com"), "_dada-verify.other.com");
+});
+
+test("manual verify: no prior check ever, so the first click is never blocked", () => {
+  const r = manualVerifyCooldown({ attempt: 0, lastVerifyAtMs: null, nowMs: 1_000_000 });
+  assert.equal(r.blocked, false);
+  assert.equal(r.remainingMs, 0);
+});
+
+test("manual verify: a click 3s into the 10s first-attempt window is blocked with 7s left", () => {
+  const r = manualVerifyCooldown({ attempt: 0, lastVerifyAtMs: 1_000_000, nowMs: 1_003_000 });
+  assert.equal(r.blocked, true);
+  assert.equal(r.remainingMs, 7_000);
+});
+
+test("manual verify: 43 clicks 0.24s apart (the live incident) let only the first one through", () => {
+  let lastVerifyAtMs: number | null = null;
+  let attempt = 0;
+  let sent = 0;
+  let t = 0;
+  for (let i = 0; i < 43; i += 1) {
+    const r = manualVerifyCooldown({ attempt, lastVerifyAtMs, nowMs: t });
+    if (!r.blocked) {
+      sent += 1;
+      lastVerifyAtMs = t;
+      attempt += 1;
+    }
+    t += 240;
+  }
+  assert.equal(sent, 1);
+});
+
+test("manual verify: a click once the backoff window has fully elapsed is allowed", () => {
+  const r = manualVerifyCooldown({ attempt: 0, lastVerifyAtMs: 1_000_000, nowMs: 1_010_000 });
+  assert.equal(r.blocked, false);
+  assert.equal(r.remainingMs, 0);
+});
+
+test("manual verify: 15s after the last check clears attempt 0 (10s wait) but not attempt 3 (60s wait)", () => {
+  const early = manualVerifyCooldown({ attempt: 0, lastVerifyAtMs: 0, nowMs: 15_000 });
+  const later = manualVerifyCooldown({ attempt: 3, lastVerifyAtMs: 0, nowMs: 15_000 });
+  assert.equal(early.blocked, false);
+  assert.equal(later.blocked, true);
+});
+
+test("manual verify: budget is exhausted at the same threshold the poller uses", () => {
+  assert.equal(verifyExhausted(VERIFY_MAX_ATTEMPTS - 1), false);
+  assert.equal(verifyExhausted(VERIFY_MAX_ATTEMPTS), true);
 });

@@ -6,9 +6,9 @@ import { UpgradeDialog } from "@/components/billing/upgrade-dialog";
 import { docsHref } from "@/lib/site";
 import { deriveAuthorizationDomain } from "@/lib/domain-authorization";
 import {
-  VERIFY_MAX_ATTEMPTS,
   challengeLabel,
   classifyVerifyFailure,
+  manualVerifyCooldown,
   verifyDelayMs,
   verifyExhausted,
 } from "@/lib/domain-verify-backoff";
@@ -170,11 +170,25 @@ export default function ProjectDomainsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [verifyAttempts, setVerifyAttempts] = useState<number>(0);
+  const [lastVerifyAtMs, setLastVerifyAtMs] = useState<number | null>(null);
+  const [cooldownNowMs, setCooldownNowMs] = useState<number>(() => Date.now());
 
   const authsRef = useRef<DomainAuthorization[]>([]);
   useEffect(() => {
     authsRef.current = auths;
   }, [auths]);
+
+  const manualCooldown = useMemo(
+    () => manualVerifyCooldown({ attempt: verifyAttempts, lastVerifyAtMs, nowMs: cooldownNowMs }),
+    [verifyAttempts, lastVerifyAtMs, cooldownNowMs]
+  );
+
+  /** Ticks the visible countdown once a second while a manual click is on cooldown. */
+  useEffect(() => {
+    if (!manualCooldown.blocked) return;
+    const id = setInterval(() => setCooldownNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [manualCooldown.blocked]);
 
   const fetchAll = useCallback(async (): Promise<{
     auths: DomainAuthorization[];
@@ -266,6 +280,7 @@ export default function ProjectDomainsPage() {
     const id = setTimeout(() => {
       const targets = authsRef.current.filter((a) => a.status !== "verified");
       if (targets.length === 0) return;
+      setLastVerifyAtMs(Date.now());
       Promise.all(
         targets.map((a) =>
           customDomainsApi
@@ -285,20 +300,38 @@ export default function ProjectDomainsPage() {
     return () => clearTimeout(id);
   }, [auths, funnelOpen, projectId, reload, verifyAttempts]);
 
-  async function handleVerify(id: string) {
+  /**
+   * Manual "Verify now" click.
+   *
+   * Shares the same {@link verifyAttempts} budget and {@link manualVerifyCooldown}
+   * pacing as the auto-poller above — a live user clicked this 43 times in 5
+   * minutes (0.24s apart) with nothing to stop them, because this path never
+   * touched the attempt counter the poller already respects.
+   */
+  const handleVerify = useCallback(async (id: string) => {
+    const nowMs = Date.now();
+    if (verifyExhausted(verifyAttempts)) return;
+    if (manualVerifyCooldown({ attempt: verifyAttempts, lastVerifyAtMs, nowMs }).blocked) return;
     setBusyId(id);
     setError(null);
+    setLastVerifyAtMs(nowMs);
     try {
       const result = await customDomainsApi.verifyAuthorization(projectId, id);
       const updated = { ...result.authorization, challenge: result.challenge };
       setAuths((prev) => prev.map((a) => (a.id === id ? updated : a)));
-      if (updated.status === "verified") void reload();
+      if (updated.status === "verified") {
+        setVerifyAttempts(0);
+        void reload();
+      } else {
+        setVerifyAttempts((n) => n + 1);
+      }
     } catch (err) {
+      setVerifyAttempts((n) => n + 1);
       setError(err instanceof Error ? err.message : t("domains.error.verify"));
     } finally {
       setBusyId(null);
     }
-  }
+  }, [verifyAttempts, lastVerifyAtMs, projectId, reload, t]);
 
   async function handleDeleteApex(id: string) {
     if (!confirm(t("domains.confirm.remove"))) return;
@@ -539,6 +572,13 @@ export default function ProjectDomainsPage() {
             if (row.kind === "apex-pending") {
               const { auth } = row;
               const failed = auth.status === "failed";
+              const verifyExhaustedNow = verifyExhausted(verifyAttempts);
+              const verifyCooldownSec = Math.ceil(manualCooldown.remainingMs / 1000);
+              const verifyBtnLabel = verifyExhaustedNow
+                ? t("domains.action.verifyStopped")
+                : manualCooldown.blocked
+                  ? t("domains.action.verifyCooldown", { sec: String(verifyCooldownSec) })
+                  : t("domains.action.verify");
               return (
                 <div key={row.id} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 sm:p-5 shadow-sm">
                   <div className="flex flex-wrap items-center justify-between gap-3">
@@ -555,9 +595,13 @@ export default function ProjectDomainsPage() {
                     </div>
                     {canEdit && (
                       <div className="flex shrink-0 items-center gap-2">
-                        <button onClick={() => handleVerify(auth.id)} disabled={busyId === auth.id} className={btnGhost}>
+                        <button
+                          onClick={() => handleVerify(auth.id)}
+                          disabled={busyId === auth.id || verifyExhaustedNow || manualCooldown.blocked}
+                          className={btnGhost}
+                        >
                           {busyId === auth.id ? <Spinner size="sm" /> : null}
-                          {t("domains.action.verify")}
+                          {verifyBtnLabel}
                         </button>
                         <button onClick={toggle} className={btnGhost}>
                           {t("domains.dns.edit")}
