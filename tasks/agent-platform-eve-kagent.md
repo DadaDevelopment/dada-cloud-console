@@ -30,7 +30,7 @@ Marginal agent+MCP = ~0.5-0.64 GiB reserved. 4 agents + 4 MCP = ~2.2 GiB request
 - [x] By-name agent routes gated on owning project role: `9b169b77` (main). Prod delivery not verified.
 - [x] Agent names global, saveAgent refuses a name another project holds: `37a2b4cc` (main).
 - [x] tg-agent-tools `/mcp` bearer gate: tg-agent-tools `dcdb0c3` (memory: project_tg_agent_tools_mcp_bearer_gate.md).
-- [ ] tg-gateway `POST /outbound` has no auth (ClusterIP only): add token or NetworkPolicy.
+- [x] tg-gateway `POST /outbound` has no auth (ClusterIP only): add token or NetworkPolicy. Done 2682766a: bearer `TG_GATEWAY_TOKEN` on /bindings + /outbound (503 when unset), console + agent-runtime send it; argo-infra d7e13c48e (token in tgGateway.secret, chart pin). NetworkPolicy skipped: argocd-prod has none in git, live cluster unreachable to check a first NP.
 - [ ] Hand-applied ModelConfigs `tg-referral-glm-53-flash`, `tg-vibecoder-glm-53` live outside argo-infra: move into git.
 - [ ] z.ai calls (agents + judge) bypass ai-gateway ledger `agent_token_usage`: route via ai-gateway. Prereq for C.6.
 - [ ] Orphan RemoteMCPServer `kagent/tg-agent-tools` (401 every minute, no Agent uses it): trace readers, then delete.
