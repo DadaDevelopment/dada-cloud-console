@@ -84,14 +84,16 @@ func NewA2AClient() A2AClient {
 }
 
 type a2aPart struct {
-	Kind string `json:"kind"`
-	Text string `json:"text,omitempty"`
+	Kind string         `json:"kind"`
+	Text string         `json:"text,omitempty"`
+	Data map[string]any `json:"data,omitempty"`
 }
 
 type a2aMessage struct {
 	Role      string         `json:"role"`
 	MessageID string         `json:"messageId"`
 	ContextID string         `json:"contextId,omitempty"`
+	TaskID    string         `json:"taskId,omitempty"`
 	Parts     []a2aPart      `json:"parts"`
 	Metadata  map[string]any `json:"metadata,omitempty"`
 }
@@ -169,65 +171,32 @@ func (c *httpA2AClient) Send(ctx context.Context, agentName string, text string)
 // start. Send() (empty contextID) keeps the legacy stateless behavior --
 // each call gets a new server-generated context.
 func (c *httpA2AClient) SendWithContext(ctx context.Context, agentName string, contextID string, text string) (string, error) {
-	reqBody := a2aRequest{JSONRPC: "2.0", ID: "tg-gateway", Method: "message/send"}
-	reqBody.Params.Message = a2aMessage{Role: "user", MessageID: uuid.NewString(), Parts: []a2aPart{{Kind: "text", Text: text}}, Metadata: a2aMetadataFrom(ctx)}
-	if contextID != "" {
-		reqBody.Params.Message.ContextID = contextID
-	}
-
-	payload, err := json.Marshal(reqBody)
+	msg := a2aMessage{Role: "user", MessageID: uuid.NewString(), ContextID: contextID, Parts: []a2aPart{{Kind: "text", Text: text}}, Metadata: a2aMetadataFrom(ctx)}
+	result, err := c.post(ctx, agentName, contextID, msg)
 	if err != nil {
 		return "", err
 	}
-
-	url := c.agentURL(agentName)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if endUser := endUserFromContextID(contextID); endUser != "" {
-		req.Header.Set(endUserHeader, endUser)
-		req.Header.Set(agentHeader, agentName)
-	}
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("a2a %s: %w", agentName, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("a2a %s: status %d", agentName, resp.StatusCode)
-	}
-
-	var parsed a2aResponse
-	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
-		return "", fmt.Errorf("a2a %s: decode response: %w", agentName, err)
-	}
-	if parsed.Error != nil {
-		return "", fmt.Errorf("a2a %s: %s", agentName, parsed.Error.Message)
-	}
-
-	// The A2A task carries its own typed outcome in status.state. Reading it
-	// replaces content-sniffing entirely: "completed" (or no state field, for
-	// minimal servers) means extractText below is safe; "input-required" is
-	// the known HITL pause this one-shot client cannot resume; every other
-	// state - failed, canceled, rejected, auth-required, unknown, or one the
-	// spec adds later - means the task did not produce a reply, and whatever
-	// text an artifact carries there (including a leaked upstream error body)
-	// must not be extracted as if it were one. This is the fix for the class
-	// of bug where a new provider failure shape needed a new substring added
-	// to a marker list after the fact: the protocol already says which task
-	// states are not a reply, so read that instead of the content.
 	var envelope a2aResultEnvelope
-	if err := json.Unmarshal(parsed.Result, &envelope); err != nil {
+	if err := json.Unmarshal(result, &envelope); err != nil {
 		return "", fmt.Errorf("a2a %s: decode result envelope: %w", agentName, err)
+	}
+	if envelope.Status.State == "input-required" {
+		taskID, questions := askUserPause(result)
+		log.Warn().Str("agent", agentName).Str("task", taskID).Int("questions", questions).
+			Msg("tggateway: agent paused on ask_user; resuming with the unavailable-tool answer")
+		result, err = c.post(ctx, agentName, contextID, askUserResume(contextID, taskID, questions))
+		if err != nil {
+			return "", fmt.Errorf("a2a %s: resume after ask_user: %w", agentName, err)
+		}
+		envelope = a2aResultEnvelope{}
+		if err := json.Unmarshal(result, &envelope); err != nil {
+			return "", fmt.Errorf("a2a %s: decode result envelope: %w", agentName, err)
+		}
 	}
 	switch envelope.Status.State {
 	case "", "completed":
 	case "input-required":
-		log.Warn().Str("agent", agentName).Msg("tggateway: agent paused on input-required (ask_user or similar HITL tool) - this client is one-shot and cannot resume it")
+		log.Warn().Str("agent", agentName).Msg("tggateway: agent still paused on input-required after the ask_user resume")
 		return a2aInputRequiredFallback, nil
 	default:
 		log.Warn().Str("agent", agentName).Str("state", envelope.Status.State).
@@ -235,11 +204,85 @@ func (c *httpA2AClient) SendWithContext(ctx context.Context, agentName string, c
 		return a2aFailureFallback, nil
 	}
 
-	text = extractText(parsed.Result)
+	text = extractText(result)
 	if text == "" {
 		return "", fmt.Errorf("a2a %s: no text in response", agentName)
 	}
 	return sanitizeModelReply(text), nil
+}
+
+func (c *httpA2AClient) post(ctx context.Context, agentName, contextID string, msg a2aMessage) (json.RawMessage, error) {
+	reqBody := a2aRequest{JSONRPC: "2.0", ID: "tg-gateway", Method: "message/send"}
+	reqBody.Params.Message = msg
+	payload, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.agentURL(agentName), bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if endUser := endUserFromContextID(contextID); endUser != "" {
+		req.Header.Set(endUserHeader, endUser)
+		req.Header.Set(agentHeader, agentName)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("a2a %s: %w", agentName, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("a2a %s: status %d", agentName, resp.StatusCode)
+	}
+	var parsed a2aResponse
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return nil, fmt.Errorf("a2a %s: decode response: %w", agentName, err)
+	}
+	if parsed.Error != nil {
+		return nil, fmt.Errorf("a2a %s: %s", agentName, parsed.Error.Message)
+	}
+	return parsed.Result, nil
+}
+
+const askUserUnavailableAnswer = "Инструмент ask_user в этом канале не работает: клиент этот вопрос не видит и ответить на него не может. Ответь клиенту обычным текстом; если нужно что-то уточнить, задай вопрос в самом ответе."
+
+func askUserResume(contextID, taskID string, questions int) a2aMessage {
+	answers := make([]map[string]any, 0, max(questions, 1))
+	for i := 0; i < max(questions, 1); i++ {
+		answers = append(answers, map[string]any{"answer": []string{askUserUnavailableAnswer}})
+	}
+	return a2aMessage{Role: "user", MessageID: uuid.NewString(), ContextID: contextID, TaskID: taskID,
+		Parts: []a2aPart{{Kind: "data", Data: map[string]any{"decision_type": "approve", "ask_user_answers": answers}}}}
+}
+
+func askUserPause(raw json.RawMessage) (string, int) {
+	var v struct {
+		ID     string `json:"id"`
+		Status struct {
+			Message struct {
+				Parts []a2aPart `json:"parts"`
+			} `json:"message"`
+		} `json:"status"`
+	}
+	if json.Unmarshal(raw, &v) != nil {
+		return "", 0
+	}
+	questions := 0
+	for _, part := range v.Status.Message.Parts {
+		call := part.Data
+		if call["name"] == "adk_request_confirmation" {
+			args, _ := call["args"].(map[string]any)
+			call, _ = args["originalFunctionCall"].(map[string]any)
+		}
+		if call["name"] != "ask_user" {
+			continue
+		}
+		args, _ := call["args"].(map[string]any)
+		list, _ := args["questions"].([]any)
+		questions += len(list)
+	}
+	return v.ID, questions
 }
 
 // a2aInputRequiredFallback is sent to the Telegram user when an agent pauses
