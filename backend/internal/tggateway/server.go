@@ -40,6 +40,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /bindings", s.requireToken(s.handleBind))
 	mux.HandleFunc("DELETE /bindings/{agentName}", s.requireToken(s.handleUnbind))
 	mux.HandleFunc("GET /bindings/{agentName}", s.requireToken(s.handleGet))
+	mux.HandleFunc("PUT /bindings/{agentName}/failure", s.requireToken(s.handleSetFailure))
 	mux.HandleFunc("POST /outbound", s.requireToken(s.handleOutbound))
 	return recoverAndLog(mux)
 }
@@ -140,7 +141,38 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"bound": true, "bot_username": b.BotUsername})
+	writeJSON(w, http.StatusOK, map[string]any{"bound": true, "bot_username": b.BotUsername,
+		"on_failure": string(b.failureMode()), "failure_notice": b.FailureText})
+}
+
+type failureRequest struct {
+	OnFailure     string `json:"on_failure"`
+	FailureNotice string `json:"failure_notice"`
+}
+
+func (s *Server) handleSetFailure(w http.ResponseWriter, r *http.Request) {
+	agentName := r.PathValue("agentName")
+	var req failureRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json: " + err.Error()})
+		return
+	}
+	mode, ok := ParseFailureMode(strings.TrimSpace(req.OnFailure))
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "on_failure must be notice or silent"})
+		return
+	}
+	text := strings.TrimSpace(req.FailureNotice)
+	if err := s.mgr.SetFailurePolicy(r.Context(), agentName, mode, text); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "no binding for that agent"})
+			return
+		}
+		log.Error().Err(err).Str("agent", agentName).Msg("tggateway: set failure policy failed")
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "update failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"on_failure": string(mode), "failure_notice": text})
 }
 
 // outboundRequest is the internal delivery payload agent-runtime posts to

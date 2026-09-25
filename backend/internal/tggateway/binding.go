@@ -58,6 +58,8 @@ type Binding struct {
 	Transport   Transport
 	Status      Status
 	CreatedAt   time.Time
+	OnFailure   FailureMode
+	FailureText string
 }
 
 // Live reports whether this binding should have a running poller.
@@ -69,4 +71,43 @@ func (b Binding) transport() Transport {
 		return TransportBot
 	}
 	return b.Transport
+}
+
+type FailureMode string
+
+const (
+	FailureNotice FailureMode = "notice"
+	FailureSilent FailureMode = "silent"
+)
+
+const runtimeFailureNotice = "Секунду, уточняю и скоро вернусь с ответом."
+
+func ParseFailureMode(raw string) (FailureMode, bool) {
+	switch FailureMode(raw) {
+	case "", FailureNotice:
+		return FailureNotice, true
+	case FailureSilent:
+		return FailureSilent, true
+	}
+	return "", false
+}
+
+func (b Binding) failureMode() FailureMode {
+	if b.OnFailure == "" {
+		return FailureNotice
+	}
+	return b.OnFailure
+}
+
+func (b Binding) failureNotice(viaRuntime bool) string {
+	if b.failureMode() == FailureSilent {
+		return ""
+	}
+	if b.FailureText != "" {
+		return b.FailureText
+	}
+	if viaRuntime {
+		return runtimeFailureNotice
+	}
+	return a2aFailureFallback
 }

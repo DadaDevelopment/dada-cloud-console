@@ -13,8 +13,9 @@
 │   (long poll)   │      │  (conversation   │
 │                 │      │   state + hooks) │
 └─────────────────┘      └────────┬─────────┘
-     │ fallback               │
-     │ A2A                    │ A2A + history
+     │ direct A2A             │
+     │ (агенты вне            │ A2A + history
+     │ AGENT_RUNTIME_AGENTS)  │
      ▼                        ▼
      └──────────────┬─────────┘
                     ▼
@@ -54,13 +55,18 @@ LOG_LEVEL=info
 ### 2. tg-gateway Integration
 
 **Изменения:**
-- `Manager.SetRuntimeClient(runtime)` — включает платформу
-- Без `SetRuntimeClient()` — работает как раньше (direct A2A)
-- С runtime — сначала `runtime.ProcessMessage()`, fallback на A2A при ошибке
+- `Manager.SetRuntimeClient(runtime)` + `SetRuntimeAgents(names)` — включают платформу для агентов из `AGENT_RUNTIME_AGENTS` (прод: `tg-exchange-support`)
+- Агент вне списка ходит в kagent напрямую (direct A2A, `tggateway/a2a.go`); на паузе `ask_user` gateway сам резюмит задачу ответом «инструмент недоступен», как это делает runtime
+- Агент в списке ходит только через runtime. Fallback на direct A2A при ошибке runtime НЕТ: runtime владеет состоянием диалога (пауза оператором, эскалация), обход через A2A его бы нарушил
 
-**Backward compatibility:**
-- Старые деплои без agent-runtime продолжают работать
-- tg-gateway логирует `runtime unavailable, falling back to direct A2A`
+**Ошибка runtime (или direct A2A):**
+- Один транзиентный ретрай (5xx, connection reset, timeout) через 2 с
+- Дальше поведение задаёт биндинг, колонки `tg_bindings.on_failure` / `failure_notice`:
+  - `notice` (по умолчанию) — в чат одно короткое сообщение на серию ошибок в этом чате. Текст — `failure_notice`, иначе дефолт пути: runtime «Секунду, уточняю и скоро вернусь с ответом.» (runtime сам переигрывает упавший ход через 30/90/240 с, `turn_recovery.go`), direct A2A «попробуйте отправить ещё раз»
+  - `silent` — только лог; включать явно
+- В группах уведомление не шлётся никогда
+- Задать: `PUT /bindings/{agent}/failure` `{"on_failure":"notice|silent","failure_notice":"..."}`; `GET /bindings/{agent}` показывает текущее. Ребинд (`POST /bindings`) политику не сбрасывает
+- Лог: `tggateway: message processing failed` с `runtime`, `on_failure`, `conv`
 
 ### 3. Lifecycle Hooks
 
@@ -336,7 +342,7 @@ curl http://agent-runtime:8083/health
 
 3. Проверить template interpolation — логи показывают request_data
 
-### Runtime unavailable (fallback to A2A)
+### Runtime unavailable (в чат уходит failure notice, fallback на A2A нет)
 
 1. Проверить agent-runtime запущен:
    ```bash
@@ -345,7 +351,7 @@ curl http://agent-runtime:8083/health
 
 2. Проверить tg-gateway env var:
    ```bash
-   echo $TG_GATEWAY_RUNTIME_URL
+   echo $AGENT_RUNTIME_URL $AGENT_RUNTIME_AGENTS
    # должен быть http://agent-runtime:8083
    ```
 

@@ -20,7 +20,7 @@
 
 ### Integration
 - ✅ `tggateway.RuntimeClient` — HTTP client for agent-runtime
-- ✅ `tggateway.Manager` updated — runtime-first, A2A fallback
+- ✅ `tggateway.Manager` updated — runtime for `AGENT_RUNTIME_AGENTS`, direct A2A for the rest; no runtime->A2A fallback, a failed turn sends the binding's failure notice (`tg_bindings.on_failure`, default `notice`)
 - ✅ `cmd/agent-runtime` — standalone service
 - ✅ `Dockerfile.agent-runtime` — container image
 
@@ -90,7 +90,7 @@ docs/STATUS-agent-runtime.md (this file)
 - [x] Hooks execute without LLM involvement
 - [x] HTTP action can integrate with external systems
 - [x] Metadata action can store CRM IDs
-- [x] Runtime fallback to direct A2A when unavailable
+- [x] Runtime failure is never silent by default: binding failure notice (fallback to direct A2A was removed, runtime owns conversation state)
 - [ ] Domain instructions available to agent via tool
 - [ ] Idle scheduler fires follow-ups
 - [ ] Full E2E: Telegram → runtime → kagent → CRM → follow-up

@@ -80,6 +80,8 @@ type runningPoller struct {
 	cancel    context.CancelFunc
 	token     string
 	transport Transport
+	onFailure FailureMode
+	notice    string
 }
 
 // Manager owns every live poller goroutine and reconciles them against the
@@ -188,7 +190,8 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 
 	for name, running := range m.pollers {
 		b, ok := want[name]
-		if !ok || b.BotToken != running.token || b.transport() != running.transport {
+		if !ok || b.BotToken != running.token || b.transport() != running.transport ||
+			b.failureMode() != running.onFailure || b.FailureText != running.notice {
 			running.cancel()
 			delete(m.pollers, name)
 		}
@@ -210,7 +213,7 @@ func (m *Manager) startLocked(b Binding) {
 		return
 	}
 	pctx, cancel := context.WithCancel(context.Background())
-	m.pollers[b.AgentName] = &runningPoller{cancel: cancel, token: b.BotToken, transport: b.transport()}
+	m.pollers[b.AgentName] = &runningPoller{cancel: cancel, token: b.BotToken, transport: b.transport(), onFailure: b.failureMode(), notice: b.FailureText}
 	go runPollerDebounced(pctx, tg, m.a2a, m.runtimeForAgent(b.AgentName), b, m.debounce)
 }
 
@@ -276,6 +279,13 @@ func (m *Manager) Unbind(ctx context.Context, agentName string) error {
 }
 
 // Get returns the current binding for an agent, or ErrNotFound.
+func (m *Manager) SetFailurePolicy(ctx context.Context, agentName string, mode FailureMode, text string) error {
+	if err := m.store.SetFailurePolicy(ctx, agentName, mode, text); err != nil {
+		return err
+	}
+	return m.Reconcile(ctx)
+}
+
 func (m *Manager) Get(ctx context.Context, agentName string) (Binding, error) {
 	return m.store.Get(ctx, agentName)
 }
@@ -462,8 +472,7 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 	useRuntime := runtime != nil && !noop
 
 	var stateMu sync.Mutex
-	failing := false
-	warned := false
+	warnedChats := map[string]bool{}
 
 	links := NewLinkTitleFetcher()
 	media := NewMediaDownloader(tg, os.Getenv("TELEGRAM_API_BASE"), mediaCacheDir())
@@ -685,28 +694,24 @@ func runPollerDebounced(ctx context.Context, tg TelegramClient, a2a A2AClient, r
 				if runCtx.Err() != nil {
 					return
 				}
-				if useRuntime {
-					log.Warn().Err(procErr).Str("agent", b.AgentName).Msg("tggateway: runtime failed; conversation enablement unknown, suppressing channel output")
+				notice := b.failureNotice(useRuntime)
+				log.Warn().Err(procErr).Str("agent", b.AgentName).Str("conv", convKey).Bool("runtime", useRuntime).
+					Str("on_failure", string(b.failureMode())).Msg("tggateway: message processing failed")
+				stateMu.Lock()
+				first := !warnedChats[convKey]
+				warnedChats[convKey] = true
+				stateMu.Unlock()
+				if notice == "" || !first || IsGroup(batch[0].ChatType) {
 					return
 				}
-				stateMu.Lock()
-				if !failing {
-					failing = true
-					warned = false
+				if sendErr := tg.SendMessage(ctx, b.BotToken, chatID, notice); sendErr != nil {
+					log.Warn().Err(sendErr).Str("agent", b.AgentName).Msg("tggateway: failure notice send failed")
 				}
-				log.Warn().Err(procErr).Str("agent", b.AgentName).Msg("tggateway: message processing failed")
-				if !warned && !IsGroup(batch[0].ChatType) {
-					warned = true
-					if sendErr := tg.SendMessage(ctx, b.BotToken, chatID, a2aFailureFallback); sendErr != nil {
-						log.Warn().Err(sendErr).Str("agent", b.AgentName).Msg("tggateway: warning send failed")
-					}
-				}
-				stateMu.Unlock()
 				return
 			}
 		}
 		stateMu.Lock()
-		failing = false
+		delete(warnedChats, convKey)
 		stateMu.Unlock()
 		if resp.Suppressed || strings.TrimSpace(reply) == "" {
 			return

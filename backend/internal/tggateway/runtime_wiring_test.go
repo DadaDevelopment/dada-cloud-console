@@ -90,7 +90,7 @@ func TestRuntimeConfiguredRouting(t *testing.T) {
 		response         RuntimeMessageResponse
 		expectedMessages int
 	}{
-		{"failure", 503, RuntimeMessageResponse{}, 0},
+		{"failure", 400, RuntimeMessageResponse{}, 1},
 		{"suppressed", 200, RuntimeMessageResponse{Suppressed: true, Text: "must never send this"}, 0},
 		{"empty", 200, RuntimeMessageResponse{Text: " \n "}, 0},
 	} {

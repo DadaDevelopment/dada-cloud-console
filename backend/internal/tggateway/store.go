@@ -21,6 +21,7 @@ type Store interface {
 	Get(ctx context.Context, agentName string) (Binding, error)
 	Upsert(ctx context.Context, b Binding) error
 	Delete(ctx context.Context, agentName string) error
+	SetFailurePolicy(ctx context.Context, agentName string, mode FailureMode, text string) error
 }
 
 type pgStore struct{ pool *pgxpool.Pool }
@@ -30,7 +31,7 @@ func NewPGStore(pool *pgxpool.Pool) Store { return pgStore{pool: pool} }
 
 func (s pgStore) List(ctx context.Context) ([]Binding, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT agent_name, project_id, bot_token, bot_username, transport, status, created_at FROM tg_bindings`)
+		`SELECT agent_name, project_id, bot_token, bot_username, transport, status, created_at, on_failure, failure_notice FROM tg_bindings`)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +50,7 @@ func (s pgStore) List(ctx context.Context) ([]Binding, error) {
 
 func (s pgStore) Get(ctx context.Context, agentName string) (Binding, error) {
 	row := s.pool.QueryRow(ctx,
-		`SELECT agent_name, project_id, bot_token, bot_username, transport, status, created_at
+		`SELECT agent_name, project_id, bot_token, bot_username, transport, status, created_at, on_failure, failure_notice
 		   FROM tg_bindings WHERE agent_name = $1`, agentName)
 	b, err := scanBinding(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -73,6 +74,19 @@ func (s pgStore) Upsert(ctx context.Context, b Binding) error {
 	return err
 }
 
+func (s pgStore) SetFailurePolicy(ctx context.Context, agentName string, mode FailureMode, text string) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE tg_bindings SET on_failure = $2, failure_notice = $3 WHERE agent_name = $1`,
+		agentName, string(mode), text)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s pgStore) Delete(ctx context.Context, agentName string) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM tg_bindings WHERE agent_name = $1`, agentName)
 	return err
@@ -84,11 +98,12 @@ type rowScanner interface {
 
 func scanBinding(row rowScanner) (Binding, error) {
 	var b Binding
-	var status, transport string
-	if err := row.Scan(&b.AgentName, &b.ProjectID, &b.BotToken, &b.BotUsername, &transport, &status, &b.CreatedAt); err != nil {
+	var status, transport, onFailure string
+	if err := row.Scan(&b.AgentName, &b.ProjectID, &b.BotToken, &b.BotUsername, &transport, &status, &b.CreatedAt, &onFailure, &b.FailureText); err != nil {
 		return Binding{}, err
 	}
 	b.Status = Status(status)
 	b.Transport = Transport(transport)
+	b.OnFailure = FailureMode(onFailure)
 	return b, nil
 }

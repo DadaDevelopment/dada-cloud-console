@@ -43,7 +43,22 @@ func (f *fakeStore) Get(_ context.Context, agentName string) (Binding, error) {
 func (f *fakeStore) Upsert(_ context.Context, b Binding) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if prev, ok := f.rows[b.AgentName]; ok {
+		b.OnFailure, b.FailureText = prev.OnFailure, prev.FailureText
+	}
 	f.rows[b.AgentName] = b
+	return nil
+}
+
+func (f *fakeStore) SetFailurePolicy(_ context.Context, agentName string, mode FailureMode, text string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	b, ok := f.rows[agentName]
+	if !ok {
+		return ErrNotFound
+	}
+	b.OnFailure, b.FailureText = mode, text
+	f.rows[agentName] = b
 	return nil
 }
 
