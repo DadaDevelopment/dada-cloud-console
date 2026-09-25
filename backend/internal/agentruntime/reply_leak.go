@@ -208,7 +208,7 @@ func latinShare(text string) (float64, int) {
 const leakPlaceholderHint = "Предыдущий черновик клиенту не отправлен: вместо значения в нём стоял плейсхолдер %s. Подставь настоящее значение (ссылку и факты бери из kb_search, партнёрская ссылка в статье ref_link) или перепиши ответ без этого места. Напиши только сам ответ клиенту: 1-3 коротких предложения по-русски."
 
 func leakRepairMessage(reason string) string {
-	if strings.HasPrefix(reason, "link outside allowlist ") {
+	if strings.HasPrefix(reason, linkReasonOutside) || strings.HasPrefix(reason, linkReasonDenied) {
 		return leakLinkRepairMessage(reason)
 	}
 	if strings.HasPrefix(reason, "placeholder ") {

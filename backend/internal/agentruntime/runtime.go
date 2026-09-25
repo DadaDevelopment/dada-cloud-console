@@ -120,6 +120,7 @@ type Runtime struct {
 	recoveryDelays []time.Duration
 	recoveryMu     sync.Mutex
 	recovering     map[uuid.UUID]bool
+	ext            runtimeExt
 }
 
 func NewRuntime(store ConversationStore, hooks HookExecutor, a2a A2AClient, domains DomainProvider) *Runtime {
@@ -133,6 +134,7 @@ func NewRuntime(store ConversationStore, hooks HookExecutor, a2a A2AClient, doma
 		domains:        domains,
 		recoveryDelays: defaultRecoveryDelays,
 		recovering:     map[uuid.UUID]bool{},
+		ext:            runtimeExt{logSlots: make(chan struct{}, precheckLogParallel)},
 	}
 }
 
@@ -344,14 +346,21 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 		opts.onProcessing()
 	}
 	_, narrowAtEntry := narrowSince(conv)
+	var pc *precheckTurn
+	if r.flags.Precheck == precheckBlock && r.ext.precheck != nil {
+		pc = newPrecheckTurn(precheckBlock, r.ext.precheckBudget)
+		r.resetRefusalsAfterResume(ctx, conv)
+	}
 	var reply string
-	var traced A2AReply
+	var traced, earlier A2AReply
 	var after RuntimeState
 	for attempt := 0; attempt < 2; attempt++ {
 		traced, err = r.send(ctx, run)
 		if err != nil {
 			return MessageResponse{}, &turnFailure{err: fmt.Errorf("a2a send: %w", err)}
 		}
+		traced = withEarlierAttempts(earlier, traced)
+		earlier = traced
 		reply = traced.Text
 		after, err = r.states.GetState(ctx, conv.ID)
 		if err != nil {
@@ -370,7 +379,7 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 			reply = stripEmDash(reply)
 			reason := leakReason(reply)
 			if reason == "" {
-				reason = linkLeakReason(reply, r.linkAllowlist)
+				reason = linkLeakReason(reply, r.linkAllowlist, r.flags.HandoffTriggers)
 			}
 			if reason == "" {
 				if soft := repeatedHookReason(reply, history); soft != "" && attempt == 0 {
@@ -414,11 +423,28 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 					}
 					log.Warn().Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Str("reason", soft).Msg("agentruntime: rewrite still asks, delivering as is")
 				}
+				// A deliberate silence (empty, SKIP) is not a draft: nothing to
+				// check, but on attempt 1 a hand-off attempt 0 left waiting is
+				// carried out (precheckSilence).
+				if pc != nil && (!isSilenceReply(reply) || attempt == 1) {
+					step, resp, perr := r.precheckStep(ctx, conv, &run, after, pending, history, &reply, traced, attempt, pc)
+					if perr != nil {
+						return MessageResponse{}, &turnFailure{err: perr}
+					}
+					if step == precheckStepRedo {
+						continue
+					} else if step == precheckStepDone {
+						return resp, nil
+					}
+				}
 				break
 			}
 			log.Warn().Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Int("attempt", attempt).
 				Str("reason", reason).Int("runes", len([]rune(reply))).Msg("agentruntime: reply held back as internal monologue")
 			if attempt == 1 {
+				if strings.HasPrefix(reason, linkReasonDenied) {
+					return MessageResponse{}, &turnFailure{err: fmt.Errorf("agent reply carried a denied link twice: %s", reason)}
+				}
 				return MessageResponse{}, &turnFailure{err: fmt.Errorf("agent reply leaked internal reasoning twice: %s", reason)}
 			}
 			run.ConversationContext.State = after
@@ -428,6 +454,17 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 		rendered, contractErr := renderReplyPlan(reply, after)
 		if contractErr == nil {
 			reply = rendered
+			if pc != nil && (!isSilenceReply(reply) || attempt == 1) {
+				step, resp, perr := r.precheckStep(ctx, conv, &run, after, pending, history, &reply, traced, attempt, pc)
+				if perr != nil {
+					return MessageResponse{}, &turnFailure{err: perr}
+				}
+				if step == precheckStepRedo {
+					continue
+				} else if step == precheckStepDone {
+					return resp, nil
+				}
+			}
 			break
 		}
 		if attempt == 1 {
@@ -472,7 +509,10 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 	}
 	r.recordTurnCounters(ctx, conv, reply)
 	r.mirrorState(ctx, conv, after, "")
-	r.judgeTurn(ctx, conv, run, pending, history, reply, parts, traced)
+	if pc != nil {
+		r.afterCheckedTurn(ctx, conv, pc)
+	}
+	r.judgeTurn(ctx, conv, run, pending, history, reply, parts, traced, pc)
 	return MessageResponse{Text: reply, Messages: parts}, nil
 }
 

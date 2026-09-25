@@ -32,6 +32,8 @@ var escalationReasons = map[string]string{
 	"E_GUARANTEE_DEMAND":    "требует гарантий",
 	"E_SECOND_PERSON":       "в диалоге второй человек",
 	"E_OTHER":               "другое",
+	// A signal without a pause under every flag state (plan 2026-09-25, Q2).
+	"E_CHECK_AND_RETURN": "бот пообещал уточнить и вернуться",
 }
 
 // escalationHandsOff lists the reasons where a person genuinely takes the
@@ -330,76 +332,158 @@ func (s *Server) handleEscalate(c *gin.Context) {
 		return
 	}
 	req.ReasonCode = strings.ToUpper(strings.TrimSpace(req.ReasonCode))
-	if _, known := escalationReasons[req.ReasonCode]; !known {
-		rejectControl(c, "unknown_reason_code", "unknown escalation reason", "Use one of: "+strings.Join(sortedKeys(escalationReasons), ", ")+".")
+	if !s.escalationReasonKnown(req.ReasonCode) {
+		rejectControl(c, "unknown_reason_code", "unknown escalation reason", "Use one of: "+strings.Join(s.escalationReasonCodes(), ", ")+".")
 		return
 	}
 	if strings.TrimSpace(req.Summary) == "" {
 		rejectControl(c, "empty_summary", "empty escalation summary", "Write for the operator: what the customer wants, what is known, what is unclear, what you tried, how the customer feels.")
 		return
 	}
-	if !escalationHandsOff[req.ReasonCode] {
-		s.signalOperator(c, conv, req.ReasonCode, req.Summary)
-		return
+	if s.handsOff(req.ReasonCode) {
+		req.ClientMessage = fixClientMessageGender(req.ClientMessage)
+		if clientMessageEchoesSummary(req.ClientMessage, req.Summary) {
+			rejectControl(c, "client_message_echoes_summary", "client_message duplicates the operator summary",
+				"client_message is the line the customer reads, addressed to them directly (вы): do not repeat summary's third-person facts about them. Write 1-2 short sentences in the dialogue's own voice.")
+			return
+		}
 	}
-	req.ClientMessage = fixClientMessageGender(req.ClientMessage)
-	if clientMessageEchoesSummary(req.ClientMessage, req.Summary) {
-		rejectControl(c, "client_message_echoes_summary", "client_message duplicates the operator summary",
-			"client_message is the line the customer reads, addressed to them directly (вы): do not repeat summary's third-person facts about them. Write 1-2 short sentences in the dialogue's own voice.")
-		return
+	res, _ := s.handOff(c.Request.Context(), conv, HandoffRequest{Code: req.ReasonCode, Summary: req.Summary, ClientLine: req.ClientMessage})
+	c.JSON(res.Status, res.Body)
+}
+
+// escalationCheckAndReturn is the code of "the bot promised to check and come
+// back" (plan 2026-09-25, Q2). It is always known (the model's tool enum
+// carries it whatever the flags) and always a signal, not a hand-off: the bot
+// keeps leading the script while the operator answers the open question.
+// Every such signal reaches the operator, see signalOperator.
+const escalationCheckAndReturn = "E_CHECK_AND_RETURN"
+
+// escalationTriggerReasons are the codes AGENT_RUNTIME_HANDOFF_TRIGGERS turns
+// into hands-off. With the flag off E_LEGAL_TAX stays a signal; the flag
+// does not touch E_CHECK_AND_RETURN, which is a signal either way.
+var escalationTriggerReasons = map[string]bool{
+	"E_LEGAL_TAX": true,
+}
+
+// escalationReasonKnown is the closed list.
+func (s *Server) escalationReasonKnown(code string) bool {
+	_, known := escalationReasons[code]
+	return known
+}
+
+// escalationReasonCodes is what the rejection hint lists, sorted.
+func (s *Server) escalationReasonCodes() []string {
+	var out []string
+	for _, code := range sortedKeys(escalationReasons) {
+		if s.escalationReasonKnown(code) {
+			out = append(out, code)
+		}
 	}
-	if s.runtime.flags.NarrowEscalation {
-		s.narrowHandoff(c, conv, req.ReasonCode, req.Summary, req.ClientMessage)
-		return
+	return out
+}
+
+// handsOff reports whether the code pauses the agent (or, under narrow mode,
+// hands the chat to the curator) instead of only signalling the operator.
+func (s *Server) handsOff(code string) bool {
+	return s.runtime.codeHandsOff(code)
+}
+
+// codeHandsOff is handsOff for the runtime's own hand-offs (a check verdict).
+func (r *Runtime) codeHandsOff(code string) bool {
+	return escalationHandsOff[code] || (r.flags.HandoffTriggers && escalationTriggerReasons[code])
+}
+
+// HandoffResult is what handOff did: the HTTP status and body /tools/escalate
+// answers with (unchanged from the handler it was extracted from), and the
+// same facts for a runtime caller.
+type HandoffResult struct {
+	Status           int
+	Body             gin.H
+	Paused           bool
+	ClientNotified   bool
+	OperatorNotified bool
+}
+
+// handOff is the body of /tools/escalate without gin, so the runtime can hand
+// a conversation off by itself (a check verdict, the refusal threshold). A
+// code that is not hands-off only signals the operator. A hands-off code
+// enters narrow mode when AGENT_RUNTIME_NARROW_ESCALATION is on, unless the
+// request forces a pause (ForcePause, which pauses on any code); otherwise the
+// agent is paused, the client gets ClientLine (or the fixed fallback; none
+// under NoClientLine) and the operator gets the card (not under NoCard). The error is non-nil whenever Status is not 200.
+func (s *Server) handOff(ctx context.Context, conv Conversation, req HandoffRequest) (HandoffResult, error) {
+	if !req.ForcePause && !s.handsOff(req.Code) {
+		return s.signalOperator(ctx, conv, req.Code, req.Summary)
 	}
-	state, err := s.runtime.states.PauseAgent(c.Request.Context(), conv.ID, "escalated: "+req.ReasonCode)
+	if s.runtime.flags.NarrowEscalation && !req.ForcePause {
+		return s.narrowHandoff(ctx, conv, req.Code, req.Summary, req.ClientLine)
+	}
+	state, err := s.runtime.states.PauseAgent(ctx, conv.ID, "escalated: "+req.Code)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "pause rejected"})
-		return
+		return HandoffResult{Status: http.StatusBadRequest, Body: gin.H{"error": "pause rejected"}}, fmt.Errorf("hand-off %s: pause: %w", req.Code, err)
 	}
-	if err := s.runtime.store.ClearEscalationAck(c.Request.Context(), conv.ID); err != nil {
+	if err := s.runtime.store.ClearEscalationAck(ctx, conv.ID); err != nil {
 		log.Warn().Err(err).Str("conversation", conv.ID.String()).Msg("agentruntime: escalation ack flag not cleared")
 	}
-	clientTold := s.tellClient(c.Request.Context(), conv, req.ClientMessage)
+	s.runtime.markRefusalsPaused(ctx, conv)
+	clientTold := false
+	if !req.NoClientLine {
+		clientTold = s.tellClient(ctx, conv, req.ClientLine)
+	}
 	notified := false
-	if s.operator != nil {
-		notified = s.operator.Notify(c.Request.Context(), conv, escalationCard(escalationTitle(req.ReasonCode), conv, req.ReasonCode, req.Summary, state)) == nil
+	if s.operator != nil && !req.NoCard {
+		notified = s.operator.Notify(ctx, conv, escalationCard(escalationTitle(req.Code), conv, req.Code, req.Summary, state)) == nil
 	}
-	s.runtime.mirrorState(c.Request.Context(), conv, state, req.Summary)
-	state, err = s.syncPausedCRM(c.Request.Context(), conv)
+	if req.ForcePause {
+		// A runtime-decided hand-off answers the turn itself; without this
+		// silence recovery would replay the input into a paused chat.
+		if err := s.runtime.markPendingHandled(ctx, conv.ID); err != nil {
+			log.Warn().Err(err).Str("conversation", conv.ID.String()).Msg("agentruntime: forced hand-off could not drain the pending inbox")
+		}
+	}
+	s.runtime.mirrorState(ctx, conv, state, req.Summary)
+	res := HandoffResult{Paused: true, ClientNotified: clientTold, OperatorNotified: notified}
+	state, err = s.syncPausedCRM(ctx, conv)
 	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"agent_enabled": false, "client_notified": clientTold, "operator_notified": notified, "crm_status_sync": "pending"})
-		return
+		res.Status = http.StatusServiceUnavailable
+		res.Body = gin.H{"agent_enabled": false, "client_notified": clientTold, "operator_notified": notified, "crm_status_sync": "pending"}
+		return res, fmt.Errorf("hand-off %s: crm sync: %w", req.Code, err)
 	}
-	c.JSON(http.StatusOK, gin.H{"agent_enabled": false, "client_notified": clientTold, "operator_notified": notified, "crm_status_sync": state.CRMStatusSync, "state_version": state.Version})
+	res.Status = http.StatusOK
+	res.Body = gin.H{"agent_enabled": false, "client_notified": clientTold, "operator_notified": notified, "crm_status_sync": state.CRMStatusSync, "state_version": state.Version}
+	return res, nil
 }
 
 // signalOperator is the non-pausing branch of handleEscalate: the card goes
 // to the operator once per reason per window, the summary is mirrored to the
 // CRM, and the reply the model writes after this call reaches the customer
-// as usual because the conversation stays enabled.
-func (s *Server) signalOperator(c *gin.Context, conv Conversation, reason, summary string) {
-	ctx := c.Request.Context()
+// as usual because the conversation stays enabled. E_CHECK_AND_RETURN is the
+// exception to the window: each one is a separate question the bot promised
+// to come back on, and the outbound path cannot edit a sent card, so a repeat
+// inside the window pages the operator again (logged as repeat) instead of
+// being dropped.
+func (s *Server) signalOperator(ctx context.Context, conv Conversation, reason, summary string) (HandoffResult, error) {
 	state, err := s.runtime.states.GetState(ctx, conv.ID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "state unavailable"})
-		return
+		return HandoffResult{Status: http.StatusBadRequest, Body: gin.H{"error": "state unavailable"}}, fmt.Errorf("signal %s: state: %w", reason, err)
 	}
 	claimed, err := s.runtime.store.ClaimEscalationSignal(ctx, conv.ID, reason, escalationSignalWindow)
 	if err != nil {
 		log.Warn().Err(err).Str("conversation", conv.ID.String()).Str("reason", reason).Msg("agentruntime: escalation signal claim failed")
 		claimed = true
 	}
+	repeat := !claimed && reason == escalationCheckAndReturn
 	notified := false
-	if claimed && s.operator != nil {
+	if (claimed || repeat) && s.operator != nil {
 		card := escalationCardWithFooter("🔔 Сигнал оператору", conv, reason, summary, state, "Агент продолжает диалог сам; пауза только вручную.")
 		notified = s.operator.Notify(ctx, conv, card) == nil
 	}
 	s.runtime.mirrorState(ctx, conv, state, summary)
-	log.Info().Str("conversation", conv.ID.String()).Str("reason", reason).Bool("claimed", claimed).Bool("operator_notified", notified).
+	log.Info().Str("conversation", conv.ID.String()).Str("reason", reason).Bool("claimed", claimed).Bool("repeat", repeat).Bool("operator_notified", notified).
 		Msg("agentruntime: escalation signal, agent stays live")
-	c.JSON(http.StatusOK, gin.H{"agent_enabled": true, "mode": "signal", "client_notified": false, "operator_notified": notified,
-		"already_signalled": !claimed, "next": escalationSignalNext, "state_version": state.Version})
+	return HandoffResult{Status: http.StatusOK, OperatorNotified: notified, Body: gin.H{"agent_enabled": true, "mode": "signal", "client_notified": false, "operator_notified": notified,
+		"already_signalled": !claimed, "next": escalationSignalNext, "state_version": state.Version}}, nil
 }
 
 // narrowHandoff is the hands-off branch under AGENT_RUNTIME_NARROW_ESCALATION
@@ -410,17 +494,14 @@ func (s *Server) signalOperator(c *gin.Context, conv Conversation, reason, summa
 // out, because it is the model's own continuation of the dialogue; the
 // one-shot escalation ack is not armed, since nothing is paused and the
 // customer is not waiting on a receipt.
-func (s *Server) narrowHandoff(c *gin.Context, conv Conversation, reason, summary, clientMessage string) {
-	ctx := c.Request.Context()
+func (s *Server) narrowHandoff(ctx context.Context, conv Conversation, reason, summary, clientMessage string) (HandoffResult, error) {
 	state, err := s.runtime.states.GetState(ctx, conv.ID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "state unavailable"})
-		return
+		return HandoffResult{Status: http.StatusBadRequest, Body: gin.H{"error": "state unavailable"}}, fmt.Errorf("narrow hand-off %s: state: %w", reason, err)
 	}
 	if err := s.runtime.store.EnterNarrowMode(ctx, conv.ID); err != nil {
 		log.Warn().Err(err).Str("conversation", conv.ID.String()).Msg("agentruntime: narrow mode not recorded")
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "narrow mode not recorded"})
-		return
+		return HandoffResult{Status: http.StatusServiceUnavailable, Body: gin.H{"error": "narrow mode not recorded"}}, fmt.Errorf("narrow hand-off %s: %w", reason, err)
 	}
 	// Same claim signalOperator uses, under its own key: a narrow hand-off and
 	// a plain signal on the same reason are different events, and sharing one
@@ -453,8 +534,8 @@ func (s *Server) narrowHandoff(c *gin.Context, conv Conversation, reason, summar
 	s.runtime.mirrorState(ctx, conv, state, summary)
 	log.Info().Str("conversation", conv.ID.String()).Str("reason", reason).Bool("claimed", claimed).Bool("operator_notified", notified).
 		Msg("agentruntime: narrow hand-off, agent stays live on a white list")
-	c.JSON(http.StatusOK, gin.H{"agent_enabled": true, "mode": "narrow", "client_notified": clientTold,
-		"operator_notified": notified, "already_signalled": !claimed, "next": escalationNarrowNext, "state_version": state.Version})
+	return HandoffResult{Status: http.StatusOK, ClientNotified: clientTold, OperatorNotified: notified, Body: gin.H{"agent_enabled": true, "mode": "narrow", "client_notified": clientTold,
+		"operator_notified": notified, "already_signalled": !claimed, "next": escalationNarrowNext, "state_version": state.Version}}, nil
 }
 
 const escalationNarrowNext = "Curator owns the chat now, you are not paused. Answer only commission, withdrawal, MT5 and verification questions from the KB; on anything else stay silent and the operator gets the customer's line."
@@ -480,11 +561,18 @@ func (r *Runtime) clientHandoffLine() string {
 // own reply is suppressed once the agent is paused (runtime.go re-reads the
 // state after the run), so the hand-off sentence has to leave through the
 // same outbound path idle follow-ups use. Text comes from the tool call so
-// it matches the model's voice; empty falls back to a fixed line. The line
-// is saved to history before delivery so a later operator sees it.
+// it matches the model's voice; empty falls back to a fixed line, and so
+// does a line with a denylisted link under AGENT_RUNTIME_HANDOFF_TRIGGERS.
+// The line is saved to history before delivery so a later operator sees it.
 func (s *Server) tellClient(ctx context.Context, conv Conversation, text string) bool {
 	if text = strings.TrimSpace(text); text == "" {
 		text = s.runtime.clientHandoffLine()
+	}
+	if s.runtime.flags.HandoffTriggers {
+		if reason := linkLeakReason(text, nil, true); reason != "" {
+			log.Warn().Str("conversation", conv.ID.String()).Str("reason", reason).Msg("agentruntime: escalation client line carried a denied link, fallback line sent")
+			text = s.runtime.clientHandoffLine()
+		}
 	}
 	if _, err := s.runtime.store.SaveMessage(ctx, conv.ID, SaveMessageInput{Role: "assistant", Content: text}); err != nil {
 		log.Warn().Err(err).Str("conversation", conv.ID.String()).Msg("agentruntime: escalation client line not saved")

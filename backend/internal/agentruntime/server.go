@@ -73,6 +73,8 @@ func NewServer(pool *pgxpool.Pool, gitopsBasePath string) *Server {
 		return srv.outbound.SendOutbound(ctx, agentName, externalID, text, mediaURL)
 	}
 	runtime.syncPause = func(ctx context.Context, conv Conversation) error { _, err := srv.syncPausedCRM(ctx, conv); return err }
+	runtime.ext.precheck = precheckJudgeFromEnv(gitopsBasePath, runtime.flags)
+	runtime.ext.handoff = srv.handOff
 	runtime.notifyOperator = func(ctx context.Context, conv Conversation, text string) error {
 		if srv.operator == nil {
 			return nil

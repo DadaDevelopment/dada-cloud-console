@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dada-tuda/console/backend/internal/agentjudge"
 	"github.com/dada-tuda/console/backend/internal/turnbudget"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
@@ -95,9 +96,10 @@ func (c *httpA2AClient) url(agentName string) string {
 }
 
 type a2aPart struct {
-	Kind string         `json:"kind"`
-	Text string         `json:"text,omitempty"`
-	Data map[string]any `json:"data,omitempty"`
+	Kind     string         `json:"kind"`
+	Text     string         `json:"text,omitempty"`
+	Data     map[string]any `json:"data,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 type a2aMessage struct {
@@ -161,10 +163,17 @@ type a2aResponse struct {
 // A2AReply is the agent answer together with the Langfuse ids of the turn the
 // agent image stamps into the task metadata; both ids are empty when the agent
 // runs without the dada tracing patch.
+//
+// KB is what kb_search returned during the turn, read from the task history
+// (kbResults); the pre-delivery check verifies facts against it.
 type A2AReply struct {
 	Text          string
 	TraceID       string
 	ObservationID string
+	KB            []agentjudge.KBResult
+	// Escalations are the reason codes the model passed to
+	// escalate_to_operator during the turn, read from the same history.
+	Escalations []string
 }
 
 // TracedA2AClient is implemented by clients that can report where the agent
@@ -256,7 +265,7 @@ func (c *httpA2AClient) SendTraced(ctx context.Context, run AgentRunRequest) (A2
 	if text == "" {
 		return A2AReply{}, fmt.Errorf("a2a %s: no text in response", agentName)
 	}
-	return A2AReply{Text: text, TraceID: task.TraceID, ObservationID: task.ObservationID}, nil
+	return A2AReply{Text: text, TraceID: task.TraceID, ObservationID: task.ObservationID, KB: kbResults(result), Escalations: escalationCalls(result)}, nil
 }
 
 // callRetrying sends the message and re-sends it, as a fresh message in the

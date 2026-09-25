@@ -25,6 +25,13 @@ const (
 	SeverityHard  = "hard"
 	SeverityMajor = "major"
 	SeverityMinor = "minor"
+
+	// BlockRewrite and BlockHandoff mark a criterion the runtime checks
+	// before delivery (Judge.Check): a rewrite violation asks the model for
+	// another draft with Ask, a handoff violation also passes the dialog to
+	// an operator with Code and sends Line to the client.
+	BlockRewrite = "rewrite"
+	BlockHandoff = "handoff"
 )
 
 // Criterion is one scored rule. Score is the suffix of the Langfuse score
@@ -46,6 +53,11 @@ type Criterion struct {
 	Message  int      `yaml:"message"`
 	Turn     int      `yaml:"turn"`
 	Allow    []string `yaml:"allow"`
+	Block    string   `yaml:"block"`
+	Ask      string   `yaml:"ask"`
+	Code     string   `yaml:"code"`
+	Line     string   `yaml:"line"`
+	Source   string   `yaml:"source"`
 }
 
 // Signal is a situation label the LLM marks on the client side of the turn.
@@ -148,6 +160,10 @@ func ParseSpec(raw []byte) (*Spec, error) {
 	if spec.Total.Score == "" {
 		spec.Total.Score = "total"
 	}
+	signals := map[string]bool{}
+	for _, s := range spec.Signals {
+		signals[s.ID] = true
+	}
 	seen := map[string]bool{}
 	for i, c := range spec.Criteria {
 		if c.ID == "" || c.Score == "" {
@@ -178,6 +194,23 @@ func ParseSpec(raw []byte) (*Spec, error) {
 		} else if strings.TrimSpace(c.Text) == "" {
 			return nil, fmt.Errorf("criterion %s: llm criterion needs text", c.ID)
 		}
+		switch c.Block {
+		case "":
+		case BlockRewrite, BlockHandoff:
+			if strings.TrimSpace(c.Ask) == "" {
+				return nil, fmt.Errorf("criterion %s: block %s needs ask", c.ID, c.Block)
+			}
+			if c.Block == BlockHandoff && (strings.TrimSpace(c.Code) == "" || strings.TrimSpace(c.Line) == "" || strings.TrimSpace(c.Source) == "") {
+				return nil, fmt.Errorf("criterion %s: block handoff needs code, line and source", c.ID)
+			}
+		default:
+			return nil, fmt.Errorf("criterion %s: block must be rewrite or handoff", c.ID)
+		}
+		// A block criterion gated by an unknown signal would never fire in
+		// Check, silently turning a safety rule off.
+		if c.Block != "" && c.Applies != "" && !signals[c.Applies] {
+			return nil, fmt.Errorf("criterion %s: applies %s is not a signal", c.ID, c.Applies)
+		}
 	}
 	for _, s := range spec.Signals {
 		if s.ID == "" {
@@ -205,6 +238,19 @@ func (s *Spec) Skips(username string) bool {
 
 func (s *Spec) ScoreName(suffix string) string {
 	return s.Name + "." + suffix
+}
+
+// subset is a copy of the spec with only the criteria keep accepts; signals,
+// totals and the template are shared, so the prompt keeps its shape.
+func (s *Spec) subset(keep func(Criterion) bool) *Spec {
+	sub := *s
+	sub.Criteria = nil
+	for _, c := range s.Criteria {
+		if keep(c) {
+			sub.Criteria = append(sub.Criteria, c)
+		}
+	}
+	return &sub
 }
 
 func (s *Spec) llmCriteria() []Criterion {

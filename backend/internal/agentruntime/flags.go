@@ -1,6 +1,7 @@
 package agentruntime
 
 import (
+	"fmt"
 	"os"
 	"regexp"
 	"strconv"
@@ -91,6 +92,44 @@ type runtimeFlags struct {
 	// existing turn_recovery ladder, instead of leaving the customer with
 	// silence and no error anywhere.
 	SilenceRecovery bool
+
+	// Pre-delivery check (plan 2026-09-25). Every default below is today's
+	// behaviour: no check, no counters, no new hand-off codes.
+
+	// Precheck (AGENT_RUNTIME_PRECHECK) is off|log|block. log judges the
+	// delivered turn once, after delivery, and records what block would have
+	// done; block checks every draft before it reaches the client.
+	Precheck string
+	// ScriptCounters (AGENT_RUNTIME_SCRIPT_COUNTERS) counts the check's
+	// refusal_* signals per conversation; RefusalHandoffAt
+	// (AGENT_RUNTIME_REFUSAL_HANDOFF_AT, default 2) hands the conversation
+	// off at that many refusals for one reason. Requires Precheck=block.
+	ScriptCounters   bool
+	RefusalHandoffAt int
+	// HandoffTriggers (AGENT_RUNTIME_HANDOFF_TRIGGERS) makes E_LEGAL_TAX
+	// hands-off and refuses the denylisted links (linkDenylist) in replies,
+	// follow-ups and hand-off lines. E_CHECK_AND_RETURN is a signal with the
+	// flag on or off. Required by Precheck=block.
+	HandoffTriggers bool
+}
+
+// Modes of AGENT_RUNTIME_PRECHECK.
+const (
+	precheckOff   = "off"
+	precheckLog   = "log"
+	precheckBlock = "block"
+)
+
+// envChoice reads one of a fixed set of words; anything else keeps the
+// default, same safe-side rule as envBool.
+func envChoice(name, def string, allowed ...string) string {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
+	for _, a := range allowed {
+		if v == a {
+			return v
+		}
+	}
+	return def
 }
 
 func runtimeFlagsFromEnv() runtimeFlags {
@@ -104,5 +143,35 @@ func runtimeFlagsFromEnv() runtimeFlags {
 		AckLimit:          envInt("AGENT_RUNTIME_ACK_LIMIT", 0),
 		FunnelOrder:       envBool("AGENT_RUNTIME_FUNNEL_ORDER", false),
 		SilenceRecovery:   envBool("AGENT_RUNTIME_SILENCE_RECOVERY", false),
+		Precheck:          envChoice("AGENT_RUNTIME_PRECHECK", precheckOff, precheckOff, precheckLog, precheckBlock),
+		ScriptCounters:    envBool("AGENT_RUNTIME_SCRIPT_COUNTERS", false),
+		RefusalHandoffAt:  envInt("AGENT_RUNTIME_REFUSAL_HANDOFF_AT", refusalHandoffAtDefault),
+		HandoffTriggers:   envBool("AGENT_RUNTIME_HANDOFF_TRIGGERS", false),
 	}
+}
+
+// ValidateFlagsFromEnv rejects switch combinations that cannot work, so the
+// process refuses to start instead of silently running without them. The
+// refusal counters read the check's signals before delivery; under
+// PRECHECK=log those signals arrive after the reply is gone, and a
+// threshold that cannot discard the draft would hand off one turn late.
+// A check switched on without its model is refused for the same reason.
+func ValidateFlagsFromEnv() error {
+	f := runtimeFlagsFromEnv()
+	if f.Precheck != precheckOff && precheckLLMFromEnv() == nil {
+		return fmt.Errorf("AGENT_RUNTIME_PRECHECK=%s requires AGENT_JUDGE_LLM_URL, AGENT_JUDGE_LLM_KEY and AGENT_JUDGE_LLM_MODEL", f.Precheck)
+	}
+	return f.validate()
+}
+
+func (f runtimeFlags) validate() error {
+	if f.ScriptCounters && f.Precheck != precheckBlock {
+		return fmt.Errorf("AGENT_RUNTIME_SCRIPT_COUNTERS=on requires AGENT_RUNTIME_PRECHECK=block (got %q)", f.Precheck)
+	}
+	// The block check hands off with the spec's codes: without the triggers
+	// E_LEGAL_TAX does not pause.
+	if f.Precheck == precheckBlock && !f.HandoffTriggers {
+		return fmt.Errorf("AGENT_RUNTIME_PRECHECK=block requires AGENT_RUNTIME_HANDOFF_TRIGGERS=on")
+	}
+	return nil
 }

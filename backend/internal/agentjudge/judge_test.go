@@ -185,15 +185,26 @@ func TestParseVerdictsRejectsBadValues(t *testing.T) {
 	}
 }
 
+// fakeLLM answers every call the same; the judges of one turn call it from
+// their own goroutines, so the last prompt is kept under a lock.
 type fakeLLM struct {
 	answer string
 	err    error
+	mu     sync.Mutex
 	prompt string
 }
 
 func (f *fakeLLM) Complete(_ context.Context, prompt string) (string, error) {
+	f.mu.Lock()
 	f.prompt = prompt
+	f.mu.Unlock()
 	return f.answer, f.err
+}
+
+func (f *fakeLLM) lastPrompt() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.prompt
 }
 
 type recorder struct{ scores []langfuse.Score }
@@ -293,7 +304,7 @@ func TestSubmitPostsScores(t *testing.T) {
 	if v, _ := total.Metadata["violations"].([]string); len(v) != 0 {
 		t.Errorf("violations = %v", v)
 	}
-	if !strings.Contains(llm.prompt, "салам") {
+	if !strings.Contains(llm.lastPrompt(), "салам") {
 		t.Error("prompt did not carry the client text")
 	}
 }
@@ -305,7 +316,7 @@ func TestSubmitSkipsProbeUsernames(t *testing.T) {
 		j.Submit("roman", Turn{TraceID: "abc", Username: user, Reply: "Счёт у FxPro уже есть?"})
 	}
 	time.Sleep(50 * time.Millisecond)
-	if llm.prompt != "" {
+	if llm.lastPrompt() != "" {
 		t.Fatal("probe turn reached the llm")
 	}
 }
@@ -316,7 +327,7 @@ func TestSubmitMutedUnderBudget(t *testing.T) {
 	j.MuteWhen(func() bool { return true })
 	j.Submit("roman", Turn{TraceID: "abc", Username: "ivan", Reply: "Счёт у FxPro уже есть?"})
 	time.Sleep(50 * time.Millisecond)
-	if llm.prompt != "" {
+	if llm.lastPrompt() != "" {
 		t.Fatal("muted judge still ran")
 	}
 }
