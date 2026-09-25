@@ -123,6 +123,8 @@ definitions:
         items:
           $ref: '#/definitions/models.AgentEnvVar'
         type: array
+      model_config:
+        type: string
       name:
         type: string
       prompt:
@@ -3636,22 +3638,28 @@ paths:
     post:
       consumes:
       - application/json
-      description: 'Checks name, prompt and requested MCP servers against everything
-        the cluster would refuse later. Returns 400 with a per-field error list, or
-        200 when the draft is safe to commit. Each tools entry is either a bare server
-        name (a server the platform runs) or the whole reference this project brings
-        itself, with url, protocol and headers; a header value may cite the agent
-        env as ${VAR}. Pass the project the draft is for to also check what saveAgent
-        refuses with 409: a name another project already holds, and an own server
-        declared under a name another project owns. A bare name counts only for a
-        platform server or one of that project''s own; another project''s server is
-        reported as unknown. The project is honoured only when the caller has a role
-        in it.'
+      description: 'Checks name, prompt, model config and requested MCP servers against
+        everything the cluster would refuse later. Returns 400 with a per-field error
+        list, or 200 when the draft is safe to commit. Each tools entry is either
+        a bare server name (a server the platform runs) or the whole reference this
+        project brings itself, with url, protocol and headers; a header value may
+        cite the agent env as ${VAR}. Pass the project the draft is for to also run
+        every check saveAgent runs, reported as field errors: a name another project
+        already holds, an own server declared under a name another project owns, a
+        prompt synced from a repository. Add the environment to judge the draft as
+        an edit of the agent already there: an existing agent may omit the prompt
+        and keeps the one it has. A bare name counts only for a platform server or
+        one of that project''s own; another project''s server is reported as unknown.
+        The project is honoured only when the caller has a role in it.'
       operationId: validateAgent
       parameters:
       - description: Project id or name the draft is for
         in: query
         name: project
+        type: string
+      - description: Environment id the draft is saved to
+        in: query
+        name: environment
         type: string
       - description: Draft agent
         in: body

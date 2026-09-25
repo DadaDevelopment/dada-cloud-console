@@ -274,7 +274,7 @@ metadata:
     {{- include "dada-cloud-console.labels" . | nindent 4 }}
 rules:
   - apiGroups: ["kagent.dev"]
-    resources: ["agents", "remotemcpservers"]
+    resources: ["agents", "remotemcpservers", "modelconfigs"]
     verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["configmaps"]

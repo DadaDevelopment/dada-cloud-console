@@ -161,7 +161,7 @@ func TestValidateAgentDraft_RefusesACustomMCPThatWouldLeakOrSilentlyFail(t *test
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			problems := validateAgentDraft(tc.req)
+			problems := validateAgentDraft(tc.req, false)
 			for _, p := range problems {
 				if p.Field == tc.field {
 					return
@@ -184,7 +184,7 @@ func TestValidateAgentDraft_AcceptsAnOwnServerAuthorizedFromEnv(t *testing.T) {
 			Headers: []models.AgentToolHeader{{Name: "Authorization", Value: "Bearer ${NOTION_TOKEN}"}},
 		}},
 		Env: []models.AgentEnvVar{{Name: "NOTION_TOKEN", Value: "ntn_live"}},
-	})
+	}, false)
 	if len(problems) != 0 {
 		t.Fatalf("a working custom MCP must pass: %+v", problems)
 	}

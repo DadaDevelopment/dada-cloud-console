@@ -22,6 +22,7 @@ const DefaultNamespace = "kagent"
 var (
 	agentGVR           = schema.GroupVersionResource{Group: "kagent.dev", Version: "v1alpha2", Resource: "agents"}
 	remoteMCPServerGVR = schema.GroupVersionResource{Group: "kagent.dev", Version: "v1alpha2", Resource: "remotemcpservers"}
+	modelConfigGVR     = schema.GroupVersionResource{Group: "kagent.dev", Version: "v1alpha2", Resource: "modelconfigs"}
 )
 
 // Tool is one MCP server an agent may be pointed at, as the console offers it
@@ -157,6 +158,24 @@ func (r *Reader) ListTools(ctx context.Context) ([]Tool, error) {
 	}
 	sort.Slice(tools, func(a, b int) bool { return tools[a].Name < tools[b].Name })
 	return tools, nil
+}
+
+// ModelConfigExists reports whether the runtime namespace holds a ModelConfig
+// with this name. An agent naming one that does not exist is accepted by git and
+// by Argo and then sits Unready in kagent, which reads as "the agent is down"
+// rather than as the typo it is.
+func (r *Reader) ModelConfigExists(ctx context.Context, name string) (bool, error) {
+	if !r.Enabled() {
+		return false, ErrClusterUnavailable
+	}
+	_, err := r.dyn.Resource(modelConfigGVR).Namespace(r.namespace).Get(ctx, name, metav1.GetOptions{})
+	if isNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("reading model config %s: %w", name, err)
+	}
+	return true, nil
 }
 
 func toolFromObject(obj *unstructured.Unstructured) Tool {

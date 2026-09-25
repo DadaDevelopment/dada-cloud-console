@@ -17,8 +17,9 @@ import (
 )
 
 // saveAgentRequest is what the agent editor posts. It is one whole agent: the
-// console has a single save, and a save re-states every field, so a partial
-// body is a smaller agent rather than an unchanged one.
+// console has a single save. A field left empty keeps what git holds for it,
+// the prompt included once the agent exists, so a partial body is an edit of
+// the fields it names rather than a smaller agent.
 type saveAgentRequest struct {
 	Name          string                `json:"name"`
 	DisplayName   string                `json:"display_name"`
@@ -239,70 +240,19 @@ func (h *Handler) SaveAgent(c *gin.Context) {
 		return
 	}
 
-	if problems := validateAgentDraft(req); len(problems) > 0 {
-		reject(http.StatusBadRequest, "invalid_agent", gin.H{"valid": false, "errors": problems})
+	verdict := h.checkAgentSave(c.Request.Context(), projectID, envID, &req)
+	if verdict.status != 0 {
+		reject(verdict.status, verdict.reason, verdict.body)
 		return
 	}
-
 	if problems := h.toolOwnershipProblems(c.Request.Context(), projectID, req.Tools); len(problems) > 0 {
 		reject(http.StatusConflict, "tool_owned_by_another_project", gin.H{"valid": false, "errors": problems})
 		return
 	}
-
-	nameTaken := gin.H{
-		"error":   "agent_name_taken",
-		"code":    "agent_name_taken",
-		"message": agentNameTakenMessage(req.Name),
-	}
-	taken, err := agentNameTakenElsewhere(c.Request.Context(), h.pool, projectID, req.Name)
-	if err != nil {
-		reject(http.StatusInternalServerError, "lookup_failed", gin.H{"error": "failed to look up agent"})
-		return
-	}
-	if taken {
-		reject(http.StatusConflict, "agent_name_taken", nameTaken)
-		return
-	}
-
-	existingKind, err := h.agentSnapshotKind(c.Request.Context(), projectID, envID, req.Name)
-	if err != nil {
-		reject(http.StatusInternalServerError, "lookup_failed", gin.H{"error": "failed to look up agent"})
-		return
-	}
-	switch existingKind {
-	case adoptedAgentKind:
-		reject(http.StatusConflict, "agent_not_console_owned", gin.H{
-			"error":   "agent_not_console_owned",
-			"message": "this agent is a raw kagent CR maintained in git outside the console; editing it here would compose a second CR with the same name",
-		})
-		return
-	case managedAgentKind:
+	if verdict.existingKind == managedAgentKind {
 		action = "UpdateAgent"
 	}
-
-	promptFromSource := false
-	if existingKind == managedAgentKind {
-		source, owned, err := h.promptSourceOverride(c.Request.Context(), projectID, envID, req.Name)
-		if err != nil {
-			reject(http.StatusServiceUnavailable, "prompt_source_unavailable", gin.H{"error": "failed to look up the agent's prompt source"})
-			return
-		}
-		if owned && req.Prompt != source.Prompt {
-			reject(http.StatusConflict, "prompt_owned_by_source", gin.H{
-				"error":          "prompt_owned_by_source",
-				"code":           "prompt_owned_by_source",
-				"message":        "this agent's prompt is synced from " + source.RepoFullName + " (" + source.Ref + "/" + source.Path + "); edit core.md there or detach the source first",
-				"repo_full_name": source.RepoFullName,
-				"ref":            source.Ref,
-				"path":           source.Path,
-				"prompt_version": source.PromptVersion,
-			})
-			return
-		}
-		if owned {
-			req.PromptVersion, promptFromSource = source.PromptVersion, true
-		}
-	}
+	promptFromSource := verdict.promptFromSource
 
 	payload := models.SaveAgentPayload{
 		Name:          req.Name,
@@ -332,12 +282,13 @@ func (h *Handler) SaveAgent(c *gin.Context) {
 		reject(http.StatusInternalServerError, "lookup_failed", gin.H{"error": "failed to look up agent"})
 		return
 	}
-	if taken, err = agentNameTakenElsewhere(c.Request.Context(), tx, projectID, req.Name); err != nil {
+	taken, err := agentNameTakenElsewhere(c.Request.Context(), tx, projectID, req.Name)
+	if err != nil {
 		reject(http.StatusInternalServerError, "lookup_failed", gin.H{"error": "failed to look up agent"})
 		return
 	}
 	if taken {
-		reject(http.StatusConflict, "agent_name_taken", nameTaken)
+		reject(http.StatusConflict, "agent_name_taken", agentNameTakenBody(req.Name))
 		return
 	}
 
@@ -501,18 +452,128 @@ func (h *Handler) DeleteAgent(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "agent deletion queued"})
 }
 
+// agentSaveVerdict is what checkAgentSave decided about one save. A zero
+// status means the save may be queued.
+type agentSaveVerdict struct {
+	status           int
+	reason           string
+	field            string
+	body             gin.H
+	existingKind     string
+	promptFromSource bool
+}
+
+// checkAgentSave runs the refusals SaveAgent and ValidateAgent share, so the
+// validator answers from the same list the save refuses from: a validator that
+// clears a draft the save then refuses is worse than no validator. Tool
+// ownership stays with each caller, because the validator words it without
+// confirming who owns a server.
+//
+// A save of an agent that already exists may leave the prompt out: the git
+// writer keeps what the claim holds for every field a save does not state, so
+// a tools-only save is an edit of the tools, not an agent with no prompt. When
+// the prompt is synced from a repository, an unstated prompt is the synced one
+// and only a different prompt is refused. A nil envID knows no existing agent,
+// so the prompt is required.
+func (h *Handler) checkAgentSave(ctx context.Context, projectID, envID uuid.UUID, req *saveAgentRequest) agentSaveVerdict {
+	lookupFailed := agentSaveVerdict{status: http.StatusInternalServerError, reason: "lookup_failed", body: gin.H{"error": "failed to look up agent"}}
+	existingKind, err := h.agentSnapshotKind(ctx, projectID, envID, req.Name)
+	if err != nil {
+		return lookupFailed
+	}
+	v := agentSaveVerdict{existingKind: existingKind}
+
+	problems := validateAgentDraft(*req, existingKind == managedAgentKind)
+	problems = append(problems, h.modelConfigProblems(ctx, req.ModelConfig)...)
+	if len(problems) > 0 {
+		return agentSaveVerdict{status: http.StatusBadRequest, reason: "invalid_agent", body: gin.H{"valid": false, "errors": problems}}
+	}
+
+	taken, err := agentNameTakenElsewhere(ctx, h.pool, projectID, req.Name)
+	if err != nil {
+		return lookupFailed
+	}
+	if taken {
+		return agentSaveVerdict{status: http.StatusConflict, reason: "agent_name_taken", field: "name", body: agentNameTakenBody(req.Name)}
+	}
+
+	switch existingKind {
+	case adoptedAgentKind:
+		return agentSaveVerdict{status: http.StatusConflict, reason: "agent_not_console_owned", field: "name", body: gin.H{
+			"error":   "agent_not_console_owned",
+			"message": "this agent is a raw kagent CR maintained in git outside the console; editing it here would compose a second CR with the same name",
+		}}
+	case managedAgentKind:
+	default:
+		return v
+	}
+
+	source, owned, err := h.promptSourceOverride(ctx, projectID, envID, req.Name)
+	if err != nil {
+		return agentSaveVerdict{status: http.StatusServiceUnavailable, reason: "prompt_source_unavailable", body: gin.H{"error": "failed to look up the agent's prompt source"}}
+	}
+	if !owned {
+		return v
+	}
+	if req.Prompt != "" && req.Prompt != source.Prompt {
+		return agentSaveVerdict{status: http.StatusConflict, reason: "prompt_owned_by_source", field: "prompt", body: gin.H{
+			"error":          "prompt_owned_by_source",
+			"code":           "prompt_owned_by_source",
+			"message":        "this agent's prompt is synced from " + source.RepoFullName + " (" + source.Ref + "/" + source.Path + "); edit core.md there or detach the source first",
+			"repo_full_name": source.RepoFullName,
+			"ref":            source.Ref,
+			"path":           source.Path,
+			"prompt_version": source.PromptVersion,
+		}}
+	}
+	req.Prompt, req.PromptVersion, v.promptFromSource = source.Prompt, source.PromptVersion, true
+	return v
+}
+
+// agentNameTakenBody is the 409 SaveAgent answers for a name another project
+// holds, both before the transaction and under its lock.
+func agentNameTakenBody(name string) gin.H {
+	return gin.H{
+		"error":   "agent_name_taken",
+		"code":    "agent_name_taken",
+		"message": agentNameTakenMessage(name),
+	}
+}
+
+// modelConfigProblems refuses a model config the runtime does not have. A
+// cluster this console cannot read yields no problems, for the same reason as
+// toolOwnershipProblems: a reader outage must not become an editing outage.
+func (h *Handler) modelConfigProblems(ctx context.Context, name string) []AgentFieldError {
+	if name == "" {
+		return nil
+	}
+	exists, err := h.agentRuntime().ModelConfigExists(ctx, name)
+	if err != nil || exists {
+		return nil
+	}
+	return []AgentFieldError{{
+		Field:   "model_config",
+		Message: "no ModelConfig named " + name + " exists in the agent runtime; the agent would be committed and then never become ready",
+	}}
+}
+
 // validateAgentDraft refuses a draft before it becomes a commit.
 //
 // Everything here is checkable without the cluster, which matters: a refusal
 // that arrives as an Argo sync failure minutes later reads as "the platform is
 // broken", while the same refusal on the field reads as "fix this line".
-func validateAgentDraft(req saveAgentRequest) []AgentFieldError {
+//
+// An existing agent may leave the prompt out; the git writer keeps the one the
+// claim holds. A new agent may not: there is nothing to keep.
+func validateAgentDraft(req saveAgentRequest, exists bool) []AgentFieldError {
 	var problems []AgentFieldError
 	if err := kagent.ValidateName(req.Name); err != nil {
 		problems = append(problems, AgentFieldError{Field: "name", Message: err.Error()})
 	}
-	if err := kagent.ValidatePrompt(req.Prompt); err != nil {
-		problems = append(problems, AgentFieldError{Field: "prompt", Message: err.Error()})
+	if promptUnsaid := exists && req.Prompt == ""; !promptUnsaid {
+		if err := kagent.ValidatePrompt(req.Prompt); err != nil {
+			problems = append(problems, AgentFieldError{Field: "prompt", Message: err.Error()})
+		}
 	}
 	envNames := map[string]bool{}
 	for _, e := range req.Env {

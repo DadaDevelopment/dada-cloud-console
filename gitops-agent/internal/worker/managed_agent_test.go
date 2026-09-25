@@ -320,3 +320,89 @@ func TestFillUnsaid_APromptOnlySaveKeepsTheRestOfTheSpec(t *testing.T) {
 		t.Fatalf("naming one field must not drop the others: %#v", retargeted)
 	}
 }
+
+// TestFillUnsaid_AToolsOnlySaveKeepsTheClaimByteForByte is the saveAgent call
+// that used to be refused with "system prompt is required": an MCP caller
+// sends only the new tools list. Everything else in the claim -- the prompt
+// with its blank lines and version, the model, the env, the allowed headers --
+// must come out of the writer exactly as git held it, so the only diff a
+// tools-only save may produce is the tools block.
+func TestFillUnsaid_AToolsOnlySaveKeepsTheClaimByteForByte(t *testing.T) {
+	mgr, valuesPath := agentCarrierFixture(t, "agents", "prod", "native")
+
+	before := renderer.ManagedAgentSpec{
+		Name:          "native",
+		Namespace:     "kagent",
+		ProjectSlug:   "agents",
+		EnvSlug:       "prod",
+		OperationID:   "11111111-1111-1111-1111-111111111111",
+		DisplayName:   "Hello Trading",
+		Prompt:        "Ты помощник.\n\n## Правила\n  - отвечай коротко\n\nКонец.",
+		PromptVersion: "2026-09-16.native.46",
+		ModelConfig:   "tg-referral-glm-53-flash",
+		Runtime:       "python",
+		Tools: []renderer.ManagedAgentToolRef{{
+			Name:           "tg-agent-tools",
+			URL:            "http://tg-agent-tools.agents-prod.svc:8080/mcp",
+			Protocol:       "STREAMABLE_HTTP",
+			Headers:        []renderer.ManagedAgentToolHeader{{Name: "Authorization", Value: "Bearer ${TG_AGENT_TOOLS_TOKEN}"}},
+			AllowedHeaders: []string{"x-dada-user", "x-dada-chat"},
+		}},
+		Env: []renderer.ManagedAgentEnvVar{
+			{Name: "TG_AGENT_TOOLS_TOKEN", Value: "s3cr3t"},
+			{Name: "REFERRAL_TIER", Value: "flash"},
+		},
+	}
+	writeAgentClaim(t, mgr, valuesPath, before)
+
+	carried, err := carriedOverAgent(mgr, valuesPath, "native")
+	if err != nil {
+		t.Fatalf("carriedOverAgent: %v", err)
+	}
+	newTools := append([]renderer.ManagedAgentToolRef{}, before.Tools...)
+	newTools = append(newTools, renderer.ManagedAgentToolRef{Name: "reels-task-tools"})
+
+	toolsOnly := renderer.ManagedAgentSpec{
+		Name:        "native",
+		Namespace:   "kagent",
+		ProjectSlug: "agents",
+		EnvSlug:     "prod",
+		OperationID: before.OperationID,
+		Tools:       newTools,
+	}
+	fillUnsaid(&toolsOnly, carried)
+	got, err := renderer.RenderManagedAgent(toolsOnly)
+	if err != nil {
+		t.Fatalf("RenderManagedAgent(tools-only): %v", err)
+	}
+
+	want := before
+	want.Tools = newTools
+	wantYAML, err := renderer.RenderManagedAgent(want)
+	if err != nil {
+		t.Fatalf("RenderManagedAgent(want): %v", err)
+	}
+	if got != wantYAML {
+		t.Fatalf("a tools-only save changed more than the tools\n--- want\n%s\n--- got\n%s", wantYAML, got)
+	}
+}
+
+func writeAgentClaim(t *testing.T, mgr *git.Manager, valuesPath string, spec renderer.ManagedAgentSpec) {
+	t.Helper()
+	yaml, err := renderer.RenderManagedAgent(spec)
+	if err != nil {
+		t.Fatalf("RenderManagedAgent: %v", err)
+	}
+	var b strings.Builder
+	b.WriteString("manifests:\n")
+	for i, line := range strings.Split(strings.TrimRight(yaml, "\n"), "\n") {
+		if i == 0 {
+			b.WriteString("  - " + line + "\n")
+			continue
+		}
+		b.WriteString("    " + line + "\n")
+	}
+	if err := os.WriteFile(filepath.Join(mgr.LocalPath(), valuesPath), []byte(b.String()), 0o644); err != nil {
+		t.Fatalf("write values: %v", err)
+	}
+}

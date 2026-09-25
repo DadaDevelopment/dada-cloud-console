@@ -205,6 +205,23 @@ func TestAgentPromptSourceLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("saveAgent without a prompt passes and carries the synced one", func(t *testing.T) {
+		c, rec := saveAgentCtx(t, projectID, envID, userID, saveAgentRequest{Name: agent, ModelConfig: "gpt"})
+		h.SaveAgent(c)
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+		}
+		var out struct {
+			Operation models.Operation `json:"operation"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		var payload models.SaveAgentPayload
+		_ = json.Unmarshal(out.Operation.Payload, &payload)
+		if payload.Prompt != promptSourceCore || payload.PromptVersion != "2026-09-16.native.46" {
+			t.Fatalf("payload = %+v", payload)
+		}
+	})
+
 	t.Run("a broken commit is reported once and the last good prompt stays", func(t *testing.T) {
 		repo.sha = "bbbb222"
 		repo.files["agents/roman/domains/big.md"] = strings.Repeat("x", 9000)

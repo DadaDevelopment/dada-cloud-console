@@ -58,6 +58,8 @@ const defaultAgentRuntimeNamespace = "kagent"
 type carriedOverAgentFields struct {
 	DisplayName       string
 	Description       string
+	Prompt            string
+	PromptVersion     string
 	ModelConfig       string
 	Runtime           string
 	LangfuseProjectID string
@@ -96,6 +98,8 @@ func carriedOverAgent(mgr *git.Manager, valuesPath, name string) (carriedOverAge
 		Spec struct {
 			DisplayName       string `yaml:"displayName"`
 			Description       string `yaml:"description"`
+			Prompt            string `yaml:"prompt"`
+			PromptVersion     string `yaml:"promptVersion"`
 			ModelConfig       string `yaml:"modelConfig"`
 			Runtime           string `yaml:"runtime"`
 			LangfuseProjectID string `yaml:"langfuseProjectId"`
@@ -126,6 +130,8 @@ func carriedOverAgent(mgr *git.Manager, valuesPath, name string) (carriedOverAge
 	}
 	out.DisplayName = claim.Spec.DisplayName
 	out.Description = claim.Spec.Description
+	out.Prompt = claim.Spec.Prompt
+	out.PromptVersion = claim.Spec.PromptVersion
 	out.ModelConfig = claim.Spec.ModelConfig
 	out.Runtime = claim.Spec.Runtime
 	out.LangfuseProjectID = claim.Spec.LangfuseProjectID
@@ -157,7 +163,9 @@ func carriedOverAgent(mgr *git.Manager, valuesPath, name string) (carriedOverAge
 
 // fillUnsaid completes a save with what git already holds for every field the
 // save left empty. Memory and the Langfuse project are always taken from git,
-// because no save can state them; the rest only when the save did not.
+// because no save can state them; the rest only when the save did not. The
+// prompt travels with its version: a save without a prompt keeps both, so the
+// version in git still names the text the agent loads.
 func fillUnsaid(spec *renderer.ManagedAgentSpec, carried carriedOverAgentFields) {
 	spec.Memory = carried.Memory
 	spec.LangfuseProjectID = carried.LangfuseProjectID
@@ -166,6 +174,9 @@ func fillUnsaid(spec *renderer.ManagedAgentSpec, carried carriedOverAgentFields)
 	}
 	if spec.Description == "" {
 		spec.Description = carried.Description
+	}
+	if spec.Prompt == "" {
+		spec.Prompt, spec.PromptVersion = carried.Prompt, carried.PromptVersion
 	}
 	if spec.ModelConfig == "" {
 		spec.ModelConfig = carried.ModelConfig

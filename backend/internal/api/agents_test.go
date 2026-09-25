@@ -26,7 +26,7 @@ func TestValidateAgentDraft_AcceptsAWorkingAgent(t *testing.T) {
 			{Name: "shared-tools"},
 		},
 		Env: []models.AgentEnvVar{{Name: "AGENTSYNC_BASE_URL", Value: "https://agentsync.dada-tuda.ru"}},
-	})
+	}, false)
 	if len(problems) != 0 {
 		t.Fatalf("a valid draft was refused: %#v", problems)
 	}
@@ -35,7 +35,7 @@ func TestValidateAgentDraft_AcceptsAWorkingAgent(t *testing.T) {
 // An empty prompt is the failure worth catching before git: the agent starts,
 // answers, and answers as the bare model.
 func TestValidateAgentDraft_RefusesAnEmptyPrompt(t *testing.T) {
-	problems := validateAgentDraft(saveAgentRequest{Name: "reels-poc", Prompt: "   \n"})
+	problems := validateAgentDraft(saveAgentRequest{Name: "reels-poc", Prompt: "   \n"}, false)
 	if len(problems) != 1 || problems[0].Field != "prompt" {
 		t.Fatalf("want one prompt problem, got %#v", problems)
 	}
@@ -45,7 +45,7 @@ func TestValidateAgentDraft_RefusesAnEmptyPrompt(t *testing.T) {
 // but minutes later and as an Argo sync failure nobody reads.
 func TestValidateAgentDraft_RefusesANameKubernetesWouldReject(t *testing.T) {
 	for _, name := range []string{"", "Reels_POC", "-reels", "reels-", strings.Repeat("a", 64)} {
-		problems := validateAgentDraft(saveAgentRequest{Name: name, Prompt: "Be brief."})
+		problems := validateAgentDraft(saveAgentRequest{Name: name, Prompt: "Be brief."}, false)
 		if len(problems) == 0 {
 			t.Errorf("name %q must be refused", name)
 		}
@@ -60,7 +60,7 @@ func TestValidateAgentDraft_RefusesADuplicateToolReference(t *testing.T) {
 		Name:   "reels-poc",
 		Prompt: "Be brief.",
 		Tools:  []models.AgentToolRef{{Name: "shared-tools"}, {Name: "shared-tools"}},
-	})
+	}, false)
 	if len(problems) != 1 || problems[0].Field != "tools[1].name" {
 		t.Fatalf("want a duplicate-tool problem, got %#v", problems)
 	}
@@ -75,7 +75,7 @@ func TestValidateAgentDraft_RefusesAMalformedAllowedHeader(t *testing.T) {
 		Prompt: "Be brief.",
 		Tools:  []models.AgentToolRef{{Name: "shared-tools", AllowedHeaders: []string{"X-Dada User"}}},
 		Env:    []models.AgentEnvVar{{Name: ""}},
-	})
+	}, false)
 	got := fieldsOf(problems)
 	if len(got) != 2 || got[0] != "tools[0].allowed_headers[0]" || got[1] != "env[0].name" {
 		t.Fatalf("want both problems reported at once, got %#v", problems)

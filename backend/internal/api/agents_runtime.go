@@ -95,6 +95,7 @@ func (h *Handler) ListAgentTools(c *gin.Context) {
 type ValidateAgentRequest struct {
 	Name           string               `json:"name"`
 	Prompt         string               `json:"prompt"`
+	ModelConfig    string               `json:"model_config"`
 	Tools          agentToolDraft       `json:"tools"`
 	AllowedHeaders []string             `json:"allowed_headers"`
 	Env            []models.AgentEnvVar `json:"env"`
@@ -154,12 +155,13 @@ type AgentFieldError struct {
 // an outage.
 // @ID          validateAgent
 // @Summary     Validate a draft agent before it is written to git
-// @Description Checks name, prompt and requested MCP servers against everything the cluster would refuse later. Returns 400 with a per-field error list, or 200 when the draft is safe to commit. Each tools entry is either a bare server name (a server the platform runs) or the whole reference this project brings itself, with url, protocol and headers; a header value may cite the agent env as ${VAR}. Pass the project the draft is for to also check what saveAgent refuses with 409: a name another project already holds, and an own server declared under a name another project owns. A bare name counts only for a platform server or one of that project's own; another project's server is reported as unknown. The project is honoured only when the caller has a role in it.
+// @Description Checks name, prompt, model config and requested MCP servers against everything the cluster would refuse later. Returns 400 with a per-field error list, or 200 when the draft is safe to commit. Each tools entry is either a bare server name (a server the platform runs) or the whole reference this project brings itself, with url, protocol and headers; a header value may cite the agent env as ${VAR}. Pass the project the draft is for to also run every check saveAgent runs, reported as field errors: a name another project already holds, an own server declared under a name another project owns, a prompt synced from a repository. Add the environment to judge the draft as an edit of the agent already there: an existing agent may omit the prompt and keeps the one it has. A bare name counts only for a platform server or one of that project's own; another project's server is reported as unknown. The project is honoured only when the caller has a role in it.
 // @Tags        agents
 // @Accept      json
 // @Produce     json
 // @Security    BearerAuth
 // @Param       project query    string               false "Project id or name the draft is for"
+// @Param       environment query string               false "Environment id the draft is saved to"
 // @Param       request body     ValidateAgentRequest true "Draft agent"
 // @Success     200     {object} map[string]interface{} "valid draft"
 // @Failure     400     {object} map[string]interface{} "object with the per-field errors array"
@@ -178,26 +180,34 @@ func (h *Handler) ValidateAgent(c *gin.Context) {
 	}
 	projectID, projectName := h.toolProject(c, claims)
 
-	problems := validateAgentDraft(saveAgentRequest{
-		Name:   req.Name,
-		Prompt: req.Prompt,
-		Tools:  req.Tools,
-		Env:    req.Env,
-	})
+	draft := saveAgentRequest{
+		Name:        req.Name,
+		Prompt:      req.Prompt,
+		ModelConfig: req.ModelConfig,
+		Tools:       req.Tools,
+		Env:         req.Env,
+	}
+	var problems []AgentFieldError
+	if projectID == uuid.Nil {
+		problems = append(validateAgentDraft(draft, false), h.modelConfigProblems(c.Request.Context(), req.ModelConfig)...)
+	} else {
+		envID, _ := uuid.Parse(c.Query("environment"))
+		verdict := h.checkAgentSave(c.Request.Context(), projectID, envID, &draft)
+		switch {
+		case verdict.status == 0:
+		case verdict.status == http.StatusBadRequest:
+			problems, _ = verdict.body["errors"].([]AgentFieldError)
+		case verdict.field != "":
+			message, _ := verdict.body["message"].(string)
+			problems = append(problems, AgentFieldError{Field: verdict.field, Message: message})
+		default:
+			c.JSON(verdict.status, verdict.body)
+			return
+		}
+	}
 	for _, header := range req.AllowedHeaders {
 		if err := kagent.ValidateHeader(header); err != nil {
 			problems = append(problems, AgentFieldError{Field: "allowed_headers", Message: err.Error()})
-		}
-	}
-
-	if projectID != uuid.Nil && req.Name != "" {
-		taken, err := agentNameTakenElsewhere(c.Request.Context(), h.pool, projectID, req.Name)
-		if err != nil {
-			respondError(c, http.StatusInternalServerError, "failed to check the agent name")
-			return
-		}
-		if taken {
-			problems = append(problems, AgentFieldError{Field: "name", Message: agentNameTakenMessage(req.Name)})
 		}
 	}
 
