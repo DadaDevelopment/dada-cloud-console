@@ -54,6 +54,11 @@ func TestLeakReasonCatchesMonologues(t *testing.T) {
 		"stage code alone on a line":              "S9\nПодскажите, а какая цель по результатам с трейдинга в месяц?",
 		"P0-4 tier math read out":                 "300к = 300 000 ₽/мес, тир 200-500 тыс.",
 		"P0-4 tier bucket label":                  "Это тир от 200 тыс. до 500 тыс.: сильная цель по доходу",
+		"P0-4 bare arithmetic":                    "300к = 300 000 ₽ в месяц, сильная цель по доходу",
+		"P0-4 tier word without numbers":          "Это тир повыше, сильная цель по доходу",
+		"P0-4 tier label without the word":        "от 200 тыс. до 500 тыс.: Сильная цель по доходу. Думаю, мы сможем к ней дойти",
+		"P0-4 stage code mid sentence":            "Сейчас идём по S7, дальше расскажу про цель",
+		"P0-4 route arrow":                        "Опыт → цель → депозит, давайте по порядку",
 	}
 	for name, reply := range cases {
 		if reason := leakReason(reply); reason == "" {
@@ -68,6 +73,10 @@ func TestLeakReasonPassesClientReplies(t *testing.T) {
 		"MT5 and platforms":           "MT5 ставится на iOS и Android из App Store и Google Play, логин и пароль от торгового счёта приходят на почту после открытия счёта в кабинете FxPro. Установили?",
 		"english client":              "Registering through our partner link takes a couple of minutes, then verification in the profile: https://direct-fxpro.com/en/partner/2LJMnV3qh?platform=web — open it and start the FxPro signup, write here when the account is created?",
 		"handle":                      "Куратор напишет вам с аккаунта @fxpro_curator в течение дня, ждите сообщение",
+		"P0-4 roman tier line":        "Сильная цель по доходу. Думаю, мы сможем к ней дойти, если не будем рисковать излишне в сделках 🤞",
+		"P0-4 amount range no colon":  "Цель от 200 до 500 тысяч в месяц вполне рабочая, на какой депозит готовы начать?",
+		"P0-4 deposit sentence":       "Я принимаю людей к себе от 300$, при такой сумме риск на сделку 1-2% от депозита. Сможем?",
+		"P0-4 word containing тир":    "Квартира, стирка и тираж тут ни при чём, просто пополните счёт на 300$",
 		"short question":              "Счёт у FxPro уже открыт?",
 		"quote of client":             "Вы написали «не понравится, смогу вывести?»: да, деньги остаются на вашем счёте у брокера, вывод в любой момент из кабинета",
 		"подскажу is not скажу":       "Тип счёта и плечо выбираете сами в кабинете при открытии, наша группа этот параметр не задаёт. Открывайте счёт по ссылке, дальше по кабинету подскажу: https://direct-fxpro.com/en/partner/2LJMnV3qh?platform=web",

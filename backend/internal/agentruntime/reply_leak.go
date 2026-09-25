@@ -70,7 +70,36 @@ var leakPlanningPattern = regexp.MustCompile(`(?i)(^|[^\pL])((выше|ниже)
 // math stays in the model's head; the client only ever gets Roman's line for
 // that bracket. \b does not follow Cyrillic in Go's RE2, so both boundaries
 // are spelled out explicitly instead of relying on it.
-var leakTierPattern = regexp.MustCompile(`(?i)(^|[^\pL])тир(ы|а|е|ов)?\s+(от\s+)?\d[\d\s\-]*\s*(тыс|к|000)($|[^\pL])`)
+var leakTierPattern = regexp.MustCompile(`(?i)(^|[^\pL])тир(ы|а|е|у|ом|ов)?($|[^\pL])`)
+
+// leakTierLabelPattern catches a bracket label left in front of the scripted
+// line with the word «тир» dropped («от 200 тыс. до 500 тыс.: Сильная цель»):
+// core.md writes each bracket as `label: «line»`, and the model sometimes
+// copies the label along with the line.
+var leakTierLabelPattern = regexp.MustCompile(`(?i)(^|[^\pL])(от|до)\s+\d[\d\s]*\s*(тыс|млн|к)\.?(\s+до\s+\d[\d\s]*\s*(тыс|млн|к)\.?)?\s*:`)
+
+// leakArithmeticPattern catches the model's own conversion read out to the
+// client («300к = 300 000 ₽/мес»). A client never needs the equation, only
+// the line it leads to.
+var leakArithmeticPattern = regexp.MustCompile(`(?i)\d[\d\s]*(к|тыс\.?|млн)?\s*=\s*\d[\d\s]*\s*(₽|руб|\$|тыс|млн|долл|usd)`)
+
+// leakBareStagePattern finds a script stage code S1..S10 anywhere in the
+// text, written the way core.md writes it (capital S, case-sensitive), which
+// the frame and chain patterns miss mid-sentence («сейчас S7, дальше цель»).
+// bareStageCode drops the matches that follow a Latin word, a model name such
+// as «Galaxy S10».
+var leakBareStagePattern = regexp.MustCompile(`(^|[^\pL\d])(S(10|[1-9])[a-zа-я]?)($|[^\pL\d])`)
+
+var leakLatinWordBefore = regexp.MustCompile(`\p{Latin}+\s*$`)
+
+func bareStageCode(text string) string {
+	for _, m := range leakBareStagePattern.FindAllStringSubmatchIndex(text, -1) {
+		if !leakLatinWordBefore.MatchString(text[:m[4]]) {
+			return text[m[4]:m[5]]
+		}
+	}
+	return ""
+}
 
 var leakEnglishFillers = []string{"continue to", "hmm", "okay,", "fine.", "let me ", "the user ", "the client "}
 
@@ -117,6 +146,18 @@ func leakReason(reply string) string {
 	}
 	if m := leakTierPattern.FindString(text); m != "" {
 		return "internal deposit tier " + strings.TrimSpace(m)
+	}
+	if m := leakTierLabelPattern.FindString(text); m != "" {
+		return "internal deposit tier label " + strings.TrimSpace(m)
+	}
+	if m := leakArithmeticPattern.FindString(text); m != "" {
+		return "internal arithmetic " + strings.TrimSpace(m)
+	}
+	if m := bareStageCode(text); m != "" {
+		return "script stage code " + m
+	}
+	if strings.Contains(text, "→") {
+		return "route arrow"
 	}
 	share, latin := latinShare(text)
 	if share > 0 {
