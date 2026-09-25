@@ -7,6 +7,7 @@ import { useProjectContext } from "@/lib/project-context";
 import { isAdmin, roleColors } from "@/lib/rbac";
 import { adminApi } from "@/lib/api";
 import { useT } from "@/lib/i18n/console/context";
+import { UserAvatar } from "@/components/ui/user-avatar";
 
 /**
  * Top-right account menu. Consolidates identity, the project role badge, global
@@ -58,7 +59,7 @@ export function AccountMenu() {
   }, [open]);
 
   const name = user?.display_name || user?.username || t("shell.account.fallbackName");
-  const initial = name.charAt(0).toUpperCase();
+  const avatarSeed = user?.email || user?.username || user?.id || name;
 
   function handleLogout() {
     logout();
@@ -73,14 +74,16 @@ export function AccountMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={t("shell.account.label")}
-        className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-sm font-semibold text-white transition-colors hover:bg-blue-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
+        className="flex h-9 w-9 items-center justify-center rounded-full transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
       >
-        {initial}
+        <UserAvatar seed={avatarSeed} size={36} />
       </button>
 
       {open && (
         <div role="menu" className="absolute right-0 z-50 mt-2 w-64 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-900">
-          <div className="border-b border-gray-100 px-4 py-3 dark:border-gray-800">
+          <div className="flex gap-3 border-b border-gray-100 px-4 py-3 dark:border-gray-800">
+            <UserAvatar seed={avatarSeed} size={40} />
+            <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">{name}</p>
             {user?.email && <p className="truncate text-xs text-gray-400 dark:text-gray-500">{user.email}</p>}
             {role && (
@@ -88,6 +91,7 @@ export function AccountMenu() {
                 {t(`roles.${role}`)}
               </span>
             )}
+            </div>
           </div>
           <div className="py-1">
             <Link role="menuitem" href="/ai-studio" onClick={() => setOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800">

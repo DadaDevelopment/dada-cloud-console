@@ -1,5 +1,6 @@
 "use client";
 
+import { UserAvatar } from "@/components/ui/user-avatar";
 import { useCallback, useEffect, useState, FormEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useProjectContext } from "@/lib/project-context";
@@ -164,9 +165,12 @@ export default function MembersPage() {
       header: t("members.col.member"),
       sortValue: (m) => m.display_name || m.email,
       render: (m) => (
-        <div>
-          <div className="font-medium text-gray-900 dark:text-gray-100">{m.display_name || m.email}</div>
-          <div className="text-xs text-gray-500 dark:text-gray-400">{m.email}</div>
+        <div className="flex items-center gap-3">
+          <UserAvatar seed={m.email} size={32} />
+          <div className="min-w-0">
+            <div className="font-medium text-gray-900 dark:text-gray-100">{m.display_name || m.email}</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">{m.email}</div>
+          </div>
         </div>
       ),
     },
