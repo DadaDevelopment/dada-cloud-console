@@ -175,3 +175,60 @@ func ListOpenGitHubDeployments(ctx context.Context, pool *pgxpool.Pool, limit in
 	}
 	return out, rows.Err()
 }
+
+// GitHubBackfillCandidate is the build a GitHub App repo is running right now,
+// for a repo that has never had a GitHub Deployment: the newest successful
+// build whose image the app's live snapshot reports as running.
+type GitHubBackfillCandidate struct {
+	BuildID        uuid.UUID
+	EnvironmentID  uuid.UUID
+	RepoFullName   string
+	InstallationID int64
+	ProjectSlug    string
+	AppName        string
+	Ref            string
+	LiveStatus     string
+	LiveURL        string
+}
+
+// ListGitHubBackfillCandidates returns, per GitHub App repo that no build has
+// ever opened a GitHub Deployment for, the build its app is running now.
+// Repos whose running image matches no build of theirs are left out: there is
+// no commit to name.
+func ListGitHubBackfillCandidates(ctx context.Context, pool *pgxpool.Pool) ([]GitHubBackfillCandidate, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT DISTINCT ON (gr.id)
+		       b.id, gr.environment_id, gr.repo_full_name, i.installation_id, p.name, gr.app_name,
+		       COALESCE(NULLIF(b.head_sha, ''), b.commit_sha),
+		       COALESCE(rs.summary_json->>'status', ''), COALESCE(rs.summary_json->>'url', '')
+		FROM   git_repos gr
+		JOIN   git_app_installations i ON i.id = gr.installation_id
+		JOIN   projects p ON p.id = gr.project_id
+		JOIN   resource_snapshots rs
+		       ON rs.environment_id = gr.environment_id AND rs.kind = 'App' AND rs.name = gr.app_name
+		JOIN   builds b
+		       ON b.git_repo_id = gr.id AND b.status = 'success' AND b.image_uri = rs.summary_json->>'image'
+		WHERE  gr.provider = 'github'
+		  AND  i.installation_id <> 0
+		  AND  b.gh_deployment_state IS NULL
+		  AND  NOT EXISTS (
+		           SELECT 1 FROM builds x
+		           WHERE  x.git_repo_id = gr.id AND x.gh_deployment_state IS NOT NULL
+		       )
+		ORDER  BY gr.id, b.created_at DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list github backfill candidates: %w", err)
+	}
+	defer rows.Close()
+	var out []GitHubBackfillCandidate
+	for rows.Next() {
+		var c GitHubBackfillCandidate
+		if err := rows.Scan(&c.BuildID, &c.EnvironmentID, &c.RepoFullName, &c.InstallationID,
+			&c.ProjectSlug, &c.AppName, &c.Ref, &c.LiveStatus, &c.LiveURL); err != nil {
+			return nil, fmt.Errorf("scan github backfill candidate: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}

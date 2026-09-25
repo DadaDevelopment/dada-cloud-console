@@ -203,3 +203,72 @@ func (r *Runner) SyncGitHubDeployments(ctx context.Context) {
 		}
 	}
 }
+
+// BackfillGitHubDeployments gives every GitHub App repo that has never had a
+// GitHub Deployment one for the commit its app is running now, marked success
+// with the app's URL, so the repository's Deployments tab is not empty until
+// the next push. It only touches repos with no deployment history at all and
+// claims each build first, so it is safe to run on every agent start. A repo
+// whose app is not Ready is skipped rather than reported as deployed.
+func (r *Runner) BackfillGitHubDeployments(ctx context.Context) {
+	candidates, err := db.ListGitHubBackfillCandidates(ctx, r.pool)
+	if err != nil {
+		log.Warn().Err(err).Msg("github deployment backfill: listing candidates")
+		return
+	}
+	var opened, refused, skipped int
+	for _, c := range candidates {
+		if c.LiveStatus != "Ready" || c.Ref == "" || strings.HasPrefix(c.Ref, "manual-") {
+			skipped++
+			continue
+		}
+		claimed, err := db.ClaimGitHubDeployment(ctx, r.pool, c.BuildID)
+		if err != nil || !claimed {
+			skipped++
+			continue
+		}
+		g, err := db.LoadGitHubEnvironment(ctx, r.pool, c.EnvironmentID, c.RepoFullName)
+		if err != nil {
+			_ = db.SetGitHubDeployment(ctx, r.pool, c.BuildID, 0, 0, db.GHDeployUnavailable)
+			skipped++
+			continue
+		}
+		env, production := githubEnvironment(g, c.AppName)
+		cctx, cancel := context.WithTimeout(ctx, ghDeployCallDeadline)
+		id, err := r.github.CreateDeployment(cctx, c.InstallationID, c.RepoFullName, github.DeploymentRequest{
+			Ref:         c.Ref,
+			Environment: env,
+			Production:  production,
+			Description: "dada cloud: " + c.AppName,
+		})
+		cancel()
+		if err != nil {
+			log.Info().Err(err).Str("repo", c.RepoFullName).Int64("installation", c.InstallationID).
+				Msg("github deployment backfill: refused")
+			_ = db.SetGitHubDeployment(ctx, r.pool, c.BuildID, 0, 0, db.GHDeployUnavailable)
+			refused++
+			continue
+		}
+		cctx, cancel = context.WithTimeout(ctx, ghDeployCallDeadline)
+		perr := r.github.PostDeploymentStatus(cctx, c.InstallationID, c.RepoFullName, id, github.DeploymentStatus{
+			State:          "success",
+			LogURL:         buildPageURL(c.ProjectSlug, c.AppName, c.BuildID),
+			EnvironmentURL: c.LiveURL,
+			Description:    "Deployed",
+		})
+		cancel()
+		state := "success"
+		if perr != nil {
+			log.Warn().Err(perr).Str("repo", c.RepoFullName).Msg("github deployment backfill: status not posted")
+			state = db.GHDeployInProgress
+		}
+		if err := db.SetGitHubDeployment(ctx, r.pool, c.BuildID, id, c.InstallationID, state); err != nil {
+			log.Warn().Err(err).Str("repo", c.RepoFullName).Msg("github deployment backfill: recording")
+		}
+		opened++
+		log.Info().Str("repo", c.RepoFullName).Str("app", c.AppName).Str("ref", c.Ref).Int64("deployment", id).
+			Msg("github deployment backfill: opened")
+	}
+	log.Info().Int("candidates", len(candidates)).Int("opened", opened).Int("refused", refused).Int("skipped", skipped).
+		Msg("github deployment backfill done")
+}

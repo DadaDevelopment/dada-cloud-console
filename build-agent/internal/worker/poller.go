@@ -28,6 +28,7 @@ func (p *Poller) Start(ctx context.Context) {
 	p.runner.Reconcile(ctx)
 	p.runner.ReapStuck(ctx)
 	p.runner.ReconcileDeploys(ctx)
+	p.runner.BackfillGitHubDeployments(ctx)
 	ticker := time.NewTicker(p.interval)
 	defer ticker.Stop()
 	for {
