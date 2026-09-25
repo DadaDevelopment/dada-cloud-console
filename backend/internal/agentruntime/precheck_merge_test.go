@@ -52,9 +52,10 @@ func TestPGEscalate_ModelClientLineUncheckedWhenOff(t *testing.T) {
 	require.Empty(t, checks)
 }
 
-// A signal action whose code the runtime does not know is skipped; the next
-// action in spec order with a known code hands off, with the spec's line.
-func TestPrecheckSignals_UnknownHandoffCodeSkipped(t *testing.T) {
+// A signal action whose code the runtime does not know fails closed: the
+// hand-off still happens, with the fallback code and a pause, and the spec's
+// line; it is not skipped in favour of a later action.
+func TestPrecheckSignals_UnknownHandoffCodeFailsClosed(t *testing.T) {
 	r := &Runtime{}
 	pc := newPrecheckTurn(precheckBlock, 0)
 	pc.signals = map[string]bool{"a": true, "b": true}
@@ -62,10 +63,40 @@ func TestPrecheckSignals_UnknownHandoffCodeSkipped(t *testing.T) {
 	pc.handoffLine = "spec line"
 	r.precheckSignals(Conversation{}, pc)
 	require.NotNil(t, pc.signalHandoff)
-	require.Equal(t, "E_WITHDRAW", pc.signalHandoff.Code)
+	require.Equal(t, precheckFallbackCode, pc.signalHandoff.Code)
 	require.Equal(t, "spec line", pc.signalHandoff.ClientLine)
 	require.True(t, pc.signalHandoff.ForcePause)
-	require.Equal(t, "b", pc.handoffBy)
+	require.Equal(t, "a", pc.handoffBy)
+}
+
+// A handoff criterion with a code the runtime does not know hands off with
+// the fallback code and a pause instead of degrading to a signal.
+func TestPGPrecheckBlock_UnknownCriterionCodeFailsClosed(t *testing.T) {
+	rig := newPrecheckRig(t, map[string]string{"AGENT_RUNTIME_PRECHECK": "block"}, "первый ответ", "второй ответ")
+	bad := agentjudge.Precheck{Violations: []agentjudge.Violation{violation("legal_no_handoff", agentjudge.BlockHandoff, "ask", "E_LEAGL_TAX")}}
+	rig.judge.verdicts = []agentjudge.Precheck{bad, bad}
+	out := rig.send(t, "это законно?")
+	require.True(t, out.Suppressed, "the forced pause ends the turn")
+	require.Len(t, rig.handoffs, 1)
+	require.Equal(t, precheckFallbackCode, rig.handoffs[0].Code)
+	require.True(t, rig.handoffs[0].ForcePause)
+}
+
+// A handoff violation whose code only signals, with no line of its own and
+// no spec handoff_line, never delivers the draft the check refused: the
+// platform line replaces it, also when the model already made the call.
+func TestPGPrecheckBlock_SignalHandoffWithoutLineReplacesTheDraft(t *testing.T) {
+	for _, already := range []bool{false, true} {
+		rig := newPrecheckRig(t, map[string]string{"AGENT_RUNTIME_PRECHECK": "block"}, "комиссия 5%", "комиссия 7%")
+		if already {
+			rig.agent.escalations = []string{"E_CHECK_AND_RETURN"}
+		}
+		bad := agentjudge.Precheck{Violations: []agentjudge.Violation{violation("fact_unbacked", agentjudge.BlockHandoff, "ask", "E_CHECK_AND_RETURN")}}
+		rig.judge.verdicts = []agentjudge.Precheck{bad, bad}
+		out := rig.send(t, "какая комиссия?")
+		require.Equal(t, rig.rt.clientHandoffLine(), out.Text, "already=%v", already)
+		require.NotContains(t, out.Text, "комиссия")
+	}
 }
 
 // The precheck counter takes the shadow outcome under log (what block would

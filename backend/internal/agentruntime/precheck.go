@@ -35,6 +35,12 @@ const precheckClientLineBudget = 15 * time.Second
 // the runtime's own guards read.
 const precheckHistory = 30
 
+// precheckFallbackCode is the hand-off code a check uses when the spec names
+// a code the runtime does not know: a person takes the conversation over
+// (hands-off, pause) rather than a typo quietly turning a blocking rule into
+// a card nobody acts on.
+const precheckFallbackCode = "E_OTHER"
+
 // precheckLogParallel bounds the background Checks of log mode; one more is
 // skipped with a log line instead of piling up goroutines on a slow judge.
 const precheckLogParallel = 8
@@ -312,9 +318,16 @@ func (r *Runtime) precheckFallback(pc *precheckTurn) precheckDecision {
 // precheckViolationHandoff hands off on a handoff violation with the
 // criterion's code and the line agentjudge resolved for it (the criterion's
 // own, else the spec's handoff_line; empty falls back to the platform line).
+// A code the runtime does not know fails closed: precheckFallbackCode with a
+// pause.
 func (r *Runtime) precheckViolationHandoff(v agentjudge.Violation, pc *precheckTurn) precheckDecision {
 	pc.outcome, pc.handoffBy = precheckHandoff, v.ID
-	return precheckDecision{action: precheckHandOff, handoff: HandoffRequest{Code: v.Code, Summary: precheckSummary(v.ID, v.Why), ClientLine: strings.TrimSpace(v.Line), ForcePause: r.codeHandsOff(v.Code)}}
+	code, force := v.Code, r.codeHandsOff(v.Code)
+	if _, known := escalationReasons[code]; !known {
+		log.Error().Str("criterion", v.ID).Str("code", code).Str("fallback", precheckFallbackCode).Msg("agentruntime: precheck criterion names an unknown hand-off code, handing off with a pause")
+		code, force = precheckFallbackCode, true
+	}
+	return precheckDecision{action: precheckHandOff, handoff: HandoffRequest{Code: code, Summary: precheckSummary(v.ID, v.Why), ClientLine: strings.TrimSpace(v.Line), ForcePause: force}}
 }
 
 // precheckAsk is the rewrite request: the asks of the violated criteria in
@@ -361,9 +374,10 @@ func precheckSummary(id, why string) string {
 // the runtime knows asks for a hand-off with a pause, but does not drop the
 // draft. A draft that breaks no criterion goes out and the conversation is
 // handed off after it without a line (afterCheckedTurn); a draft that still
-// breaks one is dropped for the hand-off with the spec's hand-off line. An
-// unknown code is logged and skipped: the spec names codes, the runtime owns
-// the list.
+// breaks one is dropped for the hand-off with the spec's hand-off line. A
+// code the runtime does not know fails closed: precheckFallbackCode, still
+// with the pause, logged as an error (the spec names codes, the runtime owns
+// the list).
 func (r *Runtime) precheckSignals(conv Conversation, pc *precheckTurn) {
 	if pc.acted || pc.signals == nil {
 		return
@@ -373,13 +387,14 @@ func (r *Runtime) precheckSignals(conv Conversation, pc *precheckTurn) {
 		if a.Handoff == "" {
 			continue
 		}
-		if _, known := escalationReasons[a.Handoff]; !known {
-			log.Warn().Str("conversation", conv.ID.String()).Str("signal", a.Signal).Str("code", a.Handoff).Msg("agentruntime: precheck signal names an unknown hand-off code, skipped")
-			continue
+		code := a.Handoff
+		if _, known := escalationReasons[code]; !known {
+			log.Error().Str("conversation", conv.ID.String()).Str("signal", a.Signal).Str("code", code).Str("fallback", precheckFallbackCode).Msg("agentruntime: precheck signal names an unknown hand-off code, handing off with the fallback code")
+			code = precheckFallbackCode
 		}
 		pc.handoffBy = a.Signal
-		pc.signalHandoff = &HandoffRequest{Code: a.Handoff, Summary: "precheck " + a.Signal, ClientLine: pc.handoffLine, ForcePause: true}
-		log.Info().Str("conversation", conv.ID.String()).Str("signal", a.Signal).Str("code", a.Handoff).Msg("agentruntime: precheck signal, handing off after the draft")
+		pc.signalHandoff = &HandoffRequest{Code: code, Summary: "precheck " + a.Signal, ClientLine: pc.handoffLine, ForcePause: true}
+		log.Info().Str("conversation", conv.ID.String()).Str("signal", a.Signal).Str("code", code).Msg("agentruntime: precheck signal, handing off after the draft")
 		return
 	}
 }
@@ -399,7 +414,9 @@ const (
 // the asks as ReplyError, the loop goes on.
 // Done: a hand-off ended the turn, resp is what runTurn returns. Deliver: the
 // draft (or, for a signal-code hand-off, the criterion's line in *reply)
-// goes out as usual. When the model already called escalate_to_operator with
+// goes out as usual; a hand-off the turn does not end on always replaces the
+// draft, with the platform line when the spec gives none, since the draft is
+// the one the check refused. When the model already called escalate_to_operator with
 // the code of the hand-off (and the call went through), the runtime does not
 // page the operator a second time: a hand-off without a forced pause is not
 // repeated at all (only the criterion's line goes out), a forced one pauses
@@ -474,9 +491,11 @@ func (r *Runtime) precheckAct(ctx context.Context, conv Conversation, run *Agent
 				return precheckStepDone, MessageResponse{Suppressed: true}, nil
 			}
 		}
-		if d.handoff.ClientLine != "" {
-			*reply = d.handoff.ClientLine
+		line := d.handoff.ClientLine
+		if line == "" {
+			line = r.clientHandoffLine()
 		}
+		*reply = line
 	case precheckDeliver:
 		if pc.deferred != nil && slices.Contains(traced.Escalations, pc.deferred.Code) {
 			pc.deferred.NoCard = true
