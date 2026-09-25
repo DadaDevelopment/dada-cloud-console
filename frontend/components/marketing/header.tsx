@@ -8,12 +8,14 @@ import { useAuth } from "@/lib/auth";
 import { consoleHref, localeHref } from "@/lib/site";
 import { GOAL_LANDING_CTA, reachGoal } from "@/lib/metrika";
 import { LangToggle } from "./lang-toggle";
+import { UserAvatar } from "@/components/ui/user-avatar";
 import { clsx } from "clsx";
 import styles from "./header.module.css";
 
 export function MarketingHeader() {
   const { t, locale } = useLang();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  const avatarSeed = user?.email || user?.username || user?.id || "";
   const [open, setOpen] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
 
@@ -68,12 +70,15 @@ export function MarketingHeader() {
         <div className="hidden items-center gap-3 xl:flex">
           <LangToggle className={styles.language} />
           {token ? (
-            <Link
-              href={consoleHref("/projects")}
-              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
-            >
-              {t.nav.console}
-            </Link>
+            <>
+              <Link
+                href={consoleHref("/projects")}
+                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
+              >
+                {t.nav.console}
+              </Link>
+              {avatarSeed && <UserAvatar seed={avatarSeed} size={32} />}
+            </>
           ) : (
             <>
               <Link href={consoleHref("/login")} className="px-3 py-2 text-sm font-medium text-slate-600 hover:text-blue-600">
