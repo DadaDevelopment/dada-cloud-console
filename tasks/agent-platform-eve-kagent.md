@@ -107,4 +107,7 @@ Last status: Accepted=False, ReconcileFailed, `initialize`: Unauthorized (bearer
 Spike 2026-09-25: eve fits as engine (guard and evals without fork). Density win exists only
 when agents are data resolved per session (`defineDynamic` host), not with eve's documented
 one-process-per-agent layout. Durability needs our own dead-worker lock sweeper and idempotent
-side-effecting tools before prod. Next: design of the pilot (declarative-agent host).
+side-effecting tools before prod.
+
+Design 2026-09-25: `docs/superpowers/specs/2026-09-25-eve-kagent-design.md` (tier 1 declarative host,
+shared pool for all projects, tg-gateway stays transport, guards via agentjudge precheck, phases P0-P6).
