@@ -68,13 +68,13 @@ Marginal agent+MCP = ~0.5-0.64 GiB reserved. 4 agents + 4 MCP = ~2.2 GiB request
 
 ## D. eve-kagent spike (throwaway, answer = numbers)
 
-Workspace: session scratchpad, not the repo.
+Workspace: session scratchpad, not the repo. Full report: `tasks/eve-kagent-spike-2026-09-25.md`.
 
-- [ ] D1 RSS/latency: eve workspace with 3-5 agents, idle and 10 concurrent sessions.
-- [ ] D2 Pre-send guard with one bounded rewrite without forking eve (channel delivery or model middleware).
-- [ ] D3 Postgres workflow world: exists, and a `kill -9` mid-turn resumes.
-- [ ] D4 One tg-agent-tools YAML suite runs through `eve eval` via a loadYaml adapter.
-- [ ] Verdict written here with numbers.
+- [x] D1 RSS/latency: YELLOW. Documented workspace = 1 process per agent, ~200 MB idle each (same class as kagent pod). `defineDynamic` host = 5 agents in 1 process at 167 MB idle. ~1 MB retained per parked session.
+- [x] D2 Pre-send guard: GREEN. `wrapLanguageModel` middleware, ~70 lines, one rewrite, draft never in stream/history. No streaming of final text; usage under-counts the draft call.
+- [x] D3 Postgres world: YELLOW. `@workflow/world-postgres@5.0.0-beta.46` works, resumes after manual unlock, but kill -9 leaves the job lock ~4 h; tools re-run (at-least-once). SIGTERM path untested.
+- [x] D4 Eval compat: GREEN. markers.yaml runs unchanged via ~30-line loadYaml adapter; trajectory asserts, `--junit`, `--json`, exit 0/1/2 work.
+- [x] Verdict: YELLOW, bounded pilot.
 
 ## Review
 
@@ -104,4 +104,7 @@ spec:
 
 Last status: Accepted=False, ReconcileFailed, `initialize`: Unauthorized (bearer gate since dcdb0c3, this CR had no headers).
 
-(filled after spike)
+Spike 2026-09-25: eve fits as engine (guard and evals without fork). Density win exists only
+when agents are data resolved per session (`defineDynamic` host), not with eve's documented
+one-process-per-agent layout. Durability needs our own dead-worker lock sweeper and idempotent
+side-effecting tools before prod. Next: design of the pilot (declarative-agent host).
