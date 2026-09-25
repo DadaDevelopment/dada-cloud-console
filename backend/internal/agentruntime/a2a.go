@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -47,10 +48,18 @@ const (
 )
 
 // reRateLimited recognises the provider rate limit inside a failed task's
-// error text. It changes no behaviour: a burst that rate-limits every chat
-// looks exactly like a broken agent in the log otherwise, and the two need
-// very different responses from whoever is on call.
+// error text or a JSON-RPC error. In a failed task it only labels the log: a
+// burst that rate-limits every chat looks exactly like a broken agent
+// otherwise, and the two need very different responses from whoever is on
+// call. In a JSON-RPC error it also makes the call retryable.
 var reRateLimited = regexp.MustCompile(`(?i)\b429\b|rate.?limit|too many requests|overloaded`)
+
+// errA2ATransient marks a call that failed on the way rather than in the turn:
+// the agent's gateway answered 429 or 5xx, the provider rate limit came back
+// as a JSON-RPC error, or the connection dropped before any answer. On
+// 2026-09-20 such failures ended 12 eval turns with no reply at all, because
+// only a task the agent itself reported as failed was ever retried.
+var errA2ATransient = errors.New("transient agent call failure")
 
 // endUserHeader and agentHeader carry caller identity to the agent, which
 // replays them onto its MCP calls when its claim lists them in allowedHeaders.
@@ -186,7 +195,7 @@ func (c *httpA2AClient) SendTraced(ctx context.Context, run AgentRunRequest) (A2
 		MessageID: uuid.NewString(),
 		Parts:     []a2aPart{{Kind: "text", Text: renderAgentRun(run)}},
 	}
-	result, err := c.call(ctx, run, message)
+	result, err := c.callRetrying(ctx, run, message)
 	if err != nil {
 		return A2AReply{}, err
 	}
@@ -210,7 +219,7 @@ func (c *httpA2AClient) SendTraced(ctx context.Context, run AgentRunRequest) (A2
 			return A2AReply{}, fmt.Errorf("retry after %s task: %w", task.State, err)
 		}
 		message.MessageID = uuid.NewString()
-		if result, err = c.call(ctx, run, message); err != nil {
+		if result, err = c.callRetrying(ctx, run, message); err != nil {
 			return A2AReply{}, fmt.Errorf("retry after %s task: %w", task.State, err)
 		}
 		task = parseTask(result)
@@ -250,6 +259,33 @@ func (c *httpA2AClient) SendTraced(ctx context.Context, run AgentRunRequest) (A2
 	return A2AReply{Text: text, TraceID: task.TraceID, ObservationID: task.ObservationID}, nil
 }
 
+// callRetrying sends the message and re-sends it, as a fresh message in the
+// same context, while the call fails in transit. The pauses follow the failed
+// task schedule. A timeout is not retried: the call already spent its whole
+// budget, and a second one would outlive the turn.
+func (c *httpA2AClient) callRetrying(ctx context.Context, run AgentRunRequest, message a2aMessage) (json.RawMessage, error) {
+	result, err := c.call(ctx, run, message)
+	for attempt := 0; err != nil && errors.Is(err, errA2ATransient) && attempt < c.retries; attempt++ {
+		wait := c.retryPause << attempt
+		log.Warn().Err(err).Str("agent", run.AgentName).Str("context", run.ContextID).Int("attempt", attempt+1).Dur("pause", wait).
+			Bool("rate_limited", reRateLimited.MatchString(err.Error())).Msg("agentruntime: agent call failed in transit; retrying the turn")
+		if perr := c.pause(ctx, wait); perr != nil {
+			return nil, fmt.Errorf("retry after transient failure: %w", perr)
+		}
+		message.MessageID = uuid.NewString()
+		result, err = c.call(ctx, run, message)
+	}
+	return result, err
+}
+
+func transientTransport(ctx context.Context, err error) bool {
+	if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return false
+	}
+	var timeout interface{ Timeout() bool }
+	return !(errors.As(err, &timeout) && timeout.Timeout())
+}
+
 func (c *httpA2AClient) call(ctx context.Context, run AgentRunRequest, message a2aMessage) (json.RawMessage, error) {
 	if c.timeout > 0 {
 		var cancel context.CancelFunc
@@ -284,10 +320,16 @@ func (c *httpA2AClient) call(ctx context.Context, run AgentRunRequest, message a
 
 	resp, err := c.http.Do(req)
 	if err != nil {
+		if transientTransport(ctx, err) {
+			return nil, fmt.Errorf("a2a %s: %w: %w", agentName, errA2ATransient, err)
+		}
 		return nil, fmt.Errorf("a2a %s: %w", agentName, err)
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+		return nil, fmt.Errorf("a2a %s: status %d: %w", agentName, resp.StatusCode, errA2ATransient)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("a2a %s: status %d", agentName, resp.StatusCode)
 	}
@@ -300,6 +342,9 @@ func (c *httpA2AClient) call(ctx context.Context, run AgentRunRequest, message a
 		msg := strings.TrimSpace(parsed.Error.Message)
 		if msg == "" {
 			msg = "agent returned an error without a message (typically the agent could not reach its MCP tool server)"
+		}
+		if reRateLimited.MatchString(msg) {
+			return nil, fmt.Errorf("a2a %s: rpc error %d: %s: %w", agentName, parsed.Error.Code, msg, errA2ATransient)
 		}
 		return nil, fmt.Errorf("a2a %s: rpc error %d: %s", agentName, parsed.Error.Code, msg)
 	}
