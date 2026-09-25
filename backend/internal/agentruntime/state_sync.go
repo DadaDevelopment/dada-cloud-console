@@ -46,7 +46,7 @@ type stateReceipt struct {
 // operator summary changed. An empty summary keeps the one from the previous
 // receipt, so the hand-off text written at escalation survives later turns.
 func (s *StateSync) Push(ctx context.Context, conv Conversation, state RuntimeState, summary string) error {
-	if conv.AgentName != s.agent || conv.Channel != "telegram" {
+	if conv.AgentName != s.agent || conv.Channel != "telegram" || syntheticActor(conv.ActorUsername) {
 		return nil
 	}
 	lock := &s.locks[int(conv.ID[0])%len(s.locks)]

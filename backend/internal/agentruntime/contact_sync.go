@@ -41,7 +41,7 @@ func contactSyncFromEnv(store *pgStore) *ContactSync {
 }
 
 func (s *ContactSync) Ensure(ctx context.Context, conv Conversation) error {
-	if conv.AgentName != s.agent || conv.Channel != "telegram" {
+	if conv.AgentName != s.agent || conv.Channel != "telegram" || syntheticActor(conv.ActorUsername) {
 		return nil
 	}
 	lock := &s.locks[int(conv.ID[0])%len(s.locks)]
