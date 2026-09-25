@@ -31,6 +31,7 @@ const (
 var aiModelDiscoveryClient = &http.Client{Timeout: 8 * time.Second}
 var aiModelLookupIP = net.DefaultResolver.LookupIPAddr
 var aiModelIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]*$`)
+var aiVersionedBasePath = regexp.MustCompile(`/v[0-9]+$`)
 
 var aiProviderDefaultBases = map[string]string{
 	"openai":     "https://api.openai.com",
@@ -40,6 +41,7 @@ var aiProviderDefaultBases = map[string]string{
 	"sambanova":  "https://api.sambanova.ai",
 	"sotamodel":  "https://www.sotamodel.net",
 	"nvidia_nim": "https://integrate.api.nvidia.com",
+	"zai":        "https://api.z.ai/api/coding/paas/v4",
 }
 
 func modelDiscoveryURL(apiBase string) (string, error) {
@@ -49,7 +51,7 @@ func modelDiscoveryURL(apiBase string) (string, error) {
 	}
 	switch {
 	case strings.HasSuffix(base.Path, "/models"):
-	case strings.HasSuffix(base.Path, "/v1"):
+	case aiVersionedBasePath.MatchString(base.Path):
 		base.Path += "/models"
 	default:
 		base.Path += "/v1/models"

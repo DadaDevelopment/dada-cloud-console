@@ -65,6 +65,7 @@ var aiCatalogProviders = []aiCatalogProvider{
 	{Name: "groq", Label: "Groq", KeyURL: "https://console.groq.com/keys"},
 	{Name: "sambanova", Label: "SambaNova", KeyURL: "https://cloud.sambanova.ai/apis"},
 	{Name: "sotamodel", Label: "SotaModel", KeyURL: ""},
+	{Name: "zai", Label: "Z.ai", KeyURL: "https://z.ai/manage-apikey/apikey-list"},
 }
 
 var aiCatalogModels = []aiCatalogModel{
@@ -74,6 +75,8 @@ var aiCatalogModels = []aiCatalogModel{
 	{Alias: "claude", Provider: "anthropic", Kind: "chat", Upstream: "anthropic/claude-sonnet-5"},
 	{Alias: "claude-haiku", Provider: "anthropic", Kind: "chat", Upstream: "anthropic/claude-haiku-4-5-20251001"},
 	{Alias: "opus", Provider: "sotamodel", Kind: "chat", Upstream: "openai/claude-opus-5"},
+	{Alias: "glm-5.3", Provider: "zai", Kind: "chat", Upstream: "openai/glm-5.3"},
+	{Alias: "glm-5.3-flash", Provider: "zai", Kind: "chat", Upstream: "openai/glm-5.3-flash"},
 	{Alias: "or-gpt-41-mini", Provider: "openrouter", Kind: "chat", Upstream: "openrouter/openai/gpt-4.1-mini"},
 	{Alias: "or-gpt-41-mini-online", Provider: "openrouter", Kind: "chat", Upstream: "openrouter/openai/gpt-4.1-mini:online"},
 	{Alias: "or-gpt-4o-mini", Provider: "openrouter", Kind: "chat", Upstream: "openrouter/openai/gpt-4o-mini"},
