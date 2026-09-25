@@ -1145,3 +1145,16 @@ Review: homepage RU/EN rewritten, VPS responsibility split added, secondary prod
 - [x] Simplify footer; verify RU/EN, mobile/desktop, interactions and code checks.
 
 Readability review: browser computed homepage paragraphs20–25px with rgb(32,32,30) ink; widths320/768/1024/1440 CSSpx matched document scrollWidth. RU/EN render, bot/API switches and Free FAQ expansion passed. ESLint/tsc/diff-check passed. Anthropic composition inspected in browser; Apple/Yandex official pages read. Preview only, no deployment.
+
+## 2026-09-25 — Проверка ответа судьёй до отправки (PR #49 + tg-agent-tools #6, ребейз наш)
+- [x] Коммит Артёма (PR #49) перенесён на main как есть, флаги выключены.
+- [x] Сигналы и коды передачи — из спеки агента (`handoff`, `stop_followups`), в Go только механика; `line`/`source` необязательны, `handoff_line` по умолчанию.
+- [x] Счётчики отказов убраны (судья видит 30 сообщений истории); `AGENT_RUNTIME_HANDOFF_TRIGGERS` и denylist в Go убраны: `AGENT_RUNTIME_HANDS_OFF_CODES=E_LEGAL_TAX`, ссылки — через `AGENT_REPLY_LINK_ALLOWLIST`.
+- [x] Запрос на переделку = ask + причина судьи; подсказка гарда на попытке 0 склеивается с запросами судьи.
+- [x] Судья видит состояние после вызова агента (`active_skills` этого хода); догоны проверяются до отправки (block) / пишутся как `idle_log` (log); `client_message` эскалации проверяется (block).
+- [x] `AGENT_PRECHECK_LLM_*` (свой ключ) с откатом на `AGENT_JUDGE_LLM_*`; метрики `dada_agent_precheck_total`, `dada_agent_precheck_check_seconds`.
+- [ ] Живой A2A-вызов в `agent-sandbox`: в `result.history` есть `function_response` `kb_search`.
+- [ ] Стенд: 32 сценария возражений × 2 (off / block).
+- [ ] Прод: `PRECHECK=log` одновременно со спекой судьи и промптом native.79 (не раньше — R30 + `{{kb}}` валят `turn.total`), неделя, затем `block` + `HANDS_OFF_CODES=E_LEGAL_TAX`.
+
+Review: go test agentjudge/agentruntime/turnbudget с PG зелёные (105 PG-тестов), `-race` ок, gofmt (golang:1.25-alpine) чисто; мутации ключевых новых тестов краснеют.

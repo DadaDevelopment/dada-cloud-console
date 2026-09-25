@@ -9,21 +9,31 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
 	"github.com/dada-tuda/console/backend/internal/agentjudge"
 )
 
-// Pre-delivery check (plan 2026-09-25). The criteria and every line the
-// client or the model reads live in the agent's judge spec; this file is the
-// mechanics: when to check, what to do with the verdict, what to record.
-
-// precheckBudgetDefault bounds the Checks of one turn: their durations
-// together stay within it, each Check runs under what the earlier ones left.
-// The rewrite in between is the agent's own call and neither counts nor is
-// cut; a Check with nothing left is not made. turnbudget.Precheck is the
-// same budget on the turn's own deadline.
+// precheckBudgetDefault bounds the Checks of one turn (plan 2026-09-25): their
+// durations together stay within it, each Check runs under what the earlier
+// ones left. The rewrite in between is the agent's own call and neither
+// counts nor is cut; a Check with nothing left is not made.
+// turnbudget.Precheck is the same budget on the turn's own deadline. The
+// criteria, the asks, the lines and what a signal starts all live in the
+// agent's judge spec; this file is the mechanics: when to check, what to do
+// with the verdict, what to record.
 const precheckBudgetDefault = 30 * time.Second
+
+// precheckClientLineBudget bounds the check of the hand-off line the model
+// wrote into escalate_to_operator: that check runs inside the model's own
+// tool call, which the agent's turn timeout also covers.
+const precheckClientLineBudget = 15 * time.Second
+
+// precheckHistory is how many recent messages a check sees. A second refusal
+// or a repeated script question can lie further back than the ten messages
+// the runtime's own guards read.
+const precheckHistory = 30
 
 // precheckLogParallel bounds the background Checks of log mode; one more is
 // skipped with a log line instead of piling up goroutines on a slow judge.
@@ -34,82 +44,59 @@ const precheckLogParallel = 8
 // they are acted on and the record says the verdict was partial.
 const precheckPartial = "partial"
 
-// Outcomes of metadata.precheck.outcome (and shadow_outcome).
+// Outcomes of metadata.precheck.outcome (and shadow_outcome). drop is a
+// follow-up the check held back after its one rewrite, or a model-written
+// hand-off line replaced by the spec's line.
 const (
 	precheckPass    = "pass"
 	precheckRewrite = "rewrite"
 	precheckHandoff = "handoff"
 	precheckTimeout = "timeout"
 	precheckError   = "error"
+	precheckDrop    = "drop"
 )
 
-// precheckIdleLog is metadata.precheck.mode of a follow-up checked after
-// delivery under AGENT_RUNTIME_PRECHECK=block: follow-ups are not held.
-const precheckIdleLog = "idle_log"
-
-// Signal ids of the turn spec the runtime acts on under block (refusal_*
-// only with ScriptCounters).
+// Modes of metadata.precheck.mode beyond off|log|block: a follow-up checked
+// before delivery under block, a follow-up checked after delivery under log
+// (a follow-up never hands off, so the log share leaves it out), and the
+// hand-off line of the model's own escalate_to_operator call checked under
+// block.
 const (
-	signalDistress         = "distress"
-	signalMoneyWithUsLost  = "money_with_us_lost"
-	signalWithdrawalStuck  = "withdrawal_stuck"
-	refusalSignalPrefix    = "refusal_"
-	escalationLostMoney    = "E_LOST_MONEY"
-	escalationWithdraw     = "E_WITHDRAW"
-	escalationOtherDefault = "E_OTHER"
+	precheckIdleBlock  = "idle_block"
+	precheckIdleLog    = "idle_log"
+	precheckClientLine = "client_line"
 )
 
-// moneySignals are the signals that hand the conversation off with a pause
-// after the client got the (sympathetic) draft, in priority order: one
-// hand-off per turn, the first signal on wins.
-var moneySignals = []struct{ id, code string }{
-	{signalMoneyWithUsLost, escalationLostMoney},
-	{signalWithdrawalStuck, escalationWithdraw},
-}
-
-// refusalHandoffCodes maps a refusal signal to the code the conversation is
-// handed off with at the threshold; a refusal signal not listed here hands
-// off with E_OTHER.
-var refusalHandoffCodes = map[string]string{
-	"refusal_distrust": "E_DISTRUST",
-	"refusal_money":    "E_TERMS_OFF_LADDER",
-	"refusal_time":     escalationOtherDefault,
-	"refusal_other":    escalationOtherDefault,
-}
-
-// precheckTurn is one turn's check record across the attempts.
+// precheckTurn is one turn's check record across the attempts: the time the
+// Checks took (spent, the rewrite excluded), the attempts, the signals and
+// signal actions of the first answered Check with the spec's hand-off line,
+// the hand-off the turn came to (handoffBy; shadowHandoffBy is what block
+// would have handed off on, in log), the last answered verdict and the draft
+// it judged (Submit reuses them when that draft is what went out), the first
+// handoff violation of attempt 0 (acted on when the rewrite's Check does not
+// answer, handoffAttempt0 records that) and the hand-off a signal asked for:
+// waiting on the draft (signalHandoff), or carried past delivery (deferred).
 type precheckTurn struct {
-	mode   string
-	budget time.Duration
-	start  time.Time
-	// spent is the time the Checks of the turn took, the rewrite excluded.
-	spent    time.Duration
-	partial  bool
-	outcome  string
-	shadow   string
-	attempts []map[string]any
-	signals  map[string]bool
-	acted    bool
-	// handoffBy is the criterion or signal id a hand-off came from
-	// (shadowHandoffBy: what block would have handed off on, in log).
+	mode            string
+	budget          time.Duration
+	start           time.Time
+	spent           time.Duration
+	partial         bool
+	outcome         string
+	shadow          string
+	attempts        []map[string]any
+	signals         map[string]bool
+	actions         []agentjudge.SignalAction
+	handoffLine     string
+	acted           bool
 	handoffBy       string
 	shadowHandoffBy string
-
-	// verdicts and reply are the last answered Check and the draft it
-	// judged; Submit reuses them when that draft is what was delivered.
-	verdicts *agentjudge.Precheck
-	reply    string
-
-	// firstHandoff is the first handoff violation of attempt 0: when the
-	// Check of the rewrite does not answer, the turn acts on it instead of
-	// delivering an unchecked rewrite (handoffAttempt0 records that).
+	verdicts        *agentjudge.Precheck
+	reply           string
 	firstHandoff    *agentjudge.Violation
 	handoffAttempt0 bool
-	// signalHandoff is the hand-off a money signal asked for, waiting on the
-	// draft: a clean draft goes out and deferred carries the hand-off past
-	// delivery; a draft that still breaks a criterion is dropped for it.
-	signalHandoff *HandoffRequest
-	deferred      *HandoffRequest
+	signalHandoff   *HandoffRequest
+	deferred        *HandoffRequest
 }
 
 func newPrecheckTurn(mode string, budget time.Duration) *precheckTurn {
@@ -152,6 +139,17 @@ func (pc *precheckTurn) record() map[string]any {
 		rec["signals"] = signals
 	}
 	return rec
+}
+
+// stopsFollowups reports whether a marked signal of the turn asks the
+// follow-up ladder to stop.
+func (pc *precheckTurn) stopsFollowups() bool {
+	for _, a := range pc.actions {
+		if a.StopFollowups {
+			return true
+		}
+	}
+	return false
 }
 
 // precheckOnce runs one Check under what is left of the turn's check budget
@@ -206,7 +204,7 @@ func (r *Runtime) precheckOnce(ctx context.Context, agent string, t agentjudge.T
 	}
 	entry["violations"] = ids
 	if pc.signals == nil {
-		pc.signals = verdict.Signals
+		pc.signals, pc.actions, pc.handoffLine = verdict.Signals, verdict.Actions, verdict.HandoffLine
 	}
 	pc.verdicts, pc.reply = &verdict, t.Reply
 	return verdict, status
@@ -227,30 +225,31 @@ type precheckDecision struct {
 	handoff HandoffRequest
 }
 
+// hasHandoffViolation reports whether a verdict breaks a handoff criterion.
+func hasHandoffViolation(violations []agentjudge.Violation) bool {
+	return slices.ContainsFunc(violations, func(v agentjudge.Violation) bool { return v.Block == agentjudge.BlockHandoff })
+}
+
 // precheckDraft is the block-mode rule for one draft. Attempt 0 with any
 // violation goes back with the violated criteria's asks. Attempt 1 (also when
-// a soft check already spent attempt 0) with a handoff violation hands off
+// a runtime guard already spent attempt 0) with a handoff violation hands off
 // with that criterion's code and line; with only rewrite violations the
 // draft goes out and the violation is recorded. A timeout or a judge error
 // delivers the draft as is, except on attempt 1 after attempt 0 broke a
 // handoff criterion: the turn then hands off on that violation
 // (precheckFallback). A partial verdict is acted on, except on attempt 1
 // without a handoff violation: the draft is then as unchecked as after an
-// error and takes the same way (its signals still count). The signals
-// of the first answered Check may hand the turn off before any of that; a
-// money signal waits on the draft (precheckSignals). A criterion's code that
-// hands off (escalationHandsOff, E_LEGAL_TAX under the triggers) pauses even
-// under narrow mode; a signal code (E_CHECK_AND_RETURN) only pages the
-// operator.
-func (r *Runtime) precheckDraft(ctx context.Context, conv Conversation, t agentjudge.Turn, pending []Message, attempt int, pc *precheckTurn) precheckDecision {
+// error and takes the same way (its signals still count). A signal whose
+// spec action names a hand-off code waits on the draft (precheckSignals). A
+// criterion's code that hands off (escalationHandsOff and
+// AGENT_RUNTIME_HANDS_OFF_CODES) pauses even under narrow mode; a signal code
+// (E_CHECK_AND_RETURN) only pages the operator.
+func (r *Runtime) precheckDraft(ctx context.Context, conv Conversation, t agentjudge.Turn, attempt int, pc *precheckTurn) precheckDecision {
 	verdict, status := r.precheckOnce(ctx, conv.AgentName, t, attempt, pc)
 	if status == precheckPartial {
 		status = ""
-		if attempt > 0 && !slices.ContainsFunc(verdict.Violations, func(v agentjudge.Violation) bool { return v.Block == agentjudge.BlockHandoff }) {
-			if d, ok := r.precheckSignals(ctx, conv, pending, pc); ok {
-				pc.outcome = precheckHandoff
-				return d
-			}
+		if attempt > 0 && !hasHandoffViolation(verdict.Violations) {
+			r.precheckSignals(conv, pc)
 			status = precheckError
 		}
 	}
@@ -259,12 +258,9 @@ func (r *Runtime) precheckDraft(ctx context.Context, conv Conversation, t agentj
 		if attempt == 0 {
 			return precheckDecision{action: precheckDeliver}
 		}
-		return r.precheckFallback(conv, pc)
+		return r.precheckFallback(pc)
 	}
-	if d, ok := r.precheckSignals(ctx, conv, pending, pc); ok {
-		pc.outcome = precheckHandoff
-		return d
-	}
+	r.precheckSignals(conv, pc)
 	if len(verdict.Violations) == 0 {
 		if pc.outcome == "" {
 			pc.outcome = precheckPass
@@ -290,7 +286,7 @@ func (r *Runtime) precheckDraft(ctx context.Context, conv Conversation, t agentj
 	}
 	for _, v := range verdict.Violations {
 		if v.Block == agentjudge.BlockHandoff {
-			return r.precheckViolationHandoff(conv, v, pc)
+			return r.precheckViolationHandoff(v, pc)
 		}
 	}
 	pc.outcome = precheckRewrite
@@ -299,45 +295,56 @@ func (r *Runtime) precheckDraft(ctx context.Context, conv Conversation, t agentj
 
 // precheckFallback is attempt 1 when its draft is unchecked (the Check
 // timed out, failed or answered only in part, or the model fell silent): a
-// money hand-off attempt 0 asked for takes the turn, else the handoff
+// signal hand-off attempt 0 asked for takes the turn, else the handoff
 // violation of attempt 0 does, else the draft goes out as is.
-func (r *Runtime) precheckFallback(conv Conversation, pc *precheckTurn) precheckDecision {
+func (r *Runtime) precheckFallback(pc *precheckTurn) precheckDecision {
 	if req := pc.signalHandoff; req != nil {
 		pc.signalHandoff, pc.outcome = nil, precheckHandoff
 		return precheckDecision{action: precheckHandOff, handoff: *req}
 	}
 	if v := pc.firstHandoff; v != nil {
 		pc.handoffAttempt0 = true
-		return r.precheckViolationHandoff(conv, *v, pc)
+		return r.precheckViolationHandoff(*v, pc)
 	}
 	return precheckDecision{action: precheckDeliver}
 }
 
 // precheckViolationHandoff hands off on a handoff violation with the
-// criterion's code and line.
-func (r *Runtime) precheckViolationHandoff(conv Conversation, v agentjudge.Violation, pc *precheckTurn) precheckDecision {
+// criterion's code and the line agentjudge resolved for it (the criterion's
+// own, else the spec's handoff_line; empty falls back to the platform line).
+func (r *Runtime) precheckViolationHandoff(v agentjudge.Violation, pc *precheckTurn) precheckDecision {
 	pc.outcome, pc.handoffBy = precheckHandoff, v.ID
-	line := ""
-	if c, ok := r.ext.precheck.Criterion(conv.AgentName, v.ID); ok {
-		line = strings.TrimSpace(c.Line)
-	}
-	return precheckDecision{action: precheckHandOff, handoff: HandoffRequest{Code: v.Code, Summary: precheckSummary(v.ID, v.Why), ClientLine: line, ForcePause: r.codeHandsOff(v.Code)}}
+	return precheckDecision{action: precheckHandOff, handoff: HandoffRequest{Code: v.Code, Summary: precheckSummary(v.ID, v.Why), ClientLine: strings.TrimSpace(v.Line), ForcePause: r.codeHandsOff(v.Code)}}
 }
 
-// precheckAsk joins the asks of the violated criteria, each once, in spec
-// order: the whole text comes from the spec.
+// precheckAsk is the rewrite request: the asks of the violated criteria in
+// spec order, each once, each followed by the judge's own reasons for the
+// violations that raised it, so the model learns what to change and where.
+// The asks come from the spec, the reasons from the judge; no text here.
 func precheckAsk(violations []agentjudge.Violation) string {
-	seen := map[string]bool{}
-	var asks []string
+	var order []string
+	whys := map[string][]string{}
 	for _, v := range violations {
 		ask := strings.TrimSpace(v.Ask)
-		if ask == "" || seen[ask] {
+		if ask == "" {
 			continue
 		}
-		seen[ask] = true
-		asks = append(asks, ask)
+		if _, seen := whys[ask]; !seen {
+			order = append(order, ask)
+			whys[ask] = nil
+		}
+		if why := strings.TrimSpace(v.Why); why != "" && !slices.Contains(whys[ask], why) {
+			whys[ask] = append(whys[ask], why)
+		}
 	}
-	return strings.Join(asks, "\n")
+	lines := make([]string, 0, len(order))
+	for _, ask := range order {
+		if reasons := whys[ask]; len(reasons) > 0 {
+			ask += " (" + strings.Join(reasons, "; ") + ")"
+		}
+		lines = append(lines, ask)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // precheckSummary is the operator card's summary for a check-decided
@@ -349,70 +356,32 @@ func precheckSummary(id, why string) string {
 	return "precheck " + id
 }
 
-// precheckSignals acts on the signals of the turn's first answered Check,
-// once per turn: money_with_us_lost (E_LOST_MONEY) or else withdrawal_stuck
-// (E_WITHDRAW) asks for a hand-off with a pause but does not drop the draft:
-// the sympathetic draft that breaks no criterion goes out, then the
-// conversation is handed off without a platform line (afterCheckedTurn); a
-// draft that still breaks one is dropped for the hand-off with the platform
-// line. Under AGENT_RUNTIME_SCRIPT_COUNTERS each refusal_*
-// signal is counted (deduplicated by the pending message ids, so attempts 0
-// and 1 and a recovery replay count once) and at
-// AGENT_RUNTIME_REFUSAL_HANDOFF_AT refusals for one reason the draft is
-// dropped and the conversation handed off with a pause. The client gets the
-// runtime's hand-off line: the spec has no line field for a signal.
-func (r *Runtime) precheckSignals(ctx context.Context, conv Conversation, pending []Message, pc *precheckTurn) (precheckDecision, bool) {
+// precheckSignals acts on the signal actions of the turn's first answered
+// Check, once per turn: the first action in spec order whose hand-off code
+// the runtime knows asks for a hand-off with a pause, but does not drop the
+// draft. A draft that breaks no criterion goes out and the conversation is
+// handed off after it without a line (afterCheckedTurn); a draft that still
+// breaks one is dropped for the hand-off with the spec's hand-off line. An
+// unknown code is logged and skipped: the spec names codes, the runtime owns
+// the list.
+func (r *Runtime) precheckSignals(conv Conversation, pc *precheckTurn) {
 	if pc.acted || pc.signals == nil {
-		return precheckDecision{}, false
+		return
 	}
 	pc.acted = true
-	for _, sig := range moneySignals {
-		if !pc.signals[sig.id] {
+	for _, a := range pc.actions {
+		if a.Handoff == "" {
 			continue
 		}
-		pc.handoffBy = sig.id
-		pc.signalHandoff = &HandoffRequest{Code: sig.code, Summary: "precheck " + sig.id, ForcePause: true}
-		log.Info().Str("conversation", conv.ID.String()).Str("signal", sig.id).Str("code", sig.code).Msg("agentruntime: precheck money signal, handing off after the draft")
-		return precheckDecision{}, false
-	}
-	if !r.flags.ScriptCounters {
-		return precheckDecision{}, false
-	}
-	store, ok := r.store.(counterStore)
-	if !ok {
-		log.Warn().Str("conversation", conv.ID.String()).Msg("agentruntime: refusal counter storage is not configured")
-		return precheckDecision{}, false
-	}
-	msgIDs := make([]string, 0, len(pending))
-	for _, m := range pending {
-		msgIDs = append(msgIDs, m.ID.String())
-	}
-	var keys []string
-	for id, on := range pc.signals {
-		if on && strings.HasPrefix(id, refusalSignalPrefix) {
-			keys = append(keys, id)
-		}
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		count, err := store.RecordRefusal(ctx, conv.ID, key, msgIDs)
-		if err != nil {
-			log.Warn().Err(err).Str("conversation", conv.ID.String()).Str("refusal", key).Msg("agentruntime: refusal not recorded")
+		if _, known := escalationReasons[a.Handoff]; !known {
+			log.Warn().Str("conversation", conv.ID.String()).Str("signal", a.Signal).Str("code", a.Handoff).Msg("agentruntime: precheck signal names an unknown hand-off code, skipped")
 			continue
 		}
-		if at := r.flags.RefusalHandoffAt; at <= 0 || count < at {
-			continue
-		}
-		code := refusalHandoffCodes[key]
-		if code == "" {
-			code = escalationOtherDefault
-		}
-		pc.handoffBy = key
-		log.Info().Str("conversation", conv.ID.String()).Str("refusal", key).Int("count", count).Str("code", code).
-			Msg("agentruntime: refusal threshold reached, handing off")
-		return precheckDecision{action: precheckHandOff, handoff: HandoffRequest{Code: code, Summary: fmt.Sprintf("precheck %s x%d", key, count), ForcePause: true}}, true
+		pc.handoffBy = a.Signal
+		pc.signalHandoff = &HandoffRequest{Code: a.Handoff, Summary: "precheck " + a.Signal, ClientLine: pc.handoffLine, ForcePause: true}
+		log.Info().Str("conversation", conv.ID.String()).Str("signal", a.Signal).Str("code", a.Handoff).Msg("agentruntime: precheck signal, handing off after the draft")
+		return
 	}
-	return precheckDecision{}, false
 }
 
 // precheckStepResult tells the attempt loop what to do after a check.
@@ -425,7 +394,9 @@ const (
 )
 
 // precheckStep checks the draft that passed every other guard of this
-// attempt. Redo: the run carries the asks as ReplyError, the loop goes on.
+// attempt, judged against the state after the agent's call (the facts it
+// recorded and the procedures it loaded in this turn). Redo: the run carries
+// the asks as ReplyError, the loop goes on.
 // Done: a hand-off ended the turn, resp is what runTurn returns. Deliver: the
 // draft (or, for a signal-code hand-off, the criterion's line in *reply)
 // goes out as usual. When the model already called escalate_to_operator with
@@ -438,16 +409,35 @@ func (r *Runtime) precheckStep(ctx context.Context, conv Conversation, run *Agen
 	if isSilenceReply(*reply) {
 		return r.precheckSilence(ctx, conv, run, after, pending, history, reply, traced, pc)
 	}
-	d := r.precheckDraft(ctx, conv, r.judgeInput(conv, *run, pending, history, *reply, nil, traced), pending, attempt, pc)
+	checked := *run
+	checked.ConversationContext.State = after
+	d := r.precheckDraft(ctx, conv, r.judgeInput(conv, checked, pending, history, *reply, nil, traced), attempt, pc)
 	return r.precheckAct(ctx, conv, run, after, pending, history, reply, traced, pc, d)
+}
+
+// precheckWithSoftHint runs the attempt-0 Check on a draft a runtime guard
+// already sent back, so the one rewrite the turn has carries both the
+// guard's hint and the asks of the criteria the draft breaks; without it the
+// judge would see only the rewrite, and a handoff criterion there hands off
+// with no second chance. Without a block check (or for a silence) the hint
+// goes back alone.
+func (r *Runtime) precheckWithSoftHint(ctx context.Context, conv Conversation, run AgentRunRequest, pending, history []Message, reply string, traced A2AReply, pc *precheckTurn, hint string) string {
+	if pc == nil || isSilenceReply(reply) {
+		return hint
+	}
+	d := r.precheckDraft(ctx, conv, r.judgeInput(conv, run, pending, history, reply, nil, traced), 0, pc)
+	if d.action == precheckRedo && d.ask != "" {
+		return hint + "\n" + d.ask
+	}
+	return hint
 }
 
 // precheckSilence is a deliberate silence (empty, SKIP) of the rewrite (the
 // caller does not check attempt 0's silence): it is not checked, but a
-// hand-off attempt 0 left waiting (a money signal, a handoff violation) is
+// hand-off attempt 0 left waiting (a signal hand-off, a handoff violation) is
 // carried out as after a failed Check, not lost in the silence.
 func (r *Runtime) precheckSilence(ctx context.Context, conv Conversation, run *AgentRunRequest, after RuntimeState, pending, history []Message, reply *string, traced A2AReply, pc *precheckTurn) (precheckStepResult, MessageResponse, error) {
-	d := r.precheckFallback(conv, pc)
+	d := r.precheckFallback(pc)
 	if d.action != precheckHandOff {
 		return precheckStepDeliver, MessageResponse{}, nil
 	}
@@ -528,10 +518,10 @@ func (r *Runtime) precheckHandOff(ctx context.Context, conv Conversation, req Ha
 }
 
 // afterCheckedTurn runs after a checked turn was delivered: the hand-off a
-// money signal left for after the draft (no platform line: the draft was the
-// reply), the log line, and a distress signal stops the follow-up ladder
-// until the client writes again. A turn no Check ran on (a deliberate
-// silence) has nothing to record.
+// signal left for after the draft (no line: the draft was the reply), the log
+// line, and a signal whose spec action says stop_followups ends the
+// follow-up ladder until the client writes again. A turn no Check ran on (a
+// deliberate silence) has nothing to record.
 func (r *Runtime) afterCheckedTurn(ctx context.Context, conv Conversation, pc *precheckTurn) {
 	if pc.start.IsZero() {
 		return
@@ -539,50 +529,105 @@ func (r *Runtime) afterCheckedTurn(ctx context.Context, conv Conversation, pc *p
 	if req := pc.deferred; req != nil {
 		req.NoClientLine = true
 		if ended, err := r.precheckHandOff(ctx, conv, *req); err != nil || !ended {
-			log.Error().Err(err).Str("conversation", conv.ID.String()).Str("code", req.Code).Msg("agentruntime: draft delivered but the money hand-off did not pause")
+			log.Error().Err(err).Str("conversation", conv.ID.String()).Str("code", req.Code).Msg("agentruntime: draft delivered but the signal hand-off did not pause")
 		}
 	}
 	logPrecheck(conv, pc.record())
-	if !pc.signals[signalDistress] {
+	if !pc.stopsFollowups() {
 		return
 	}
-	store, ok := r.store.(counterStore)
+	store, ok := r.store.(followupStopper)
 	if !ok {
 		return
 	}
 	if err := store.StopIdleLadder(ctx, conv.ID); err != nil {
-		log.Warn().Err(err).Str("conversation", conv.ID.String()).Msg("agentruntime: follow-ups not stopped after distress")
+		log.Warn().Err(err).Str("conversation", conv.ID.String()).Msg("agentruntime: follow-ups not stopped after a stop_followups signal")
 	}
 }
 
-// resetRefusalsAfterResume clears the refusal counters of a conversation an
-// operator returned to the bot: a turn runs only while the agent is enabled,
-// so a pause mark found here means the pause was lifted.
-func (r *Runtime) resetRefusalsAfterResume(ctx context.Context, conv Conversation) {
-	if !r.flags.ScriptCounters {
-		return
+// precheckFollowUp is the block-mode check of an idle follow-up before it
+// goes out. Attempt 0 with any violation returns the asks for the one
+// rewrite; attempt 1 with any violation drops the follow-up (a skipped
+// follow-up is silence, a bad one is a message the client did not ask for).
+// Signals start nothing here, and a Check that does not answer lets the
+// follow-up go, as for a turn.
+func (r *Runtime) precheckFollowUp(ctx context.Context, conv Conversation, t agentjudge.Turn, attempt int, pc *precheckTurn) (ask string, drop bool) {
+	verdict, status := r.precheckOnce(ctx, conv.AgentName, t, attempt, pc)
+	if status != "" && status != precheckPartial {
+		pc.outcome = status
+		return "", false
 	}
-	store, ok := r.store.(counterStore)
-	if !ok {
-		return
+	if len(verdict.Violations) == 0 {
+		if pc.outcome == "" {
+			pc.outcome = precheckPass
+		}
+		return "", false
 	}
-	reset, err := store.ResetRefusalsAfterPause(ctx, conv.ID)
+	if attempt == 0 {
+		pc.outcome = precheckRewrite
+		return precheckAsk(verdict.Violations), false
+	}
+	pc.outcome = precheckDrop
+	return "", true
+}
+
+// checkedClientLine checks, under AGENT_RUNTIME_PRECHECK=block, the line the
+// model wrote into escalate_to_operator before it reaches the client: the
+// tool sends that line by itself, outside the turn the runtime checks. A line
+// that breaks a block criterion is replaced by the handoff violation's line,
+// else the spec's hand-off line, else the platform line; a check that does
+// not answer lets the model's line go, as for a turn.
+func (r *Runtime) checkedClientLine(ctx context.Context, conv Conversation, line string) string {
+	if r.flags.Precheck != precheckBlock || r.ext.precheck == nil || strings.TrimSpace(line) == "" {
+		return line
+	}
+	state, err := r.states.GetState(ctx, conv.ID)
 	if err != nil {
-		log.Warn().Err(err).Str("conversation", conv.ID.String()).Msg("agentruntime: refusal counters not reset after resume")
-		return
+		return line
 	}
-	if reset {
-		log.Info().Str("conversation", conv.ID.String()).Msg("agentruntime: agent resumed, refusal counters reset")
+	history, err := r.store.GetRecentMessages(ctx, conv.ID, precheckHistory)
+	if err != nil {
+		return line
 	}
+	var pending []Message
+	if inbox, ok := r.store.(interface {
+		PendingRuntimeMessages(context.Context, uuid.UUID) ([]Message, error)
+	}); ok {
+		pending, _ = inbox.PendingRuntimeMessages(ctx, conv.ID)
+	}
+	pc := newPrecheckTurn(precheckClientLine, precheckClientLineBudget)
+	run := AgentRunRequest{ConversationContext: AgentConversationContext{State: state}}
+	verdict, status := r.precheckOnce(ctx, conv.AgentName, r.judgeInput(conv, run, pending, history, line, nil, A2AReply{}), 0, pc)
+	switch {
+	case status != "" && status != precheckPartial:
+		pc.outcome = status
+	case len(verdict.Violations) == 0:
+		pc.outcome = precheckPass
+	default:
+		pc.outcome, pc.handoffBy = precheckDrop, verdict.Violations[0].ID
+		replacement := verdict.HandoffLine
+		for _, v := range verdict.Violations {
+			if v.Block == agentjudge.BlockHandoff && strings.TrimSpace(v.Line) != "" {
+				replacement = v.Line
+				break
+			}
+		}
+		if strings.TrimSpace(replacement) == "" {
+			replacement = r.clientHandoffLine()
+		}
+		line = replacement
+	}
+	logPrecheck(conv, pc.record())
+	return line
 }
 
-// precheckLogged is AGENT_RUNTIME_PRECHECK=log (and, with mode idle_log, a
-// follow-up under block): after delivery, one Check of the delivered reply
-// under the same budget, then the one Submit of the turn with the record.
-// Nothing is rewritten, no tool is called and no signal is acted on:
-// shadow_outcome says what block would have started with (handoff on
-// money_with_us_lost or when a handoff criterion failed, rewrite for any
-// other violation) and shadow_handoff_by what it would have handed off on.
+// precheckLogged is AGENT_RUNTIME_PRECHECK=log: after delivery, one Check of
+// the delivered reply under the same budget, then the one Submit of the turn
+// with the record. Nothing is rewritten, no tool is called and no signal is
+// acted on: shadow_outcome says what block would have started with (handoff
+// when a handoff criterion failed or a marked signal names a hand-off code,
+// rewrite for any other violation) and shadow_handoff_by what it would have
+// handed off on.
 func (r *Runtime) precheckLogged(conv Conversation, t agentjudge.Turn, traced bool, mode string) {
 	defer func() {
 		if p := recover(); p != nil {
@@ -602,9 +647,9 @@ func (r *Runtime) precheckLogged(conv Conversation, t agentjudge.Turn, traced bo
 		}
 		pc.shadow = precheckRewrite
 	}
-	for _, sig := range moneySignals {
-		if verdict.Signals[sig.id] {
-			pc.shadow, pc.shadowHandoffBy = precheckHandoff, sig.id
+	for _, a := range verdict.Actions {
+		if a.Handoff != "" {
+			pc.shadow, pc.shadowHandoffBy = precheckHandoff, a.Signal
 			break
 		}
 	}
@@ -638,8 +683,10 @@ func (r *Runtime) goPrecheckLogged(conv Conversation, t agentjudge.Turn, traced 
 	}()
 }
 
-// logPrecheck is the one log line per checked turn.
+// logPrecheck is the one log line per checked turn, follow-up or hand-off
+// line, and the same record counted in the precheck metrics.
 func logPrecheck(conv Conversation, rec map[string]any) {
 	e := log.Info().Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Interface("precheck", rec)
 	e.Msg("agentruntime: precheck")
+	observePrecheck(conv.AgentName, rec)
 }

@@ -370,6 +370,10 @@ func (s *IdleScheduler) invoke(ctx context.Context, r idleHookRow, deliver bool)
 		ActorMetadata: conv.ActorMetadata, Trigger: "idle",
 	}
 	register := clientRegister(history, nil)
+	var pc *precheckTurn
+	if s.runtime.flags.Precheck == precheckBlock && s.runtime.ext.precheck != nil {
+		pc = newPrecheckTurn(precheckIdleBlock, s.runtime.ext.precheckBudget)
+	}
 	var reply string
 	var traced, earlier A2AReply
 	for attempt := 0; attempt < 2; attempt++ {
@@ -399,9 +403,9 @@ func (s *IdleScheduler) invoke(ctx context.Context, r idleHookRow, deliver bool)
 			log.Warn().Str("conversation", convID).Str("reason", reason).Msg("agentruntime: idle follow-up dropped as internal monologue")
 			return ""
 		}
-		if s.runtime.flags.HandoffTriggers {
-			if reason := linkLeakReason(reply, nil, true); reason != "" {
-				log.Warn().Str("conversation", convID).Str("reason", reason).Msg("agentruntime: idle follow-up dropped: denied link")
+		if pc != nil {
+			if reason := linkLeakReason(reply, s.runtime.linkAllowlist); reason != "" {
+				log.Warn().Str("conversation", convID).Str("reason", reason).Msg("agentruntime: idle follow-up dropped: link outside the allowlist")
 				return ""
 			}
 		}
@@ -411,14 +415,30 @@ func (s *IdleScheduler) invoke(ctx context.Context, r idleHookRow, deliver bool)
 			run.ConversationContext.ReplyError = registerRepairHint(reply, register)
 			continue
 		}
+		if pc != nil {
+			checked := run
+			checked.ConversationContext.State = state
+			ask, drop := s.runtime.precheckFollowUp(ctx, conv, s.runtime.judgeInput(conv, checked, nil, history, reply, splitReplyParts(reply), traced), attempt, pc)
+			if drop {
+				logPrecheck(conv, pc.record())
+				log.Warn().Str("conversation", convID).Msg("agentruntime: idle follow-up dropped by the precheck after its rewrite")
+				return ""
+			}
+			if ask != "" {
+				run.ConversationContext.State = state
+				run.ConversationContext.ReplyError = ask
+				continue
+			}
+		}
 		break
 	}
-	if s.runtime.flags.Precheck == precheckBlock && s.runtime.ext.precheck != nil {
-		// A follow-up is not held for the check: it is checked after
-		// delivery, the way log mode checks a turn, and nothing is acted on.
-		t := s.runtime.judgeInput(conv, run, nil, history, reply, splitReplyParts(reply), traced)
-		s.runtime.goPrecheckLogged(conv, t, traced.TraceID != "", precheckIdleLog)
-	} else {
+	switch {
+	case pc != nil:
+		logPrecheck(conv, pc.record())
+		s.runtime.judgeTurn(ctx, conv, run, nil, history, reply, splitReplyParts(reply), traced, pc)
+	case s.runtime.flags.Precheck == precheckLog && s.runtime.ext.precheck != nil:
+		s.runtime.goPrecheckLogged(conv, s.runtime.judgeInput(conv, run, nil, history, reply, splitReplyParts(reply), traced), traced.TraceID != "", precheckIdleLog)
+	default:
 		s.runtime.judgeTurn(ctx, conv, run, nil, history, reply, splitReplyParts(reply), traced, nil)
 	}
 	if _, err := s.runtime.store.SaveMessage(ctx, conv.ID, SaveMessageInput{

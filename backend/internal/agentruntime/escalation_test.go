@@ -232,11 +232,11 @@ func TestPGStopAgent_NotifiesOperator(t *testing.T) {
 	require.Contains(t, out.texts[0], "client declined")
 }
 
-// AGENT_RUNTIME_HANDOFF_TRIGGERS makes E_LEGAL_TAX hands-off; off, it stays
+// AGENT_RUNTIME_HANDS_OFF_CODES=E_LEGAL_TAX makes E_LEGAL_TAX hands-off; unset, it stays
 // a signal. E_CHECK_AND_RETURN is known and a signal under both states: the
 // model's tool enum always carries it (plan 2026-09-25, Q2), and an unknown
 // code would leave "Уточню и вернусь" without an operator.
-func TestEscalationHandoffTriggersFlag(t *testing.T) {
+func TestEscalationHandsOffCodesFlag(t *testing.T) {
 	off := &Server{runtime: &Runtime{flags: runtimeFlagsFromEnv()}}
 	require.False(t, off.handsOff("E_LEGAL_TAX"))
 	require.True(t, off.escalationReasonKnown("E_CHECK_AND_RETURN"))
@@ -244,7 +244,7 @@ func TestEscalationHandoffTriggersFlag(t *testing.T) {
 	require.Equal(t, "E_CHECK_AND_RETURN, E_DEPOSIT_HANDOFF, E_DISTRUST, E_GUARANTEE_DEMAND, E_LEGAL_TAX, E_LOST_MONEY, E_OTHER, E_PAYMENT_UNCONFIRMED, E_SECOND_PERSON, E_TECH_BLOCKED, E_TERMS_OFF_LADDER, E_WITHDRAW",
 		strings.Join(off.escalationReasonCodes(), ", "))
 
-	t.Setenv("AGENT_RUNTIME_HANDOFF_TRIGGERS", "1")
+	t.Setenv("AGENT_RUNTIME_HANDS_OFF_CODES", "E_LEGAL_TAX")
 	on := &Server{runtime: &Runtime{flags: runtimeFlagsFromEnv()}}
 	require.True(t, on.handsOff("E_LEGAL_TAX"))
 	require.False(t, on.handsOff("E_CHECK_AND_RETURN"), "plan 2026-09-25 Q2: a signal, the bot keeps the script")
@@ -285,11 +285,11 @@ func escalateTestServer(t *testing.T, env map[string]string) (*pgStore, *Server,
 }
 
 // W4 "done when": /tools/escalate answers old codes exactly as before, with
-// the triggers flag off and on. The expected bodies are the literal maps the
+// the hands-off code list unset and set. The expected bodies are the literal maps the
 // handler wrote before handOff was extracted.
 func TestPGEscalate_OldCodesAnswerBitForBitWithTriggersOffAndOn(t *testing.T) {
-	for _, flag := range []string{"", "1"} {
-		_, _, _, _, target, closeServer := escalateTestServer(t, map[string]string{"AGENT_RUNTIME_HANDOFF_TRIGGERS": flag})
+	for _, flag := range []string{"", "E_LEGAL_TAX"} {
+		_, _, _, _, target, closeServer := escalateTestServer(t, map[string]string{"AGENT_RUNTIME_HANDS_OFF_CODES": flag})
 		base, token, _ := strings.Cut(target, "|")
 
 		status, signal := postRuntime(t, base, "/tools/escalate", map[string]any{"context_token": token, "reason_code": "E_DISTRUST", "summary": "Хочет пруфы."}, testRuntimeToken)
@@ -313,8 +313,8 @@ func TestPGEscalate_OldCodesAnswerBitForBitWithTriggersOffAndOn(t *testing.T) {
 		closeServer()
 	}
 
-	for _, flag := range []string{"", "1"} {
-		_, _, _, _, target, closeServer := escalateTestServer(t, map[string]string{"AGENT_RUNTIME_HANDOFF_TRIGGERS": flag})
+	for _, flag := range []string{"", "E_LEGAL_TAX"} {
+		_, _, _, _, target, closeServer := escalateTestServer(t, map[string]string{"AGENT_RUNTIME_HANDS_OFF_CODES": flag})
 		base, token, _ := strings.Cut(target, "|")
 		status, handoff := postRuntime(t, base, "/tools/escalate", map[string]any{"context_token": token, "reason_code": "E_PAYMENT_UNCONFIRMED", "summary": "Деньги ушли, зачисления нет.", "client_message": "Принял, проверяем платёж"}, testRuntimeToken)
 		require.Equal(t, 200, status, handoff)
@@ -329,7 +329,7 @@ func TestPGEscalate_OldCodesAnswerBitForBitWithTriggersOffAndOn(t *testing.T) {
 // line, the operator gets the hand-off card, and there is no "answer the
 // customer yourself" instruction in the response.
 func TestPGEscalate_LegalTaxIsHandsOffUnderTriggers(t *testing.T) {
-	store, _, out, client, target, closeServer := escalateTestServer(t, map[string]string{"AGENT_RUNTIME_HANDOFF_TRIGGERS": "1"})
+	store, _, out, client, target, closeServer := escalateTestServer(t, map[string]string{"AGENT_RUNTIME_HANDS_OFF_CODES": "E_LEGAL_TAX"})
 	defer closeServer()
 	base, token, _ := strings.Cut(target, "|")
 
@@ -349,11 +349,11 @@ func TestPGEscalate_LegalTaxIsHandsOffUnderTriggers(t *testing.T) {
 	require.Equal(t, "escalated: E_LEGAL_TAX", state.PauseReason)
 }
 
-// A runtime hand-off with ForcePause (refusal threshold, check verdict)
+// A runtime hand-off with ForcePause (a signal hand-off, check verdict)
 // bypasses narrow mode, delivers ClientLine, sends the card and drains the
 // pending input.
 func TestPGHandOff_ForcePauseBypassesNarrowAndDrainsPending(t *testing.T) {
-	store, srv, out, client, _, closeServer := escalateTestServer(t, map[string]string{"AGENT_RUNTIME_HANDOFF_TRIGGERS": "1", "AGENT_RUNTIME_NARROW_ESCALATION": "1"})
+	store, srv, out, client, _, closeServer := escalateTestServer(t, map[string]string{"AGENT_RUNTIME_HANDS_OFF_CODES": "E_LEGAL_TAX", "AGENT_RUNTIME_NARROW_ESCALATION": "1"})
 	defer closeServer()
 	ctx := context.Background()
 	_, err := store.SaveMessage(ctx, client.ID, SaveMessageInput{Role: "user", Content: "не верю я вам"})
@@ -389,7 +389,7 @@ func TestPGHandOff_ForcePauseBypassesNarrowAndDrainsPending(t *testing.T) {
 // under narrow mode, and a second one inside the signal window still reaches
 // the operator (a plain signal reason is deduplicated as before).
 func TestPGHandOff_CheckAndReturnSignalsWithoutPauseAndRepeats(t *testing.T) {
-	store, srv, out, client, _, closeServer := escalateTestServer(t, map[string]string{"AGENT_RUNTIME_HANDOFF_TRIGGERS": "1", "AGENT_RUNTIME_NARROW_ESCALATION": "1"})
+	store, srv, out, client, _, closeServer := escalateTestServer(t, map[string]string{"AGENT_RUNTIME_HANDS_OFF_CODES": "E_LEGAL_TAX", "AGENT_RUNTIME_NARROW_ESCALATION": "1"})
 	defer closeServer()
 	ctx := context.Background()
 
@@ -436,12 +436,12 @@ func TestPGHandOff_WithoutForcePauseFollowsNarrow(t *testing.T) {
 }
 
 // M1: a check verdict whose code hands off (E_OTHER here) pauses even under
-// narrow mode, like the refusal threshold; E_CHECK_AND_RETURN stays a signal
+// narrow mode, like a signal hand-off; E_CHECK_AND_RETURN stays a signal
 // without a pause (Q2). The model's own tool call still follows narrow mode
 // (TestPGHandOff_WithoutForcePauseFollowsNarrow).
 func TestPGHandOff_PrecheckViolationPausesUnderNarrow(t *testing.T) {
 	store, srv, out, client, _, closeServer := escalateTestServer(t, map[string]string{
-		"AGENT_RUNTIME_PRECHECK": "block", "AGENT_RUNTIME_HANDOFF_TRIGGERS": "1", "AGENT_RUNTIME_NARROW_ESCALATION": "1"})
+		"AGENT_RUNTIME_PRECHECK": "block", "AGENT_RUNTIME_HANDS_OFF_CODES": "E_LEGAL_TAX", "AGENT_RUNTIME_NARROW_ESCALATION": "1"})
 	defer closeServer()
 	ctx := context.Background()
 	agent := &scriptedAgent{drafts: []string{"сейчас переведу вам"}}

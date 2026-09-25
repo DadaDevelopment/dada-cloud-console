@@ -25,13 +25,14 @@ type runtimeExt struct {
 }
 
 // HandoffRequest is a hand-off the runtime decides on by itself (a check
-// verdict, the refusal threshold): the escalation code, the operator summary,
+// verdict, a signal the spec maps to a hand-off): the escalation code, the operator summary,
 // the line the client gets, and whether the pause must bypass the narrow
 // mode. NoClientLine skips the client line (the turn's draft already is the
 // reply); NoCard skips the operator card (the model's own call with the same
-// code already sent it).
+// code already sent it). CheckLine marks a line the model wrote, which the
+// hand-off path checks under AGENT_RUNTIME_PRECHECK=block before sending.
 type HandoffRequest struct {
-	Code, Summary, ClientLine string
-	ForcePause                bool
-	NoClientLine, NoCard      bool
+	Code, Summary, ClientLine       string
+	ForcePause                      bool
+	NoClientLine, NoCard, CheckLine bool
 }

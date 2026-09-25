@@ -33,7 +33,7 @@ func TestLeakCorpus(t *testing.T) {
 		total++
 		reason := leakReason(row.Text)
 		if reason == "" {
-			if reason = linkLeakReason(row.Text, allowlist, false); reason != "" {
+			if reason = linkLeakReason(row.Text, allowlist); reason != "" {
 				links++
 			}
 		}

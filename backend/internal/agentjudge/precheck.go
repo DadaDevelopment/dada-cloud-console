@@ -10,20 +10,35 @@ import (
 // precheckSpec is the judge whose block criteria gate a reply before delivery.
 const precheckSpec = "turn"
 
-// Violation is one block criterion the checked reply breaks.
+// Violation is one block criterion the checked reply breaks. Line is the
+// client line of a handoff violation: the criterion's own, else the spec's
+// handoff_line, else empty (the runtime then uses its platform line).
 type Violation struct {
 	ID    string
 	Block string
 	Ask   string
 	Why   string
 	Code  string
+	Line  string
+}
+
+// SignalAction is what the spec tells the runtime to do about a signal the
+// check marked: hand the conversation off with Handoff after the turn's
+// reply, and/or stop the follow-up ladder.
+type SignalAction struct {
+	Signal        string
+	Handoff       string
+	StopFollowups bool
 }
 
 // Precheck is the pre-delivery verdict on one draft reply: the broken block
-// criteria in spec order and every signal the LLM marked.
+// criteria in spec order, every signal the LLM marked, the actions of the
+// marked signals in spec order, and the spec's default hand-off line.
 type Precheck struct {
-	Violations []Violation
-	Signals    map[string]bool
+	Violations  []Violation
+	Signals     map[string]bool
+	Actions     []SignalAction
+	HandoffLine string
 
 	// complete is set when the LLM answered every block criterion, so
 	// Submit may reuse the verdicts for the same reply.
@@ -81,6 +96,7 @@ func (j *Judge) Check(ctx context.Context, agent string, t Turn) (Precheck, erro
 		byName[r.Name] = r
 	}
 	pc.Signals = map[string]bool{}
+	pc.HandoffLine = strings.TrimSpace(spec.HandoffLine)
 	pc.asked = map[string]bool{}
 	pc.results = map[string]Result{}
 	for _, sg := range sub.Signals {
@@ -88,6 +104,9 @@ func (j *Judge) Check(ctx context.Context, agent string, t Turn) (Precheck, erro
 		if r, ok := byName[name]; ok {
 			pc.Signals[sg.ID] = r.Value == 1
 			pc.results[name] = r
+			if r.Value == 1 && (sg.Handoff != "" || sg.StopFollowups) {
+				pc.Actions = append(pc.Actions, SignalAction{Signal: sg.ID, Handoff: strings.TrimSpace(sg.Handoff), StopFollowups: sg.StopFollowups})
+			}
 		}
 	}
 	// A block criterion the LLM answered with null although it applies is
@@ -112,7 +131,14 @@ func (j *Judge) Check(ctx context.Context, agent string, t Turn) (Precheck, erro
 			hit = sub.violated(c, r.Value)
 		}
 		if hit {
-			pc.Violations = append(pc.Violations, Violation{ID: c.ID, Block: c.Block, Ask: c.Ask, Why: r.Comment, Code: c.Code})
+			v := Violation{ID: c.ID, Block: c.Block, Ask: c.Ask, Why: r.Comment, Code: c.Code}
+			if c.Block == BlockHandoff {
+				v.Line = strings.TrimSpace(c.Line)
+				if v.Line == "" {
+					v.Line = pc.HandoffLine
+				}
+			}
+			pc.Violations = append(pc.Violations, v)
 		}
 	}
 	if len(unanswered) > 0 {
@@ -120,19 +146,4 @@ func (j *Judge) Check(ctx context.Context, agent string, t Turn) (Precheck, erro
 	}
 	pc.complete = err == nil && len(pc.asked) > 0
 	return pc, err
-}
-
-// Criterion returns the criterion with this id from the agent's turn spec,
-// so the runtime can read Line and Source of a handoff violation.
-func (j *Judge) Criterion(agent, id string) (Criterion, bool) {
-	spec, _ := j.precheckSpec(agent)
-	if spec == nil {
-		return Criterion{}, false
-	}
-	for _, c := range spec.Criteria {
-		if c.ID == id {
-			return c, true
-		}
-	}
-	return Criterion{}, false
 }

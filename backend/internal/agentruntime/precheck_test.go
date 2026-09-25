@@ -3,7 +3,6 @@ package agentruntime
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -66,12 +65,46 @@ func (f *fakePrecheck) Check(ctx context.Context, _ string, t agentjudge.Turn) (
 	if len(f.verdicts) == 0 {
 		return agentjudge.Precheck{}, err
 	}
-	return f.verdicts[min(i, len(f.verdicts)-1)], err
+	return f.resolve(f.verdicts[min(i, len(f.verdicts)-1)]), err
 }
 
-func (f *fakePrecheck) Criterion(_, id string) (agentjudge.Criterion, bool) {
-	c, ok := f.criteria[id]
-	return c, ok
+// Signal ids of the tg-exchange-support turn spec the precheck tests use.
+const (
+	signalDistress        = "distress"
+	signalMoneyWithUsLost = "money_with_us_lost"
+	signalWithdrawalStuck = "withdrawal_stuck"
+)
+
+// testSignalActions mirrors the signal actions of the agent's turn spec, in
+// spec order: agentjudge.Check reports them for the marked signals.
+var testSignalActions = []agentjudge.SignalAction{
+	{Signal: signalMoneyWithUsLost, Handoff: "E_LOST_MONEY"},
+	{Signal: signalWithdrawalStuck, Handoff: "E_WITHDRAW"},
+	{Signal: signalDistress, StopFollowups: true},
+}
+
+// resolve does what agentjudge.Check does with the spec for a scripted
+// verdict: a handoff violation gets its criterion's line, the marked signals
+// get their actions.
+func (f *fakePrecheck) resolve(pc agentjudge.Precheck) agentjudge.Precheck {
+	if len(pc.Violations) > 0 {
+		vs := make([]agentjudge.Violation, len(pc.Violations))
+		copy(vs, pc.Violations)
+		for i := range vs {
+			if vs[i].Block == agentjudge.BlockHandoff && vs[i].Line == "" {
+				vs[i].Line = f.criteria[vs[i].ID].Line
+			}
+		}
+		pc.Violations = vs
+	}
+	if pc.Actions == nil {
+		for _, a := range testSignalActions {
+			if pc.Signals[a.Signal] {
+				pc.Actions = append(pc.Actions, a)
+			}
+		}
+	}
+	return pc
 }
 
 func (f *fakePrecheck) snapshot() ([]agentjudge.Turn, []agentjudge.Turn) {
@@ -217,7 +250,7 @@ func TestPGPrecheckBlock_RewriteJoinsAsks(t *testing.T) {
 	require.Equal(t, "вторая версия", out.Text)
 	require.Len(t, rig.agent.runs, 2)
 	require.Empty(t, rig.agent.runs[0].ConversationContext.ReplyError)
-	require.Equal(t, "ask one\nask two", rig.agent.runs[1].ConversationContext.ReplyError)
+	require.Equal(t, "ask one (why fact_unbacked; why sell_during_distress)\nask two (why script_repeat)", rig.agent.runs[1].ConversationContext.ReplyError, "each ask once, with the judge's reasons")
 	checks, submits := rig.judge.snapshot()
 	require.Len(t, checks, 2)
 	require.Equal(t, "первый ответ", checks[0].Reply)
@@ -250,7 +283,7 @@ func TestPGPrecheckBlock_HandoffUsesCriterionLineAndCode(t *testing.T) {
 	}}
 	criteria := map[string]agentjudge.Criterion{"legal_no_handoff": {ID: "legal_no_handoff", Line: " line from the spec ", Code: "E_LEGAL_TAX"}}
 
-	paused := newPrecheckRig(t, map[string]string{"AGENT_RUNTIME_PRECHECK": "block", "AGENT_RUNTIME_HANDOFF_TRIGGERS": "1"}, "про налоги 13%", "всё равно про налоги")
+	paused := newPrecheckRig(t, map[string]string{"AGENT_RUNTIME_PRECHECK": "block", "AGENT_RUNTIME_HANDS_OFF_CODES": "E_LEGAL_TAX"}, "про налоги 13%", "всё равно про налоги")
 	paused.judge.verdicts, paused.judge.criteria = []agentjudge.Precheck{bad}, criteria
 	out := paused.send(t, "какой налог?")
 	require.True(t, out.Suppressed)
@@ -268,7 +301,7 @@ func TestPGPrecheckBlock_HandoffUsesCriterionLineAndCode(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, pending, "the input is answered by the hand-off")
 
-	signal := newPrecheckRig(t, map[string]string{"AGENT_RUNTIME_PRECHECK": "block", "AGENT_RUNTIME_HANDOFF_TRIGGERS": "1"}, "комиссия 5%", "комиссия 7%")
+	signal := newPrecheckRig(t, map[string]string{"AGENT_RUNTIME_PRECHECK": "block", "AGENT_RUNTIME_HANDS_OFF_CODES": "E_LEGAL_TAX"}, "комиссия 5%", "комиссия 7%")
 	signal.judge.verdicts = []agentjudge.Precheck{{Violations: []agentjudge.Violation{violation("fact_unbacked", agentjudge.BlockHandoff, "ask", "E_CHECK_AND_RETURN")}}}
 	signal.judge.criteria = map[string]agentjudge.Criterion{"fact_unbacked": {ID: "fact_unbacked", Line: "Уточню и вернусь", Code: "E_CHECK_AND_RETURN"}}
 	out = signal.send(t, "какая комиссия?")
@@ -293,18 +326,38 @@ func TestPGPrecheckBlock_RewriteViolationOnAttemptOneDelivers(t *testing.T) {
 	require.Equal(t, []string{"script_repeat"}, submits[0].Precheck["attempts"].([]map[string]any)[1]["violations"])
 }
 
-// A soft check of the runtime already spent attempt 0: the check runs once,
-// on attempt 1, with the attempt-1 rule (hand-off, not another rewrite).
+// A runtime guard sends the first draft back: the check runs on that draft
+// too, so the one rewrite carries the guard's hint and the criteria's asks
+// together; the rewrite is checked under the attempt-1 rule (hand-off, not
+// another rewrite).
 func TestPGPrecheckBlock_AfterSoftRewriteAppliesAttemptOneRule(t *testing.T) {
 	rig := newPrecheckRig(t, map[string]string{"AGENT_RUNTIME_PRECHECK": "block"}, "Hello, how are you?", "комиссия 7%")
 	rig.judge.verdicts = []agentjudge.Precheck{{Violations: []agentjudge.Violation{violation("fact_unbacked", agentjudge.BlockHandoff, "ask", "E_CHECK_AND_RETURN")}}}
 	rig.judge.criteria = map[string]agentjudge.Criterion{"fact_unbacked": {Line: "Уточню и вернусь"}}
 	out := rig.send(t, "какая комиссия?")
 	checks, _ := rig.judge.snapshot()
-	require.Len(t, checks, 1)
+	require.Len(t, checks, 2)
+	require.Equal(t, "Hello, how are you?", checks[0].Reply)
+	require.Equal(t, "комиссия 7%", checks[1].Reply)
+	require.Len(t, rig.agent.runs, 2)
+	require.Equal(t, languageRepairHint+"\nask (why fact_unbacked)", rig.agent.runs[1].ConversationContext.ReplyError)
+	require.Equal(t, "Уточню и вернусь", out.Text)
+}
+
+// Without a block check the guard's hint goes back alone, as before.
+func TestPGPrecheckLog_SoftRewriteHintAlone(t *testing.T) {
+	rig := newPrecheckRig(t, map[string]string{"AGENT_RUNTIME_PRECHECK": "log"}, "Hello, how are you?", "комиссия 7%")
+	rig.judge.done = make(chan struct{}, 1)
+	rig.send(t, "какая комиссия?")
 	require.Len(t, rig.agent.runs, 2)
 	require.Equal(t, languageRepairHint, rig.agent.runs[1].ConversationContext.ReplyError)
-	require.Equal(t, "Уточню и вернусь", out.Text)
+	select {
+	case <-rig.judge.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("log check never submitted")
+	}
+	checks, _ := rig.judge.snapshot()
+	require.Len(t, checks, 1, "log checks the delivered reply only")
 }
 
 // Timeout and a judge error deliver the draft unchecked, with the outcome.
@@ -367,112 +420,13 @@ func TestPGPrecheckLog_DeliversFirstThenScoresOnce(t *testing.T) {
 	require.Empty(t, rig.handoffs)
 }
 
-// Refusal counters: attempts 0 and 1 of one input count once; the second
-// input with the same reason drops the draft and hands off with the reason's
-// code and a pause; the counters start over once an operator resumes the bot.
-func TestPGPrecheckCounters_RefusalThresholdAndResume(t *testing.T) {
-	store, srv, out, client, _, closeServer := escalateTestServer(t, map[string]string{
-		"AGENT_RUNTIME_PRECHECK": "block", "AGENT_RUNTIME_SCRIPT_COUNTERS": "on"})
-	defer closeServer()
-	ctx := context.Background()
-	agent := &scriptedAgent{drafts: []string{"ответ А"}}
-	judge := &fakePrecheck{verdicts: []agentjudge.Precheck{
-		{Violations: []agentjudge.Violation{violation("script_repeat", agentjudge.BlockRewrite, "ask", "")}, Signals: map[string]bool{"refusal_money": true, "distress": false}},
-		{Signals: map[string]bool{"refusal_money": true}},
-	}}
-	srv.runtime.a2a, srv.runtime.ext.precheck, srv.runtime.judge, srv.runtime.hooks = agent, judge, judge, testHooks{}
-	turn := func(text string) MessageResponse {
-		resp, err := srv.runtime.ProcessMessage(ctx, MessageRequest{AgentName: client.AgentName, Channel: "telegram", ExternalID: "1001",
-			Messages: []InboundMessage{{Content: text, ChannelMessageID: uuid.NewString()}}})
-		require.NoError(t, err)
-		return resp
-	}
-
-	first := turn("дорого")
-	require.Equal(t, "ответ А", first.Text)
-	fresh, err := store.GetConversation(ctx, client.ID)
-	require.NoError(t, err)
-	require.Equal(t, map[string]int{"refusal_money": 1}, metadataCounts(fresh, obstacleRefusalsKey), "attempts 0 and 1 count once")
-
-	judge.mu.Lock()
-	judge.checks = nil
-	judge.mu.Unlock()
-	second := turn("всё равно дорого")
-	require.True(t, second.Suppressed, "the draft is dropped")
-	state, err := store.GetState(ctx, client.ID)
-	require.NoError(t, err)
-	require.False(t, state.AgentEnabled)
-	require.Equal(t, "escalated: E_TERMS_OFF_LADDER", state.PauseReason)
-	require.Equal(t, "1001", out.chats[0])
-	require.Equal(t, srv.runtime.clientHandoffLine(), out.texts[0], "no line field for a signal: the runtime fallback")
-	require.Contains(t, out.texts[1], "E_TERMS_OFF_LADDER")
-	require.Contains(t, out.texts[1], "refusal_money x2")
-	_, submits := judge.snapshot()
-	require.Equal(t, "refusal_money", submits[len(submits)-1].Precheck["handoff_by"])
-	for _, text := range out.texts {
-		require.NotContains(t, text, "ответ А")
-	}
-
-	_, err = store.pool.Exec(ctx, `UPDATE conversation_runtime_state SET agent_enabled = true, pause_reason = '', crm_status_sync = '' WHERE conversation_id = $1`, client.ID)
-	require.NoError(t, err)
-	judge.mu.Lock()
-	judge.checks = nil
-	judge.verdicts = []agentjudge.Precheck{{}}
-	judge.mu.Unlock()
-	third := turn("ладно, а что дальше?")
-	require.Equal(t, "ответ А", third.Text)
-	fresh, err = store.GetConversation(ctx, client.ID)
-	require.NoError(t, err)
-	require.NotContains(t, fresh.Metadata, obstacleRefusalsKey, "the operator's resume starts the counters over")
-	require.NotContains(t, fresh.Metadata, refusalsPausedKey)
-}
-
-// money_with_us_lost on a draft that breaks no criterion: the sympathetic
-// draft goes out, then the conversation is handed off with E_LOST_MONEY and a
-// pause, without the platform's client line; distress stops the follow-up
-// ladder and keeps the reply.
-func TestPGPrecheckCounters_LostMoneyAndDistress(t *testing.T) {
-	store, srv, out, client, _, closeServer := escalateTestServer(t, map[string]string{
-		"AGENT_RUNTIME_PRECHECK": "block", "AGENT_RUNTIME_SCRIPT_COUNTERS": "on", "AGENT_RUNTIME_NARROW_ESCALATION": "1"})
-	defer closeServer()
-	ctx := context.Background()
-	agent := &scriptedAgent{drafts: []string{"сочувствую"}}
-	judge := &fakePrecheck{verdicts: []agentjudge.Precheck{{Signals: map[string]bool{"distress": true}}}}
-	srv.runtime.a2a, srv.runtime.ext.precheck, srv.runtime.judge, srv.runtime.hooks = agent, judge, judge, testHooks{}
-	turn := func(text string) MessageResponse {
-		resp, err := srv.runtime.ProcessMessage(ctx, MessageRequest{AgentName: client.AgentName, Channel: "telegram", ExternalID: "1001",
-			Messages: []InboundMessage{{Content: text, ChannelMessageID: uuid.NewString()}}})
-		require.NoError(t, err)
-		return resp
-	}
-
-	require.Equal(t, "сочувствую", turn("у меня умер отец").Text)
-	fresh, err := store.GetConversation(ctx, client.ID)
-	require.NoError(t, err)
-	require.EqualValues(t, idleLadderStopped, fresh.Metadata["idle_step"], "no follow-up after distress")
-	state, err := store.GetState(ctx, client.ID)
-	require.NoError(t, err)
-	require.True(t, state.AgentEnabled)
-
-	judge.mu.Lock()
-	judge.verdicts = []agentjudge.Precheck{{Signals: map[string]bool{"money_with_us_lost": true}}}
-	judge.mu.Unlock()
-	require.Equal(t, "сочувствую", turn("я у вас уже потерял 1000$").Text, "the draft is the reply")
-	state, err = store.GetState(ctx, client.ID)
-	require.NoError(t, err)
-	require.False(t, state.AgentEnabled, "E_LOST_MONEY pauses even under narrow mode")
-	require.Equal(t, "escalated: E_LOST_MONEY", state.PauseReason)
-	require.Equal(t, []string{"4242"}, out.chats, "only the card: no platform line to the client")
-	require.True(t, strings.Contains(out.texts[len(out.texts)-1], "E_LOST_MONEY"))
-}
-
 // Through the real server: a legal violation on both attempts hands off
 // with E_LEGAL_TAX, which pauses under the triggers flag; the client gets
 // the criterion's line. A fact violation hands off with E_CHECK_AND_RETURN,
 // which only signals: the line is the reply and the bot stays live.
 func TestPGPrecheckBlock_LegalPausesCheckAndReturnDoesNot(t *testing.T) {
 	store, srv, out, client, _, closeServer := escalateTestServer(t, map[string]string{
-		"AGENT_RUNTIME_PRECHECK": "block", "AGENT_RUNTIME_HANDOFF_TRIGGERS": "1"})
+		"AGENT_RUNTIME_PRECHECK": "block", "AGENT_RUNTIME_HANDS_OFF_CODES": "E_LEGAL_TAX"})
 	defer closeServer()
 	ctx := context.Background()
 	agent := &scriptedAgent{drafts: []string{"комиссия 7%"}}
@@ -514,7 +468,7 @@ func TestPGPrecheckBlock_LegalPausesCheckAndReturnDoesNot(t *testing.T) {
 // rewrite on attempt 1 is checked against the lookups of attempt 0 too, and
 // the Submit carries the same union, each result once.
 func TestPGPrecheckBlock_KBAccumulatesAcrossAttempts(t *testing.T) {
-	rig := newPrecheckRig(t, map[string]string{"AGENT_RUNTIME_PRECHECK": "block", "AGENT_RUNTIME_HANDOFF_TRIGGERS": "1"}, "первый ответ", "вторая версия")
+	rig := newPrecheckRig(t, map[string]string{"AGENT_RUNTIME_PRECHECK": "block", "AGENT_RUNTIME_HANDS_OFF_CODES": "E_LEGAL_TAX"}, "первый ответ", "вторая версия")
 	first := agentjudge.KBResult{Query: "комиссия", Text: "без комиссии"}
 	second := agentjudge.KBResult{Query: "вывод", Text: "вывод за сутки"}
 	rig.agent.kbs = [][]agentjudge.KBResult{{first}, {first, second}}
@@ -527,7 +481,7 @@ func TestPGPrecheckBlock_KBAccumulatesAcrossAttempts(t *testing.T) {
 	require.Equal(t, []agentjudge.KBResult{first, second}, checks[1].KB, "attempt 0's lookups still back the rewrite, once each")
 	require.Equal(t, []agentjudge.KBResult{first, second}, submits[0].KB)
 
-	rig = newPrecheckRig(t, map[string]string{"AGENT_RUNTIME_PRECHECK": "block", "AGENT_RUNTIME_HANDOFF_TRIGGERS": "1"}, "первый ответ", "вторая версия")
+	rig = newPrecheckRig(t, map[string]string{"AGENT_RUNTIME_PRECHECK": "block", "AGENT_RUNTIME_HANDS_OFF_CODES": "E_LEGAL_TAX"}, "первый ответ", "вторая версия")
 	rig.agent.kbs = [][]agentjudge.KBResult{{first}, nil}
 	rig.judge.verdicts = []agentjudge.Precheck{{Violations: []agentjudge.Violation{violation("script_repeat", agentjudge.BlockRewrite, "ask", "")}}, {}}
 	rig.send(t, "какая комиссия?")
@@ -536,18 +490,19 @@ func TestPGPrecheckBlock_KBAccumulatesAcrossAttempts(t *testing.T) {
 	require.Equal(t, []agentjudge.KBResult{first}, submits[0].KB)
 }
 
-// H2: under block without the counters money_with_us_lost still hands off
-// with E_LOST_MONEY and a pause (after the draft), and distress still stops
-// the follow-ups; refusal_* signals are not counted.
-func TestPGPrecheckBlock_SignalsWithoutCounters(t *testing.T) {
+// Signal actions come from the spec: money_with_us_lost (handoff:
+// E_LOST_MONEY) hands off with a pause after the sympathetic draft went out,
+// even under narrow mode, and distress (stop_followups) stops the follow-up
+// ladder and keeps the reply; a marked signal without an action (refusal_*)
+// starts nothing.
+func TestPGPrecheckBlock_SignalActions(t *testing.T) {
 	store, srv, out, client, _, closeServer := escalateTestServer(t, map[string]string{
-		"AGENT_RUNTIME_PRECHECK": "block", "AGENT_RUNTIME_HANDOFF_TRIGGERS": "1", "AGENT_RUNTIME_NARROW_ESCALATION": "1"})
+		"AGENT_RUNTIME_PRECHECK": "block", "AGENT_RUNTIME_HANDS_OFF_CODES": "E_LEGAL_TAX", "AGENT_RUNTIME_NARROW_ESCALATION": "1"})
 	defer closeServer()
 	ctx := context.Background()
 	agent := &scriptedAgent{drafts: []string{"сочувствую"}}
 	judge := &fakePrecheck{verdicts: []agentjudge.Precheck{{Signals: map[string]bool{"distress": true, "refusal_money": true}}}}
 	srv.runtime.a2a, srv.runtime.ext.precheck, srv.runtime.judge, srv.runtime.hooks = agent, judge, judge, testHooks{}
-	require.False(t, srv.runtime.flags.ScriptCounters)
 	turn := func(text string) MessageResponse {
 		resp, err := srv.runtime.ProcessMessage(ctx, MessageRequest{AgentName: client.AgentName, Channel: "telegram", ExternalID: "1001",
 			Messages: []InboundMessage{{Content: text, ChannelMessageID: uuid.NewString()}}})
@@ -558,16 +513,19 @@ func TestPGPrecheckBlock_SignalsWithoutCounters(t *testing.T) {
 	require.Equal(t, "сочувствую", turn("у меня умер отец, и дорого").Text)
 	fresh, err := store.GetConversation(ctx, client.ID)
 	require.NoError(t, err)
-	require.EqualValues(t, idleLadderStopped, fresh.Metadata["idle_step"], "distress stops the follow-ups without the counters")
-	require.NotContains(t, fresh.Metadata, obstacleRefusalsKey, "refusals are counted only under the counters")
+	require.EqualValues(t, idleLadderStopped, fresh.Metadata["idle_step"], "distress stops the follow-ups")
+	state, err := store.GetState(ctx, client.ID)
+	require.NoError(t, err)
+	require.True(t, state.AgentEnabled, "refusal_money has no action")
 
 	judge.mu.Lock()
 	judge.verdicts = []agentjudge.Precheck{{Signals: map[string]bool{"money_with_us_lost": true}}}
 	judge.mu.Unlock()
-	require.Equal(t, "сочувствую", turn("я у вас уже потерял 1000$").Text)
-	state, err := store.GetState(ctx, client.ID)
+	require.Equal(t, "сочувствую", turn("я у вас уже потерял 1000$").Text, "the draft is the reply")
+	state, err = store.GetState(ctx, client.ID)
 	require.NoError(t, err)
-	require.False(t, state.AgentEnabled, "E_LOST_MONEY pauses without the counters, even under narrow mode")
+	require.False(t, state.AgentEnabled, "E_LOST_MONEY pauses even under narrow mode")
+	require.Equal(t, []string{"4242"}, out.chats, "the draft is the turn's reply; the hand-off sends only the operator card")
 	require.Equal(t, "escalated: E_LOST_MONEY", state.PauseReason)
 	require.Contains(t, out.texts[len(out.texts)-1], "E_LOST_MONEY")
 	_, submits := judge.snapshot()
@@ -609,7 +567,7 @@ func TestPGPrecheckBlock_ModelAlreadyEscalatedSameCode(t *testing.T) {
 	bad := []agentjudge.Precheck{{Violations: []agentjudge.Violation{violation("fact_unbacked", agentjudge.BlockHandoff, "ask", "E_CHECK_AND_RETURN")}}}
 	criteria := map[string]agentjudge.Criterion{"fact_unbacked": {Line: "Уточню и вернусь"}}
 
-	same := newPrecheckRig(t, map[string]string{"AGENT_RUNTIME_PRECHECK": "block", "AGENT_RUNTIME_HANDOFF_TRIGGERS": "1"}, "комиссия 5%", "комиссия 7%")
+	same := newPrecheckRig(t, map[string]string{"AGENT_RUNTIME_PRECHECK": "block", "AGENT_RUNTIME_HANDS_OFF_CODES": "E_LEGAL_TAX"}, "комиссия 5%", "комиссия 7%")
 	same.agent.escalations = []string{"E_CHECK_AND_RETURN"}
 	same.judge.verdicts, same.judge.criteria = bad, criteria
 	require.Equal(t, "Уточню и вернусь", same.send(t, "какая комиссия?").Text)
@@ -618,7 +576,7 @@ func TestPGPrecheckBlock_ModelAlreadyEscalatedSameCode(t *testing.T) {
 	require.Equal(t, precheckHandoff, submits[0].Precheck["outcome"])
 	require.Equal(t, "fact_unbacked", submits[0].Precheck["handoff_by"])
 
-	other := newPrecheckRig(t, map[string]string{"AGENT_RUNTIME_PRECHECK": "block", "AGENT_RUNTIME_HANDOFF_TRIGGERS": "1"}, "комиссия 5%", "комиссия 7%")
+	other := newPrecheckRig(t, map[string]string{"AGENT_RUNTIME_PRECHECK": "block", "AGENT_RUNTIME_HANDS_OFF_CODES": "E_LEGAL_TAX"}, "комиссия 5%", "комиссия 7%")
 	other.agent.escalations = []string{"E_DISTRUST"}
 	other.judge.verdicts, other.judge.criteria = bad, criteria
 	require.Equal(t, "Уточню и вернусь", other.send(t, "какая комиссия?").Text)
@@ -626,58 +584,58 @@ func TestPGPrecheckBlock_ModelAlreadyEscalatedSameCode(t *testing.T) {
 	require.Equal(t, "E_CHECK_AND_RETURN", other.handoffs[0].Code)
 }
 
-// M4: under block a follow-up is not held for the check: it is delivered,
-// then checked in the background and submitted once with mode idle_log;
-// nothing is rewritten or handed off.
-func TestPGPrecheckBlock_IdleFollowUpCheckedAfterDelivery(t *testing.T) {
+// Under block a follow-up is checked before it goes out: a violation on the
+// first draft sends it back once with the asks, a clean rewrite goes out
+// with mode idle_block in its record; a rewrite that still breaks a
+// criterion is dropped, and a follow-up never hands off.
+func TestPGPrecheckBlock_IdleFollowUpCheckedBeforeDelivery(t *testing.T) {
 	t.Setenv("AGENT_RUNTIME_PRECHECK", "block")
-	t.Setenv("AGENT_RUNTIME_HANDOFF_TRIGGERS", "1")
 	store := setupTestStore(t).(*pgStore)
 	ctx := context.Background()
 	agentName := "idle-precheck-" + uuid.NewString()[:8]
-	conv, _, err := store.GetOrCreateConversation(ctx, agentName, "telegram", "-900777", Actor{ExternalID: "900777"})
-	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = store.pool.Exec(ctx, `DELETE FROM conversations WHERE agent_name = $1`, agentName)
 		_, _ = store.pool.Exec(ctx, `DELETE FROM lifecycle_hooks WHERE agent_name = $1`, agentName)
 	})
-	_, err = store.pool.Exec(ctx, `
+	_, err := store.pool.Exec(ctx, `
 		INSERT INTO lifecycle_hooks (agent_name, name, trigger_event, trigger_config, action_type, action_config)
 		VALUES ($1, 'follow-up', 'conversation.idle', '{"ladder_minutes":[20],"direct_only":true}', 'schedule', '{"agent_message":"дожим"}')
 	`, agentName)
 	require.NoError(t, err)
+	bad := agentjudge.Precheck{Violations: []agentjudge.Violation{violation("sell_during_distress", agentjudge.BlockRewrite, "без продажи", "")}}
 
-	agent := &scriptedAgent{drafts: []string{"Получилось пройти регистрацию?"}}
-	judge := &fakePrecheck{release: make(chan struct{}), done: make(chan struct{}, 1),
-		verdicts: []agentjudge.Precheck{{Violations: []agentjudge.Violation{violation("fact_unbacked", agentjudge.BlockHandoff, "ask", "E_CHECK_AND_RETURN")}}}}
-	rt := NewRuntime(store, &noopHooks{}, agent, nil)
-	rt.contextKey = []byte(testRuntimeToken)
-	rt.judge, rt.ext.precheck = judge, judge
-	var handoffs []HandoffRequest
-	rt.ext.handoff = func(_ context.Context, _ Conversation, req HandoffRequest) (HandoffResult, error) {
-		handoffs = append(handoffs, req)
-		return HandoffResult{}, nil
+	run := func(chat string, verdicts ...agentjudge.Precheck) (string, *scriptedAgent, *fakePrecheck, []HandoffRequest) {
+		conv, _, err := store.GetOrCreateConversation(ctx, agentName, "telegram", chat, Actor{ExternalID: chat})
+		require.NoError(t, err)
+		agent := &scriptedAgent{drafts: []string{"Давайте закончим регистрацию!", "Как вы, держитесь?"}}
+		judge := &fakePrecheck{verdicts: verdicts}
+		rt := NewRuntime(store, &noopHooks{}, agent, nil)
+		rt.contextKey = []byte(testRuntimeToken)
+		rt.judge, rt.ext.precheck = judge, judge
+		var handoffs []HandoffRequest
+		rt.ext.handoff = func(_ context.Context, _ Conversation, req HandoffRequest) (HandoffResult, error) {
+			handoffs = append(handoffs, req)
+			return HandoffResult{}, nil
+		}
+		sched := NewIdleScheduler(store.pool, rt, agent, &fakeOutbound{onSend: func(_, _, _ string) {}}, time.Second)
+		reply, err := sched.InvokeNow(ctx, conv)
+		require.NoError(t, err)
+		return reply, agent, judge, handoffs
 	}
-	sched := NewIdleScheduler(store.pool, rt, agent, &fakeOutbound{onSend: func(_, _, _ string) {}}, time.Second)
 
-	reply, err := sched.InvokeNow(ctx, conv)
-	require.NoError(t, err)
-	require.Equal(t, "Получилось пройти регистрацию?", reply, "returned while the check is still waiting")
-	_, submits := judge.snapshot()
-	require.Empty(t, submits)
-
-	close(judge.release)
-	select {
-	case <-judge.done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the idle check never submitted")
-	}
+	reply, agent, judge, handoffs := run("-900777", bad, agentjudge.Precheck{})
+	require.Equal(t, "Как вы, держитесь?", reply, "the clean rewrite goes out")
+	require.Len(t, agent.runs, 2)
+	require.Contains(t, agent.runs[1].ConversationContext.ReplyError, "без продажи (why sell_during_distress)")
 	checks, submits := judge.snapshot()
-	require.Len(t, checks, 1)
+	require.Len(t, checks, 2)
 	require.Len(t, submits, 1)
-	require.Equal(t, precheckIdleLog, submits[0].Precheck["mode"])
-	require.Equal(t, precheckHandoff, submits[0].Precheck["shadow_outcome"])
-	require.Equal(t, "fact_unbacked", submits[0].Precheck["shadow_handoff_by"])
-	require.Len(t, agent.runs, 1)
+	require.Equal(t, precheckIdleBlock, submits[0].Precheck["mode"])
+	require.Equal(t, precheckRewrite, submits[0].Precheck["outcome"])
+	require.Empty(t, handoffs)
+
+	reply, agent, _, handoffs = run("-900778", bad, bad)
+	require.Empty(t, reply, "a rewrite that still breaks a criterion is dropped")
+	require.Len(t, agent.runs, 2)
 	require.Empty(t, handoffs)
 }

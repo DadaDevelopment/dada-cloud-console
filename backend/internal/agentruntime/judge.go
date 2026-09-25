@@ -19,7 +19,6 @@ import (
 type TurnJudge interface {
 	Submit(agent string, t agentjudge.Turn)
 	Check(ctx context.Context, agent string, t agentjudge.Turn) (agentjudge.Precheck, error)
-	Criterion(agent, id string) (agentjudge.Criterion, bool)
 }
 
 // langfuseFromEnv is the project the runtime's judge scores into and whose
@@ -55,28 +54,34 @@ const precheckRetryPause = 500 * time.Millisecond
 // precheckJudgeFromEnv builds the judge that checks drafts before delivery
 // (AGENT_RUNTIME_PRECHECK=log|block). Unlike judgeFromEnv it needs no
 // Langfuse keys and no AGENT_JUDGE_ENABLED: a check must not switch off with
-// the scoring project. The model is the scoring judge's (AGENT_JUDGE_LLM_*).
+// the scoring project. The model is AGENT_PRECHECK_LLM_* when set, else the
+// scoring judge's AGENT_JUDGE_LLM_*: a key of its own keeps the check's
+// synchronous calls from eating the rate limit the agent itself runs on.
 // nil when the flag is off; ValidateFlagsFromEnv refuses to start when the
-// flag is on and the model is not configured.
+// flag is on and no model is configured.
 func precheckJudgeFromEnv(basePath string, flags runtimeFlags) TurnJudge {
 	if flags.Precheck == precheckOff {
 		return nil
 	}
 	llm := precheckLLMFromEnv()
 	if llm == nil {
-		log.Warn().Str("mode", flags.Precheck).Msg("agentruntime: AGENT_RUNTIME_PRECHECK on but AGENT_JUDGE_LLM_* incomplete; precheck off")
+		log.Warn().Str("mode", flags.Precheck).Msg("agentruntime: AGENT_RUNTIME_PRECHECK on but neither AGENT_PRECHECK_LLM_* nor AGENT_JUDGE_LLM_* is complete; precheck off")
 		return nil
 	}
 	log.Info().Str("mode", flags.Precheck).Str("model", llm.Model).Msg("agentruntime: precheck on")
 	return agentjudge.New(basePath, llm, nil)
 }
 
+// precheckLLMFromEnv is the check model: the complete AGENT_PRECHECK_LLM_*
+// triple, else the complete AGENT_JUDGE_LLM_* triple, else nil.
 func precheckLLMFromEnv() *agentjudge.OpenAIChat {
-	url, key, model := strings.TrimSpace(os.Getenv("AGENT_JUDGE_LLM_URL")), strings.TrimSpace(os.Getenv("AGENT_JUDGE_LLM_KEY")), strings.TrimSpace(os.Getenv("AGENT_JUDGE_LLM_MODEL"))
-	if url == "" || key == "" || model == "" {
-		return nil
+	for _, prefix := range []string{"AGENT_PRECHECK_LLM_", "AGENT_JUDGE_LLM_"} {
+		url, key, model := strings.TrimSpace(os.Getenv(prefix+"URL")), strings.TrimSpace(os.Getenv(prefix+"KEY")), strings.TrimSpace(os.Getenv(prefix+"MODEL"))
+		if url != "" && key != "" && model != "" {
+			return &agentjudge.OpenAIChat{BaseURL: url, APIKey: key, Model: model, RetryPause: precheckRetryPause}
+		}
 	}
-	return &agentjudge.OpenAIChat{BaseURL: url, APIKey: key, Model: model, RetryPause: precheckRetryPause}
+	return nil
 }
 
 // judgeTurn hands the delivered turn to the judge. Under
@@ -104,7 +109,9 @@ func (r *Runtime) judgeTurn(ctx context.Context, conv Conversation, run AgentRun
 // judgeInput packs a turn for the judge: the client messages of this turn,
 // the earlier dialog, the state the agent had, the flags that change what
 // counts as a violation, and the reply as it was cut for delivery. The
-// kb_search results ride along only while a check is on, so with
+// kb_search results and the names of the procedures loaded for the turn
+// (active_skills, so a criterion can tell an objection answered without its
+// procedure) ride along only while a check is on, so with
 // AGENT_RUNTIME_PRECHECK=off the judge gets exactly the turn it got before.
 func (r *Runtime) judgeInput(conv Conversation, run AgentRunRequest, pending, history []Message, reply string, parts []string, traced A2AReply) agentjudge.Turn {
 	pendingIDs := map[string]bool{}
@@ -129,8 +136,12 @@ func (r *Runtime) judgeInput(conv Conversation, run AgentRunRequest, pending, hi
 		t.History = append(t.History, agentjudge.Exchange{Role: role, Text: m.Content})
 	}
 	state := run.ConversationContext.State
-	ctxJSON, _ := json.Marshal(map[string]any{"reported_facts": state.ReportedFacts, "open_loops": state.OpenLoops,
-		"no_question_this_turn": t.NoQuestionThisTurn, "reply_error": t.ReplyError, "username": conv.ActorUsername})
+	fields := map[string]any{"reported_facts": state.ReportedFacts, "open_loops": state.OpenLoops,
+		"no_question_this_turn": t.NoQuestionThisTurn, "reply_error": t.ReplyError, "username": conv.ActorUsername}
+	if r.flags.Precheck != precheckOff {
+		fields["active_skills"] = sortedKeys(state.ActiveSkills)
+	}
+	ctxJSON, _ := json.Marshal(fields)
 	t.Context = string(ctxJSON)
 	if r.flags.Precheck != precheckOff {
 		t.KB = traced.KB

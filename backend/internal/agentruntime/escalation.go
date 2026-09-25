@@ -348,7 +348,7 @@ func (s *Server) handleEscalate(c *gin.Context) {
 			return
 		}
 	}
-	res, _ := s.handOff(c.Request.Context(), conv, HandoffRequest{Code: req.ReasonCode, Summary: req.Summary, ClientLine: req.ClientMessage})
+	res, _ := s.handOff(c.Request.Context(), conv, HandoffRequest{Code: req.ReasonCode, Summary: req.Summary, ClientLine: req.ClientMessage, CheckLine: true})
 	c.JSON(res.Status, res.Body)
 }
 
@@ -358,13 +358,6 @@ func (s *Server) handleEscalate(c *gin.Context) {
 // keeps leading the script while the operator answers the open question.
 // Every such signal reaches the operator, see signalOperator.
 const escalationCheckAndReturn = "E_CHECK_AND_RETURN"
-
-// escalationTriggerReasons are the codes AGENT_RUNTIME_HANDOFF_TRIGGERS turns
-// into hands-off. With the flag off E_LEGAL_TAX stays a signal; the flag
-// does not touch E_CHECK_AND_RETURN, which is a signal either way.
-var escalationTriggerReasons = map[string]bool{
-	"E_LEGAL_TAX": true,
-}
 
 // escalationReasonKnown is the closed list.
 func (s *Server) escalationReasonKnown(code string) bool {
@@ -391,7 +384,7 @@ func (s *Server) handsOff(code string) bool {
 
 // codeHandsOff is handsOff for the runtime's own hand-offs (a check verdict).
 func (r *Runtime) codeHandsOff(code string) bool {
-	return escalationHandsOff[code] || (r.flags.HandoffTriggers && escalationTriggerReasons[code])
+	return escalationHandsOff[code] || r.flags.HandsOffCodes[code]
 }
 
 // HandoffResult is what handOff did: the HTTP status and body /tools/escalate
@@ -406,15 +399,21 @@ type HandoffResult struct {
 }
 
 // handOff is the body of /tools/escalate without gin, so the runtime can hand
-// a conversation off by itself (a check verdict, the refusal threshold). A
+// a conversation off by itself (a check verdict, a signal the spec maps to a hand-off). A
 // code that is not hands-off only signals the operator. A hands-off code
 // enters narrow mode when AGENT_RUNTIME_NARROW_ESCALATION is on, unless the
 // request forces a pause (ForcePause, which pauses on any code); otherwise the
 // agent is paused, the client gets ClientLine (or the fixed fallback; none
-// under NoClientLine) and the operator gets the card (not under NoCard). The error is non-nil whenever Status is not 200.
+// under NoClientLine) and the operator gets the card (not under NoCard). A
+// line the model wrote (CheckLine, /tools/escalate) is checked first under
+// AGENT_RUNTIME_PRECHECK=block, since it reaches the client outside the turn
+// the runtime checks. The error is non-nil whenever Status is not 200.
 func (s *Server) handOff(ctx context.Context, conv Conversation, req HandoffRequest) (HandoffResult, error) {
 	if !req.ForcePause && !s.handsOff(req.Code) {
 		return s.signalOperator(ctx, conv, req.Code, req.Summary)
+	}
+	if req.CheckLine && !req.NoClientLine {
+		req.ClientLine = s.runtime.checkedClientLine(ctx, conv, req.ClientLine)
 	}
 	if s.runtime.flags.NarrowEscalation && !req.ForcePause {
 		return s.narrowHandoff(ctx, conv, req.Code, req.Summary, req.ClientLine)
@@ -426,7 +425,6 @@ func (s *Server) handOff(ctx context.Context, conv Conversation, req HandoffRequ
 	if err := s.runtime.store.ClearEscalationAck(ctx, conv.ID); err != nil {
 		log.Warn().Err(err).Str("conversation", conv.ID.String()).Msg("agentruntime: escalation ack flag not cleared")
 	}
-	s.runtime.markRefusalsPaused(ctx, conv)
 	clientTold := false
 	if !req.NoClientLine {
 		clientTold = s.tellClient(ctx, conv, req.ClientLine)
@@ -562,15 +560,16 @@ func (r *Runtime) clientHandoffLine() string {
 // state after the run), so the hand-off sentence has to leave through the
 // same outbound path idle follow-ups use. Text comes from the tool call so
 // it matches the model's voice; empty falls back to a fixed line, and so
-// does a line with a denylisted link under AGENT_RUNTIME_HANDOFF_TRIGGERS.
+// does, under AGENT_RUNTIME_PRECHECK=block, a line with a link outside the
+// reply link allowlist (the turn's own replies are held to it already).
 // The line is saved to history before delivery so a later operator sees it.
 func (s *Server) tellClient(ctx context.Context, conv Conversation, text string) bool {
 	if text = strings.TrimSpace(text); text == "" {
 		text = s.runtime.clientHandoffLine()
 	}
-	if s.runtime.flags.HandoffTriggers {
-		if reason := linkLeakReason(text, nil, true); reason != "" {
-			log.Warn().Str("conversation", conv.ID.String()).Str("reason", reason).Msg("agentruntime: escalation client line carried a denied link, fallback line sent")
+	if s.runtime.flags.Precheck == precheckBlock {
+		if reason := linkLeakReason(text, s.runtime.linkAllowlist); reason != "" {
+			log.Warn().Str("conversation", conv.ID.String()).Str("reason", reason).Msg("agentruntime: escalation client line carried a link outside the allowlist, fallback line sent")
 			text = s.runtime.clientHandoffLine()
 		}
 	}

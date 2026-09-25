@@ -327,6 +327,12 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 	if err != nil {
 		return MessageResponse{}, err
 	}
+	judgeHistory := history
+	if r.flags.Precheck != precheckOff && r.ext.precheck != nil {
+		if longer, err := r.store.GetRecentMessages(ctx, conv.ID, precheckHistory); err == nil {
+			judgeHistory = longer
+		}
+	}
 	run := AgentRunRequest{AgentName: conv.AgentName, ContextID: "runtime-" + conv.ID.String(), Messages: pending,
 		EndUserKey: conv.Channel + ":" + conv.ExternalID,
 		ConversationContext: AgentConversationContext{ConversationID: conv.ID.String(), Channel: conv.Channel,
@@ -349,7 +355,6 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 	var pc *precheckTurn
 	if r.flags.Precheck == precheckBlock && r.ext.precheck != nil {
 		pc = newPrecheckTurn(precheckBlock, r.ext.precheckBudget)
-		r.resetRefusalsAfterResume(ctx, conv)
 	}
 	var reply string
 	var traced, earlier A2AReply
@@ -379,55 +384,52 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 			reply = stripEmDash(reply)
 			reason := leakReason(reply)
 			if reason == "" {
-				reason = linkLeakReason(reply, r.linkAllowlist, r.flags.HandoffTriggers)
+				reason = linkLeakReason(reply, r.linkAllowlist)
 			}
 			if reason == "" {
 				if soft := repeatedHookReason(reply, history); soft != "" && attempt == 0 {
 					log.Warn().Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Str("reason", soft).Msg("agentruntime: reply sent back for a rewrite")
 					run.ConversationContext.State = after
-					run.ConversationContext.ReplyError = repeatRepairHint
+					run.ConversationContext.ReplyError = r.precheckWithSoftHint(ctx, conv, run, pending, judgeHistory, reply, traced, pc, repeatRepairHint)
 					continue
 				}
 				if soft := languageMismatchReason(reply, pending); soft != "" && attempt == 0 {
 					log.Warn().Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Str("reason", soft).Msg("agentruntime: reply sent back for a rewrite")
 					run.ConversationContext.State = after
-					run.ConversationContext.ReplyError = languageRepairHint
+					run.ConversationContext.ReplyError = r.precheckWithSoftHint(ctx, conv, run, pending, judgeHistory, reply, traced, pc, languageRepairHint)
 					continue
 				}
 				if register := clientRegister(history, pending); attempt == 0 {
 					if soft := registerMismatchReason(reply, register); soft != "" {
 						log.Warn().Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Str("reason", soft).Msg("agentruntime: reply sent back for a rewrite")
 						run.ConversationContext.State = after
-						run.ConversationContext.ReplyError = registerRepairHint(reply, register)
+						run.ConversationContext.ReplyError = r.precheckWithSoftHint(ctx, conv, run, pending, judgeHistory, reply, traced, pc, registerRepairHint(reply, register))
 						continue
 					}
 				}
 				if soft := ackLimitReason(reply, pending, history, after, r.flags.AckLimit); soft != "" && attempt == 0 {
 					log.Warn().Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Str("reason", soft).Msg("agentruntime: reply sent back for a rewrite")
 					run.ConversationContext.State = after
-					run.ConversationContext.ReplyError = ackRepairHint(r.flags.AckLimit)
+					run.ConversationContext.ReplyError = r.precheckWithSoftHint(ctx, conv, run, pending, judgeHistory, reply, traced, pc, ackRepairHint(r.flags.AckLimit))
 					continue
 				}
 				if soft := funnelOrderReason(reply, after); r.flags.FunnelOrder && soft != "" && attempt == 0 {
 					log.Warn().Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Str("reason", soft).Msg("agentruntime: reply sent back for a rewrite")
 					run.ConversationContext.State = after
-					run.ConversationContext.ReplyError = funnelOrderRepairHint
+					run.ConversationContext.ReplyError = r.precheckWithSoftHint(ctx, conv, run, pending, judgeHistory, reply, traced, pc, funnelOrderRepairHint)
 					continue
 				}
 				if soft := questionBudgetReason(run.ConversationContext.NoQuestionThisTurn, reply); soft != "" {
 					if attempt == 0 {
 						log.Warn().Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Str("reason", soft).Msg("agentruntime: reply sent back for a rewrite")
 						run.ConversationContext.State = after
-						run.ConversationContext.ReplyError = questionBudgetRepairHint
+						run.ConversationContext.ReplyError = r.precheckWithSoftHint(ctx, conv, run, pending, judgeHistory, reply, traced, pc, questionBudgetRepairHint)
 						continue
 					}
 					log.Warn().Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Str("reason", soft).Msg("agentruntime: rewrite still asks, delivering as is")
 				}
-				// A deliberate silence (empty, SKIP) is not a draft: nothing to
-				// check, but on attempt 1 a hand-off attempt 0 left waiting is
-				// carried out (precheckSilence).
 				if pc != nil && (!isSilenceReply(reply) || attempt == 1) {
-					step, resp, perr := r.precheckStep(ctx, conv, &run, after, pending, history, &reply, traced, attempt, pc)
+					step, resp, perr := r.precheckStep(ctx, conv, &run, after, pending, judgeHistory, &reply, traced, attempt, pc)
 					if perr != nil {
 						return MessageResponse{}, &turnFailure{err: perr}
 					}
@@ -442,9 +444,6 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 			log.Warn().Str("conversation", conv.ID.String()).Str("agent", conv.AgentName).Int("attempt", attempt).
 				Str("reason", reason).Int("runes", len([]rune(reply))).Msg("agentruntime: reply held back as internal monologue")
 			if attempt == 1 {
-				if strings.HasPrefix(reason, linkReasonDenied) {
-					return MessageResponse{}, &turnFailure{err: fmt.Errorf("agent reply carried a denied link twice: %s", reason)}
-				}
 				return MessageResponse{}, &turnFailure{err: fmt.Errorf("agent reply leaked internal reasoning twice: %s", reason)}
 			}
 			run.ConversationContext.State = after
@@ -455,7 +454,7 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 		if contractErr == nil {
 			reply = rendered
 			if pc != nil && (!isSilenceReply(reply) || attempt == 1) {
-				step, resp, perr := r.precheckStep(ctx, conv, &run, after, pending, history, &reply, traced, attempt, pc)
+				step, resp, perr := r.precheckStep(ctx, conv, &run, after, pending, judgeHistory, &reply, traced, attempt, pc)
 				if perr != nil {
 					return MessageResponse{}, &turnFailure{err: perr}
 				}
@@ -512,7 +511,10 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 	if pc != nil {
 		r.afterCheckedTurn(ctx, conv, pc)
 	}
-	r.judgeTurn(ctx, conv, run, pending, history, reply, parts, traced, pc)
+	if r.flags.Precheck != precheckOff {
+		run.ConversationContext.State = after
+	}
+	r.judgeTurn(ctx, conv, run, pending, judgeHistory, reply, parts, traced, pc)
 	return MessageResponse{Text: reply, Messages: parts}, nil
 }
 

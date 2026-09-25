@@ -27,6 +27,7 @@ total:
 signals:
   - id: distress
     when: client is grieving
+    stop_followups: true
 criteria:
   - id: B1
     score: fact_unbacked
@@ -132,12 +133,10 @@ func TestSpecBlockFields(t *testing.T) {
 	}
 	head := "version: 2\nname: turn\ncriteria:\n  - {id: A, score: a, check: llm, type: bool, text: t, "
 	bad := map[string]string{
-		"unknown block":     head + "block: stop, ask: x}\n",
-		"rewrite no ask":    head + "block: rewrite}\n",
-		"handoff no ask":    head + "block: handoff, code: C, line: L, source: S}\n",
-		"handoff no code":   head + "block: handoff, ask: x, line: L, source: S}\n",
-		"handoff no line":   head + "block: handoff, ask: x, code: C, source: S}\n",
-		"handoff no source": head + "block: handoff, ask: x, code: C, line: L}\n",
+		"unknown block":   head + "block: stop, ask: x}\n",
+		"rewrite no ask":  head + "block: rewrite}\n",
+		"handoff no ask":  head + "block: handoff, code: C, line: L, source: S}\n",
+		"handoff no code": head + "block: handoff, ask: x, line: L, source: S}\n",
 	}
 	for name, body := range bad {
 		if _, err := ParseSpec([]byte(body)); err == nil {
@@ -146,6 +145,9 @@ func TestSpecBlockFields(t *testing.T) {
 	}
 	if _, err := ParseSpec([]byte(head + "block: rewrite, ask: x}\n")); err != nil {
 		t.Errorf("rewrite with ask: %v", err)
+	}
+	if _, err := ParseSpec([]byte(head + "block: handoff, ask: x, code: C}\n")); err != nil {
+		t.Errorf("handoff without line and source: %v", err)
 	}
 }
 
@@ -174,9 +176,6 @@ func TestOldSpecsLoadWithoutBlocks(t *testing.T) {
 	var nilJudge *Judge
 	if _, err := nilJudge.Check(context.Background(), "roman", Turn{}); err != nil {
 		t.Error(err)
-	}
-	if _, ok := nilJudge.Criterion("roman", "R01"); ok {
-		t.Error("nil judge found a criterion")
 	}
 }
 
@@ -210,7 +209,7 @@ func TestCheckUsesOnlyBlockCriteria(t *testing.T) {
 	if strings.Join(order, ",") != "B1,B3,C1" {
 		t.Fatalf("violations = %+v", pc.Violations)
 	}
-	if v := got["B1"]; v.Block != BlockHandoff || v.Ask != "ask-fact" || v.Why != "rate not in kb" || v.Code != "E_CHECK_AND_RETURN" {
+	if v := got["B1"]; v.Block != BlockHandoff || v.Ask != "ask-fact" || v.Why != "rate not in kb" || v.Code != "E_CHECK_AND_RETURN" || v.Line != "line-fact" {
 		t.Errorf("B1 = %+v", v)
 	}
 	if v := got["C1"]; v.Block != BlockRewrite || v.Ask != "ask-code" || v.Why == "" {
@@ -219,12 +218,11 @@ func TestCheckUsesOnlyBlockCriteria(t *testing.T) {
 	if !pc.Signals["distress"] || len(pc.Signals) != 1 {
 		t.Errorf("signals = %v", pc.Signals)
 	}
-	c, ok := j.Criterion("bot", "B1")
-	if !ok || c.Line != "line-fact" || c.Source != "conversations.jsonl#1" {
-		t.Errorf("Criterion = %+v %v", c, ok)
+	if len(pc.Actions) != 1 || pc.Actions[0] != (SignalAction{Signal: "distress", StopFollowups: true}) {
+		t.Errorf("actions = %+v", pc.Actions)
 	}
-	if _, ok := j.Criterion("bot", "nope"); ok {
-		t.Error("unknown id found")
+	if got["C1"].Line != "" {
+		t.Errorf("rewrite violation carries a line: %+v", got["C1"])
 	}
 }
 
@@ -450,9 +448,6 @@ func TestCheckBrokenSpecIsAnError(t *testing.T) {
 		t.Error("broken spec enabled")
 	}
 	j.Submit("bot", Turn{TraceID: "tr", Reply: "x"})
-	if _, ok := j.Criterion("bot", "A"); ok {
-		t.Error("criterion of a broken spec")
-	}
 	if len(llm.prompts) != 0 {
 		t.Errorf("broken spec reached the llm: %d calls", len(llm.prompts))
 	}
@@ -522,5 +517,53 @@ func TestSpecBlockAppliesMustBeSignal(t *testing.T) {
 	head := "version: 2\nname: turn\ncriteria:\n  - {id: A, score: a, check: llm, type: bool, text: t, applies: nosuch}\n"
 	if _, err := ParseSpec([]byte(head)); err != nil {
 		t.Errorf("non-block applies: %v", err)
+	}
+}
+
+// TestCheckHandoffLineDefaultAndSignalHandoff: a handoff criterion without a
+// line of its own carries the spec's handoff_line, and every marked signal
+// with a handoff code or stop_followups comes back as an action, in spec
+// order; a marked signal without either is only a signal.
+func TestCheckHandoffLineDefaultAndSignalHandoff(t *testing.T) {
+	spec := `version: 2
+name: turn
+handoff_line: default line
+signals:
+  - id: lost
+    when: lost money with us
+    handoff: E_LOST_MONEY
+  - id: stuck
+    when: withdrawal stuck
+    handoff: E_WITHDRAW
+    stop_followups: true
+  - id: quiet
+    when: nothing to act on
+criteria:
+  - id: L1
+    score: legal
+    check: llm
+    type: bool
+    title: legal
+    text: legal answer given
+    block: handoff
+    ask: ask-legal
+    code: E_LEGAL_TAX
+`
+	root := writeAgent(t, spec, blockSpecMD)
+	llm := &seqLLM{answers: []string{`{"legal": {"value": true, "why": "called it legal"}, "lost": true, "stuck": true, "quiet": true}`}}
+	j := New(root, llm, &recorder{})
+	pc, err := j.Check(context.Background(), "bot", Turn{Reply: "all legal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pc.Violations) != 1 || pc.Violations[0].Line != "default line" || pc.Violations[0].Code != "E_LEGAL_TAX" {
+		t.Fatalf("violations = %+v", pc.Violations)
+	}
+	want := []SignalAction{{Signal: "lost", Handoff: "E_LOST_MONEY"}, {Signal: "stuck", Handoff: "E_WITHDRAW", StopFollowups: true}}
+	if len(pc.Actions) != len(want) || pc.Actions[0] != want[0] || pc.Actions[1] != want[1] {
+		t.Errorf("actions = %+v", pc.Actions)
+	}
+	if pc.HandoffLine != "default line" || !pc.Signals["quiet"] {
+		t.Errorf("handoff line %q, signals %v", pc.HandoffLine, pc.Signals)
 	}
 }

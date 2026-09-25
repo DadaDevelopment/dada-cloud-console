@@ -13,7 +13,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/agentjudge"
 )
 
-var blockEnv = map[string]string{"AGENT_RUNTIME_PRECHECK": "block", "AGENT_RUNTIME_HANDOFF_TRIGGERS": "1"}
+var blockEnv = map[string]string{"AGENT_RUNTIME_PRECHECK": "block", "AGENT_RUNTIME_HANDS_OFF_CODES": "E_LEGAL_TAX"}
 
 // The check budget counts only the Checks: a rewrite slower than the whole
 // budget still gets its Check, and the record says how long the Checks took.
@@ -88,7 +88,7 @@ func TestPGPrecheckBlock_PartialVerdictIsApplied(t *testing.T) {
 	rig.judge.errs = []error{errors.New("judge reply unparsable"), nil}
 	out := rig.send(t, "не знаю")
 	require.Equal(t, "вторая версия", out.Text)
-	require.Equal(t, "ask one", rig.agent.runs[1].ConversationContext.ReplyError)
+	require.Equal(t, "ask one (why script_repeat)", rig.agent.runs[1].ConversationContext.ReplyError)
 	_, submits := rig.judge.snapshot()
 	rec := submits[0].Precheck
 	require.Equal(t, precheckRewrite, rec["outcome"])
@@ -173,7 +173,7 @@ func TestPGPrecheckBlock_ForcedHandoffSkipsCardTheModelSent(t *testing.T) {
 // Server side of NoCard and NoClientLine: the pause happens, the skipped
 // message does not go out.
 func TestPGHandOff_NoCardAndNoClientLine(t *testing.T) {
-	_, srv, out, client, _, closeServer := escalateTestServer(t, map[string]string{"AGENT_RUNTIME_HANDOFF_TRIGGERS": "1"})
+	_, srv, out, client, _, closeServer := escalateTestServer(t, map[string]string{"AGENT_RUNTIME_HANDS_OFF_CODES": "E_LEGAL_TAX"})
 	res, err := srv.handOff(context.Background(), client, HandoffRequest{Code: "E_LOST_MONEY", Summary: "s", ClientLine: "line", ForcePause: true, NoCard: true})
 	require.NoError(t, err)
 	require.True(t, res.Paused)
@@ -181,7 +181,7 @@ func TestPGHandOff_NoCardAndNoClientLine(t *testing.T) {
 	require.Equal(t, []string{"1001"}, out.chats)
 	closeServer()
 
-	_, srv, out, client, _, closeServer = escalateTestServer(t, map[string]string{"AGENT_RUNTIME_HANDOFF_TRIGGERS": "1"})
+	_, srv, out, client, _, closeServer = escalateTestServer(t, map[string]string{"AGENT_RUNTIME_HANDS_OFF_CODES": "E_LEGAL_TAX"})
 	defer closeServer()
 	res, err = srv.handOff(context.Background(), client, HandoffRequest{Code: "E_LOST_MONEY", Summary: "s", ForcePause: true, NoClientLine: true})
 	require.NoError(t, err)
@@ -290,30 +290,31 @@ func TestPGPrecheckLog_BoundedInFlight(t *testing.T) {
 	require.Eventually(t, func() bool { checks, _ := rig.judge.snapshot(); return len(checks) == 2 }, 5*time.Second, 10*time.Millisecond)
 }
 
-// Under AGENT_RUNTIME_HANDOFF_TRIGGERS a hand-off line with a denylisted
-// link is replaced with the platform line; off, it goes out as before.
-func TestPGEscalate_ClientMessageDenylistedLink(t *testing.T) {
+// Under AGENT_RUNTIME_PRECHECK=block a hand-off line with a link outside the
+// reply link allowlist is replaced with the platform line (the same list the
+// turn's own replies are held to); with the check off it goes out as before.
+func TestPGEscalate_ClientMessageLinkOutsideAllowlist(t *testing.T) {
 	line := "Обзор здесь: https://t.me/robinhoodmetals/58"
-	for _, flag := range []string{"1", ""} {
-		_, srv, out, _, target, closeServer := escalateTestServer(t, map[string]string{"AGENT_RUNTIME_HANDOFF_TRIGGERS": flag})
+	for _, mode := range []string{"block", "off"} {
+		_, srv, out, _, target, closeServer := escalateTestServer(t, map[string]string{"AGENT_RUNTIME_PRECHECK": mode, "AGENT_REPLY_LINK_ALLOWLIST": "direct-fxpro.com"})
 		base, token, _ := strings.Cut(target, "|")
 		status, res := postRuntime(t, base, "/tools/escalate", map[string]any{"context_token": token, "reason_code": "E_PAYMENT_UNCONFIRMED", "summary": "Деньги ушли, зачисления нет.", "client_message": line}, testRuntimeToken)
 		require.Equal(t, 200, status, res)
 		require.Equal(t, "1001", out.chats[0])
-		if flag == "1" {
+		if mode == "block" {
 			require.Equal(t, srv.runtime.clientHandoffLine(), out.texts[0])
 		} else {
-			require.Equal(t, line, out.texts[0], "flag off: unchanged")
+			require.Equal(t, line, out.texts[0], "check off: unchanged")
 		}
 		closeServer()
 	}
 }
 
-// Under AGENT_RUNTIME_HANDOFF_TRIGGERS a follow-up with a denylisted link
-// is dropped; off, it goes out as before.
-func TestIdleScheduler_DropsFollowUpWithDenylistedLink(t *testing.T) {
-	for _, flag := range []string{"1", ""} {
-		t.Setenv("AGENT_RUNTIME_HANDOFF_TRIGGERS", flag)
+// Under AGENT_RUNTIME_PRECHECK=block a follow-up with a link outside the
+// reply link allowlist is dropped; with the check off it goes out as before.
+func TestIdleScheduler_DropsFollowUpWithLinkOutsideAllowlist(t *testing.T) {
+	for _, mode := range []string{"block", "off"} {
+		t.Setenv("AGENT_RUNTIME_PRECHECK", mode)
 		store := setupTestStore(t).(*pgStore)
 		ctx := context.Background()
 		agentName := "idle-deny-" + uuid.NewString()[:8]
@@ -335,10 +336,13 @@ func TestIdleScheduler_DropsFollowUpWithDenylistedLink(t *testing.T) {
 		var delivered []string
 		rt := NewRuntime(store, &noopHooks{}, agent, nil)
 		rt.contextKey = []byte(testRuntimeToken)
+		rt.linkAllowlist = []string{"direct-fxpro.com"}
+		judge := &fakePrecheck{}
+		rt.ext.precheck = judge
 		sched := NewIdleScheduler(store.pool, rt, agent, &fakeOutbound{onSend: func(_, _, text string) { delivered = append(delivered, text) }}, time.Second)
 		sched.now = idleDaytime
 		require.NoError(t, sched.Tick(ctx))
-		if flag == "1" {
+		if mode == "block" {
 			require.Empty(t, delivered)
 		} else {
 			require.Equal(t, []string{"Обзор здесь: https://t.me/robinhoodmetals/58"}, delivered)

@@ -61,9 +61,16 @@ type Criterion struct {
 }
 
 // Signal is a situation label the LLM marks on the client side of the turn.
+// Handoff and StopFollowups say what the runtime does when a pre-delivery
+// check marks it: Handoff is the escalation code the conversation is handed
+// off with (after the reply of that turn went out, with a pause),
+// StopFollowups ends the idle follow-up ladder until the client writes
+// again. The mapping lives in the agent's spec, the runtime only acts on it.
 type Signal struct {
-	ID   string `yaml:"id"`
-	When string `yaml:"when"`
+	ID            string `yaml:"id"`
+	When          string `yaml:"when"`
+	Handoff       string `yaml:"handoff"`
+	StopFollowups bool   `yaml:"stop_followups"`
 }
 
 // Total describes the aggregate score derived from the criteria.
@@ -80,15 +87,18 @@ type Skip struct {
 }
 
 // Spec is the parsed turn.yaml plus the prompt template next to it.
+// HandoffLine is the client line of a check-decided hand-off whose criterion
+// names no line of its own.
 type Spec struct {
-	Version  int         `yaml:"version"`
-	Name     string      `yaml:"name"`
-	Prompt   string      `yaml:"prompt"`
-	Skip     Skip        `yaml:"skip"`
-	Total    Total       `yaml:"total"`
-	Signals  []Signal    `yaml:"signals"`
-	Criteria []Criterion `yaml:"criteria"`
-	Template string      `yaml:"-"`
+	Version     int         `yaml:"version"`
+	Name        string      `yaml:"name"`
+	Prompt      string      `yaml:"prompt"`
+	Skip        Skip        `yaml:"skip"`
+	Total       Total       `yaml:"total"`
+	HandoffLine string      `yaml:"handoff_line"`
+	Signals     []Signal    `yaml:"signals"`
+	Criteria    []Criterion `yaml:"criteria"`
+	Template    string      `yaml:"-"`
 }
 
 // LoadSpec reads <dir>/turn.yaml and the prompt file it names.
@@ -200,8 +210,8 @@ func ParseSpec(raw []byte) (*Spec, error) {
 			if strings.TrimSpace(c.Ask) == "" {
 				return nil, fmt.Errorf("criterion %s: block %s needs ask", c.ID, c.Block)
 			}
-			if c.Block == BlockHandoff && (strings.TrimSpace(c.Code) == "" || strings.TrimSpace(c.Line) == "" || strings.TrimSpace(c.Source) == "") {
-				return nil, fmt.Errorf("criterion %s: block handoff needs code, line and source", c.ID)
+			if c.Block == BlockHandoff && strings.TrimSpace(c.Code) == "" {
+				return nil, fmt.Errorf("criterion %s: block handoff needs code", c.ID)
 			}
 		default:
 			return nil, fmt.Errorf("criterion %s: block must be rewrite or handoff", c.ID)

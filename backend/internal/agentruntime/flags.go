@@ -93,24 +93,8 @@ type runtimeFlags struct {
 	// silence and no error anywhere.
 	SilenceRecovery bool
 
-	// Pre-delivery check (plan 2026-09-25). Every default below is today's
-	// behaviour: no check, no counters, no new hand-off codes.
-
-	// Precheck (AGENT_RUNTIME_PRECHECK) is off|log|block. log judges the
-	// delivered turn once, after delivery, and records what block would have
-	// done; block checks every draft before it reaches the client.
-	Precheck string
-	// ScriptCounters (AGENT_RUNTIME_SCRIPT_COUNTERS) counts the check's
-	// refusal_* signals per conversation; RefusalHandoffAt
-	// (AGENT_RUNTIME_REFUSAL_HANDOFF_AT, default 2) hands the conversation
-	// off at that many refusals for one reason. Requires Precheck=block.
-	ScriptCounters   bool
-	RefusalHandoffAt int
-	// HandoffTriggers (AGENT_RUNTIME_HANDOFF_TRIGGERS) makes E_LEGAL_TAX
-	// hands-off and refuses the denylisted links (linkDenylist) in replies,
-	// follow-ups and hand-off lines. E_CHECK_AND_RETURN is a signal with the
-	// flag on or off. Required by Precheck=block.
-	HandoffTriggers bool
+	Precheck      string
+	HandsOffCodes map[string]bool
 }
 
 // Modes of AGENT_RUNTIME_PRECHECK.
@@ -144,34 +128,52 @@ func runtimeFlagsFromEnv() runtimeFlags {
 		FunnelOrder:       envBool("AGENT_RUNTIME_FUNNEL_ORDER", false),
 		SilenceRecovery:   envBool("AGENT_RUNTIME_SILENCE_RECOVERY", false),
 		Precheck:          envChoice("AGENT_RUNTIME_PRECHECK", precheckOff, precheckOff, precheckLog, precheckBlock),
-		ScriptCounters:    envBool("AGENT_RUNTIME_SCRIPT_COUNTERS", false),
-		RefusalHandoffAt:  envInt("AGENT_RUNTIME_REFUSAL_HANDOFF_AT", refusalHandoffAtDefault),
-		HandoffTriggers:   envBool("AGENT_RUNTIME_HANDOFF_TRIGGERS", false),
+		HandsOffCodes:     parseCodeList(os.Getenv("AGENT_RUNTIME_HANDS_OFF_CODES")),
 	}
 }
 
+// parseCodeList reads a comma-separated list of escalation codes, upper-cased;
+// empty entries are skipped and an empty list is nil.
+func parseCodeList(raw string) map[string]bool {
+	var codes map[string]bool
+	for _, entry := range strings.Split(raw, ",") {
+		code := strings.ToUpper(strings.TrimSpace(entry))
+		if code == "" {
+			continue
+		}
+		if codes == nil {
+			codes = map[string]bool{}
+		}
+		codes[code] = true
+	}
+	return codes
+}
+
 // ValidateFlagsFromEnv rejects switch combinations that cannot work, so the
-// process refuses to start instead of silently running without them. The
-// refusal counters read the check's signals before delivery; under
-// PRECHECK=log those signals arrive after the reply is gone, and a
-// threshold that cannot discard the draft would hand off one turn late.
-// A check switched on without its model is refused for the same reason.
+// process refuses to start instead of silently running without them: a check
+// switched on without its model (AGENT_PRECHECK_LLM_*, else the scoring
+// judge's AGENT_JUDGE_LLM_*), and a hands-off code the runtime does not know.
+//
+// The pre-delivery check (plan 2026-09-25) keeps every default at today's
+// behaviour. AGENT_RUNTIME_PRECHECK is off|log|block: log judges the
+// delivered turn once, after delivery, and records what block would have
+// done; block checks every draft, follow-up and model-written hand-off line
+// before it reaches the client. AGENT_RUNTIME_HANDS_OFF_CODES lists extra
+// escalation codes that pause the agent (E_LEGAL_TAX for the lead's "legal
+// and tax go to a person"); the built-in escalationHandsOff set is unchanged.
 func ValidateFlagsFromEnv() error {
 	f := runtimeFlagsFromEnv()
 	if f.Precheck != precheckOff && precheckLLMFromEnv() == nil {
-		return fmt.Errorf("AGENT_RUNTIME_PRECHECK=%s requires AGENT_JUDGE_LLM_URL, AGENT_JUDGE_LLM_KEY and AGENT_JUDGE_LLM_MODEL", f.Precheck)
+		return fmt.Errorf("AGENT_RUNTIME_PRECHECK=%s requires AGENT_PRECHECK_LLM_URL/KEY/MODEL or AGENT_JUDGE_LLM_URL/KEY/MODEL", f.Precheck)
 	}
 	return f.validate()
 }
 
 func (f runtimeFlags) validate() error {
-	if f.ScriptCounters && f.Precheck != precheckBlock {
-		return fmt.Errorf("AGENT_RUNTIME_SCRIPT_COUNTERS=on requires AGENT_RUNTIME_PRECHECK=block (got %q)", f.Precheck)
-	}
-	// The block check hands off with the spec's codes: without the triggers
-	// E_LEGAL_TAX does not pause.
-	if f.Precheck == precheckBlock && !f.HandoffTriggers {
-		return fmt.Errorf("AGENT_RUNTIME_PRECHECK=block requires AGENT_RUNTIME_HANDOFF_TRIGGERS=on")
+	for _, code := range sortedKeys(f.HandsOffCodes) {
+		if _, known := escalationReasons[code]; !known {
+			return fmt.Errorf("AGENT_RUNTIME_HANDS_OFF_CODES: unknown escalation code %s", code)
+		}
 	}
 	return nil
 }
