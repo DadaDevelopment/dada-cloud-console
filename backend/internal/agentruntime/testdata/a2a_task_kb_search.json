@@ -1,0 +1,21 @@
+{
+  "id": "task-1",
+  "contextId": "runtime-1",
+  "kind": "task",
+  "status": {"state": "completed", "message": {"role": "agent", "parts": [{"kind": "text", "text": "Комиссия 0 %."}]}},
+  "history": [
+    {"role": "user", "parts": [{"kind": "text", "text": "какая комиссия?"}]},
+    {"role": "agent", "parts": [
+      {"kind": "data", "data": {"id": "call-1", "name": "kb_search", "args": {"query": "комиссия за пополнение"}}, "metadata": {"kagent_type": "function_call"}}
+    ]},
+    {"role": "agent", "parts": [
+      {"kind": "data", "data": {"id": "call-1", "name": "kb_search", "response": {"result": {"content": [{"type": "text", "text": "Пополнение без комиссии."}], "isError": false}}}, "metadata": {"kagent_type": "function_response"}}
+    ]},
+    {"role": "agent", "parts": [
+      {"kind": "data", "data": {"id": "call-2", "name": "load_skill", "response": {"result": "price"}}, "metadata": {"kagent_type": "function_response"}},
+      {"kind": "data", "data": {"id": "call-3", "name": "kb_search", "response": {"result": "stale"}}},
+      {"kind": "data", "data": {"id": "call-4", "name": "kb_search", "args": {"query": "вывод"}, "response": {"x": 1}}, "metadata": {"kagent_type": "function_call"}}
+    ]}
+  ],
+  "artifacts": [{"parts": [{"kind": "text", "text": "Комиссия 0 %."}]}]
+}

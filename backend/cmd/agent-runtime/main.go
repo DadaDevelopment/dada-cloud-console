@@ -51,6 +51,9 @@ func main() {
 		log.Fatal().Err(err).Msg("AGENT_RUNTIME_TZ is not a known IANA zone")
 	}
 	agentruntime.SetRuntimeLocation(loc)
+	if err := agentruntime.ValidateFlagsFromEnv(); err != nil {
+		log.Fatal().Err(err).Msg("agentruntime: switch combination not supported")
+	}
 	log.Info().Str("zone", loc.String()).Msg("agentruntime: model clock zone")
 
 	gitopsBasePath := os.Getenv("GITOPS_BASE_PATH")

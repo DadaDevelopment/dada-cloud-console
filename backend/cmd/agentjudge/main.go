@@ -8,6 +8,7 @@
 //	 "turns": [{"id": "t01/2", "username": "eval_t01", "incoming": ["..."], "reply": "...",
 //	            "parts": ["..."], "history": [{"role": "client", "text": "..."}],
 //	            "state": {"reported_facts": {}, "open_loops": []},
+//	            "kb": [{"query": "...", "text": "..."}],
 //	            "no_question_this_turn": false, "reply_error": false}]}
 //
 // Output (stdout, JSON): {"specs": [{"name": "turn", "fail_below": 50}],
@@ -39,6 +40,12 @@ type inputTurn struct {
 	State              json.RawMessage `json:"state"`
 	NoQuestionThisTurn bool            `json:"no_question_this_turn"`
 	ReplyError         bool            `json:"reply_error"`
+	KB                 []kbResult      `json:"kb"`
+}
+
+type kbResult struct {
+	Query string `json:"query"`
+	Text  string `json:"text"`
 }
 
 type exchange struct {
@@ -123,6 +130,9 @@ func run(in io.Reader, out io.Writer) error {
 			NoQuestionThisTurn: it.NoQuestionThisTurn, ReplyError: it.ReplyError}
 		for _, h := range it.History {
 			t.History = append(t.History, agentjudge.Exchange{Role: h.Role, Text: h.Text})
+		}
+		for _, k := range it.KB {
+			t.KB = append(t.KB, agentjudge.KBResult{Query: k.Query, Text: k.Text})
 		}
 		t.Context = contextJSON(it)
 		ot := outTurn{ID: it.ID, Results: map[string][]outResult{}}

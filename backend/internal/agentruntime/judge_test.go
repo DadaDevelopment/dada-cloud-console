@@ -31,6 +31,14 @@ func (j *recordingJudge) Submit(agent string, t agentjudge.Turn) {
 	j.turns = append(j.turns, t)
 }
 
+func (j *recordingJudge) Check(context.Context, string, agentjudge.Turn) (agentjudge.Precheck, error) {
+	return agentjudge.Precheck{}, nil
+}
+
+func (j *recordingJudge) Criterion(string, string) (agentjudge.Criterion, bool) {
+	return agentjudge.Criterion{}, false
+}
+
 func TestPGJudgeReceivesTurnWithHistoryAndTrace(t *testing.T) {
 	store := setupTestStore(t).(*pgStore)
 	ctx := context.Background()

@@ -158,8 +158,15 @@ func (s *Spec) RenderPrompt(t Turn) string {
 	if ctx == "" {
 		ctx = "(пусто)"
 	}
+	// An empty {{kb}} means kb_search was not called this turn; the template
+	// says what that implies for the model.
+	var kb strings.Builder
+	for _, k := range t.KB {
+		fmt.Fprintf(&kb, "query: %s\n%s\n\n", strings.TrimSpace(k.Query), strings.TrimSpace(k.Text))
+	}
 	r := strings.NewReplacer(
 		"{{criteria}}", criteria.String(),
+		"{{kb}}", strings.TrimSpace(kb.String()),
 		"{{signals}}", signals.String(),
 		"{{history}}", history.String(),
 		"{{context}}", ctx,
