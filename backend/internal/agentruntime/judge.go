@@ -68,7 +68,7 @@ func precheckJudgeFromEnv(basePath string, flags runtimeFlags) TurnJudge {
 		log.Warn().Str("mode", flags.Precheck).Msg("agentruntime: AGENT_RUNTIME_PRECHECK on but neither AGENT_PRECHECK_LLM_* nor AGENT_JUDGE_LLM_* is complete; precheck off")
 		return nil
 	}
-	log.Info().Str("mode", flags.Precheck).Str("model", llm.Model).Msg("agentruntime: precheck on")
+	log.Info().Str("mode", flags.Precheck).Str("synthetic", flags.PrecheckSynthetic).Str("model", llm.Model).Msg("agentruntime: precheck on")
 	return agentjudge.New(basePath, llm, nil)
 }
 
@@ -91,7 +91,7 @@ func precheckLLMFromEnv() *agentjudge.OpenAIChat {
 // is scored once and the client waits for nothing. pc is the block-mode
 // record of this turn (nil otherwise).
 func (r *Runtime) judgeTurn(ctx context.Context, conv Conversation, run AgentRunRequest, pending, history []Message, reply string, parts []string, traced A2AReply, pc *precheckTurn) {
-	if r.flags.Precheck == precheckLog && r.ext.precheck != nil {
+	if r.precheckMode(conv) == precheckLog && r.ext.precheck != nil {
 		t := r.judgeInput(conv, run, pending, history, reply, parts, traced)
 		r.goPrecheckLogged(conv, t, traced.TraceID != "", precheckLog)
 		return

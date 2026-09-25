@@ -93,8 +93,9 @@ type runtimeFlags struct {
 	// silence and no error anywhere.
 	SilenceRecovery bool
 
-	Precheck      string
-	HandsOffCodes map[string]bool
+	Precheck          string
+	PrecheckSynthetic string
+	HandsOffCodes     map[string]bool
 }
 
 // Modes of AGENT_RUNTIME_PRECHECK.
@@ -128,6 +129,7 @@ func runtimeFlagsFromEnv() runtimeFlags {
 		FunnelOrder:       envBool("AGENT_RUNTIME_FUNNEL_ORDER", false),
 		SilenceRecovery:   envBool("AGENT_RUNTIME_SILENCE_RECOVERY", false),
 		Precheck:          envChoice("AGENT_RUNTIME_PRECHECK", precheckOff, precheckOff, precheckLog, precheckBlock),
+		PrecheckSynthetic: envChoice("AGENT_RUNTIME_PRECHECK_SYNTHETIC", "", precheckBlock),
 		HandsOffCodes:     parseCodeList(os.Getenv("AGENT_RUNTIME_HANDS_OFF_CODES")),
 	}
 }
@@ -158,9 +160,13 @@ func parseCodeList(raw string) map[string]bool {
 // behaviour. AGENT_RUNTIME_PRECHECK is off|log|block: log judges the
 // delivered turn once, after delivery, and records what block would have
 // done; block checks every draft, follow-up and model-written hand-off line
-// before it reaches the client. AGENT_RUNTIME_HANDS_OFF_CODES lists extra
-// escalation codes that pause the agent (E_LEGAL_TAX for the lead's "legal
-// and tax go to a person"); the built-in escalationHandsOff set is unchanged.
+// before it reaches the client. AGENT_RUNTIME_PRECHECK_SYNTHETIC=block runs
+// block for test traffic only (syntheticActor: eval runs, QA, probes) while
+// clients stay on log, so block is measured on the production agent before a
+// client meets it; it needs AGENT_RUNTIME_PRECHECK=log.
+// AGENT_RUNTIME_HANDS_OFF_CODES lists extra escalation codes that pause the
+// agent (E_LEGAL_TAX for the lead's "legal and tax go to a person"); the
+// built-in escalationHandsOff set is unchanged.
 func ValidateFlagsFromEnv() error {
 	f := runtimeFlagsFromEnv()
 	if f.Precheck != precheckOff && precheckLLMFromEnv() == nil {
@@ -170,6 +176,9 @@ func ValidateFlagsFromEnv() error {
 }
 
 func (f runtimeFlags) validate() error {
+	if f.PrecheckSynthetic != "" && f.Precheck != precheckLog {
+		return fmt.Errorf("AGENT_RUNTIME_PRECHECK_SYNTHETIC=%s requires AGENT_RUNTIME_PRECHECK=log, got %s", f.PrecheckSynthetic, f.Precheck)
+	}
 	for _, code := range sortedKeys(f.HandsOffCodes) {
 		if _, known := escalationReasons[code]; !known {
 			return fmt.Errorf("AGENT_RUNTIME_HANDS_OFF_CODES: unknown escalation code %s", code)

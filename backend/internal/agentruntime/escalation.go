@@ -567,7 +567,7 @@ func (s *Server) tellClient(ctx context.Context, conv Conversation, text string)
 	if text = strings.TrimSpace(text); text == "" {
 		text = s.runtime.clientHandoffLine()
 	}
-	if s.runtime.flags.Precheck == precheckBlock {
+	if s.runtime.precheckMode(conv) == precheckBlock {
 		if reason := linkLeakReason(text, s.runtime.linkAllowlist); reason != "" {
 			log.Warn().Str("conversation", conv.ID.String()).Str("reason", reason).Msg("agentruntime: escalation client line carried a link outside the allowlist, fallback line sent")
 			text = s.runtime.clientHandoffLine()

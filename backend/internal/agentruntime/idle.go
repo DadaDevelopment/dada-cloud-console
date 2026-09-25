@@ -371,7 +371,7 @@ func (s *IdleScheduler) invoke(ctx context.Context, r idleHookRow, deliver bool)
 	}
 	register := clientRegister(history, nil)
 	var pc *precheckTurn
-	if s.runtime.flags.Precheck == precheckBlock && s.runtime.ext.precheck != nil {
+	if s.runtime.precheckMode(conv) == precheckBlock && s.runtime.ext.precheck != nil {
 		pc = newPrecheckTurn(precheckIdleBlock, s.runtime.ext.precheckBudget)
 	}
 	var reply string
@@ -436,7 +436,7 @@ func (s *IdleScheduler) invoke(ctx context.Context, r idleHookRow, deliver bool)
 	case pc != nil:
 		logPrecheck(conv, pc.record())
 		s.runtime.judgeTurn(ctx, conv, run, nil, history, reply, splitReplyParts(reply), traced, pc)
-	case s.runtime.flags.Precheck == precheckLog && s.runtime.ext.precheck != nil:
+	case s.runtime.precheckMode(conv) == precheckLog && s.runtime.ext.precheck != nil:
 		s.runtime.goPrecheckLogged(conv, s.runtime.judgeInput(conv, run, nil, history, reply, splitReplyParts(reply), traced), traced.TraceID != "", precheckIdleLog)
 	default:
 		s.runtime.judgeTurn(ctx, conv, run, nil, history, reply, splitReplyParts(reply), traced, nil)

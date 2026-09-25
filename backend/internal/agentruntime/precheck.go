@@ -590,6 +590,16 @@ func (r *Runtime) precheckFollowUp(ctx context.Context, conv Conversation, t age
 	return "", true
 }
 
+// precheckMode is the check mode of one conversation: test traffic
+// (syntheticActor) runs AGENT_RUNTIME_PRECHECK_SYNTHETIC when it is set,
+// everyone else AGENT_RUNTIME_PRECHECK.
+func (r *Runtime) precheckMode(conv Conversation) string {
+	if r.flags.PrecheckSynthetic != "" && syntheticActor(conv.ActorUsername) {
+		return r.flags.PrecheckSynthetic
+	}
+	return r.flags.Precheck
+}
+
 // checkedClientLine checks, under AGENT_RUNTIME_PRECHECK=block, the line the
 // model wrote into escalate_to_operator before it reaches the client: the
 // tool sends that line by itself, outside the turn the runtime checks. A line
@@ -597,7 +607,7 @@ func (r *Runtime) precheckFollowUp(ctx context.Context, conv Conversation, t age
 // else the spec's hand-off line, else the platform line; a check that does
 // not answer lets the model's line go, as for a turn.
 func (r *Runtime) checkedClientLine(ctx context.Context, conv Conversation, line string) string {
-	if r.flags.Precheck != precheckBlock || r.ext.precheck == nil || strings.TrimSpace(line) == "" {
+	if r.precheckMode(conv) != precheckBlock || r.ext.precheck == nil || strings.TrimSpace(line) == "" {
 		return line
 	}
 	state, err := r.states.GetState(ctx, conv.ID)

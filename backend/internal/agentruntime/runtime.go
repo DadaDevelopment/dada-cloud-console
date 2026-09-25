@@ -353,7 +353,7 @@ func (r *Runtime) runTurn(ctx context.Context, conv Conversation, state RuntimeS
 	}
 	_, narrowAtEntry := narrowSince(conv)
 	var pc *precheckTurn
-	if r.flags.Precheck == precheckBlock && r.ext.precheck != nil {
+	if r.precheckMode(conv) == precheckBlock && r.ext.precheck != nil {
 		pc = newPrecheckTurn(precheckBlock, r.ext.precheckBudget)
 	}
 	var reply string
