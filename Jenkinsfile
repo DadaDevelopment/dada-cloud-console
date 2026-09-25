@@ -75,7 +75,11 @@ def NEXT_PUBLIC_OIDC_CLIENT_ID  = 'dada-console'
 // both hosts — on the console host this is simply same-origin.
 def NEXT_PUBLIC_CONSOLE_URL     = 'https://console.dada-tuda.ru'
 
-def podLabel  = 'dada-cloud-console-agent'
+// Per-build label. With a fixed label, node() matched ANY registered template
+// carrying it, including one left behind by an aborted build: #147 ran on #146's
+// stale template (node-builder 1280Mi, Pending on every node) instead of its
+// own 1216Mi one.
+def podLabel  = "dada-cloud-console-agent-${env.BUILD_NUMBER}"
 def agentName = "kubeagent-${env.JOB_BASE_NAME}-${env.BUILD_NUMBER}-${UUID.randomUUID().toString().take(6)}"
 
 // abortPrevious tried TWICE now, reverted both times for the same reason:
