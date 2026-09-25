@@ -114,7 +114,7 @@ function ShardCard({ shard, windowDays }: { shard: AdminDBShard; windowDays: num
           />
         </div>
 
-        {shard.top.length === 0 ? (
+        {!shard.top?.length ? (
           <p className="text-xs text-gray-500 dark:text-gray-400">{t("adminDbShards.noSamples")}</p>
         ) : (
           <div className="overflow-x-auto">
@@ -133,7 +133,7 @@ function ShardCard({ shard, windowDays }: { shard: AdminDBShard; windowDays: num
                 </tr>
               </thead>
               <tbody>
-                {shard.top.map((db) => (
+                {(shard.top ?? []).map((db) => (
                   <DatabaseRow key={db.datname} db={db} t={t} />
                 ))}
               </tbody>

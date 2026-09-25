@@ -205,6 +205,9 @@ func (h *Handler) GetAdminDBShards(c *gin.Context) {
 				view.Top[i].Share = float64(view.Top[i].SizeBytes) / float64(view.SampledBytes)
 			}
 		}
+		if view.Top == nil {
+			view.Top = []adminShardDatabase{}
+		}
 		if len(view.Top) > adminShardTopDatabases {
 			view.Top = view.Top[:adminShardTopDatabases]
 		}

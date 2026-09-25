@@ -76,3 +76,48 @@ func TestGetAdminDBShardsHidesDatabaseAbsentFromLatestShardSample(t *testing.T) 
 	}
 	t.Fatalf("response omitted shard %s", shard)
 }
+
+func TestGetAdminDBShardsEncodesEmptyShardTopAsArray(t *testing.T) {
+	pool := overviewBrokenTestPool(t)
+	ctx := context.Background()
+	shard := "empty-" + uuid.NewString()[:8]
+
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO db_shards (name, state, is_platform, metrics_selector, note)
+		 VALUES ($1, 'open', FALSE, '', '')`, shard,
+	); err != nil {
+		t.Fatalf("seed shard: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM db_shards WHERE name = $1`, shard)
+	})
+
+	h := &Handler{pool: pool}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/db-shards", nil)
+	auth.SetClaims(c, &auth.Claims{Groups: []string{"/platform-admins"}})
+	h.GetAdminDBShards(c)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var response struct {
+		Shards []map[string]json.RawMessage `json:"shards"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	for _, view := range response.Shards {
+		var name string
+		_ = json.Unmarshal(view["name"], &name)
+		if name != shard {
+			continue
+		}
+		if string(view["top"]) != "[]" {
+			t.Fatalf("shard without samples must encode top as [], got %s", view["top"])
+		}
+		return
+	}
+	t.Fatalf("response omitted shard %s", shard)
+}
