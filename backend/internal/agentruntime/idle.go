@@ -371,13 +371,15 @@ func (s *IdleScheduler) invoke(ctx context.Context, r idleHookRow, deliver bool)
 	}
 	register := clientRegister(history, nil)
 	var reply string
-	var traced A2AReply
+	var traced, earlier A2AReply
 	for attempt := 0; attempt < 2; attempt++ {
 		traced, err = s.send(ctx, run)
 		if err != nil {
 			log.Warn().Err(err).Str("conversation", convID).Msg("agentruntime: idle invoke: a2a")
 			return ""
 		}
+		traced = withEarlierAttempts(earlier, traced)
+		earlier = traced
 		state, err = s.runtime.states.GetState(ctx, conv.ID)
 		if err != nil || !state.AgentEnabled {
 			return ""
@@ -397,6 +399,12 @@ func (s *IdleScheduler) invoke(ctx context.Context, r idleHookRow, deliver bool)
 			log.Warn().Str("conversation", convID).Str("reason", reason).Msg("agentruntime: idle follow-up dropped as internal monologue")
 			return ""
 		}
+		if s.runtime.flags.HandoffTriggers {
+			if reason := linkLeakReason(reply, nil, true); reason != "" {
+				log.Warn().Str("conversation", convID).Str("reason", reason).Msg("agentruntime: idle follow-up dropped: denied link")
+				return ""
+			}
+		}
 		if soft := registerMismatchReason(reply, register); soft != "" && attempt == 0 {
 			log.Warn().Str("conversation", convID).Str("reason", soft).Msg("agentruntime: idle follow-up sent back for a rewrite")
 			run.ConversationContext.State = state
@@ -405,7 +413,14 @@ func (s *IdleScheduler) invoke(ctx context.Context, r idleHookRow, deliver bool)
 		}
 		break
 	}
-	s.runtime.judgeTurn(ctx, conv, run, nil, history, reply, splitReplyParts(reply), traced)
+	if s.runtime.flags.Precheck == precheckBlock && s.runtime.ext.precheck != nil {
+		// A follow-up is not held for the check: it is checked after
+		// delivery, the way log mode checks a turn, and nothing is acted on.
+		t := s.runtime.judgeInput(conv, run, nil, history, reply, splitReplyParts(reply), traced)
+		s.runtime.goPrecheckLogged(conv, t, traced.TraceID != "", precheckIdleLog)
+	} else {
+		s.runtime.judgeTurn(ctx, conv, run, nil, history, reply, splitReplyParts(reply), traced, nil)
+	}
 	if _, err := s.runtime.store.SaveMessage(ctx, conv.ID, SaveMessageInput{
 		Role:    "assistant",
 		Content: reply,

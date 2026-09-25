@@ -43,6 +43,7 @@ type Judge struct {
 	mu        sync.Mutex
 	specs     map[string][]*Spec
 	missing   map[string]bool
+	broken    map[string]error
 	muted     func() bool
 }
 
@@ -56,7 +57,7 @@ const queueSize = 512
 // New wires a judge; basePath is the same gitops root the runtime reads
 // domains from.
 func New(basePath string, llm LLM, sink ScoreSink) *Judge {
-	j := &Judge{basePath: basePath, llm: llm, sink: sink, timeout: 4 * time.Minute, storeWait: 10 * time.Minute, queue: make(chan scoreJob, queueSize), specs: map[string][]*Spec{}, missing: map[string]bool{}}
+	j := &Judge{basePath: basePath, llm: llm, sink: sink, timeout: 4 * time.Minute, storeWait: 10 * time.Minute, queue: make(chan scoreJob, queueSize), specs: map[string][]*Spec{}, missing: map[string]bool{}, broken: map[string]error{}}
 	go j.store()
 	return j
 }
@@ -74,34 +75,54 @@ func (j *Judge) store() {
 	}
 }
 
-func (j *Judge) agentSpecs(agent string) []*Spec {
+// agentSpecs returns the agent's judge specs. An agent without a judge dir
+// (or without *.yaml in it) has none and no error; a judge dir whose specs
+// fail to load or validate returns the load error on every call, so the
+// precheck can fail closed instead of passing the reply unchecked.
+func (j *Judge) agentSpecs(agent string) ([]*Spec, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	if s, ok := j.specs[agent]; ok {
-		return s
+		return s, nil
+	}
+	if err, ok := j.broken[agent]; ok {
+		return nil, err
 	}
 	if j.missing[agent] {
-		return nil
+		return nil, nil
 	}
 	dir := filepath.Join(j.basePath, "agents", agent, "judge")
 	specs, err := LoadSpecs(dir)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			log.Warn().Err(err).Str("agent", agent).Msg("agentjudge: judge spec unreadable")
-		}
+	// LoadSpecs returns the bare os.ErrNotExist sentinel only for a dir
+	// without specs; a missing prompt file is a *PathError and stays broken.
+	if err == os.ErrNotExist {
 		j.missing[agent] = true
-		return nil
+		return nil, nil
+	}
+	if err != nil {
+		err = fmt.Errorf("agentjudge: judge spec of %s unreadable: %w", agent, err)
+		log.Warn().Err(err).Str("agent", agent).Msg("agentjudge: judge spec unreadable")
+		j.broken[agent] = err
+		return nil, err
 	}
 	j.specs[agent] = specs
 	for _, s := range specs {
 		log.Info().Str("agent", agent).Str("judge", s.Name).Int("criteria", len(s.Criteria)).Msg("agentjudge: judge spec loaded")
 	}
-	return specs
+	return specs, nil
 }
 
 // Enabled reports whether the agent ships at least one judge spec.
+// A broken spec disables the async judge with a warning.
 func (j *Judge) Enabled(agent string) bool {
-	return j != nil && len(j.agentSpecs(agent)) > 0
+	if j == nil {
+		return false
+	}
+	specs, err := j.agentSpecs(agent)
+	if err != nil {
+		log.Warn().Err(err).Str("agent", agent).Msg("agentjudge: judge disabled, spec broken")
+	}
+	return len(specs) > 0
 }
 
 // MuteWhen installs the budget check: while it reports true no turn is
@@ -117,7 +138,11 @@ func (j *Judge) Submit(agent string, t Turn) {
 	if j == nil || t.TraceID == "" || (j.muted != nil && j.muted()) {
 		return
 	}
-	for _, spec := range j.agentSpecs(agent) {
+	specs, err := j.agentSpecs(agent)
+	if err != nil {
+		log.Warn().Err(err).Str("agent", agent).Str("trace", t.TraceID).Msg("agentjudge: turn not judged, spec broken")
+	}
+	for _, spec := range specs {
 		if !spec.Skips(t.Username) {
 			j.submitSpec(agent, spec, t)
 		}
@@ -133,7 +158,11 @@ func (j *Judge) submitSpec(agent string, spec *Spec, t Turn) {
 		}()
 		ctx, cancel := context.WithTimeout(context.Background(), j.timeout)
 		defer cancel()
-		results, err := j.Run(ctx, spec, t)
+		var reuse *Precheck
+		if spec.Name == precheckSpec && t.PrecheckVerdicts != nil && t.PrecheckVerdicts.complete && t.Reply == t.PrecheckReply {
+			reuse = t.PrecheckVerdicts
+		}
+		results, err := j.run(ctx, spec, t, reuse)
 		if err != nil {
 			log.Warn().Err(err).Str("agent", agent).Str("judge", spec.Name).Str("trace", t.TraceID).Msg("agentjudge: llm part failed, code scores only")
 		}
@@ -170,6 +199,9 @@ func (s *Spec) fold(t Turn, results []Result) langfuse.Score {
 	}
 	sort.Strings(violations)
 	total.Metadata = map[string]any{"checks": checks, "violations": violations}
+	if s.Name == precheckSpec && len(t.Precheck) > 0 {
+		total.Metadata["precheck"] = t.Precheck
+	}
 	return total
 }
 
@@ -177,6 +209,12 @@ func (s *Spec) fold(t Turn, results []Result) langfuse.Score {
 // the total. The code scores and the total are returned even when the LLM
 // call fails; the error then says why the LLM criteria are absent.
 func (j *Judge) Run(ctx context.Context, spec *Spec, t Turn) ([]Result, error) {
+	return j.run(ctx, spec, t, nil)
+}
+
+// run is Run with the LLM criteria a precheck already answered for the same
+// reply taken from it instead of asked again; nil reuse is plain Run.
+func (j *Judge) run(ctx context.Context, spec *Spec, t Turn, reuse *Precheck) ([]Result, error) {
 	results := make([]Result, 0, len(spec.Criteria)+len(spec.Signals)+1)
 	violations := map[string]Criterion{}
 	for _, c := range spec.codeCriteria() {
@@ -188,39 +226,77 @@ func (j *Judge) Run(ctx context.Context, spec *Spec, t Turn) ([]Result, error) {
 		}
 		results = append(results, r)
 	}
+	ask := spec
+	// fromCheck names the signals that gate a reused criterion. Their values
+	// come from the precheck call too, so a reused verdict and the signal it
+	// was applied under never disagree within one score; the new call's
+	// answer for them is ignored.
+	fromCheck := map[string]bool{}
+	if reuse != nil {
+		ask = spec.subset(func(c Criterion) bool { return c.Check != CheckLLM || !reuse.asked[c.Score] })
+		for _, c := range spec.llmCriteria() {
+			if reuse.asked[c.Score] && c.Applies != "" {
+				fromCheck[c.Applies] = true
+			}
+		}
+	}
 	var llmErr error
-	if j.llm != nil && len(spec.llmCriteria()) > 0 {
-		answer, err := j.llm.Complete(ctx, spec.RenderPrompt(t))
+	var verdicts map[string]Verdict
+	answered := false
+	if j.llm != nil && len(ask.llmCriteria()) > 0 {
+		answer, err := j.llm.Complete(ctx, ask.RenderPrompt(t))
 		if err != nil {
 			llmErr = err
 		} else {
-			verdicts, perr := spec.ParseVerdicts(answer)
+			var perr error
+			verdicts, perr = ask.ParseVerdicts(answer)
 			if perr != nil {
 				llmErr = perr
 			}
-			for _, c := range spec.llmCriteria() {
-				v, ok := verdicts[c.Score]
-				if !ok {
-					continue
-				}
-				if c.Applies != "" && verdicts[c.Applies].Value != 1 {
-					continue
-				}
-				r := Result{Name: spec.ScoreName(c.Score), Value: v.Value, Comment: v.Why, Severity: c.Severity}
-				if c.Type == TypeBool {
-					r.Boolean = true
-					if v.Value == 1 {
+			answered = true
+		}
+	}
+	signalOn := func(id string) bool {
+		if fromCheck[id] {
+			r, ok := reuse.results[spec.ScoreName(id)]
+			return ok && r.Value == 1
+		}
+		return verdicts[id].Value == 1
+	}
+	if answered || reuse != nil {
+		for _, c := range spec.llmCriteria() {
+			if reuse != nil && reuse.asked[c.Score] {
+				if r, ok := reuse.results[spec.ScoreName(c.Score)]; ok {
+					if spec.violated(c, r.Value) {
 						violations[c.ID] = c
 					}
-				} else if v.Value < spec.Total.FailBelow {
-					violations[c.ID] = c
+					results = append(results, r)
 				}
-				results = append(results, r)
+				continue
 			}
-			for _, sg := range spec.Signals {
+			if !answered {
+				continue
+			}
+			v, ok := verdicts[c.Score]
+			if !ok {
+				continue
+			}
+			if c.Applies != "" && !signalOn(c.Applies) {
+				continue
+			}
+			r := Result{Name: spec.ScoreName(c.Score), Value: v.Value, Comment: v.Why, Severity: c.Severity, Boolean: c.Type == TypeBool}
+			if spec.violated(c, v.Value) {
+				violations[c.ID] = c
+			}
+			results = append(results, r)
+		}
+		for _, sg := range spec.Signals {
+			if answered && !fromCheck[sg.ID] {
 				if v, ok := verdicts[sg.ID]; ok {
 					results = append(results, Result{Name: spec.ScoreName(sg.ID), Value: v.Value, Boolean: true})
 				}
+			} else if r, ok := reuse.results[spec.ScoreName(sg.ID)]; ok {
+				results = append(results, r)
 			}
 		}
 	}
@@ -230,6 +306,15 @@ func (j *Judge) Run(ctx context.Context, spec *Spec, t Turn) ([]Result, error) {
 	}
 	results = append(results, Result{Name: spec.ScoreName(spec.Total.Score), Value: total, Comment: comment})
 	return results, llmErr
+}
+
+// violated reports whether an LLM value breaks the criterion: true for a
+// bool flag, below fail_below for a score.
+func (s *Spec) violated(c Criterion, value float64) bool {
+	if c.Type == TypeBool {
+		return value == 1
+	}
+	return value < s.Total.FailBelow
 }
 
 func (s *Spec) total(violations map[string]Criterion) (float64, string) {

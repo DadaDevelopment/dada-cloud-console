@@ -25,6 +25,23 @@ type Turn struct {
 	Context            string
 	NoQuestionThisTurn bool
 	ReplyError         bool
+	// KB is what kb_search returned during the turn; it fills {{kb}}.
+	KB []KBResult
+	// Precheck is the runtime's record of the pre-delivery check (outcome,
+	// duration, violations per attempt); fold stores it as metadata.precheck
+	// of the turn score.
+	Precheck map[string]any
+	// PrecheckVerdicts is the Check result for PrecheckReply. When the
+	// delivered Reply is that same text, Submit reuses its block verdicts
+	// instead of asking the LLM for them again.
+	PrecheckVerdicts *Precheck
+	PrecheckReply    string
+}
+
+// KBResult is one kb_search call of the turn: the query and the returned text.
+type KBResult struct {
+	Query string
+	Text  string
 }
 
 func (t Turn) messages() []string {
