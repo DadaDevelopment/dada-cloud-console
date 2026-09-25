@@ -18,6 +18,7 @@ import (
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/kagent"
+	"github.com/dada-tuda/console/backend/internal/models"
 )
 
 var (
@@ -146,11 +147,15 @@ func TestValidateAgent_AnswersBeforeTheCommit(t *testing.T) {
 // serves the prompt it started with. Between a commit and a finished rollout
 // that is normal; when a rollout is stuck it is permanent and invisible.
 func TestGetAgentState_ReportsAPodServingAnOlderPrompt(t *testing.T) {
+	pool := testAgentGatePool(t)
+	agentName := "reels-poc-" + uuid.NewString()[:8]
+	projectID := seedNamedAgent(t, pool, agentName)
+
 	agent := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "kagent.dev/v1alpha2",
 		"kind":       "Agent",
 		"metadata": map[string]any{
-			"name":        "reels-poc",
+			"name":        agentName,
 			"namespace":   kagent.DefaultNamespace,
 			"annotations": map[string]any{kagent.LangfuseProjectAnnotation: "proj-reels"},
 		},
@@ -160,13 +165,14 @@ func TestGetAgentState_ReportsAPodServingAnOlderPrompt(t *testing.T) {
 		}},
 	}}
 	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: "reels-poc-prompt", Namespace: kagent.DefaultNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: agentName + "-prompt", Namespace: kagent.DefaultNamespace},
 		Data:       map[string]string{"version": "7"},
 	}
 	h := agentTestHandler([]runtime.Object{agent}, cm)
+	h.pool = pool
 
-	c, w := agentTestContext(t, "GET", "/agents/reels-poc/state", "", testAgentClaims())
-	c.Params = gin.Params{{Key: "agentName", Value: "reels-poc"}}
+	c, w := agentTestContext(t, "GET", "/agents/"+agentName+"/state", "", agentRoleClaims(projectID, models.MemberRoleReadOnly))
+	c.Params = gin.Params{{Key: "agentName", Value: agentName}}
 	h.GetAgentState(c)
 	if w.Code != 200 {
 		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
@@ -184,7 +190,9 @@ func TestGetAgentState_ReportsAPodServingAnOlderPrompt(t *testing.T) {
 }
 
 // TestAgentEndpoints_OffClusterAnswer503: local development has no cluster, and
-// a 500 there reads as a broken console rather than as an absent runtime.
+// a 500 there reads as a broken console rather than as an absent runtime. The
+// state route answers the same once past its project gate, see
+// TestGetAgentState_OffClusterAnswers503.
 func TestAgentEndpoints_OffClusterAnswer503(t *testing.T) {
 	h := &Handler{}
 
@@ -192,13 +200,6 @@ func TestAgentEndpoints_OffClusterAnswer503(t *testing.T) {
 	h.ListAgentTools(c)
 	if w.Code != 503 {
 		t.Errorf("ListAgentTools status = %d, want 503", w.Code)
-	}
-
-	c, w = agentTestContext(t, "GET", "/agents/reels-poc/state", "", testAgentClaims())
-	c.Params = gin.Params{{Key: "agentName", Value: "reels-poc"}}
-	h.GetAgentState(c)
-	if w.Code != 503 {
-		t.Errorf("GetAgentState status = %d, want 503", w.Code)
 	}
 
 	// Validation of name and prompt needs no cluster, so it must still answer.

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -23,52 +24,73 @@ func testProjectMCPServer(name, project string) *unstructured.Unstructured {
 // runtime lives in one namespace, so without the project label the tool list is
 // every tenant's MCP servers offered to every tenant -- and a checkbox is
 // enough to point an agent at somebody else's server with somebody else's
-// credentials behind it.
+// credentials behind it. The ?project= is honoured only for a project the
+// caller has a role in, otherwise naming a neighbour would list its servers.
 func TestListAgentTools_KeepsOneTenantsServerOutOfAnothersForm(t *testing.T) {
+	pool := testAgentGatePool(t)
+	projectID := seedProjectWithOwner(t, pool, seedUser(t, pool))
+	var projectName string
+	if err := pool.QueryRow(context.Background(), `SELECT name FROM projects WHERE id = $1`, projectID).Scan(&projectName); err != nil {
+		t.Fatalf("read project name: %v", err)
+	}
+
 	h := agentTestHandler([]runtime.Object{
 		testMCPServer("platform-task-tools", "http://platform/mcp"),
-		testProjectMCPServer("sandbox-notion", "agent-sandbox"),
+		testProjectMCPServer("sandbox-notion", projectName),
 		testProjectMCPServer("neighbour-crm", "someone-else"),
 	})
+	h.pool = pool
 
-	c, w := agentTestContext(t, "GET", "/agents/tools?project=agent-sandbox", "", testAgentClaims())
-	h.ListAgentTools(c)
-	if w.Code != 200 {
-		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
-	}
-	var got struct {
-		Tools []AgentToolResponse `json:"tools"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-
-	names := map[string]AgentToolResponse{}
-	for _, tool := range got.Tools {
-		names[tool.Name] = tool
-	}
-	if _, ok := names["neighbour-crm"]; ok {
-		t.Errorf("another project's MCP server must not be offered: %+v", got.Tools)
-	}
-	if _, ok := names["platform-task-tools"]; !ok {
-		t.Errorf("a server with no project is platform infrastructure and stays on offer: %+v", got.Tools)
-	}
-	own, ok := names["sandbox-notion"]
-	if !ok {
-		t.Fatalf("the project's own server must be listed: %+v", got.Tools)
-	}
-	if own.URL == "" {
-		t.Errorf("a project owns its own server and may see its address, got %+v", own)
+	list := func(query string, claims *auth.Claims) map[string]AgentToolResponse {
+		t.Helper()
+		c, w := agentTestContext(t, "GET", "/agents/tools?project="+query, "", claims)
+		h.ListAgentTools(c)
+		if w.Code != 200 {
+			t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+		}
+		var got struct {
+			Tools []AgentToolResponse `json:"tools"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		names := map[string]AgentToolResponse{}
+		for _, tool := range got.Tools {
+			names[tool.Name] = tool
+		}
+		return names
 	}
 
-	c, w = agentTestContext(t, "GET", "/agents/tools?project=agent-sandbox", "",
-		&auth.Claims{Groups: []string{"/platform-admins"}})
-	h.ListAgentTools(c)
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode: %v", err)
+	member := agentRoleClaims(projectID, models.MemberRoleReadOnly)
+	for _, query := range []string{projectID.String(), projectName} {
+		names := list(query, member)
+		if _, ok := names["neighbour-crm"]; ok {
+			t.Errorf("another project's MCP server must not be offered: %+v", names)
+		}
+		if _, ok := names["platform-task-tools"]; !ok {
+			t.Errorf("a server with no project is platform infrastructure and stays on offer: %+v", names)
+		}
+		own, ok := names["sandbox-notion"]
+		if !ok {
+			t.Fatalf("the project's own server must be listed for ?project=%s: %+v", query, names)
+		}
+		if own.URL == "" {
+			t.Errorf("a project owns its own server and may see its address, got %+v", own)
+		}
 	}
-	if len(got.Tools) != 3 {
-		t.Errorf("a platform admin debugging the runtime sees all three, got %+v", got.Tools)
+
+	for _, query := range []string{projectID.String(), projectName} {
+		names := list(query, testAgentClaims())
+		if _, ok := names["sandbox-notion"]; ok {
+			t.Errorf("naming a project the caller has no role in must not list its servers: %+v", names)
+		}
+		if _, ok := names["platform-task-tools"]; !ok {
+			t.Errorf("platform servers stay on offer to an outsider: %+v", names)
+		}
+	}
+
+	if names := list(projectName, &auth.Claims{Groups: []string{"/platform-admins"}}); len(names) != 3 {
+		t.Errorf("a platform admin debugging the runtime sees all three, got %+v", names)
 	}
 }
 

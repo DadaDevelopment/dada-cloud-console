@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/google/uuid"
+
+	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/dada-tuda/console/backend/internal/tggateway"
 )
 
@@ -59,14 +62,14 @@ func TestSendAgentMessage_EmptyText(t *testing.T) {
 }
 
 // TestSendAgentMessage_UnknownAgent refuses to relay to an agent this console
-// has never heard of, mirroring TestBindAgentTelegram_UnknownAgent.
+// has never heard of, mirroring TestBindAgentTelegram_UnknownAgent: 404.
 func TestSendAgentMessage_UnknownAgent(t *testing.T) {
 	pool := testAgentGatePool(t)
 	h := &Handler{pool: pool, a2a: &fakeA2AClient{}}
 	c, w := telegramTestCtx(t, "POST", "/agents/no-such-agent/message", `{"text":"hi"}`, testAgentClaims(), "no-such-agent")
 	h.SendAgentMessage(c)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -74,19 +77,12 @@ func TestSendAgentMessage_UnknownAgent(t *testing.T) {
 // through the endpoint's JSON body.
 func TestSendAgentMessage_Success(t *testing.T) {
 	pool := testAgentGatePool(t)
-	owner := seedUser(t, pool)
-	projectID := seedProjectWithOwner(t, pool, owner)
-	envID := seedEnvironment(t, pool, projectID)
-	if _, err := pool.Exec(context.Background(),
-		`INSERT INTO resource_snapshots (project_id, environment_id, kind, name, phase)
-		 VALUES ($1, $2, 'ManagedAgent', 'msg-test-agent', 'Pending')`,
-		projectID, envID); err != nil {
-		t.Fatalf("seed managed agent snapshot: %v", err)
-	}
+	agentName := "msg-test-agent-" + uuid.NewString()[:8]
+	projectID := seedNamedAgent(t, pool, agentName)
 
 	fake := &fakeA2AClient{reply: "привет, чем помочь?"}
 	h := &Handler{pool: pool, a2a: fake}
-	c, w := telegramTestCtx(t, "POST", "/agents/msg-test-agent/message", `{"text":"привет"}`, testAgentClaims(), "msg-test-agent")
+	c, w := telegramTestCtx(t, "POST", "/agents/"+agentName+"/message", `{"text":"привет"}`, agentRoleClaims(projectID, models.MemberRoleDeveloper), agentName)
 	h.SendAgentMessage(c)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
@@ -100,7 +96,7 @@ func TestSendAgentMessage_Success(t *testing.T) {
 	if resp.Reply != fake.reply {
 		t.Errorf("reply = %q, want %q", resp.Reply, fake.reply)
 	}
-	if fake.gotAgent != "msg-test-agent" || fake.gotText != "привет" {
+	if fake.gotAgent != agentName || fake.gotText != "привет" {
 		t.Errorf("a2a saw agent=%q text=%q", fake.gotAgent, fake.gotText)
 	}
 }
@@ -109,19 +105,12 @@ func TestSendAgentMessage_Success(t *testing.T) {
 // not a 500 that hides whose fault it is.
 func TestSendAgentMessage_A2AError(t *testing.T) {
 	pool := testAgentGatePool(t)
-	owner := seedUser(t, pool)
-	projectID := seedProjectWithOwner(t, pool, owner)
-	envID := seedEnvironment(t, pool, projectID)
-	if _, err := pool.Exec(context.Background(),
-		`INSERT INTO resource_snapshots (project_id, environment_id, kind, name, phase)
-		 VALUES ($1, $2, 'ManagedAgent', 'msg-test-agent-err', 'Pending')`,
-		projectID, envID); err != nil {
-		t.Fatalf("seed managed agent snapshot: %v", err)
-	}
+	errName := "msg-test-agent-err-" + uuid.NewString()[:8]
+	projectID := seedNamedAgent(t, pool, errName)
 
 	fake := &fakeA2AClient{err: errors.New("a2a msg-test-agent-err: status 503")}
 	h := &Handler{pool: pool, a2a: fake}
-	c, w := telegramTestCtx(t, "POST", "/agents/msg-test-agent-err/message", `{"text":"hi"}`, testAgentClaims(), "msg-test-agent-err")
+	c, w := telegramTestCtx(t, "POST", "/agents/"+errName+"/message", `{"text":"hi"}`, agentRoleClaims(projectID, models.MemberRoleDeveloper), errName)
 	h.SendAgentMessage(c)
 	if w.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502: %s", w.Code, w.Body.String())

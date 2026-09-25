@@ -1,32 +1,14 @@
 package api
 
 import (
-	"context"
 	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/tggatewayclient"
 )
-
-// agentProjectID resolves the project a named agent belongs to, from the same
-// resource_snapshots table ListAgents reads (a claim wins over a raw CR of the
-// same name, matching agentSnapshotKind). Telegram binding needs it because
-// tg-gateway's own bindings row carries project_id, even though this route
-// (like ListAgentTools/GetAgentState) is not itself project-scoped in the URL.
-func (h *Handler) agentProjectID(ctx context.Context, agentName string) (string, error) {
-	var projectID string
-	err := h.pool.QueryRow(ctx,
-		`SELECT project_id::text FROM resource_snapshots
-		 WHERE kind IN ('ManagedAgent', 'Agent') AND name = $1
-		 ORDER BY (kind = 'ManagedAgent') DESC
-		 LIMIT 1`, agentName,
-	).Scan(&projectID)
-	return projectID, err
-}
 
 // bindAgentTelegramRequest is the body BindAgentTelegram accepts.
 type bindAgentTelegramRequest struct {
@@ -50,10 +32,13 @@ type bindAgentTelegramRequest struct {
 // @Success     200       {object} map[string]string          "bot_username"
 // @Failure     400       {object} map[string]string
 // @Failure     401       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
 // @Failure     503       {object} map[string]string
 // @Router      /agents/{agentName}/telegram [post]
 func (h *Handler) BindAgentTelegram(c *gin.Context) {
-	if _, ok := auth.GetClaims(c); !ok {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
 		respondUnauthorized(c)
 		return
 	}
@@ -69,13 +54,12 @@ func (h *Handler) BindAgentTelegram(c *gin.Context) {
 		return
 	}
 
-	projectID, err := h.agentProjectID(c.Request.Context(), agentName)
-	if errors.Is(err, pgx.ErrNoRows) {
-		respondError(c, http.StatusBadRequest, "unknown agent")
+	projectID, ok := h.authorizeAgent(c, claims, agentName, true)
+	if !ok {
 		return
 	}
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to resolve agent project")
+	if projectID == "" {
+		respondNotFound(c)
 		return
 	}
 
@@ -102,10 +86,13 @@ func (h *Handler) BindAgentTelegram(c *gin.Context) {
 // @Param       agentName path     string true "Agent name"
 // @Success     200       {object} map[string]interface{}
 // @Failure     401       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
 // @Failure     503       {object} map[string]string
 // @Router      /agents/{agentName}/telegram [delete]
 func (h *Handler) UnbindAgentTelegram(c *gin.Context) {
-	if _, ok := auth.GetClaims(c); !ok {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
 		respondUnauthorized(c)
 		return
 	}
@@ -114,7 +101,11 @@ func (h *Handler) UnbindAgentTelegram(c *gin.Context) {
 		return
 	}
 
-	if err := h.tgGateway.Unbind(c.Request.Context(), c.Param("agentName")); err != nil {
+	agentName := c.Param("agentName")
+	if _, ok := h.authorizeAgent(c, claims, agentName, true); !ok {
+		return
+	}
+	if err := h.tgGateway.Unbind(c.Request.Context(), agentName); err != nil {
 		respondError(c, http.StatusServiceUnavailable, "telegram gateway is not reachable from this console")
 		return
 	}
@@ -132,10 +123,12 @@ func (h *Handler) UnbindAgentTelegram(c *gin.Context) {
 // @Param       agentName path     string true "Agent name"
 // @Success     200       {object} map[string]interface{} "bound, bot_username"
 // @Failure     401       {object} map[string]string
+// @Failure     404       {object} map[string]string
 // @Failure     503       {object} map[string]string
 // @Router      /agents/{agentName}/telegram [get]
 func (h *Handler) GetAgentTelegram(c *gin.Context) {
-	if _, ok := auth.GetClaims(c); !ok {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
 		respondUnauthorized(c)
 		return
 	}
@@ -144,7 +137,11 @@ func (h *Handler) GetAgentTelegram(c *gin.Context) {
 		return
 	}
 
-	binding, err := h.tgGateway.Get(c.Request.Context(), c.Param("agentName"))
+	agentName := c.Param("agentName")
+	if _, ok := h.authorizeAgent(c, claims, agentName, false); !ok {
+		return
+	}
+	binding, err := h.tgGateway.Get(c.Request.Context(), agentName)
 	if errors.Is(err, tggatewayclient.ErrNotFound) {
 		c.JSON(http.StatusOK, gin.H{"bound": false})
 		return

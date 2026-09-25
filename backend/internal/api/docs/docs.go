@@ -1942,7 +1942,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Reads the RemoteMCPServer objects of the agent runtime, including whether each one is accepted and which tools it actually discovered. Pass the project to also see the MCP servers that project added itself; another project's servers are never listed. The cluster-internal URL is returned to platform admins and to the project that owns the server. 503 when this console cannot see the agent runtime.",
+                "description": "Reads the RemoteMCPServer objects of the agent runtime, including whether each one is accepted and which tools it actually discovered. Pass the project to also see the MCP servers that project added itself; it is honoured only for a project the caller has a role in, and another project's servers are never listed. The cluster-internal URL is returned to platform admins and to the project that owns the server. 503 when this console cannot see the agent runtime.",
                 "produces": [
                     "application/json"
                 ],
@@ -2052,7 +2052,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "POSTs a JSON-RPC 2.0 message/send to the agent's cluster-internal A2A endpoint and returns the reply text. Stateless: no conversation history carries between calls. 400 for an unknown agent name, 502 when the agent's A2A endpoint errors or times out (it can take up to 90s), 200 with a note when the agent pauses on an input-required (human-in-the-loop) tool mid-turn.",
+                "description": "POSTs a JSON-RPC 2.0 message/send to the agent's cluster-internal A2A endpoint and returns the reply text. Stateless: no conversation history carries between calls. 404 for an agent name the caller cannot see (unknown or another tenant's), 403 without a writing role in its project, 502 when the agent's A2A endpoint errors or times out (it can take up to 90s), 200 with a note when the agent pauses on an input-required (human-in-the-loop) tool mid-turn.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2103,6 +2103,24 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -2181,6 +2199,15 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
@@ -2228,6 +2255,15 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -2310,6 +2346,24 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
@@ -2355,6 +2409,24 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
