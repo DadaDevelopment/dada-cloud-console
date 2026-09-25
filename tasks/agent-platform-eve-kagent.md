@@ -42,13 +42,13 @@ Marginal agent+MCP = ~0.5-0.64 GiB reserved. 4 agents + 4 MCP = ~2.2 GiB request
 
 ## B. ddc CLI (independent) [origin: DadaDevelopment/ddc cli-v0.3.1]
 
-- [ ] Local `~/.local/bin/ddc` is the Aug build (login/deploy only): reinstall via install.sh.
-- [ ] `ddc agent eval` with no `--suite` runs only `markers` (runner default) while help says "every suite".
-- [ ] `eval_test.go` example passes `--environment`, unknown to `eval_run.py` (argparse exit 2).
-- [ ] README Langfuse naming contract is stale (evals are report-only now).
-- [ ] `DDC_CLIENT_ID_SECRET` accepted by `MachineCredentialsPresent()` but never read.
-- [ ] Config errors flattened to exit 1; eve contract is 0 pass / 1 fail / 2 config error.
-- [ ] No command to message/tail a deployed agent (`ddc agent invoke --url`, `ddc agent logs --remote`).
+- [x] Local `~/.local/bin/ddc` is the Aug build (login/deploy only): reinstall via install.sh. Done 2026-09-25: install.sh -> cli-v0.4.0 (tag on 0959ad5), release workflow's install.sh check green.
+- [x] `ddc agent eval` with no `--suite` runs only `markers` (runner default) while help says "every suite". ddc 378ad81: iterates evals/suites/*.yaml, per-suite `--output-dir <base>/<suite>`, worst exit code wins.
+- [x] `eval_test.go` example passes `--environment`, unknown to `eval_run.py` (argparse exit 2). ddc 378ad81: `--label`/`--transport`.
+- [x] README Langfuse naming contract is stale (evals are report-only now). ddc 0959ad5: report.json/summary.md/history.jsonl section + exit codes.
+- [x] `DDC_CLIENT_ID_SECRET` accepted by `MachineCredentialsPresent()` but never read. ddc 9553781: dropped.
+- [x] Config errors flattened to exit 1; eve contract is 0 pass / 1 fail / 2 config error. ddc 378ad81 (eval, runner exit 2 propagated) + a49a1d1 (unknown agent action/flag -> 2).
+- [~] No command to message/tail a deployed agent (`ddc agent invoke --url`, `ddc agent logs --remote`). ddc a49a1d1: `ddc agent invoke --text ... [--agent --project --env]` via POST /api/v1/agents/{name}/message. Open: `logs --remote`; invoke not yet run against a live agent.
 
 ## C. eve parity features (delivered by eve-kagent if spike is green, else built on our engine)
 
