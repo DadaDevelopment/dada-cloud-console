@@ -53,6 +53,7 @@ type Result struct {
 	Framework  string
 	Port       int
 	StaticRoot string
+	Members    []string
 }
 
 // maxEntries caps how many table-of-contents entries Detect walks, so a
@@ -132,7 +133,7 @@ func Detect(data []byte) (Result, error) {
 		return Result{}, fmt.Errorf("read %s table of contents: %w", format, err)
 	}
 
-	result := Result{Format: format}
+	result := Result{Format: format, Members: names}
 	root := detectRoot(entries)
 
 	for _, pick := range []func() (entry, bool){

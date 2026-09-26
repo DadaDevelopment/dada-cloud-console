@@ -67,7 +67,62 @@ func isWorkerUpload(detectedPort int) bool {
 // A failed rewrite downgrades the verdict to the old behaviour instead of
 // refusing the upload: the build then fails the way it did before, which is
 // worse than a static deploy and better than rejecting bytes the platform has
-// already accepted.
+// wrapPythonUpload rewrites an archive whose Python dependencies the pipeline's
+// own template cannot install, so the stored bytes carry a Dockerfile that
+// installs every requirement file the archive actually ships.
+//
+// It covers the gap between what detection can see and what the builder does.
+// The pipeline re-sniffs the unpacked sources and renders a python template
+// whose install step reads only a file literally named requirements.txt or
+// pyproject.toml; a project that split its dependencies into
+// requirements-core.txt gets no install at all, and because the image still
+// builds, the build is reported success over a container that dies on its first
+// import. Writing the Dockerfile here is the only signal that survives the trip
+// to the builder (see InjectDockerfile).
+//
+// The verdict is downgraded to an empty framework when no unambiguous plan
+// exists, which is what makes the caller refuse the upload with a hint instead
+// of queueing a build that cannot work.
+func wrapPythonUpload(data []byte, detected sourcedetect.Result, names []string) ([]byte, sourcedetect.Result) {
+	if detected.Framework != "" {
+		return data, detected
+	}
+	plan, ok := sourcedetect.PythonArchivePlan(names)
+	if !ok {
+		return data, detected
+	}
+	rewritten, err := sourcedetect.InjectDockerfile(data, detected.Format, plan.Root, sourcedetect.PythonDockerfile(plan))
+	if err != nil {
+		return data, detected
+	}
+	detected.Framework = "docker"
+	detected.Port = 0
+	return rewritten, detected
+}
+
+// unbuildableArchive reports whether an upload must be refused rather than
+// queued, and the sentence to hand the user when it must.
+//
+// An archive whose framework is still unnamed after both wrappers have had
+// their turn cannot become a working app. The pipeline sniffs the unpacked
+// sources, renders a template whose install step does not match this archive's
+// layout, produces an image with nothing installed, and reports the build as
+// success -- so the platform tells the user the deploy worked and the user
+// learns otherwise from a crash loop minutes later. That is what happened to
+// artem4212@bk.ru on 2026-09-25: a green build in 84 seconds, a created app,
+// and ModuleNotFoundError: No module named 'aiogram' 72 seconds after that
+// [live psql builds 92153601-542b-4646-9dd2-750b59ee6f21 + app_health_alerts].
+//
+// Refusing at upload time, naming the specific obstacle, is the honest verdict:
+// the user still holds the archive and can fix it in one step, which is not true
+// once the bytes are stored and a dead app is carrying their app name.
+func unbuildableArchive(detected sourcedetect.Result) (string, bool) {
+	if detected.Framework != "" {
+		return "", false
+	}
+	return sourcedetect.UndetectableHint(detected.Members), true
+}
+
 func wrapStaticUpload(data []byte, detected sourcedetect.Result) ([]byte, sourcedetect.Result) {
 	if detected.Framework != "static" {
 		return data, detected
@@ -214,6 +269,11 @@ func (h *Handler) UploadSourceArchive(c *gin.Context) {
 		return
 	}
 	data, detected = wrapStaticUpload(data, detected)
+	data, detected = wrapPythonUpload(data, detected, detected.Members)
+	if hint, ok := unbuildableArchive(detected); ok {
+		reject(http.StatusBadRequest, "framework_undetected", hint)
+		return
+	}
 
 	ext, contentType := ".zip", "application/zip"
 	if detected.Format == sourcedetect.FormatTarGz {

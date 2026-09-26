@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,18 +19,59 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// buildTestArchive returns bytes of a minimal, valid zip archive: enough for
-// sourcedetect.Detect to succeed without matching any known framework.
+// buildTestArchive returns bytes of a minimal, valid zip archive that
+// detection can name: a Dockerfile is the one manifest that makes an upload
+// buildable without any inference at all.
+//
+// It used to ship only a README, so detection resolved no framework. That is no
+// longer an accepted upload: an archive whose framework cannot be named is
+// refused at upload time, because queueing it produces a green build over a
+// container with nothing installed (see unbuildableArchive). These tests are
+// about the role gate and the git binding, so they carry the simplest archive
+// that gets past detection rather than encoding the old permissive contract.
 func buildTestArchive(t *testing.T) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
-	w, err := zw.Create("README.md")
-	if err != nil {
-		t.Fatalf("create zip entry: %v", err)
+	for _, f := range []struct{ name, body string }{
+		{"README.md", "hello"},
+		{"Dockerfile", "FROM nginx:1.27-alpine\nEXPOSE 8080\n"},
+	} {
+		w, err := zw.Create(f.name)
+		if err != nil {
+			t.Fatalf("create zip entry %s: %v", f.name, err)
+		}
+		if _, err := w.Write([]byte(f.body)); err != nil {
+			t.Fatalf("write zip entry %s: %v", f.name, err)
+		}
 	}
-	if _, err := w.Write([]byte("hello")); err != nil {
-		t.Fatalf("write zip entry: %v", err)
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	return buf.Bytes()
+}
+
+// buildUndetectableArchive returns the shape that produced the 2026-09-25
+// incident: a python project whose dependencies are split across
+// requirements-*.txt files, whose Dockerfiles exist only as suffixed variants,
+// and which ships two entrypoints, so no unambiguous build plan exists.
+func buildUndetectableArchive(t *testing.T) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, name := range []string{
+		"vishnevka-bot/bot_tg/main.py",
+		"vishnevka-bot/bot_vk/main.py",
+		"vishnevka-bot/requirements-core.txt",
+		"vishnevka-bot/Dockerfile.tg",
+	} {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("create zip entry %s: %v", name, err)
+		}
+		if _, err := w.Write([]byte("x")); err != nil {
+			t.Fatalf("write zip entry %s: %v", name, err)
+		}
 	}
 	if err := zw.Close(); err != nil {
 		t.Fatalf("close zip: %v", err)
@@ -200,6 +242,126 @@ func TestUploadSourceArchive_InsufficientRole_Forbidden(t *testing.T) {
 	}
 	if uploader.puts != 0 {
 		t.Fatalf("PutObject calls = %d, want 0 (should be forbidden before storage write)", uploader.puts)
+	}
+}
+
+// TestUploadSourceArchive_Undetectable_RefusedWithHint locks the fix for the
+// 2026-09-25 incident: artem4212@bk.ru uploaded a Telegram bot whose
+// dependencies lived in requirements-core.txt and whose Dockerfiles were only
+// suffixed variants. Detection named no framework, the upload was accepted
+// anyway, the pipeline built an image with nothing installed, the build was
+// reported success in 84 seconds, and the app died 72 seconds later on
+// ModuleNotFoundError: No module named 'aiogram' [live psql builds
+// 92153601-542b-4646-9dd2-750b59ee6f21 + app_health_alerts].
+//
+// Such an upload must now be refused before any bytes are stored and before any
+// build is queued, with a hint that names the obstacle - a wrong answer the user
+// can act on beats a right-looking answer that is dead.
+func TestUploadSourceArchive_Undetectable_RefusedWithHint(t *testing.T) {
+	pool := testSourceArchivePool(t)
+	projectID, envID, appName := seedSourceArchiveProject(t, pool, "acme")
+
+	uploader := &fakeSourceUploader{bucket: "test-bucket"}
+	h := &Handler{pool: pool, sourceUploader: uploader}
+	claims := &auth.Claims{UserID: seedUser(t, pool), Groups: []string{"/platform-admins"}}
+	c, rec := newUploadSourceArchiveCtx(t, projectID, envID, appName, claims, buildUndetectableArchive(t))
+	h.UploadSourceArchive(c)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("code=%d body=%s want 400 (a build that cannot work must not be queued)", rec.Code, rec.Body.String())
+	}
+	if uploader.puts != 0 {
+		t.Fatalf("PutObject calls = %d, want 0 (nothing should be stored for a refused upload)", uploader.puts)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "Dockerfile") {
+		t.Fatalf("response must name an actionable obstacle, got %s", body)
+	}
+
+	var builds int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM builds WHERE environment_id=$1 AND app_name=$2`, envID, appName,
+	).Scan(&builds); err != nil {
+		t.Fatalf("count builds: %v", err)
+	}
+	if builds != 0 {
+		t.Fatalf("builds queued = %d, want 0", builds)
+	}
+}
+
+// TestUploadSourceArchive_SplitRequirements_Accepted is the other half of the
+// same contract: the identical project shape with ONE entrypoint is buildable,
+// so the platform writes the Dockerfile itself (installing every requirements
+// file the archive ships) instead of refusing a deployable upload.
+func TestUploadSourceArchive_SplitRequirements_Accepted(t *testing.T) {
+	pool := testSourceArchivePool(t)
+	projectID, envID, appName := seedSourceArchiveProject(t, pool, "acme")
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, f := range []struct{ name, body string }{
+		{"vishnevka-bot/bot_tg/main.py", "import aiogram\n"},
+		{"vishnevka-bot/requirements-core.txt", "aiogram==3.4.1\n"},
+		{"vishnevka-bot/requirements-tg.txt", "aiohttp\n"},
+	} {
+		w, err := zw.Create(f.name)
+		if err != nil {
+			t.Fatalf("create zip entry %s: %v", f.name, err)
+		}
+		if _, err := w.Write([]byte(f.body)); err != nil {
+			t.Fatalf("write zip entry %s: %v", f.name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+
+	uploader := &fakeSourceUploader{bucket: "test-bucket"}
+	h := &Handler{pool: pool, sourceUploader: uploader}
+	claims := &auth.Claims{UserID: seedUser(t, pool), Groups: []string{"/platform-admins"}}
+	c, rec := newUploadSourceArchiveCtx(t, projectID, envID, appName, claims, buf.Bytes())
+	h.UploadSourceArchive(c)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("code=%d body=%s want 202", rec.Code, rec.Body.String())
+	}
+	if uploader.puts != 1 {
+		t.Fatalf("PutObject calls = %d, want 1", uploader.puts)
+	}
+
+	var stored []byte
+	for _, data := range uploader.objects {
+		stored = data
+	}
+	zr, err := zip.NewReader(bytes.NewReader(stored), int64(len(stored)))
+	if err != nil {
+		t.Fatalf("read stored archive: %v", err)
+	}
+	var dockerfile string
+	for _, f := range zr.File {
+		if f.Name != "Dockerfile" {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatalf("open injected Dockerfile: %v", err)
+		}
+		raw, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			t.Fatalf("read injected Dockerfile: %v", err)
+		}
+		dockerfile = string(raw)
+	}
+	if dockerfile == "" {
+		t.Fatal("stored archive carries no Dockerfile; the builder will install nothing")
+	}
+	for _, req := range []string{"requirements-core.txt", "requirements-tg.txt"} {
+		if !strings.Contains(dockerfile, req) {
+			t.Fatalf("injected Dockerfile must install %s, got:\n%s", req, dockerfile)
+		}
+	}
+	if !strings.Contains(dockerfile, "bot_tg/main.py") {
+		t.Fatalf("injected Dockerfile must run the detected entrypoint, got:\n%s", dockerfile)
 	}
 }
 
